@@ -135,6 +135,16 @@ JavaScript namespace and constructor initialization have no async evaluation
 boundary; the compiler reports these initializers instead of emitting invalid
 code.
 
+Arrays also provide import-free `concurrent_map` for bounded I/O fan-out. Its
+fixed portable default is 8, an explicit positive `limit` can replace or
+locally reduce that capacity, nested maps share one structured task group, and
+results retain input order. Lowering uses bounded workers in Go, Ruby,
+TypeScript, and the REPL; cancellation stops admission, reaches supported
+active operations through the hidden execution scope, and all admitted work is
+collected before return. The checker rejects outer assignment and unsafe
+lexical captures. Result aggregation, heterogeneous task APIs, streaming, and
+CPU-parallel guarantees are not included.
+
 Integer and String literal types support status- and kind-indexed data.
 Exhaustive `case` over a readonly literal field narrows the complete record or
 class union in every backend and in the REPL. Ordinary scalar `case` remains

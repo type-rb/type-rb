@@ -198,6 +198,7 @@ func (c *foldingCollector) expression(expression ast.Expression) {
 		c.expression(node.Source)
 		c.expression(node.SliceSize)
 		c.expression(node.Initial)
+		c.expression(node.Limit)
 		if node.Block != nil {
 			c.expression(node.Block)
 		}

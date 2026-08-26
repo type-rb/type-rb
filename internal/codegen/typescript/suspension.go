@@ -23,6 +23,9 @@ func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 		Conversion: func(kind ir.ConversionKind) bool {
 			return kind == ir.PromiseRejectionToResultConversion
 		},
+		Transform: func(transform *ir.Transform) bool {
+			return transform.Operation == "concurrent_map"
+		},
 		WebNext:         true,
 		PassToFunctions: true,
 	})

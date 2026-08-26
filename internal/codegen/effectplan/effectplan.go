@@ -98,6 +98,7 @@ type Options struct {
 	Intrinsic       func(string) bool
 	Runtime         func(*ir.RuntimeBinding) bool
 	Conversion      func(ir.ConversionKind) bool
+	Transform       func(*ir.Transform) bool
 	WebNext         bool
 	CaptureLambdas  bool
 	PassToFunctions bool
@@ -449,8 +450,12 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Transform:
 		suspends = a.expressionReaches(node.Source, context, record)
 		suspends = a.expressionReaches(node.Initial, context, record) || suspends
+		suspends = a.expressionReaches(node.Limit, context, record) || suspends
 		suspends = a.statementsReach(node.Body, context, record) || suspends
 		suspends = a.expressionReaches(node.Result, context, record) || suspends
+		if a.options.Transform != nil && a.options.Transform(node) {
+			suspends = true
+		}
 	case *ir.Call:
 		suspends = a.expressionReaches(node.Callee, context, record)
 		for _, argument := range node.Arguments {
@@ -668,6 +673,9 @@ func ExecutionScope(programs []*ir.Program) *Plan {
 		},
 		Runtime: func(binding *ir.RuntimeBinding) bool {
 			return binding.PropagatesExecutionScope
+		},
+		Transform: func(transform *ir.Transform) bool {
+			return transform.Operation == "concurrent_map"
 		},
 	})
 }

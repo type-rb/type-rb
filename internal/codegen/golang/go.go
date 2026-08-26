@@ -2065,6 +2065,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Operation == "concurrent_map" {
+		return g.concurrentMap(transform)
+	}
 	g.temporary++
 	suffix := strconv.Itoa(g.temporary)
 	items := "__trbItems" + suffix
@@ -2152,6 +2155,56 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) concurrentMap(transform *ir.Transform) string {
+	g.requireImport("context", "trbcontext")
+	g.requireImport("sync", "")
+	g.temporary++
+	suffix := strconv.Itoa(g.temporary)
+	items := "__trbItems" + suffix
+	result := "__trbResult" + suffix
+	requested := "__trbRequested" + suffix
+	group := "__trbGroup" + suffix
+	concurrentScope := "__trbConcurrentScope" + suffix
+	semaphore := "__trbSemaphore" + suffix
+	localLimit := "__trbLocalLimit" + suffix
+	workerCount := "__trbWorkerCount" + suffix
+	childScope := "__trbChildScope" + suffix
+	cancel := "__trbCancel" + suffix
+	jobs := "__trbJobs" + suffix
+	waitGroup := "__trbWaitGroup" + suffix
+	panicOnce := "__trbPanicOnce" + suffix
+	panicValue := "__trbPanic" + suffix
+	index := "__trbIndex" + suffix
+	worker := "__trbWorker" + suffix
+	item := g.bindingIdentifier(transform.Item)
+	if item == "" || item == "_" {
+		item = "__trbItem" + suffix
+	}
+	itemUse := ""
+	if strings.HasPrefix(transform.Item, "_") {
+		itemUse = "_ = " + item + "; "
+	}
+	limit := "8"
+	explicit := transform.Limit != nil
+	if explicit {
+		limit = g.expr(transform.Limit)
+	}
+	value := g.transformResult(transform)
+	typeName := g.goType(transform.ExprType())
+	source := g.iterableExpr(transform.Source)
+	held := "__trbHeld" + suffix
+	return "func() " + typeName + " { " +
+		items + " := " + source + "; " + requested + " := " + limit + "; if " + requested + " <= 0 { panic(\"concurrent_map limit must be greater than zero\") }; " +
+		concurrentScope + " := __trbScope; " + group + ", __trbHasGroup := __trbScope.Value(\"type-rb/concurrency-group\").(map[string]any); if !__trbHasGroup { " + semaphore + " := make(chan struct{}, " + requested + "); " + group + " = map[string]any{\"semaphore\": " + semaphore + "}; " + concurrentScope + " = trbcontext.WithValue(__trbScope, \"type-rb/concurrency-group\", " + group + ") }; " +
+		semaphore + " := " + group + "[\"semaphore\"].(chan struct{}); " + localLimit + " := cap(" + semaphore + "); " +
+		"func() { if " + strconv.FormatBool(explicit) + " && " + requested + " < " + localLimit + " { " + localLimit + " = " + requested + " } }(); " +
+		held + ", _ := __trbScope.Value(\"type-rb/concurrency-held\").(bool); if " + held + " { <-" + semaphore + "; defer func() { " + semaphore + " <- struct{}{} }() }; " +
+		childScope + ", " + cancel + " := trbcontext.WithCancel(" + concurrentScope + "); defer " + cancel + "(); " + result + " := make(" + typeName + ", len(" + items + ")); " +
+		workerCount + " := " + localLimit + "; if len(" + items + ") < " + workerCount + " { " + workerCount + " = len(" + items + ") }; " + jobs + " := make(chan int); var " + waitGroup + " sync.WaitGroup; var " + panicOnce + " sync.Once; var " + panicValue + " any; " +
+		"for " + worker + " := 0; " + worker + " < " + workerCount + "; " + worker + "++ { " + waitGroup + ".Add(1); go func() { defer " + waitGroup + ".Done(); for " + index + " := range " + jobs + " { select { case " + semaphore + " <- struct{}{}: case <-" + childScope + ".Done(): return }; func() { defer func() { <-" + semaphore + " }(); defer func() { if recovered := recover(); recovered != nil { " + panicOnce + ".Do(func() { " + panicValue + " = recovered; " + cancel + "() }) } }(); __trbScope := trbcontext.WithValue(" + childScope + ", \"type-rb/concurrency-held\", true); _ = __trbScope; " + item + " := " + items + "[" + index + "]; " + itemUse + result + "[" + index + "] = " + value + " }() } }() }; " +
+		"func() { defer close(" + jobs + "); for " + index + " := range " + items + " { select { case " + jobs + " <- " + index + ": case <-" + childScope + ".Done(): return } } }(); " + waitGroup + ".Wait(); if " + panicValue + " != nil { panic(" + panicValue + ") }; if err := __trbScope.Err(); err != nil { panic(err) }; return " + result + " }()"
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {

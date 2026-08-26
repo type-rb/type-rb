@@ -322,6 +322,7 @@ type IterationExpression struct {
 	Operation string
 	SliceSize Expression
 	Initial   Expression
+	Limit     Expression
 	WithIndex bool
 	Block     *BlockExpression
 }

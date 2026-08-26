@@ -178,6 +178,32 @@ end
 	}
 }
 
+func TestTestReportsRuntimeStartFailure(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "import { describe, expect, test } from trb/std/test\n\ndescribe(\"Runtime\") do\n\ttest(\"runs\") do\n\t\texpect(true).to_be_true()\n\tend\nend\n"
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "runtime_test.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "--config", config.Path}); status != 1 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `trb: start test runtime: exec: "ruby"`) {
+		t.Fatalf("runtime start failure was not reported: %q", stderr.String())
+	}
+}
+
 func TestTestReturnsFailureAndJSONEvents(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("go is unavailable: %v", err)

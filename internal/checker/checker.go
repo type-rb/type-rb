@@ -230,17 +230,18 @@ type UnionMemberAccess struct {
 }
 
 type symbol struct {
-	typ           types.Type
-	declared      types.Type
-	mutable       bool
-	constant      bool
-	owner         string
-	span          token.Span
-	variable      *ast.VariableStatement
-	used          *bool
-	useKind       string
-	mustUseResult bool
-	pending       *pendingEmptyCollection
+	typ                types.Type
+	declared           types.Type
+	mutable            bool
+	constant           bool
+	owner              string
+	span               token.Span
+	variable           *ast.VariableStatement
+	used               *bool
+	useKind            string
+	mustUseResult      bool
+	pending            *pendingEmptyCollection
+	concurrentBorrowed bool
 }
 
 // pendingEmptyCollection is shared by every lexical reference found during the
@@ -307,15 +308,20 @@ type nullableMemberFact struct {
 }
 
 func (s *scope) lookup(name string) (symbol, bool) {
+	value, _, ok := s.lookupOwner(name)
+	return value, ok
+}
+
+func (s *scope) lookupOwner(name string) (symbol, *scope, bool) {
 	for current := s; current != nil; current = current.parent {
 		if value, ok := current.values[name]; ok {
 			if value.pending != nil && value.pending.resolved.Kind != "" {
 				value.typ = value.pending.resolved
 			}
-			return value, true
+			return value, current, true
 		}
 	}
-	return symbol{}, false
+	return symbol{}, nil, false
 }
 
 func (s *scope) markUsed(name string) {
@@ -474,6 +480,29 @@ type Checker struct {
 	pendingExpressions          map[ast.Expression]*pendingEmptyCollection
 	callbackScopes              []*scope
 	pendingEmptyCollections     int
+	concurrentBlockScopes       []*scope
+	borrowedExpressions         map[ast.Expression]bool
+	concurrentFunctions         map[*ast.MethodStatement]bool
+	concurrentConstructors      map[*ast.MethodStatement]bool
+	concurrentClasses           map[string]bool
+	currentMethod               *ast.MethodStatement
+	currentMethodScopes         []*scope
+	currentFieldClass           string
+	concurrentMapDepth          int
+	authoredMemberMethods       map[*ast.MemberExpression]*ast.MethodStatement
+	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
+	authoredOwnedMethods        map[string]*ast.MethodStatement
+	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredConstructorCalls    map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredOrdinaryCalls       map[*ast.MethodStatement]map[*ast.MethodStatement]bool
+	authoredMethodConstructors  map[*ast.MethodStatement]map[string]bool
+	authoredClassCalls          map[string]map[*ast.MethodStatement]bool
+	authoredClassConstructors   map[string]map[string]bool
+	concurrentCallRoots         map[*ast.MethodStatement]bool
+	concurrentConstructorRoots  map[*ast.MethodStatement]bool
+	concurrentOrdinaryRoots     map[*ast.MethodStatement]bool
+	concurrentClassRoots        map[string]bool
+	concurrentInitTargets       map[*ast.Identifier]bool
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -515,6 +544,15 @@ func CheckWithOptions(program *ast.Program, resolution resolver.Result, options 
 	c := newChecker(program, resolution, options)
 	c.emptyCollectionOutcomes = outcomes
 	c.checkProgram(program, true)
+	if concurrentFunctions, concurrentConstructors, concurrentClasses := c.resolvedConcurrentFunctions(); len(concurrentFunctions) > 0 || len(concurrentClasses) > 0 {
+		audited := newChecker(program, resolution, options)
+		audited.emptyCollectionOutcomes = outcomes
+		audited.concurrentFunctions = concurrentFunctions
+		audited.concurrentConstructors = concurrentConstructors
+		audited.concurrentClasses = concurrentClasses
+		audited.checkProgram(program, true)
+		return audited.result, diagnostic.Normalize(audited.diags, "", diagnostic.TypeError)
+	}
 	return c.result, diagnostic.Normalize(c.diags, "", diagnostic.TypeError)
 }
 
@@ -662,6 +700,7 @@ func expressionHasFreshEmptyMutableCollection(expression ast.Expression) bool {
 		return expressionHasFreshEmptyMutableCollection(node.Source) ||
 			expressionHasFreshEmptyMutableCollection(node.SliceSize) ||
 			expressionHasFreshEmptyMutableCollection(node.Initial) ||
+			expressionHasFreshEmptyMutableCollection(node.Limit) ||
 			node.Block != nil && statementsHaveFreshEmptyMutableCollection(node.Block.Body)
 	case *ast.InterpolatedString:
 		for _, part := range node.Parts {
@@ -787,23 +826,41 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			ImportUses:                 importUses,
 			CompilerGeneratedStart:     options.CompilerGeneratedStart,
 		},
-		classes:                map[string]*classInfo{},
-		records:                map[string]*recordInfo{},
-		enums:                  map[string]*enumInfo{},
-		aliases:                map[string]*aliasInfo{},
-		newtypes:               map[string]*newtypeInfo{},
-		interfaces:             map[string]*ast.InterfaceStatement{},
-		functions:              map[string]*ast.MethodStatement{},
-		resolution:             resolution,
-		external:               map[ast.Expression]declaration.Member{},
-		declaredTypes:          map[string]typeDeclaration{},
-		usedImports:            importUses,
-		allowUnusedImports:     options.AllowUnusedImports,
-		interactiveTopLevel:    options.InteractiveTopLevel,
-		compilerGeneratedStart: options.CompilerGeneratedStart,
-		runnableMain:           options.RunnableMain,
-		aliasCycles:            map[string]bool{},
-		declarationCalls:       map[*ast.CallExpression]string{},
+		classes:                    map[string]*classInfo{},
+		records:                    map[string]*recordInfo{},
+		enums:                      map[string]*enumInfo{},
+		aliases:                    map[string]*aliasInfo{},
+		newtypes:                   map[string]*newtypeInfo{},
+		interfaces:                 map[string]*ast.InterfaceStatement{},
+		functions:                  map[string]*ast.MethodStatement{},
+		resolution:                 resolution,
+		external:                   map[ast.Expression]declaration.Member{},
+		declaredTypes:              map[string]typeDeclaration{},
+		usedImports:                importUses,
+		allowUnusedImports:         options.AllowUnusedImports,
+		interactiveTopLevel:        options.InteractiveTopLevel,
+		compilerGeneratedStart:     options.CompilerGeneratedStart,
+		runnableMain:               options.RunnableMain,
+		aliasCycles:                map[string]bool{},
+		declarationCalls:           map[*ast.CallExpression]string{},
+		borrowedExpressions:        map[ast.Expression]bool{},
+		concurrentFunctions:        map[*ast.MethodStatement]bool{},
+		concurrentConstructors:     map[*ast.MethodStatement]bool{},
+		concurrentClasses:          map[string]bool{},
+		authoredMemberMethods:      map[*ast.MemberExpression]*ast.MethodStatement{},
+		concurrentInterfaceMembers: map[*ast.MemberExpression]bool{},
+		authoredOwnedMethods:       map[string]*ast.MethodStatement{},
+		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredOrdinaryCalls:      map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
+		authoredMethodConstructors: map[*ast.MethodStatement]map[string]bool{},
+		authoredClassCalls:         map[string]map[*ast.MethodStatement]bool{},
+		authoredClassConstructors:  map[string]map[string]bool{},
+		concurrentCallRoots:        map[*ast.MethodStatement]bool{},
+		concurrentConstructorRoots: map[*ast.MethodStatement]bool{},
+		concurrentOrdinaryRoots:    map[*ast.MethodStatement]bool{},
+		concurrentClassRoots:       map[string]bool{},
+		concurrentInitTargets:      map[*ast.Identifier]bool{},
 	}
 }
 
@@ -819,11 +876,7 @@ func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
 	if !c.inferenceOnly {
 		c.validateReservedKeywords(program.Statements)
 	}
-	for _, statement := range program.Statements {
-		if method, ok := statement.(*ast.MethodStatement); ok {
-			c.functions[method.Name] = method
-		}
-	}
+	c.indexAuthoredMethods(program.Statements, "")
 	c.collect(program.Statements)
 	if !c.inferenceOnly {
 		c.validateTypeReferences(program.Statements, nil)
@@ -832,6 +885,222 @@ func (c *Checker) checkProgram(program *ast.Program, checkUnusedImports bool) {
 	if checkUnusedImports && !c.allowUnusedImports {
 		c.checkUnusedImports(program.Statements)
 	}
+}
+
+func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.MethodStatement:
+			if owner == "" && !node.Class {
+				c.functions[node.Name] = node
+			} else if owner != "" && node.Class {
+				c.authoredOwnedMethods[authoredOwnedMethodKey(owner, node.Name)] = node
+			}
+		case *ast.ClassStatement:
+			c.indexAuthoredMethods(node.Body, nestedAuthoredOwner(owner, node.Name))
+		case *ast.ModuleStatement:
+			c.indexAuthoredMethods(node.Body, nestedAuthoredOwner(owner, node.Name))
+		}
+	}
+}
+
+func nestedAuthoredOwner(owner, name string) string {
+	if owner == "" {
+		return name
+	}
+	return owner + "::" + name
+}
+
+func authoredOwnedMethodKey(owner, name string) string {
+	return owner + "\x00" + name
+}
+
+func (c *Checker) resolvedConcurrentFunctions() (map[*ast.MethodStatement]bool, map[*ast.MethodStatement]bool, map[string]bool) {
+	// Constructor reachability stays distinct from ordinary calls so the audit
+	// may initialize fresh receiver storage without treating aliased receivers as
+	// owned. Class nodes retain field-default effects even without initialize().
+	type reach struct {
+		method      *ast.MethodStatement
+		class       string
+		constructor bool
+	}
+	reached := map[*ast.MethodStatement]bool{}
+	reachedClasses := map[string]bool{}
+	ordinary := map[*ast.MethodStatement]bool{}
+	constructed := map[*ast.MethodStatement]bool{}
+	expanded := map[*ast.MethodStatement]bool{}
+	queue := make([]reach, 0, len(c.concurrentCallRoots)+len(c.concurrentClassRoots))
+	for method := range c.concurrentOrdinaryRoots {
+		queue = append(queue, reach{method: method})
+	}
+	for method := range c.concurrentConstructorRoots {
+		queue = append(queue, reach{method: method, constructor: true})
+	}
+	for class := range c.concurrentClassRoots {
+		queue = append(queue, reach{class: class})
+	}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if current.class != "" {
+			if reachedClasses[current.class] {
+				continue
+			}
+			reachedClasses[current.class] = true
+			if class := c.classes[current.class]; class != nil {
+				if initialize := class.methods["initialize"]; initialize != nil {
+					queue = append(queue, reach{method: initialize, constructor: true})
+				}
+			}
+			for callee := range c.authoredClassCalls[current.class] {
+				queue = append(queue, reach{method: callee})
+			}
+			for constructedClass := range c.authoredClassConstructors[current.class] {
+				queue = append(queue, reach{class: constructedClass})
+			}
+			continue
+		}
+		method := current.method
+		if method == nil {
+			continue
+		}
+		reached[method] = true
+		if current.constructor {
+			constructed[method] = true
+		} else {
+			ordinary[method] = true
+		}
+		if expanded[method] {
+			continue
+		}
+		expanded[method] = true
+		for callee := range c.authoredCalls[method] {
+			if c.authoredOrdinaryCalls[method][callee] {
+				queue = append(queue, reach{method: callee})
+			}
+			if c.authoredConstructorCalls[method][callee] {
+				queue = append(queue, reach{method: callee, constructor: true})
+			}
+		}
+		for constructedClass := range c.authoredMethodConstructors[method] {
+			queue = append(queue, reach{class: constructedClass})
+		}
+	}
+	constructors := map[*ast.MethodStatement]bool{}
+	for method := range constructed {
+		if !ordinary[method] {
+			constructors[method] = true
+		}
+	}
+	return reached, constructors, reachedClasses
+}
+
+func (c *Checker) recordAuthoredCall(call *ast.CallExpression) {
+	constructorClass := c.authoredConstructorClass(call.Callee)
+	if constructorClass != "" {
+		if c.currentMethod != nil {
+			classes := c.authoredMethodConstructors[c.currentMethod]
+			if classes == nil {
+				classes = map[string]bool{}
+				c.authoredMethodConstructors[c.currentMethod] = classes
+			}
+			classes[constructorClass] = true
+		}
+		if c.currentFieldClass != "" {
+			classes := c.authoredClassConstructors[c.currentFieldClass]
+			if classes == nil {
+				classes = map[string]bool{}
+				c.authoredClassConstructors[c.currentFieldClass] = classes
+			}
+			classes[constructorClass] = true
+		}
+		if c.concurrentMapDepth > 0 {
+			c.concurrentClassRoots[constructorClass] = true
+		}
+	}
+	method := c.authoredCallTarget(call.Callee)
+	if method == nil {
+		return
+	}
+	constructorCall := constructorClass != "" && method.Name == "initialize" && !method.Class
+	if c.currentFieldClass != "" && !constructorCall {
+		calls := c.authoredClassCalls[c.currentFieldClass]
+		if calls == nil {
+			calls = map[*ast.MethodStatement]bool{}
+			c.authoredClassCalls[c.currentFieldClass] = calls
+		}
+		calls[method] = true
+	}
+	if c.currentMethod != nil {
+		calls := c.authoredCalls[c.currentMethod]
+		if calls == nil {
+			calls = map[*ast.MethodStatement]bool{}
+			c.authoredCalls[c.currentMethod] = calls
+		}
+		calls[method] = true
+		classified := c.authoredOrdinaryCalls
+		if constructorCall {
+			classified = c.authoredConstructorCalls
+		}
+		classifiedCalls := classified[c.currentMethod]
+		if classifiedCalls == nil {
+			classifiedCalls = map[*ast.MethodStatement]bool{}
+			classified[c.currentMethod] = classifiedCalls
+		}
+		classifiedCalls[method] = true
+	}
+	if c.concurrentMapDepth > 0 {
+		c.concurrentCallRoots[method] = true
+		if constructorCall {
+			c.concurrentConstructorRoots[method] = true
+		} else {
+			c.concurrentOrdinaryRoots[method] = true
+		}
+	}
+}
+
+func (c *Checker) authoredConstructorClass(expression ast.Expression) string {
+	if generic, ok := expression.(*ast.GenericExpression); ok {
+		return c.authoredConstructorClass(generic.Receiver)
+	}
+	member, ok := expression.(*ast.MemberExpression)
+	if !ok || member.Name != "new" {
+		return ""
+	}
+	owner := authoredReceiverName(member.Receiver)
+	if c.classes[owner] == nil {
+		return ""
+	}
+	return owner
+}
+
+func (c *Checker) authoredCallTarget(expression ast.Expression) *ast.MethodStatement {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		return c.functions[node.Name]
+	case *ast.GenericExpression:
+		return c.authoredCallTarget(node.Receiver)
+	case *ast.MemberExpression:
+		if method := c.authoredMemberMethods[node]; method != nil {
+			return method
+		}
+		owner := authoredReceiverName(node.Receiver)
+		if node.Name == "new" {
+			if class := c.classes[owner]; class != nil {
+				return class.methods["initialize"]
+			}
+		}
+		return c.authoredOwnedMethods[authoredOwnedMethodKey(owner, node.Name)]
+	default:
+		return nil
+	}
+}
+
+func authoredReceiverName(expression ast.Expression) string {
+	if generic, ok := expression.(*ast.GenericExpression); ok {
+		return authoredReceiverName(generic.Receiver)
+	}
+	return expressionTypeName(expression)
 }
 
 func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParameters map[string]bool) {
@@ -948,6 +1217,7 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, ty
 		c.validateExpressionTypeReferences(node.Source, typeParameters)
 		c.validateExpressionTypeReferences(node.SliceSize, typeParameters)
 		c.validateExpressionTypeReferences(node.Initial, typeParameters)
+		c.validateExpressionTypeReferences(node.Limit, typeParameters)
 		if node.Block != nil {
 			c.validateTypeReferences(node.Block.Body, typeParameters)
 		}
@@ -1548,7 +1818,23 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.interfaceDepth--
 		case *ast.FieldStatement:
 			if n.Value != nil {
-				valueType := c.checkExpression(n.Value, sc)
+				previousFieldClass := c.currentFieldClass
+				if c.current != nil {
+					c.currentFieldClass = c.current.name
+				}
+				valueScope := sc
+				concurrentField := c.concurrentClasses[c.currentFieldClass]
+				if concurrentField {
+					// A field default is a synthetic constructor prologue. Keep class
+					// fields outside its root so aliased reference fields are captures.
+					valueScope = &scope{parent: sc, values: map[string]symbol{}}
+					c.concurrentBlockScopes = append(c.concurrentBlockScopes, valueScope)
+				}
+				valueType := c.checkExpression(n.Value, valueScope)
+				if concurrentField {
+					c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
+				}
+				c.currentFieldClass = previousFieldClass
 				declared := c.typeFromRef(n.Type)
 				valueType = c.contextualizeCollectionLiteral(n.Value, declared, valueType)
 				if !n.Type.Empty() && !c.assignable(n.Value, declared, valueType) {
@@ -1626,6 +1912,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
+				if c.concurrentBorrowedType(variableType) {
+					declared.concurrentBorrowed = c.concurrentBorrowedExpression(n.Value, sc)
+				}
 				mustUseResult := len(c.returns) > 0 && !n.Constant && n.Name != "_" && c.isStandardResult(variableType)
 				if len(c.returns) > 0 && !n.Constant && (tracksUnusedBinding(n.Name) || mustUseResult) {
 					used := false
@@ -1640,7 +1929,19 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
+			var initializationTarget *ast.Identifier
+			if root := c.currentConcurrentBlockScope(); root != nil {
+				if name, outer := concurrentAssignmentRoot(n.Target, sc, root); outer {
+					if c.concurrentConstructorInitializesField(root, n.Target, name) {
+						initializationTarget, _ = n.Target.(*ast.Identifier)
+						c.concurrentInitTargets[initializationTarget] = true
+					} else {
+						c.error(n.Target.Span(), fmt.Sprintf("concurrent_map cannot assign to outer binding %s", name))
+					}
+				}
+			}
 			leftType := c.checkExpression(n.Target, sc)
+			delete(c.concurrentInitTargets, initializationTarget)
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				if value, exists := sc.lookup(identifier.Name); exists && value.declared.Kind != "" {
 					leftType = value.declared
@@ -1688,7 +1989,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if member, ok := n.Target.(*ast.MemberExpression); ok && c.readonlyClassField(member, sc) {
 				c.error(member.Span(), fmt.Sprintf("field %s is readonly", member.Name))
 			} else {
-				c.requireMutable(n.Target, sc, "assignment")
+				if _, direct := n.Target.(*ast.Identifier); direct {
+					c.requireMutable(n.Target, sc, "assignment")
+				} else {
+					c.requireUnaliasedMutable(n.Target, sc, "assignment")
+				}
 			}
 			assignedType := rightType
 			if n.Operator != "=" {
@@ -1709,6 +2014,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
+				if n.Operator == "=" {
+					if binding, _, exists := sc.lookupOwner(identifier.Name); exists &&
+						c.concurrentBorrowedType(binding.typ) && c.concurrentBorrowedExpression(n.Value, sc) {
+						markConcurrentBorrowed(sc, identifier.Name, binding)
+					}
+				}
 				sc.resetNarrowing(identifier.Name)
 				if binding, exists := sc.lookup(identifier.Name); exists {
 					sc.resetNullableMembers(identifier.Name, binding.span.Start.Offset)
@@ -2362,6 +2673,7 @@ func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
 	selectorType := c.checkExpression(node.Value, sc)
+	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)
 	if literalCaseSelector(selectorType) {
 		return c.checkLiteralCase(node, sc, selectorType, expression)
 	}
@@ -2420,7 +2732,11 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 					continue
 				}
 				field := variant.Fields[index]
-				declared := symbol{typ: field.Type, span: binding.Span()}
+				declared := symbol{
+					typ:                field.Type,
+					span:               binding.Span(),
+					concurrentBorrowed: borrowedSelector && c.concurrentBorrowedType(field.Type),
+				}
 				if tracksUnusedBinding(binding.Name) {
 					used := false
 					declared.used = &used
@@ -2634,6 +2950,7 @@ func (c *Checker) discriminantNarrowing(expression ast.Expression, sc *scope) (d
 }
 
 func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorType types.Type, expression bool) types.Type {
+	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)
 	for _, statement := range node.Leading {
 		if _, comment := statement.(*ast.CommentStatement); !comment {
 			c.error(statement.Span(), "case statements must be inside a when or else branch")
@@ -2678,7 +2995,11 @@ func (c *Checker) checkUnionCase(node *ast.CaseStatement, sc *scope, selectorTyp
 			c.error(branch.Value.Span(), fmt.Sprintf("union type pattern %s expects exactly one binding, got %d", matchType, len(branch.Bindings)))
 		} else if matchType.Kind != types.Invalid {
 			binding := branch.Bindings[0]
-			declared := symbol{typ: matchType, span: binding.Span()}
+			declared := symbol{
+				typ:                matchType,
+				span:               binding.Span(),
+				concurrentBorrowed: borrowedSelector && c.concurrentBorrowedType(matchType),
+			}
 			if tracksUnusedBinding(binding.Name) {
 				used := false
 				declared.used = &used
@@ -4234,6 +4555,18 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 	previousClassMethod := c.classMethod
 	c.classMethod = method.Class
 	methodScope := &scope{parent: parent, values: map[string]symbol{}}
+	previousMethod := c.currentMethod
+	c.currentMethod = method
+	c.currentMethodScopes = append(c.currentMethodScopes, methodScope)
+	defer func() {
+		c.currentMethodScopes = c.currentMethodScopes[:len(c.currentMethodScopes)-1]
+		c.currentMethod = previousMethod
+	}()
+	if c.concurrentFunctions[method] {
+		// Parameter defaults execute as part of the reached call and therefore
+		// share its concurrency boundary with the authored body.
+		c.concurrentBlockScopes = append(c.concurrentBlockScopes, methodScope)
+	}
 	seenPositionalDefault := false
 	seenNamedOnly := false
 	seenNamedDefault := false
@@ -4281,7 +4614,12 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
 		}
-		methodScope.values[parameter.Name] = symbol{typ: typ, mutable: true, span: parameter.Span()}
+		methodScope.values[parameter.Name] = symbol{
+			typ:                typ,
+			mutable:            true,
+			span:               parameter.Span(),
+			concurrentBorrowed: c.concurrentFunctions[method] && c.concurrentBorrowedType(typ),
+		}
 	}
 	returnType := c.typeFromRef(method.ReturnType)
 	if method.ReturnType.Empty() {
@@ -4295,6 +4633,9 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		c.initializing++
 	}
 	c.checkStatements(method.Body, methodScope)
+	if c.concurrentFunctions[method] {
+		c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
+	}
 	if c.interfaceDepth == 0 && returnType.Kind != types.Void && c.statementsFallThrough(method.Body) && !c.hasNativeImplicitReturn(method.Body) {
 		c.error(method.Span(), fmt.Sprintf("%s() must return %s on every path", method.Name, returnType))
 	}
@@ -5269,8 +5610,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = invalidType()
 			break
 		}
-		if value, ok := sc.lookup(n.Name); ok {
+		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
+			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentInitTargets[n] {
+				switch {
+				case !c.concurrencySafeType(value.typ, map[string]bool{}):
+					c.error(n.Span(), fmt.Sprintf("concurrent_map cannot capture %s because %s is not concurrency-safe", n.Name, value.typ))
+				}
+			}
 			if c.inferenceOnly && value.pending != nil && value.pending.resolved.Kind == "" && !value.pending.blocked {
 				c.pendingExpressions[n] = value.pending
 				if c.pendingCollectionIsCaptured(value.pending) {
@@ -5490,7 +5837,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IterationExpression:
 		predicate := n.Operation == "any?" || n.Operation == "all?" || n.Operation == "none?" || n.Operation == "find" || n.Operation == "find_index"
 		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
-		transform := n.Operation == "map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
+		transform := n.Operation == "map" || n.Operation == "concurrent_map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
 		sourceType := c.checkExpression(n.Source, sc)
 		if sourceType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
@@ -5512,6 +5859,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if !iterable {
 			c.error(n.Source.Span(), fmt.Sprintf("%s is not iterable", sourceType))
 			elementType = types.Type{Kind: types.Any, Name: "Any"}
+		}
+		if n.Operation == "concurrent_map" {
+			if len(c.returns) == 0 && !c.interactiveTopLevel {
+				c.error(n.Span(), "concurrent_map is only available inside a function or method")
+			}
+			if sourceType.Kind != types.Array {
+				c.error(n.Source.Span(), fmt.Sprintf("concurrent_map is available only on Array, got %s", sourceType))
+			}
+			if n.WithIndex {
+				c.error(n.Span(), "concurrent_map.with_index is not supported")
+			}
+			if n.Limit != nil {
+				limitType := c.checkExpression(n.Limit, sc)
+				if scalarType(limitType).Kind != types.Int {
+					c.error(n.Limit.Span(), fmt.Sprintf("concurrent_map limit must be Integer, got %s", limitType))
+				}
+				if literal, ok := n.Limit.(*ast.Literal); ok {
+					if limit, valid := integerLiteral(literal.Raw); valid && limit <= 0 {
+						c.error(n.Limit.Span(), "concurrent_map limit must be greater than zero")
+					}
+				}
+			}
 		}
 		hashEach := hashSource && n.Operation == "each"
 		if hashSource && !hashEach {
@@ -5570,6 +5939,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				bindingTypes = []types.Type{itemType, types.FromName("Integer")}
 			}
 			c.result.IterationBindings[n] = append([]types.Type(nil), bindingTypes...)
+			borrowedIterationSource := c.concurrentBorrowedExpression(n.Source, sc)
+			if n.Initial != nil {
+				borrowedIterationSource = borrowedIterationSource || c.concurrentBorrowedExpression(n.Initial, sc)
+			}
 			if len(n.Block.Parameters) != len(bindingTypes) {
 				c.error(n.Block.Span(), fmt.Sprintf("%s block expects %d parameter(s), got %d", n.Operation, len(bindingTypes), len(n.Block.Parameters)))
 			}
@@ -5582,7 +5955,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
 					continue
 				}
-				declared := symbol{typ: parameterType, mutable: true, span: n.Block.Span()}
+				declared := symbol{
+					typ:     parameterType,
+					mutable: true,
+					span:    n.Block.Span(),
+					concurrentBorrowed: c.concurrentBorrowedType(parameterType) &&
+						(n.Operation == "concurrent_map" || borrowedIterationSource),
+				}
 				if tracksUnusedBinding(name) {
 					used := false
 					declared.used = &used
@@ -5592,6 +5971,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			if transform {
 				c.valueTransformDepth++
+			}
+			if n.Operation == "concurrent_map" {
+				c.concurrentBlockScopes = append(c.concurrentBlockScopes, blockScope)
+				c.concurrentMapDepth++
 			}
 			if transform {
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
@@ -5624,7 +6007,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				c.result.Expressions[n.Block] = blockType
 				switch n.Operation {
-				case "map":
+				case "map", "concurrent_map":
 					typ = types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{blockType}}
 				case "select", "any?", "all?", "none?", "find", "find_index":
 					if resultExpression != nil && (blockType.Kind != types.Bool || blockType.Nullable) {
@@ -5661,6 +6044,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if transform {
 				c.valueTransformDepth--
 			}
+			if n.Operation == "concurrent_map" {
+				c.concurrentMapDepth--
+				c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
+			}
 		}
 		if !transform {
 			typ = types.Type{Kind: types.Void, Name: "Void"}
@@ -5683,6 +6070,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if receiverType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
+		}
+		if c.concurrencyInterfaceType(receiverType) {
+			c.concurrentInterfaceMembers[n] = true
 		}
 		methodReceiverType := scalarType(c.expandAlias(receiverType, map[string]bool{}))
 		dataReceiverType := c.expandAlias(receiverType, map[string]bool{})
@@ -5810,6 +6200,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			member = c.specializeLocalEnumMember(receiverType, member)
 			member = c.specializeLocalClassMember(receiverType, member)
 			typ = member.typ
+			if member.method != nil {
+				if c.interfaces[receiverType.Name] == nil {
+					c.authoredMemberMethods[n] = member.method
+				}
+			}
 			c.result.ClassFieldAccesses[n] = member.field != nil
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			binding = specializeResolvedEnumMember(receiverType, binding)
@@ -5900,6 +6295,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
 		}
+		c.recordAuthoredCall(n)
+		c.checkConcurrentDynamicCall(n.Callee, calleeType)
+		c.checkConcurrentNativeCall(n.Callee)
 		if c.declarationOnlyClassBodyCall(n) {
 			c.result.DeclarationOnlyCalls[n] = true
 		}
@@ -6030,7 +6428,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if member, method := n.Callee.(*ast.MemberExpression); method && library.HasReceiver() {
 					receiverType = c.result.Expressions[member.Receiver]
 					if library.ReceiverMutable {
-						c.requireMutable(member.Receiver, sc, binding.Name+"()")
+						c.requireUnaliasedMutable(member.Receiver, sc, binding.Name+"()")
 					}
 				}
 				typ = inferLibraryReturn(*library, receiverType, argumentTypes)
@@ -6256,7 +6654,42 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	}
 	c.result.Expressions[expression] = typ
+	if c.currentConcurrentBlockScope() != nil && c.concurrentBorrowedType(typ) {
+		c.borrowedExpressions[expression] = c.computeConcurrentBorrowedExpression(expression, sc)
+	}
 	return typ
+}
+
+func (c *Checker) checkConcurrentNativeCall(callee ast.Expression) {
+	if c.currentConcurrentBlockScope() == nil {
+		return
+	}
+	reference := callee
+	if generic, ok := callee.(*ast.GenericExpression); ok {
+		reference = generic.Receiver
+	}
+	binding, exists := c.result.References[reference]
+	if !exists || binding.Export == nil || binding.Export.Runtime == nil || binding.Export.Runtime.PropagatesExecutionScope {
+		return
+	}
+	c.error(callee.Span(), fmt.Sprintf("native function %s has no concurrency-safe execution-scope contract", binding.Name))
+}
+
+func (c *Checker) checkConcurrentDynamicCall(callee ast.Expression, calleeType types.Type) {
+	if c.currentConcurrentBlockScope() == nil || calleeType.Kind == types.Invalid {
+		return
+	}
+	reference := callee
+	if generic, ok := reference.(*ast.GenericExpression); ok {
+		reference = generic.Receiver
+	}
+	if member, ok := reference.(*ast.MemberExpression); ok && c.concurrentInterfaceMembers[member] {
+		c.error(callee.Span(), fmt.Sprintf("concurrent_map cannot call interface method %s without an explicit concurrency-safety contract", member.Name))
+		return
+	}
+	if scalarType(calleeType).Kind == types.Function {
+		c.error(callee.Span(), "concurrent_map cannot call a function value without an explicit concurrency-safety contract")
+	}
 }
 
 func jsxRenderableType(typ, nodeType types.Type) bool {
@@ -6371,7 +6804,11 @@ func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.T
 
 	handlerScope := &scope{parent: sc, values: map[string]symbol{}}
 	if node.Binding.Name != "_" {
-		declared := symbol{typ: failure, span: node.Binding.Span()}
+		declared := symbol{
+			typ:                failure,
+			span:               node.Binding.Span(),
+			concurrentBorrowed: c.concurrentBorrowedExpression(node.Value, sc) && c.concurrentBorrowedType(failure),
+		}
 		if tracksUnusedBinding(node.Binding.Name) {
 			used := false
 			declared.used = &used
@@ -6642,6 +7079,9 @@ func expressionEscapingTransform(expression ast.Expression, loopDepth int) ast.S
 			return result
 		}
 		if result := expressionEscapingTransform(node.Initial, loopDepth); result != nil {
+			return result
+		}
+		if result := expressionEscapingTransform(node.Limit, loopDepth); result != nil {
 			return result
 		}
 		if node.Block != nil {
@@ -6959,7 +7399,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 			c.recordAssignableConversion(arguments[i].Value, expected, actualType)
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Mutable {
-			c.requireMutable(arguments[i].Value, sc, name+"()")
+			c.requireUnaliasedMutable(arguments[i].Value, sc, name+"()")
 		}
 	}
 	return library
@@ -7117,6 +7557,164 @@ func (c *Checker) requireMutable(expression ast.Expression, sc *scope, action st
 	}
 }
 
+func (c *Checker) requireUnaliasedMutable(expression ast.Expression, sc *scope, action string) {
+	if c.currentConcurrentBlockScope() != nil {
+		if name, typ, borrowed := concurrentBorrowedRoot(expression, sc); borrowed {
+			c.error(expression.Span(), fmt.Sprintf("concurrent_map cannot mutate borrowed binding %s because %s is not uniquely owned", name, typ))
+			return
+		}
+	}
+	c.requireMutable(expression, sc, action)
+}
+
+func concurrentBorrowedRoot(expression ast.Expression, sc *scope) (string, types.Type, bool) {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		value, exists := sc.lookup(node.Name)
+		return node.Name, value.typ, exists && value.concurrentBorrowed
+	case *ast.MemberExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	case *ast.IndexExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	case *ast.GenericExpression:
+		return concurrentBorrowedRoot(node.Receiver, sc)
+	default:
+		return "", types.Type{}, false
+	}
+}
+
+func markConcurrentBorrowed(sc *scope, name string, binding symbol) {
+	for current := sc; current != nil; current = current.parent {
+		value, exists := current.values[name]
+		if !exists || !sameConcurrentBinding(value, binding) {
+			continue
+		}
+		value.concurrentBorrowed = true
+		current.values[name] = value
+	}
+}
+
+func sameConcurrentBinding(left, right symbol) bool {
+	if left.variable != nil || right.variable != nil {
+		return left.variable != nil && left.variable == right.variable
+	}
+	return left.span == right.span
+}
+
+func (c *Checker) concurrentBorrowedType(typ types.Type) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if typ.Kind == types.Union {
+		for _, alternative := range typ.Args {
+			if c.concurrentBorrowedType(alternative) {
+				return true
+			}
+		}
+		return false
+	}
+	return isReferenceType(typ) && !c.concurrencySafeType(typ, map[string]bool{})
+}
+
+func (c *Checker) concurrentBorrowedExpression(expression ast.Expression, sc *scope) bool {
+	if expression == nil || c.currentConcurrentBlockScope() == nil {
+		return false
+	}
+	if typ := c.result.Expressions[expression]; !c.concurrentBorrowedType(typ) {
+		return false
+	}
+	if borrowed, known := c.borrowedExpressions[expression]; known {
+		return borrowed
+	}
+	borrowed := c.computeConcurrentBorrowedExpression(expression, sc)
+	c.borrowedExpressions[expression] = borrowed
+	return borrowed
+}
+
+func (c *Checker) computeConcurrentBorrowedExpression(expression ast.Expression, sc *scope) bool {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		value, exists := sc.lookup(node.Name)
+		return exists && value.concurrentBorrowed
+	case *ast.ArrayLiteral:
+		for _, element := range node.Elements {
+			if c.concurrentBorrowedExpression(element, sc) {
+				return true
+			}
+		}
+	case *ast.HashLiteral:
+		for _, entry := range node.Entries {
+			if c.concurrentBorrowedExpression(entry.Key, sc) || c.concurrentBorrowedExpression(entry.Value, sc) {
+				return true
+			}
+		}
+	case *ast.MemberExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.IndexExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.GenericExpression:
+		return c.concurrentBorrowedExpression(node.Receiver, sc)
+	case *ast.CallExpression:
+		if member, ok := node.Callee.(*ast.MemberExpression); ok && c.concurrentBorrowedExpression(member.Receiver, sc) {
+			return true
+		}
+		for _, argument := range node.Arguments {
+			if c.concurrentBorrowedExpression(argument.Value, sc) {
+				return true
+			}
+		}
+	case *ast.IterationExpression:
+		if c.concurrentBorrowedExpression(node.Source, sc) || c.concurrentBorrowedExpression(node.Initial, sc) {
+			return true
+		}
+		if node.Block != nil {
+			_, result := controlFlowBranchExpression(node.Block.Body)
+			return c.concurrentBorrowedExpression(result, sc)
+		}
+	case *ast.IfStatement:
+		branches := [][]ast.Statement{node.Then, node.Else}
+		for _, branch := range node.ElseIf {
+			branches = append(branches, branch.Body)
+		}
+		for _, branch := range branches {
+			_, result := controlFlowBranchExpression(branch)
+			if c.concurrentBorrowedExpression(result, sc) {
+				return true
+			}
+		}
+	case *ast.CaseStatement:
+		for _, branch := range node.Branches {
+			_, result := controlFlowBranchExpression(branch.Body)
+			if c.concurrentBorrowedExpression(result, sc) {
+				return true
+			}
+		}
+		_, result := controlFlowBranchExpression(node.Else)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.TryExpression:
+		return c.concurrentBorrowedExpression(node.Value, sc)
+	case *ast.CatchExpression:
+		if c.concurrentBorrowedExpression(node.Value, sc) {
+			return true
+		}
+		_, result := controlFlowBranchExpression(node.Body)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.AttemptExpression:
+		if c.concurrentBorrowedExpression(node.Value, sc) {
+			return true
+		}
+		_, result := controlFlowBranchExpression(node.Body)
+		return c.concurrentBorrowedExpression(result, sc)
+	case *ast.UnaryExpression:
+		return c.concurrentBorrowedExpression(node.Operand, sc)
+	case *ast.BinaryExpression:
+		return c.concurrentBorrowedExpression(node.Left, sc) || c.concurrentBorrowedExpression(node.Right, sc)
+	default:
+		// Future reference-producing syntax stays borrowed until it gains an
+		// explicit provenance rule here.
+		return true
+	}
+	return false
+}
+
 func isReferenceType(typ types.Type) bool {
 	switch typ.Kind {
 	case types.Array, types.Hash, types.StringBuilder, types.Named:
@@ -7124,6 +7722,147 @@ func isReferenceType(typ types.Type) bool {
 	default:
 		return false
 	}
+}
+
+func (c *Checker) currentConcurrentBlockScope() *scope {
+	if len(c.concurrentBlockScopes) == 0 {
+		return nil
+	}
+	return c.concurrentBlockScopes[len(c.concurrentBlockScopes)-1]
+}
+
+func (c *Checker) currentMethodScope() *scope {
+	if len(c.currentMethodScopes) == 0 {
+		return nil
+	}
+	return c.currentMethodScopes[len(c.currentMethodScopes)-1]
+}
+
+func (c *Checker) concurrentConstructorInitializesField(root *scope, target ast.Expression, name string) bool {
+	identifier, direct := target.(*ast.Identifier)
+	// Only the constructor's own direct field target is fresh. A nested target
+	// such as @items[0] may still refer to storage shared by Array elements.
+	return direct && identifier.Name == name && strings.HasPrefix(name, "@") &&
+		root == c.currentMethodScope() && c.currentMethod != nil && c.concurrentConstructors[c.currentMethod]
+}
+
+func (c *Checker) concurrencyInterfaceType(typ types.Type) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if typ.Kind != types.Named {
+		return false
+	}
+	if c.interfaces[typ.Name] != nil {
+		return true
+	}
+	if binding, exists := c.resolution.ImportedType(typ.Name); exists && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
+		return true
+	}
+	if binding, exists := c.resolution.InferredType(typ.Name); exists && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
+		return true
+	}
+	exported, exists := c.resolution.CompilerOwnedType(typ.Name)
+	return exists && exported.Kind == resolver.InterfaceExport
+}
+
+func scopeWithin(candidate, root *scope) bool {
+	for current := candidate; current != nil; current = current.parent {
+		if current == root {
+			return true
+		}
+	}
+	return false
+}
+
+func concurrentAssignmentRoot(expression ast.Expression, sc, root *scope) (string, bool) {
+	var identifier *ast.Identifier
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		identifier = node
+	case *ast.MemberExpression:
+		return concurrentAssignmentRoot(node.Receiver, sc, root)
+	case *ast.IndexExpression:
+		return concurrentAssignmentRoot(node.Receiver, sc, root)
+	default:
+		return "", false
+	}
+	_, owner, exists := sc.lookupOwner(identifier.Name)
+	return identifier.Name, exists && !scopeWithin(owner, root)
+}
+
+// concurrencySafeType is intentionally conservative. A concurrent block may
+// read scalar/value data from its lexical parent, while outer assignment is
+// rejected separately. Containers, functions, Any, and class/interface
+// instances require an explicit concurrency-safety contract that TypeRB does
+// not expose yet.
+func (c *Checker) concurrencySafeType(typ types.Type, visiting map[string]bool) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if typ.Nullable {
+		typ.Nullable = false
+	}
+	if typ.Kind == types.Union {
+		for _, alternative := range typ.Args {
+			if !c.concurrencySafeType(alternative, visiting) {
+				return false
+			}
+		}
+		return true
+	}
+	switch typ.Kind {
+	case types.Nil, types.Bool, types.Int, types.IntLiteral, types.Float, types.String, types.StringLiteral, types.Bytes, types.Void:
+		return true
+	case types.Range:
+		return len(typ.Args) == 1 && c.concurrencySafeType(typ.Args[0], visiting)
+	case types.Named:
+		if target, binding, newtype := c.newtypeDefinition(typ.Name); newtype {
+			if visiting[typ.Name] {
+				return false
+			}
+			visiting[typ.Name] = true
+			parameters := c.declaredTypes[typ.Name].typeParameters
+			if binding != nil && binding.Export != nil {
+				parameters = binding.Export.TypeParameters
+			}
+			target = substituteType(target, typeSubstitutions(parameters, typ.Args))
+			safe := c.concurrencySafeType(target, visiting)
+			delete(visiting, typ.Name)
+			return safe
+		}
+		if visiting[typ.Name] {
+			return false
+		}
+		if fields, _, binding, record := c.codecRecord(typ.Name); record {
+			visiting[typ.Name] = true
+			parameters := []string{}
+			if local := c.records[typ.Name]; local != nil {
+				parameters = local.typeParameters
+			} else if binding != nil && binding.Export != nil {
+				parameters = binding.Export.TypeParameters
+			}
+			substitutions := typeSubstitutions(parameters, typ.Args)
+			for _, field := range fields {
+				if !c.concurrencySafeType(substituteType(field.Type, substitutions), visiting) {
+					delete(visiting, typ.Name)
+					return false
+				}
+			}
+			delete(visiting, typ.Name)
+			return true
+		}
+		if variants, enum := c.enumVariants(typ); enum {
+			visiting[typ.Name] = true
+			for _, variant := range variants {
+				for _, field := range variant.Fields {
+					if !c.concurrencySafeType(field.Type, visiting) {
+						delete(visiting, typ.Name)
+						return false
+					}
+				}
+			}
+			delete(visiting, typ.Name)
+			return true
+		}
+	}
+	return false
 }
 
 func portableHashKey(typ types.Type) bool {

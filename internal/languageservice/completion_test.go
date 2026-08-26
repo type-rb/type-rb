@@ -102,6 +102,7 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: "numbers.sort_d", want: "sort_descending", insertText: "sort_descending()", kind: languageservice.CompletionMethod},
 				{source: "numbers.uni", want: "uniq", insertText: "uniq()", kind: languageservice.CompletionMethod},
 				{source: "numbers.con", want: "concat", insertText: "concat", kind: languageservice.CompletionMethod},
+				{source: "numbers.concurrent_", want: "concurrent_map", insertText: "concurrent_map", kind: languageservice.CompletionMethod},
 				{source: "[1, 2, 3].no", want: "none?", insertText: "none?", kind: languageservice.CompletionMethod},
 				{source: "(1..10).to", want: "to_a", insertText: "to_a()", kind: languageservice.CompletionMethod},
 				{source: "0.25.to_", want: "to_i", insertText: "to_i()", kind: languageservice.CompletionMethod},

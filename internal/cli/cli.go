@@ -49,7 +49,7 @@ import (
 // linker flag while local and branch source builds retain a useful development
 // version. A tagged module installation resolves its version from Go build
 // information in version.go.
-var Version = "0.3.39-dev"
+var Version = "0.3.42-dev"
 
 type buildArtifactKind string
 
@@ -605,6 +605,9 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 		command.Env = append(command.Env, "TRB_DATABASE="+filepath.Join(config.Root, config.Go.Sqldef.Database))
 	}
 	if err := relay.Run(command); err != nil {
+		if command.ProcessState == nil {
+			return fmt.Errorf("start test runtime: %w", err)
+		}
 		return &reportedError{cause: err}
 	}
 	return nil

@@ -2,6 +2,39 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.41 - 2026-08-26
+
+### Tooling
+
+- `trb test` now reports failures to start the selected target runtime, such as
+  a missing executable, instead of exiting without an explanation. Test
+  programs that start and report their own failures retain concise output.
+  ([#556](https://github.com/type-rb/type-rb/pull/556))
+
+## 0.3.40 - 2026-08-26
+
+### Standard library
+
+- `Array#concurrent_map` now provides import-free, bounded I/O concurrency with
+  ordered results, a portable default limit of 8, explicit named limits, and
+  shared capacity across nested maps. Go, Ruby, TypeScript, and the REPL use
+  the same structured cancellation and joining contract, while compile-time
+  checks reject unsafe shared captures and mutation across authored calls and
+  constructors. ([#546](https://github.com/type-rb/type-rb/pull/546))
+
+## 0.3.39 - 2026-08-26
+
+### Web
+
+- `trb web client` now generates deterministic typed TypeRB browser clients
+  from explicit endpoint contracts. Generated clients reuse shared contract
+  modules and the browser HTTP transport, serialize path, query, and JSON body
+  input, and expose declared response statuses as endpoint-specific result
+  enums. Contract types imported from TypeRB packages, including package-root
+  imports, are resolved across Go, Ruby, and TypeScript projects.
+  ([#545](https://github.com/type-rb/type-rb/pull/545),
+  [#550](https://github.com/type-rb/type-rb/pull/550))
+
 ## 0.3.38 - 2026-08-26
 
 ### Language and compiler

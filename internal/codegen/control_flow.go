@@ -764,6 +764,12 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		}
 		copy.Source = source
 		copy.Initial = initial
+		limitPrefix, limit := n.expression(node.Limit)
+		prefix = append(prefix, limitPrefix...)
+		if node.Limit != nil && limit == nil {
+			return prefix, nil
+		}
+		copy.Limit = limit
 		copy.Body = n.statements(node.Body)
 		resultPrefix, result := n.expression(node.Result)
 		copy.Body = append(copy.Body, resultPrefix...)

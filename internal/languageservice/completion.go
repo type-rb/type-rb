@@ -975,6 +975,13 @@ func directReceiverMembers(receiver types.Type, context Context) []Symbol {
 			result = append(result, Symbol{Name: name, Kind: CompletionMethod, Detail: name + " { |value| " + detailType + " }: " + displayType(returnType), Type: returnType})
 		}
 	}
+	if receiver.Kind == types.Array {
+		resultType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("Any")}}
+		result = append(result, Symbol{
+			Name: "concurrent_map", Kind: CompletionMethod,
+			Detail: "concurrent_map(limit: Integer = 8) { |value| U }: Array<U>", Type: resultType,
+		})
+	}
 	byName := map[string]Symbol{}
 	for _, symbol := range result {
 		byName[symbol.Name] = symbol

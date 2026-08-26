@@ -219,6 +219,7 @@ func (c *Checker) validateReservedKeywordExpression(expression ast.Expression) {
 		c.validateReservedKeywordExpression(node.Source)
 		c.validateReservedKeywordExpression(node.SliceSize)
 		c.validateReservedKeywordExpression(node.Initial)
+		c.validateReservedKeywordExpression(node.Limit)
 		if node.Block != nil {
 			c.validateReservedKeywordBlock(node.Block)
 		}

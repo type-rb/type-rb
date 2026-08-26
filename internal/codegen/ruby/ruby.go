@@ -1191,6 +1191,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Operation == "concurrent_map" {
+		return g.concurrentMap(transform)
+	}
 	source := g.expr(transform.Source)
 	if _, rangeSource := transform.Source.(*ir.Range); rangeSource {
 		source = "(" + source + ")"
@@ -1213,6 +1216,125 @@ func (g *generator) transform(transform *ir.Transform) string {
 	default:
 		return "nil"
 	}
+}
+
+func (g *generator) concurrentMap(transform *ir.Transform) string {
+	g.temporary++
+	suffix := strconv.Itoa(g.temporary)
+	child := g.expressionChild()
+	child.temporary = g.temporary
+	items := "__trb_items_" + suffix
+	result := "__trb_result_" + suffix
+	requested := "__trb_requested_" + suffix
+	group := "__trb_group_" + suffix
+	semaphore := "__trb_semaphore_" + suffix
+	localLimit := "__trb_local_limit_" + suffix
+	childScope := "__trb_child_scope_" + suffix
+	indexMutex := "__trb_index_mutex_" + suffix
+	nextIndex := "__trb_next_index_" + suffix
+	errorMutex := "__trb_error_mutex_" + suffix
+	errors := "__trb_errors_" + suffix
+	workers := "__trb_workers_" + suffix
+	workerCount := "__trb_worker_count_" + suffix
+	index := "__trb_index_" + suffix
+	taskScope := "__trb_task_scope_" + suffix
+	item := transform.Item
+	if item == "" || item == "_" {
+		item = "__trb_item_" + suffix
+	}
+	limit := "8"
+	if transform.Limit != nil {
+		limit = child.expr(transform.Limit)
+	}
+	child.line("begin", "")
+	child.indent++
+	child.line(items+" = "+child.expr(transform.Source), "")
+	child.line(requested+" = "+limit, "")
+	child.line(`raise ArgumentError, "concurrent_map limit must be greater than zero" if `+requested+" <= 0", "")
+	child.line(group+" = __trb_scope.concurrency_group", "")
+	child.line("if "+group+".nil?", "")
+	child.indent++
+	child.line(semaphore+" = SizedQueue.new("+requested+")", "")
+	child.line(requested+".times { "+semaphore+" << true }", "")
+	child.line(group+" = { semaphore: "+semaphore+", capacity: "+requested+" }", "")
+	child.indent--
+	child.line("end", "")
+	child.line(semaphore+" = "+group+"[:semaphore]", "")
+	child.line(localLimit+" = "+group+"[:capacity]", "")
+	if transform.Limit != nil {
+		child.line(localLimit+" = ["+localLimit+", "+requested+"].min", "")
+	}
+	child.line("__trb_released_"+suffix+" = __trb_scope.concurrency_held", "")
+	child.line(semaphore+" << true if __trb_released_"+suffix, "")
+	child.line("begin", "")
+	child.indent++
+	child.line(childScope+" = __trb_scope.child", "")
+	child.line(childScope+".concurrency_group = "+group, "")
+	child.line(result+" = Array.new("+items+".length)", "")
+	child.line(indexMutex+" = Mutex.new", "")
+	child.line(nextIndex+" = 0", "")
+	child.line(errorMutex+" = Mutex.new", "")
+	child.line(errors+" = []", "")
+	child.line(workerCount+" = ["+localLimit+", "+items+".length].min", "")
+	child.line(workers+" = "+workerCount+".times.map do", "")
+	child.indent++
+	child.line("Thread.new do", "")
+	child.indent++
+	child.line(taskScope+" = "+childScope+".child", "")
+	child.line(taskScope+".concurrency_held = true", "")
+	child.line("loop do", "")
+	child.indent++
+	child.line("break if "+childScope+".cancelled?", "")
+	child.line(index+" = "+indexMutex+".synchronize do", "")
+	child.indent++
+	child.line("next nil if "+nextIndex+" >= "+items+".length", "")
+	child.line("value = "+nextIndex, "")
+	child.line(nextIndex+" += 1", "")
+	child.line("value", "")
+	child.indent--
+	child.line("end", "")
+	child.line("break if "+index+".nil?", "")
+	child.line(semaphore+".pop", "")
+	child.line("begin", "")
+	child.indent++
+	child.line(result+"["+index+"] = ->(__trb_scope) do", "")
+	child.indent++
+	child.line(item+" = "+items+"["+index+"]", "")
+	child.statements(transform.Body)
+	child.line(child.expr(transform.Result), "")
+	child.indent--
+	child.line("end.call("+taskScope+")", "")
+	child.line("rescue Exception => error", "")
+	child.indent++
+	child.line(errorMutex+".synchronize { "+errors+" << error if "+errors+".empty? }", "")
+	child.line(childScope+".cancel", "")
+	child.indent--
+	child.line("ensure", "")
+	child.indent++
+	child.line(semaphore+" << true", "")
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line(workers+".each(&:join)", "")
+	child.line("raise "+errors+".first unless "+errors+".empty?", "")
+	child.line("__trb_scope.check!", "")
+	child.line(result, "")
+	child.indent--
+	child.line("ensure", "")
+	child.indent++
+	child.line(semaphore+".pop if __trb_released_"+suffix, "")
+	child.indent--
+	child.line("end", "")
+	child.indent--
+	child.line("end", "")
+	g.mergeExpressionChild(child)
+	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {
