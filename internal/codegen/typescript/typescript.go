@@ -1258,18 +1258,7 @@ func (g *generator) importedFunctionUsesExecutionScope(reference *ir.Reference) 
 	if name == "" {
 		return false
 	}
-	modules := []string{reference.Package}
-	if strings.HasSuffix(reference.Package, "/index") {
-		modules = append(modules, strings.TrimSuffix(reference.Package, "/index"))
-	} else {
-		modules = append(modules, strings.TrimSuffix(reference.Package, "/")+"/index")
-	}
-	for _, module := range modules {
-		if g.execution.Method(module, "", name) {
-			return true
-		}
-	}
-	return false
+	return g.execution.Method(reference.Package, "", name)
 }
 
 func (g *generator) expr(expression ir.Expression) string {
@@ -2275,8 +2264,8 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 	}
 	parameters := tsTypeParameterDeclarations(record.TypeParameters)
 	result := record.Name + tsTypeParameterArguments(record.TypeParameters)
-	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
-	suspends := g.suspension != nil && g.suspension.RecordDefault(g.modulePath, record.Name)
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
+	suspends := g.suspension != nil && g.suspension.RecordDefaultFor(record)
 	arguments := "args: { " + strings.Join(properties, "; ") + " }"
 	if execution {
 		arguments = "__trbScope: AbortSignal | undefined, " + arguments

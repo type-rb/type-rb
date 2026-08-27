@@ -298,3 +298,124 @@ func TestClassConstructorsUseTheirOwnModuleQualifiedInitializerEffects(t *testin
 		t.Fatal("effectful parent initializer propagated into the child's own constructor")
 	}
 }
+
+func TestTransparentAliasCanonicalizationIsCycleSafe(t *testing.T) {
+	program := &ir.Program{ModulePath: "contracts", Statements: []ir.Statement{
+		&ir.TypeAlias{Name: "First", Target: types.FromName("Second")},
+		&ir.TypeAlias{Name: "Second", Target: types.FromName("First")},
+		&ir.Interface{Name: "Worker", Methods: []*ir.Method{{Name: "values"}}},
+		&ir.Class{Name: "Implementation", Implements: []types.Type{types.FromName("First")}},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{})
+	if plan == nil {
+		t.Fatal("Analyze returned a nil plan for a cyclic hand-built alias graph")
+	}
+}
+
+func TestNestedNamespacesKeepSameLeafMethodEffectsSeparate(t *testing.T) {
+	integer := types.FromName("Integer")
+	effectCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, types.Type{Kind: types.Function, Args: []types.Type{integer}}),
+			Name:     "load_value",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+				Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+			}},
+		},
+	}
+	effectful := &ir.Method{Name: "value", ReturnType: integer, Body: []ir.Statement{&ir.Return{Value: effectCall}}}
+	pure := &ir.Method{Name: "value", ReturnType: integer, Body: []ir.Statement{
+		&ir.Return{Value: &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "1"}},
+	}}
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		&ir.Module{Name: "Left", Body: []ir.Statement{&ir.Class{Name: "Worker", Body: []ir.Statement{effectful}}}},
+		&ir.Module{Name: "Right", Body: []ir.Statement{&ir.Class{Name: "Worker", Body: []ir.Statement{pure}}}},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.Methods[effectful] {
+		t.Fatal("effectful nested method was not recorded")
+	}
+	if plan.Methods[pure] {
+		t.Fatal("same-leaf method in another nested namespace inherited the effect ABI")
+	}
+}
+
+func TestNestedNamespacesKeepSameLeafRecordDefaultsSeparate(t *testing.T) {
+	integer := types.FromName("Integer")
+	effectCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, types.Type{Kind: types.Function, Args: []types.Type{integer}}),
+			Name:     "load_value",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+				Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+			}},
+		},
+	}
+	left := &ir.Record{Name: "Entry", Body: []ir.Statement{
+		&ir.RecordField{Name: "value", Type: integer, Default: effectCall},
+	}}
+	right := &ir.Record{Name: "Entry", Body: []ir.Statement{
+		&ir.RecordField{Name: "value", Type: integer, Default: &ir.Literal{
+			ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "1",
+		}},
+	}}
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		&ir.Module{Name: "Left", Body: []ir.Statement{left}},
+		&ir.Module{Name: "Right", Body: []ir.Statement{right}},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.RecordDefaultFor(left) || !plan.RecordDefault("main", "Left::Entry") {
+		t.Fatal("effectful nested record default was not recorded under its qualified identity")
+	}
+	if plan.RecordDefaultFor(right) || plan.RecordDefault("main", "Right::Entry") {
+		t.Fatal("same-leaf record in another nested namespace inherited the effect ABI")
+	}
+}
+
+func TestModuleInitializerKeepsTopLevelUnqualifiedFunctionIdentity(t *testing.T) {
+	integer := types.FromName("Integer")
+	function := types.FunctionOf(nil, integer)
+	effectCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, function), Name: "operation",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+				Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+			}},
+		},
+	}
+	pure := &ir.Method{Name: "value", ReturnType: integer}
+	moduleMethod := &ir.Method{Name: "value", ReturnType: integer, Body: []ir.Statement{
+		&ir.Return{Value: effectCall},
+	}}
+	initializerCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee:   &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, function), Name: "value"},
+	}
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		pure,
+		&ir.Module{Name: "Settings", Body: []ir.Statement{
+			moduleMethod,
+			&ir.Variable{Name: "VALUE", Type: integer, Value: initializerCall, Constant: true},
+		}},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.Methods[moduleMethod] {
+		t.Fatal("effectful module method was not recorded")
+	}
+	if plan.Methods[pure] || plan.Calls[initializerCall] {
+		t.Fatal("module initializer confused an unqualified top-level call with a same-named module method")
+	}
+}

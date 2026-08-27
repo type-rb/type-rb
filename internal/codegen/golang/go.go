@@ -768,7 +768,7 @@ func (g *generator) record(record *ir.Record) {
 
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
 	parameters := make([]string, 0, len(fields)*2)
-	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
 	if execution {
 		g.requireImport("context", "trbcontext")
 		parameters = append(parameters, "__trbScope trbcontext.Context")
@@ -911,19 +911,23 @@ func enumMethodName(enumName, methodName string) string {
 
 func (g *generator) typeAlias(alias *ir.TypeAlias) {
 	name := goIdentifier(alias.Name, true)
-	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.goType(alias.Target) + goTrailingComment(alias.TrailingComment))
+	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.typeAliasTarget(alias) + goTrailingComment(alias.TrailingComment))
 	if len(alias.Variants) == 0 {
 		g.b.WriteByte('\n')
 		return
 	}
-	targetName := goIdentifier(alias.Target.Name, true)
+	target := alias.AuthoredTarget
+	if target.Kind == "" {
+		target = alias.Target
+	}
+	targetName := goIdentifier(target.Name, true)
 	targetPrefix := ""
-	if imported := g.typeAliases[alias.Target.Name]; imported != "" {
+	if imported := g.typeAliases[target.Name]; alias.AuthoredTargetReference != nil && imported != "" {
 		targetPrefix = imported + "."
 	}
 	for _, variant := range alias.Variants {
 		aliasConstant := goConstantIdentifier(alias.Name, variant.Name)
-		targetConstant := targetPrefix + goConstantIdentifier(alias.Target.Name, variant.Name)
+		targetConstant := targetPrefix + goConstantIdentifier(target.Name, variant.Name)
 		if len(variant.Fields) == 0 {
 			g.line("var " + aliasConstant + " = " + targetConstant)
 			continue
@@ -934,9 +938,9 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 		g.line("func " + constructor + goTypeParameterDeclarations(alias.TypeParameters) + "(" + g.parameters(variant.Fields) + ") " + returnType + " {")
 		g.indent++
 		targetConstructor := targetPrefix + "New" + targetName + goIdentifier(variant.Name, true)
-		if len(alias.Target.Args) > 0 {
-			arguments := make([]string, len(alias.Target.Args))
-			for index, argument := range alias.Target.Args {
+		if len(target.Args) > 0 {
+			arguments := make([]string, len(target.Args))
+			for index, argument := range target.Args {
 				arguments[index] = g.goType(argument)
 			}
 			targetConstructor += "[" + strings.Join(arguments, ", ") + "]"
@@ -1068,6 +1072,23 @@ func (g *generator) statements(statements []ir.Statement) {
 	for _, statement := range statements {
 		g.statement(statement)
 	}
+}
+
+func (g *generator) typeAliasTarget(alias *ir.TypeAlias) string {
+	target := alias.AuthoredTarget
+	if target.Kind == "" {
+		target = alias.Target
+	}
+	if alias.AuthoredTargetReference != nil || target.Kind != types.Named || target.Name == "" {
+		return g.goType(target)
+	}
+	imported, exists := g.typeAliases[target.Name]
+	delete(g.typeAliases, target.Name)
+	result := g.goType(target)
+	if exists {
+		g.typeAliases[target.Name] = imported
+	}
+	return result
 }
 
 func (g *generator) class(class *ir.Class) {

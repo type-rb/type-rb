@@ -928,7 +928,7 @@ func (g *generator) expr(expression ir.Expression) string {
 
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
 	parameters := make([]string, 0, len(fields)*2)
-	execution := g.execution != nil && g.execution.RecordDefault(g.modulePath, record.Name)
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
 	if execution {
 		parameters = append(parameters, "__trb_scope")
 	}

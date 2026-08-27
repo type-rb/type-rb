@@ -49,6 +49,7 @@ type Result struct {
 	RawEnums                   map[*ast.EnumStatement]RawEnum
 	EnumCalls                  map[*ast.CallExpression]EnumCall
 	TypeAliases                map[*ast.TypeAliasStatement]TypeAlias
+	InterfaceImplementations   map[*ast.ClassStatement][]InterfaceImplementation
 	Newtypes                   map[*ast.NewtypeStatement]Newtype
 	NewtypeCalls               map[*ast.CallExpression]NewtypeCall
 	ResultTries                map[*ast.TryExpression]ResultTry
@@ -100,8 +101,15 @@ type EnumCall struct {
 }
 
 type TypeAlias struct {
-	Target   types.Type
-	Variants []EnumVariant
+	Target                types.Type
+	AuthoredTargetBinding *resolver.Binding
+	TargetBinding         *resolver.Binding
+	Variants              []EnumVariant
+}
+
+type InterfaceImplementation struct {
+	Type          types.Type
+	TargetBinding *resolver.Binding
 }
 
 type Newtype struct {
@@ -492,6 +500,7 @@ type Checker struct {
 	authoredMemberMethods       map[*ast.MemberExpression]*ast.MethodStatement
 	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
 	authoredOwnedMethods        map[string]*ast.MethodStatement
+	authoredTypes               map[string]string
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredConstructorCalls    map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredOrdinaryCalls       map[*ast.MethodStatement]map[*ast.MethodStatement]bool
@@ -814,6 +823,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
 			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
 			TypeAliases:                map[*ast.TypeAliasStatement]TypeAlias{},
+			InterfaceImplementations:   map[*ast.ClassStatement][]InterfaceImplementation{},
 			Newtypes:                   map[*ast.NewtypeStatement]Newtype{},
 			NewtypeCalls:               map[*ast.CallExpression]NewtypeCall{},
 			ResultTries:                map[*ast.TryExpression]ResultTry{},
@@ -850,6 +860,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		authoredMemberMethods:      map[*ast.MemberExpression]*ast.MethodStatement{},
 		concurrentInterfaceMembers: map[*ast.MemberExpression]bool{},
 		authoredOwnedMethods:       map[string]*ast.MethodStatement{},
+		authoredTypes:              map[string]string{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredOrdinaryCalls:      map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
@@ -897,7 +908,15 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 				c.authoredOwnedMethods[authoredOwnedMethodKey(owner, node.Name)] = node
 			}
 		case *ast.ClassStatement:
-			c.indexAuthoredMethods(node.Body, nestedAuthoredOwner(owner, node.Name))
+			qualified := nestedAuthoredOwner(owner, node.Name)
+			if !strings.Contains(node.Name, "::") {
+				c.authoredTypes[qualified] = node.Name
+			}
+			c.indexAuthoredMethods(node.Body, qualified)
+		case *ast.RecordStatement:
+			if !strings.Contains(node.Name, "::") {
+				c.authoredTypes[nestedAuthoredOwner(owner, node.Name)] = node.Name
+			}
 		case *ast.ModuleStatement:
 			c.indexAuthoredMethods(node.Body, nestedAuthoredOwner(owner, node.Name))
 		}
@@ -1770,6 +1789,15 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			target := c.expandAlias(aliasType, map[string]bool{})
 			alias := TypeAlias{Target: target}
+			authoredTarget := fromTypeRef(n.Target)
+			if binding, ok := c.authoredAliasTargetBinding(authoredTarget); ok {
+				alias.AuthoredTargetBinding = &binding
+			}
+			if c.aliasTargetIsExternal(authoredTarget, map[string]bool{}) {
+				if binding, ok := c.externalAliasTargetBinding(target.Name); ok {
+					alias.TargetBinding = &binding
+				}
+			}
 			if variants, ok := c.enumVariants(aliasType); ok {
 				alias.Variants = variants
 			}
@@ -4858,12 +4886,35 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 			continue
 		}
 		required := map[string]methodSignature{}
-		if local := c.interfaces[interfaceName]; local != nil {
+		externalTarget := c.aliasTargetIsExternal(fromTypeRef(reference), map[string]bool{})
+		implementation := InterfaceImplementation{Type: interfaceType}
+		externalBinding := resolver.Binding{}
+		externalFound := false
+		externalResolved := false
+		if externalTarget {
+			if binding, ok := c.externalAliasTargetBinding(interfaceName); ok {
+				externalFound = true
+				if binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
+					externalBinding = binding
+					externalResolved = true
+					implementation.TargetBinding = &binding
+				}
+			}
+		}
+		c.result.InterfaceImplementations[class] = append(c.result.InterfaceImplementations[class], implementation)
+		if externalFound && !externalResolved {
+			c.error(class.Span(), fmt.Sprintf("implemented type %s must resolve to an interface", interfaceType))
+			continue
+		}
+		if local := c.interfaces[interfaceName]; local != nil && !externalResolved {
 			substitutions := typeSubstitutions(typeParameterNames(local.TypeParameters), interfaceType.Args)
 			for _, method := range local.Methods {
 				required[method.Name] = substituteMethodSignature(c.signatureFromMethod(method), substitutions)
 			}
-		} else if imported, ok := c.resolution.ImportedType(interfaceName); ok && imported.Export.Kind == resolver.InterfaceExport {
+		} else if imported, ok := c.resolvedInterface(interfaceName); externalResolved || ok {
+			if externalResolved {
+				imported = externalBinding
+			}
 			c.markImportUsed(imported)
 			substitutions := typeSubstitutions(imported.Export.TypeParameters, interfaceType.Args)
 			for name, member := range imported.Export.Members {
@@ -4884,6 +4935,20 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 			}
 		}
 	}
+}
+
+func (c *Checker) resolvedInterface(name string) (resolver.Binding, bool) {
+	lookups := []func(string) (resolver.Binding, bool){
+		c.resolution.ImportedType,
+		c.resolution.ContractType,
+	}
+	for _, lookup := range lookups {
+		binding, ok := lookup(name)
+		if ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
+			return binding, true
+		}
+	}
+	return resolver.Binding{}, false
 }
 
 func (c *Checker) checkOverrides(class *ast.ClassStatement) {
@@ -5298,6 +5363,22 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 	return false
 }
 
+func authoredOwnerAccess(expression ast.Expression, sc *scope) bool {
+	switch node := expression.(type) {
+	case *ast.GenericExpression:
+		return authoredOwnerAccess(node.Receiver, sc)
+	case *ast.Identifier:
+		if _, exists := sc.lookup(node.Name); exists {
+			return false
+		}
+		return isConstant(node.Name)
+	case *ast.MemberExpression:
+		return node.Namespace
+	default:
+		return false
+	}
+}
+
 func (c *Checker) constructorType(name string) bool {
 	if declaration, exists := c.declaredTypes[name]; exists {
 		return declaration.kind == "class" || declaration.kind == "record" || declaration.kind == "newtype"
@@ -5484,6 +5565,60 @@ func expressionTypeName(expression ast.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (c *Checker) authoredTypeInScope(name string, sc *scope) (string, bool) {
+	owner := ""
+	for current := sc; current != nil; current = current.parent {
+		if current.constantOwner != "" {
+			owner = current.constantOwner
+			break
+		}
+	}
+	for current := owner; ; {
+		if local, ok := c.authoredTypes[nestedAuthoredOwner(current, name)]; ok {
+			return local, true
+		}
+		separator := strings.LastIndex(current, "::")
+		if separator < 0 {
+			if current == "" {
+				break
+			}
+			current = ""
+		} else {
+			current = current[:separator]
+		}
+	}
+	return "", false
+}
+
+func (c *Checker) authoredOwnedMethodInScope(owner, name string, sc *scope) *ast.MethodStatement {
+	if owner == "" {
+		return nil
+	}
+	constantOwner := ""
+	for current := sc; current != nil; current = current.parent {
+		if current.constantOwner != "" {
+			constantOwner = current.constantOwner
+			break
+		}
+	}
+	for current := constantOwner; ; {
+		candidate := nestedAuthoredOwner(current, owner)
+		if method := c.authoredOwnedMethods[authoredOwnedMethodKey(candidate, name)]; method != nil {
+			return method
+		}
+		separator := strings.LastIndex(current, "::")
+		if separator < 0 {
+			if current == "" {
+				break
+			}
+			current = ""
+		} else {
+			current = current[:separator]
+		}
+	}
+	return nil
 }
 
 func (c *Checker) checkFieldInitialization(class *ast.ClassStatement) {
@@ -6175,6 +6310,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
+		if classAccess || authoredOwnerAccess(n.Receiver, sc) {
+			if method := c.authoredOwnedMethodInScope(expressionTypeName(n.Receiver), n.Name, sc); method != nil {
+				typ = c.methodReturnType(method)
+				c.authoredMemberMethods[n] = method
+				break
+			}
+		}
 		if n.Name == "new" && !classAccess {
 			if c.constructorType(receiverType.Name) {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, false)
@@ -6217,9 +6359,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport
 			c.markImportedSymbolUsed(receiverType.Name)
 			c.recordReference(n, binding)
-		} else if binding, exists := c.resolution.InferredTypeMember(receiverType.Name, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
-			binding = specializeResolvedEnumMember(receiverType, binding)
-			binding = specializeResolvedClassMember(receiverType, binding)
+		} else if binding, exists := c.resolution.InferredTypeMember(dataReceiverType.Name, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
+			binding = specializeResolvedEnumMember(dataReceiverType, binding)
+			binding = specializeResolvedClassMember(dataReceiverType, binding)
 			typ = binding.Type()
 			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
 			c.recordReference(n, binding)
@@ -6521,6 +6663,17 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						if sourceBinding(binding) {
 							c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), parameters...)
 						}
+					}
+				}
+			case *ast.MemberExpression:
+				if receiver.Namespace {
+					name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
+					if record := c.records[name]; local && record != nil {
+						typ = types.FromName(name)
+						c.checkLocalRecordArguments(n, record)
+					} else if info := c.classes[name]; local && info != nil {
+						typ = types.FromName(name)
+						c.checkArguments(n, info.methods["initialize"], argumentTypes)
 					}
 				}
 			}
@@ -8798,6 +8951,78 @@ func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
 		return exported.TypeParameters, exported.AliasTarget, true
 	}
 	return nil, types.Type{}, false
+}
+
+func (c *Checker) aliasTargetIsExternal(target types.Type, seen map[string]bool) bool {
+	if target.Kind != types.Named || target.Name == "" {
+		return false
+	}
+	if alias := c.aliases[target.Name]; alias != nil {
+		if argument, ok := aliasTypeParameterArgument(alias.typeParameters, alias.target, target.Args); ok {
+			return c.aliasTargetIsExternal(argument, seen)
+		}
+		if c.aliasCycles[target.Name] {
+			return false
+		}
+		key := target.String()
+		if seen[key] {
+			return false
+		}
+		seen[key] = true
+		expanded := substituteType(alias.target, typeSubstitutions(alias.typeParameters, target.Args))
+		return c.aliasTargetIsExternal(expanded, seen)
+	}
+	if _, local := c.declaredTypes[target.Name]; local {
+		return false
+	}
+	binding, imported := c.resolution.ImportedType(target.Name)
+	if !imported {
+		return false
+	}
+	if binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport {
+		if argument, ok := aliasTypeParameterArgument(binding.Export.TypeParameters, binding.Export.AliasTarget, target.Args); ok {
+			return c.aliasTargetIsExternal(argument, seen)
+		}
+	}
+	return true
+}
+
+func aliasTypeParameterArgument(parameters []string, target types.Type, arguments []types.Type) (types.Type, bool) {
+	if target.Kind != types.Named || len(target.Args) != 0 {
+		return types.Type{}, false
+	}
+	for index, parameter := range parameters {
+		if target.Name == parameter && index < len(arguments) {
+			return arguments[index], true
+		}
+	}
+	return types.Type{}, false
+}
+
+func (c *Checker) externalAliasTargetBinding(name string) (resolver.Binding, bool) {
+	lookups := []func(string) (resolver.Binding, bool){
+		c.resolution.ImportedType,
+		c.resolution.ContractType,
+	}
+	for _, lookup := range lookups {
+		if binding, ok := lookup(name); ok {
+			return binding, true
+		}
+	}
+	return resolver.Binding{}, false
+}
+
+func (c *Checker) authoredAliasTargetBinding(target types.Type) (resolver.Binding, bool) {
+	if target.Kind != types.Named || target.Name == "" {
+		return resolver.Binding{}, false
+	}
+	if c.aliases[target.Name] != nil {
+		return resolver.Binding{}, false
+	}
+	if _, local := c.declaredTypes[target.Name]; local {
+		return resolver.Binding{}, false
+	}
+	return c.resolution.ImportedType(target.Name)
 }
 
 func (c *Checker) newtypeDefinition(name string) (types.Type, *resolver.Binding, bool) {

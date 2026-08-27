@@ -62,7 +62,7 @@ func (g *generator) programUsesExecutionScope(statements []ir.Statement) bool {
 				return true
 			}
 		case *ir.Record:
-			if g.execution != nil && g.execution.RecordDefault(g.modulePath, node.Name) {
+			if g.execution != nil && g.execution.RecordDefaultFor(node) {
 				return true
 			}
 		case *ir.Module:

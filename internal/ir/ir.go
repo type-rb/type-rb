@@ -144,10 +144,15 @@ type Class struct {
 	External       bool
 	Superclass     Expression
 	Implements     []types.Type
+	// ResolvedImplements is parallel to Implements and expands transparent
+	// aliases for semantic dispatch without changing generated source types.
+	ResolvedImplements []types.Type
 	// ImplementReferences is parallel to Implements and retains the resolved
 	// module identity for imported interfaces.
 	ImplementReferences []*Reference
-	Body                []Statement
+	// ResolvedImplementReferences is parallel to ResolvedImplements.
+	ResolvedImplementReferences []*Reference
+	Body                        []Statement
 }
 
 func (*Class) irStatement() {}
@@ -200,8 +205,15 @@ type TypeAlias struct {
 	Base
 	Name           string
 	TypeParameters []string
-	Target         types.Type
-	Variants       []EnumMember
+	AuthoredTarget types.Type
+	// AuthoredTargetReference identifies the declaration named directly in
+	// source, independently of the fully expanded semantic target.
+	AuthoredTargetReference *Reference
+	Target                  types.Type
+	// TargetReference retains the declaration that owns the semantically
+	// expanded target so transparent aliases share one declaration identity.
+	TargetReference *Reference
+	Variants        []EnumMember
 }
 
 func (*TypeAlias) irStatement() {}

@@ -530,13 +530,21 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
-		for _, implemented := range n.Implements {
-			result.Implements = append(result.Implements, lowerType(implemented))
-			var reference *ir.Reference
+		for index, implemented := range n.Implements {
+			typ := lowerType(implemented)
+			var authoredReference *ir.Reference
 			if binding, ok := l.checked.Resolution.ImportedType(implemented.Name); ok {
-				reference = referenceFromBinding(&binding)
+				authoredReference = referenceFromBinding(&binding)
 			}
-			result.ImplementReferences = append(result.ImplementReferences, reference)
+			result.Implements = append(result.Implements, typ)
+			result.ImplementReferences = append(result.ImplementReferences, authoredReference)
+			if semantic := l.checked.InterfaceImplementations[n]; index < len(semantic) {
+				result.ResolvedImplements = append(result.ResolvedImplements, semantic[index].Type)
+				result.ResolvedImplementReferences = append(result.ResolvedImplementReferences, referenceFromBinding(semantic[index].TargetBinding))
+			} else {
+				result.ResolvedImplements = append(result.ResolvedImplements, typ)
+				result.ResolvedImplementReferences = append(result.ResolvedImplementReferences, authoredReference)
+			}
 		}
 		return result
 	case *ast.RecordStatement:
@@ -580,7 +588,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return member
 	case *ast.TypeAliasStatement:
 		semantic := l.checked.TypeAliases[n]
-		result := &ir.TypeAlias{Base: base(n.Base), Name: n.Name, Target: semantic.Target}
+		result := &ir.TypeAlias{Base: base(n.Base), Name: n.Name, AuthoredTarget: lowerType(n.Target), Target: semantic.Target}
+		result.AuthoredTargetReference = referenceFromBinding(semantic.AuthoredTargetBinding)
+		result.TargetReference = referenceFromBinding(semantic.TargetBinding)
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
