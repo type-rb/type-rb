@@ -413,9 +413,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
-		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".pop(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		valueType := g.tsType(call.ExprType())
+		return "((values: Array<" + valueType + ">): " + valueType + " => { const result = values.pop(); if (result === undefined) { throw new Error(\"Array is empty\"); } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.shift":
-		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".shift(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		valueType := g.tsType(call.ExprType())
+		return "((values: Array<" + valueType + ">): " + valueType + " => { const result = values.shift(); if (result === undefined) { throw new Error(\"Array is empty\"); } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
 		return arguments[0] + ".push(" + arguments[1] + ")"
 	case "trb.std.arrays.unshift":
