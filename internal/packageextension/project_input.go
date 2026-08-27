@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 5
+const ProjectDeclarationInputProtocolVersion = 6
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -59,6 +59,7 @@ type ProjectRecord struct {
 type ProjectRecordField struct {
 	Name       string             `json:"name"`
 	Type       ProjectTypeUse     `json:"type"`
+	HasDefault bool               `json:"hasDefault,omitempty"`
 	Attributes []ProjectAttribute `json:"attributes,omitempty"`
 	Span       SourceSpan         `json:"span"`
 }
@@ -89,6 +90,7 @@ type ProjectEnumMember struct {
 	Name       string             `json:"name"`
 	Parameters []ProjectParameter `json:"parameters,omitempty"`
 	RawValue   *ProjectValue      `json:"rawValue,omitempty"`
+	Attributes []ProjectAttribute `json:"attributes,omitempty"`
 	Span       SourceSpan         `json:"span"`
 }
 
@@ -269,21 +271,9 @@ func validateProjectRecord(modulePath string, record ProjectRecord) error {
 		if err := validateProjectTypeUse(field.Type); err != nil {
 			return fmt.Errorf("project declaration input record %s.%s field %s: %w", modulePath, record.Name, field.Name, err)
 		}
-		for _, attribute := range field.Attributes {
-			if strings.TrimSpace(attribute.Name) == "" {
-				return fmt.Errorf("project declaration input record %s.%s field %s contains an unnamed attribute", modulePath, record.Name, field.Name)
-			}
-			for _, argument := range attribute.Arguments {
-				if err := validateProjectValue(argument.Value); err != nil {
-					return fmt.Errorf("project declaration input record %s.%s field %s attribute %s argument: %w", modulePath, record.Name, field.Name, attribute.Name, err)
-				}
-				if err := validateSourceSpan(argument.Span); err != nil {
-					return fmt.Errorf("project declaration input record %s.%s field %s attribute %s argument: %w", modulePath, record.Name, field.Name, attribute.Name, err)
-				}
-			}
-			if err := validateSourceSpan(attribute.Span); err != nil {
-				return fmt.Errorf("project declaration input record %s.%s field %s attribute %s: %w", modulePath, record.Name, field.Name, attribute.Name, err)
-			}
+		context := fmt.Sprintf("project declaration input record %s.%s field %s", modulePath, record.Name, field.Name)
+		if err := validateProjectAttributes(context, field.Attributes); err != nil {
+			return err
 		}
 		if err := validateSourceSpan(field.Span); err != nil {
 			return fmt.Errorf("project declaration input record %s.%s field %s: %w", modulePath, record.Name, field.Name, err)
@@ -322,8 +312,32 @@ func validateProjectEnum(modulePath string, enum ProjectEnum) error {
 				return fmt.Errorf("project declaration input enum %s.%s member %s raw value: %w", modulePath, enum.Name, member.Name, err)
 			}
 		}
+		context := fmt.Sprintf("project declaration input enum %s.%s member %s", modulePath, enum.Name, member.Name)
+		if err := validateProjectAttributes(context, member.Attributes); err != nil {
+			return err
+		}
 		if err := validateSourceSpan(member.Span); err != nil {
 			return fmt.Errorf("project declaration input enum %s.%s member %s: %w", modulePath, enum.Name, member.Name, err)
+		}
+	}
+	return nil
+}
+
+func validateProjectAttributes(context string, attributes []ProjectAttribute) error {
+	for _, attribute := range attributes {
+		if strings.TrimSpace(attribute.Name) == "" {
+			return fmt.Errorf("%s contains an unnamed attribute", context)
+		}
+		for _, argument := range attribute.Arguments {
+			if err := validateProjectValue(argument.Value); err != nil {
+				return fmt.Errorf("%s attribute %s argument: %w", context, attribute.Name, err)
+			}
+			if err := validateSourceSpan(argument.Span); err != nil {
+				return fmt.Errorf("%s attribute %s argument: %w", context, attribute.Name, err)
+			}
+		}
+		if err := validateSourceSpan(attribute.Span); err != nil {
+			return fmt.Errorf("%s attribute %s: %w", context, attribute.Name, err)
 		}
 	}
 	return nil

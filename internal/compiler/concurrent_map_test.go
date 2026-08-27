@@ -137,6 +137,54 @@ end
 	}
 }
 
+func TestClassFieldDefaultConcurrentMapSharesCallerCapacity(t *testing.T) {
+	source := []byte(`import { probe, maximum } from github.com/acme/concurrency/probe
+
+def map_values(values: Array<Integer>): Array<Integer>
+	return values.concurrent_map(limit: 2) do |value|
+		probe(value)
+	end
+end
+
+class Box
+	@values: Array<Integer> := map_values([1, 2])
+end
+
+def main()
+	results := [1, 2].concurrent_map(limit: 2) do |outer|
+		Box.new()
+		outer
+	end
+	puts(results[0])
+	puts(maximum())
+	return
+end
+`)
+	for _, mode := range []string{"go", "ruby"} {
+		t.Run(mode, func(t *testing.T) {
+			if mode == "ruby" {
+				if _, err := exec.LookPath("ruby"); err != nil {
+					t.Skip("ruby is not installed")
+				}
+			}
+			options := Options{Mode: mode, ModulePath: "main", NativePackages: concurrencyProbeCatalog(mode)}
+			if mode == "go" {
+				options.Package = "main"
+				options.GoModule = "example.com/concurrent-map-app"
+			}
+			artifacts, err := CompileProject([]SourceUnit{{
+				Filename: "main.trb", ModulePath: "main", Package: options.Package, Source: source,
+			}}, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(runConcurrentProbeArtifact(t, mode, artifacts[0].Output)); got != "1\n2" {
+				t.Fatalf("class field default escaped the caller's %s concurrency group: got %q, want %q", mode, got, "1\n2")
+			}
+		})
+	}
+}
+
 func TestConcurrentMapEnforcesExplicitAndDefaultCapacity(t *testing.T) {
 	tests := []struct {
 		name      string

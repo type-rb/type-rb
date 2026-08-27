@@ -40,6 +40,7 @@ type generator struct {
 	imports           map[string]string
 	bindingNames      map[string]string
 	bindingSources    map[string]bool
+	lexicalNames      map[string]string
 	modulePath        string
 	goModule          string
 	temporary         int
@@ -111,6 +112,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		imports:          map[string]string{},
 		bindingNames:     bindingNames,
 		bindingSources:   map[string]bool{},
+		lexicalNames:     map[string]string{},
 		modulePath:       program.ModulePath,
 		goModule:         program.GoModule,
 		jobs:             jobsintegration.ManifestFrom(program.Extensions),
@@ -753,7 +755,95 @@ func (g *generator) record(record *ir.Record) {
 	}
 	g.indent--
 	g.line("}")
+	fields := recordFields(record.Body)
+	if recordFieldsHaveDefaults(fields) {
+		g.b.WriteByte('\n')
+		g.recordDefaultConstructor(record, fields)
+	}
 	g.b.WriteByte('\n')
+}
+
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	parameters := make([]string, 0, len(fields)*2)
+	locals := make([]string, len(fields))
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
+	if execution {
+		g.requireImport("context", "trbcontext")
+		parameters = append(parameters, "__trbScope trbcontext.Context")
+	}
+	for index, field := range fields {
+		local := "__trbField" + strconv.Itoa(index)
+		locals[index] = local
+		parameters = append(parameters, local+" "+g.goType(field.Type))
+		if field.Default != nil {
+			parameters = append(parameters, local+"Provided bool")
+		}
+	}
+	name := goRecordConstructorName(record.Name)
+	result := goIdentifier(record.Name, true) + goTypeParameterArguments(record.TypeParameters)
+	g.line("func " + name + goTypeParameterDeclarations(record.TypeParameters) + "(" + strings.Join(parameters, ", ") + ") " + result + " {")
+	g.indent++
+	previousExecution := g.executionActive
+	previousLexicalNames := g.lexicalNames
+	g.lexicalNames = make(map[string]string, len(previousLexicalNames)+len(fields))
+	for name, target := range previousLexicalNames {
+		g.lexicalNames[name] = target
+	}
+	g.executionActive = execution
+	for index, field := range fields {
+		local := locals[index]
+		if field.Default != nil {
+			g.line("if !" + local + "Provided {")
+			g.indent++
+			g.line(local + " = " + g.expr(field.Default))
+			g.indent--
+			g.line("}")
+		}
+		g.lexicalNames[field.Name] = local
+	}
+	g.executionActive = previousExecution
+	g.lexicalNames = previousLexicalNames
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		values[index] = goIdentifier(field.Name, true) + ": " + locals[index]
+	}
+	g.line("return " + result + "{" + strings.Join(values, ", ") + "}")
+	g.indent--
+	g.line("}")
+}
+
+func recordFields(statements []ir.Statement) []*ir.RecordField {
+	fields := make([]*ir.RecordField, 0, len(statements))
+	for _, statement := range statements {
+		if field, ok := statement.(*ir.RecordField); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func recordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func recordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func goRecordConstructorName(name string) string {
+	// Keep the exported helper reachable across generated Go packages while
+	// retaining an identifier shape that source callable lowering cannot create.
+	return "Trb__RecordNew__" + goIdentifier(name, true)
 }
 
 func (g *generator) enum(enum *ir.Enum) {
@@ -806,10 +896,10 @@ func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
 		typeParameters := append(append([]string(nil), enum.TypeParameters...), method.TypeParameters...)
 		g.line("func " + enumMethodName(enum.Name, method.Name) + goTypeParameterDeclarations(typeParameters) + "(self " + enumName + goTypeParameterArguments(enum.TypeParameters) + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 		g.indent++
-		g.parameterDefaults(method.Parameters)
-		g.functionDepth++
 		previousExecution := g.executionActive
 		g.executionActive = g.methodUsesExecutionScope(method)
+		g.parameterDefaults(method.Parameters)
+		g.functionDepth++
 		g.statements(method.Body)
 		g.executionActive = previousExecution
 		g.functionDepth--
@@ -825,19 +915,23 @@ func enumMethodName(enumName, methodName string) string {
 
 func (g *generator) typeAlias(alias *ir.TypeAlias) {
 	name := goIdentifier(alias.Name, true)
-	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.goType(alias.Target) + goTrailingComment(alias.TrailingComment))
+	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.typeAliasTarget(alias) + goTrailingComment(alias.TrailingComment))
 	if len(alias.Variants) == 0 {
 		g.b.WriteByte('\n')
 		return
 	}
-	targetName := goIdentifier(alias.Target.Name, true)
+	target := alias.AuthoredTarget
+	if target.Kind == "" {
+		target = alias.Target
+	}
+	targetName := goIdentifier(target.Name, true)
 	targetPrefix := ""
-	if imported := g.typeAliases[alias.Target.Name]; imported != "" {
+	if imported := g.typeAliases[target.Name]; alias.AuthoredTargetReference != nil && imported != "" {
 		targetPrefix = imported + "."
 	}
 	for _, variant := range alias.Variants {
 		aliasConstant := goConstantIdentifier(alias.Name, variant.Name)
-		targetConstant := targetPrefix + goConstantIdentifier(alias.Target.Name, variant.Name)
+		targetConstant := targetPrefix + goConstantIdentifier(target.Name, variant.Name)
 		if len(variant.Fields) == 0 {
 			g.line("var " + aliasConstant + " = " + targetConstant)
 			continue
@@ -849,9 +943,9 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 		g.indent++
 		g.parameterDefaults(variant.Fields)
 		targetConstructor := targetPrefix + "New" + targetName + goIdentifier(variant.Name, true)
-		if len(alias.Target.Args) > 0 {
-			arguments := make([]string, len(alias.Target.Args))
-			for index, argument := range alias.Target.Args {
+		if len(target.Args) > 0 {
+			arguments := make([]string, len(target.Args))
+			for index, argument := range target.Args {
 				arguments[index] = g.goType(argument)
 			}
 			targetConstructor += "[" + strings.Join(arguments, ", ") + "]"
@@ -1000,6 +1094,23 @@ func (g *generator) statements(statements []ir.Statement) {
 	}
 }
 
+func (g *generator) typeAliasTarget(alias *ir.TypeAlias) string {
+	target := alias.AuthoredTarget
+	if target.Kind == "" {
+		target = alias.Target
+	}
+	if alias.AuthoredTargetReference != nil || target.Kind != types.Named || target.Name == "" {
+		return g.goType(target)
+	}
+	imported, exists := g.typeAliases[target.Name]
+	delete(g.typeAliases, target.Name)
+	result := g.goType(target)
+	if exists {
+		g.typeAliases[target.Name] = imported
+	}
+	return result
+}
+
 func (g *generator) class(class *ir.Class) {
 	name := goIdentifier(class.Name, true)
 	typeDeclarations := goTypeParameterDeclarations(class.TypeParameters)
@@ -1059,12 +1170,11 @@ func (g *generator) class(class *ir.Class) {
 
 	initialize := findInitialize(methods)
 	{
-		parameters := ""
-		if initialize != nil {
-			parameters = g.methodParameters(initialize)
-		}
+		parameters := g.classConstructorParameters(class, initialize)
 		g.line("func New" + name + typeDeclarations + "(" + parameters + ") *" + name + typeArguments + " {")
 		g.indent++
+		previousExecution := g.executionActive
+		g.executionActive = g.classConstructorUsesExecutionScope(class, initialize)
 		if initialize != nil {
 			g.parameterDefaults(initialize.Parameters)
 		}
@@ -1078,12 +1188,10 @@ func (g *generator) class(class *ir.Class) {
 		g.receiver, g.inConstructor = "self", true
 		g.functionDepth++
 		if initialize != nil {
-			previousExecution := g.executionActive
-			g.executionActive = g.methodUsesExecutionScope(initialize)
 			g.statements(initialize.Body)
-			g.executionActive = previousExecution
 		}
 		g.functionDepth--
+		g.executionActive = previousExecution
 		g.receiver, g.inConstructor = previousReceiver, previousConstructor
 		g.line("return self")
 		g.indent--
@@ -1107,14 +1215,14 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 		g.line("func (self *" + className + goTypeParameterArguments(classTypeParameters) + ") " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType) + " {")
 	}
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
 	g.functionDepth++
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1137,6 +1245,8 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.requireImport("context", "trbcontext")
 		g.line("__trbScope := trbcontext.Background()")
 	}
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
 	g.parameterDefaults(method.Parameters)
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
@@ -1147,8 +1257,6 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -1162,6 +1270,25 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 	return method != nil && (strings.HasPrefix(method.TargetName, "trb_web_route_") ||
 		strings.HasPrefix(method.TargetName, "trb_web_middleware_") ||
 		g.execution != nil && g.execution.Methods[method])
+}
+
+func (g *generator) classConstructorUsesExecutionScope(class *ir.Class, initialize *ir.Method) bool {
+	return g.methodUsesExecutionScope(initialize) || g.execution != nil && g.execution.ClassConstructors[class]
+}
+
+func (g *generator) classConstructorParameters(class *ir.Class, initialize *ir.Method) string {
+	parameters := ""
+	if initialize != nil {
+		parameters = g.parameters(initialize.Parameters)
+	}
+	if !g.classConstructorUsesExecutionScope(class, initialize) {
+		return parameters
+	}
+	g.requireImport("context", "trbcontext")
+	if parameters == "" {
+		return "__trbScope trbcontext.Context"
+	}
+	return "__trbScope trbcontext.Context, " + parameters
 }
 
 func (g *generator) methodParameters(method *ir.Method) string {
@@ -1180,7 +1307,15 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.execution == nil || !g.execution.Calls[call] {
 		return arguments
 	}
-	return append([]string{"__trbScope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trbScope"
+	}
+	g.requireImport("context", "trbcontext")
+	return "trbcontext.Background()"
 }
 
 func (g *generator) nativeRuntimeCall(binding *ir.RuntimeBinding, arguments []string) string {
@@ -1553,10 +1688,24 @@ func (g *generator) expr(expression ir.Expression) string {
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if n.RecordTarget != nil {
+				if identifier, typeArguments, record := goRecordTarget(n.RecordTarget); record {
+					if recordContractHasDefaults(n.RecordFields) {
+						return g.recordDefaultCall(n, identifier, typeArguments, n.Arguments, n.RecordFields)
+					}
+					if len(typeArguments) > 0 {
+						return g.recordLiteralApplied(identifier, typeArguments, n.Arguments)
+					}
+					return g.recordLiteral(identifier, n.Arguments)
+				}
+			}
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && (application.Kind == "class" || application.Kind == "record") {
 				identifier, named := application.Receiver.(*ir.Identifier)
 				if named {
 					if application.Kind == "record" {
+						if recordContractHasDefaults(n.RecordFields) {
+							return g.recordDefaultCall(n, identifier, application.Arguments, n.Arguments, n.RecordFields)
+						}
 						return g.recordLiteralApplied(identifier, application.Arguments, n.Arguments)
 					}
 					name := "New" + goIdentifier(identifier.Name, true)
@@ -1572,6 +1721,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
 				if g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record" {
+					if recordContractHasDefaults(n.RecordFields) {
+						return g.recordDefaultCall(n, identifier, nil, n.Arguments, n.RecordFields)
+					}
 					return g.recordLiteral(identifier, n.Arguments)
 				}
 				if alias := g.referenceAlias(identifier.Reference); alias != "" {
@@ -2181,6 +2333,9 @@ func (g *generator) bindingIdentifier(name string) string {
 	if name != "" && name != "_" {
 		g.bindingSources[name] = true
 	}
+	if target := g.lexicalNames[name]; target != "" {
+		return target
+	}
 	if target := g.bindingNames[name]; target != "" {
 		return target
 	}
@@ -2268,6 +2423,26 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 	return name + "{" + strings.Join(fields, ", ") + "}"
 }
 
+func goRecordTarget(expression ir.Expression) (*ir.Identifier, []types.Type, bool) {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return node, nil, true
+	case *ir.Member:
+		if !node.Namespace {
+			return nil, nil, false
+		}
+		return &ir.Identifier{ExprBase: node.ExprBase, Name: node.Name, Reference: node.Reference}, nil, true
+	case *ir.TypeApply:
+		identifier, _, ok := goRecordTarget(node.Receiver)
+		if !ok {
+			return nil, nil, false
+		}
+		return identifier, node.Arguments, true
+	default:
+		return nil, nil, false
+	}
+}
+
 func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
 	name := goIdentifier(record.Name, true)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
@@ -2285,6 +2460,53 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
 	}
 	return name + "[" + strings.Join(items, ", ") + "]{" + strings.Join(fields, ", ") + "}"
+}
+
+func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+	typeName := goIdentifier(record.Name, true)
+	helper := goRecordConstructorName(record.Name)
+	if alias := g.referenceAlias(record.Reference); alias != "" {
+		typeName = alias + "." + typeName
+		helper = alias + "." + helper
+	}
+	if len(typeArguments) > 0 {
+		items := make([]string, len(typeArguments))
+		for index, argument := range typeArguments {
+			items[index] = g.goType(argument)
+		}
+		applied := "[" + strings.Join(items, ", ") + "]"
+		typeName += applied
+		helper += applied
+	}
+	explicit := map[string]string{}
+	statements := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		g.temporary++
+		name := "__trbRecordArg" + strconv.Itoa(g.temporary)
+		statements = append(statements, name+" := "+g.expr(argument.Value))
+		explicit[argument.Name] = name
+	}
+	values := make([]string, 0, len(fields)*2)
+	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
+		values = append(values, g.executionScopeArgument())
+	}
+	for _, field := range fields {
+		value, provided := explicit[field.Name]
+		if !provided {
+			g.temporary++
+			value = "__trbRecordZero" + strconv.Itoa(g.temporary)
+			statements = append(statements, "var "+value+" "+g.goType(field.Type))
+		}
+		values = append(values, value)
+		if field.HasDefault {
+			values = append(values, strconv.FormatBool(provided))
+		}
+	}
+	statements = append(statements, "return "+helper+"("+strings.Join(values, ", ")+")")
+	return "func() " + typeName + " { " + strings.Join(statements, "; ") + " }()"
 }
 
 func (g *generator) unionMemberExpression(member *ir.Member) string {

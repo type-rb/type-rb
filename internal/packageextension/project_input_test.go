@@ -24,10 +24,22 @@ func TestProjectDeclarationInputIsVersionedAndSerializable(t *testing.T) {
 			Records: []ProjectRecord{{
 				Name: "JobPayload",
 				Fields: []ProjectRecordField{{
-					Name: "id",
-					Type: ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}, Span: span},
+					Name:       "id",
+					Type:       ProjectTypeUse{Authored: Type{Kind: "int", Name: "Integer"}, Resolved: Type{Kind: "int", Name: "Integer"}, Span: span},
+					HasDefault: true,
 					Attributes: []ProjectAttribute{{
 						Name: "json", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "string", Raw: `"job_id"`}, Span: span}}, Span: span,
+					}},
+					Span: span,
+				}},
+				Span: span,
+			}},
+			Enums: []ProjectEnum{{
+				Name: "DeliveryState",
+				Members: []ProjectEnumMember{{
+					Name: "Pending",
+					Attributes: []ProjectAttribute{{
+						Name: "json", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "string", Raw: `"pending"`}, Span: span}}, Span: span,
 					}},
 					Span: span,
 				}},
@@ -64,6 +76,12 @@ func TestProjectDeclarationInputIsVersionedAndSerializable(t *testing.T) {
 	if err := ValidateProjectDeclarationInput(decoded); err != nil {
 		t.Fatal(err)
 	}
+	if !decoded.Modules[0].Records[0].Fields[0].HasDefault {
+		t.Fatal("record default presence did not survive the JSON boundary")
+	}
+	if got := decoded.Modules[0].Enums[0].Members[0].Attributes[0].Arguments[0].Value.Raw; got != `"pending"` {
+		t.Fatalf("enum member attributes did not survive the JSON boundary: %q", got)
+	}
 }
 
 func TestProjectDeclarationInputRejectsInvalidBoundaryData(t *testing.T) {
@@ -87,6 +105,11 @@ func TestProjectDeclarationInputRejectsInvalidBoundaryData(t *testing.T) {
 		}, message: "has no resolved module path"},
 		{name: "enum raw value", mutate: func(input *ProjectDeclarationInput) {
 			input.Modules[0].Enums = []ProjectEnum{{Name: "State", Members: []ProjectEnumMember{{Name: "Ready", RawValue: &ProjectValue{Kind: "array"}}}}}
+		}, message: "unsupported value kind"},
+		{name: "enum attribute", mutate: func(input *ProjectDeclarationInput) {
+			input.Modules[0].Enums = []ProjectEnum{{Name: "State", Members: []ProjectEnumMember{{
+				Name: "Ready", Attributes: []ProjectAttribute{{Name: "json", Arguments: []ProjectDirectiveArgument{{Value: ProjectValue{Kind: "array"}}}}},
+			}}}}
 		}, message: "unsupported value kind"},
 		{name: "directive reference", mutate: func(input *ProjectDeclarationInput) {
 			input.Modules[0].Classes = []ProjectClass{{Name: "Model", Directives: []ProjectDirective{{

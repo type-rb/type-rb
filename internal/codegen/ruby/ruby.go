@@ -34,6 +34,7 @@ type generator struct {
 	breakTarget      string
 	execution        *effectplan.Plan
 	executionActive  bool
+	lexicalNames     map[string]string
 	oidcRuntime      bool
 	sourceRecorder   *sourcemap.Recorder
 	sourcePath       string
@@ -72,6 +73,7 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 		loader: program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{}, topMethodTargets: map[*ir.Method]string{},
 		projectNames: projectNames,
+		lexicalNames: map[string]string{},
 		jobs:         jobsintegration.ManifestFrom(program.Extensions),
 		jobsSQL:      jobssql.ManifestFrom(program.Extensions),
 		orm:          ormintegration.ManifestFrom(program.Extensions), execution: execution,
@@ -208,7 +210,7 @@ func (g *generator) statement(statement ir.Statement) {
 		for _, member := range n.Body {
 			if method, ok := member.(*ir.Method); ok && method.Name == "initialize" {
 				foundInitialize = true
-				g.method(method, fields)
+				g.classInitializer(n, method, fields)
 				continue
 			}
 			if _, isField := member.(*ir.Field); !isField {
@@ -216,23 +218,47 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 		}
 		if !foundInitialize && hasDefaults(fields) {
-			g.line("def initialize(...)", "")
+			constructorExecution := g.classConstructorUsesExecutionScope(n, nil)
+			header := "def initialize(...)"
+			if constructorExecution {
+				header = "def initialize(__trb_scope, ...)"
+			}
+			g.line(header, "")
 			g.indent++
-			g.line("super", "")
+			previousExecution := g.executionActive
+			g.executionActive = constructorExecution
+			if constructorExecution {
+				g.line("super(...)", "")
+			} else {
+				g.line("super", "")
+			}
 			g.fieldDefaults(fields)
+			g.executionActive = previousExecution
 			g.indent--
 			g.line("end", "")
 		}
 		g.indent--
 		g.line("end", "")
 	case *ir.Record:
-		fields := []string{}
+		fields := []*ir.RecordField{}
 		for _, member := range n.Body {
 			if field, ok := member.(*ir.RecordField); ok {
-				fields = append(fields, ":"+field.Name)
+				fields = append(fields, field)
 			}
 		}
-		g.line(n.Name+" = Data.define("+strings.Join(fields, ", ")+")", n.TrailingComment)
+		names := make([]string, len(fields))
+		for index, field := range fields {
+			names[index] = ":" + field.Name
+		}
+		if rubyRecordFieldsHaveDefaults(fields) {
+			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+") do", n.TrailingComment)
+			g.indent++
+			g.recordDefaultConstructor(n, fields)
+			g.indent--
+			g.line("end", "")
+		} else {
+			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+")", n.TrailingComment)
+		}
 	case *ir.Enum:
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
@@ -602,6 +628,14 @@ func enumMethods(enum *ir.Enum) []*ir.Method {
 }
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
+	g.emitMethod(method, fields, g.methodUsesExecutionScope(method))
+}
+
+func (g *generator) classInitializer(class *ir.Class, method *ir.Method, fields []*ir.Field) {
+	g.emitMethod(method, fields, g.classConstructorUsesExecutionScope(class, method))
+}
+
+func (g *generator) emitMethod(method *ir.Method, fields []*ir.Field, execution bool) {
 	name := method.Name
 	if !method.Class {
 		if target := g.topMethodTargets[method]; target != "" {
@@ -613,13 +647,13 @@ func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	if method.Class {
 		name = "self." + name
 	}
-	g.line("def "+name+"("+g.methodParameters(method)+")", method.TrailingComment)
+	g.line("def "+name+"("+g.methodParametersWithExecution(method, execution)+")", method.TrailingComment)
 	g.indent++
+	previousExecution := g.executionActive
+	g.executionActive = execution
 	if method.Name == "initialize" {
 		g.fieldDefaults(fields)
 	}
-	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.indent--
@@ -663,9 +697,20 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 		g.execution != nil && g.execution.Methods[method])
 }
 
+func (g *generator) classConstructorUsesExecutionScope(class *ir.Class, initialize *ir.Method) bool {
+	return g.methodUsesExecutionScope(initialize) || class != nil && g.execution != nil && g.execution.ClassConstructors[class]
+}
+
 func (g *generator) methodParameters(method *ir.Method) string {
+	return g.methodParametersWithExecution(method, g.methodUsesExecutionScope(method))
+}
+
+func (g *generator) methodParametersWithExecution(method *ir.Method, execution bool) string {
+	previousExecution := g.executionActive
+	g.executionActive = execution
 	parameters := g.parameters(method.Parameters)
-	if !g.methodUsesExecutionScope(method) {
+	g.executionActive = previousExecution
+	if !execution {
 		return parameters
 	}
 	if parameters == "" {
@@ -678,7 +723,14 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.execution == nil || !g.execution.Calls[call] {
 		return arguments
 	}
-	return append([]string{"__trb_scope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trb_scope"
+	}
+	return "TrbExecutionScope.root"
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
@@ -726,6 +778,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.statements(n.Body)
 		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
 	case *ir.Identifier:
+		if n.Lexical {
+			if name := g.lexicalNames[n.Name]; name != "" {
+				return name
+			}
+		}
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
 		}
@@ -855,6 +912,19 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
+		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if target := rubyRecordTarget(n.RecordTarget); target != nil {
+				if rubyRecordContractHasDefaults(n.RecordFields) {
+					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
+				}
+				return g.expr(target) + ".new(" + strings.Join(parts, ", ") + ")"
+			}
+			if rubyRecordContractHasDefaults(n.RecordFields) {
+				if target := rubyRecordTarget(member.Receiver); target != nil {
+					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
+				}
+			}
+		}
 		parts = g.executionArguments(n, parts)
 		callee := g.expr(n.Callee)
 		if n.Callee.ExprType().Kind == types.Function {
@@ -874,9 +944,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		case "raw_value":
 			return g.expr(n.Receiver) + ".raw_value"
 		case "from_raw":
+			owner := n.EnumName
+			if n.Reference == nil && n.Owner != "" {
+				owner = n.Owner
+			}
 			branches := make([]string, 0, len(n.RawValues))
 			for _, item := range n.RawValues {
-				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+n.EnumName+"::"+item.Member+")")
+				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+owner+"::"+item.Member+")")
 			}
 			message := strconv.Quote("unknown raw value for " + n.EnumName)
 			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
@@ -894,7 +968,11 @@ func (g *generator) expr(expression ir.Expression) string {
 				parts[index] = argument.Name + ": " + parts[index]
 			}
 		}
-		return n.EnumName + "::" + n.Member + ".new(" + strings.Join(parts, ", ") + ")"
+		owner := n.EnumName
+		if n.Reference == nil && n.Owner != "" {
+			owner = n.Owner
+		}
+		return owner + "::" + n.Member + ".new(" + strings.Join(parts, ", ") + ")"
 	case *ir.TypeApply:
 		return g.expr(n.Receiver)
 	case *ir.Index:
@@ -913,6 +991,117 @@ func (g *generator) expr(expression ir.Expression) string {
 	default:
 		return ""
 	}
+}
+
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	parameters := make([]string, 0, len(fields)*2)
+	locals := make([]string, len(fields))
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
+	if execution {
+		parameters = append(parameters, "__trb_scope")
+	}
+	for index, field := range fields {
+		local := "__trb_field_" + strconv.Itoa(index)
+		locals[index] = local
+		parameters = append(parameters, local)
+		if field.Default != nil {
+			parameters = append(parameters, local+"_provided")
+		}
+	}
+	g.line("def self.__trb_record_new("+strings.Join(parameters, ", ")+")", "")
+	g.indent++
+	previousExecution := g.executionActive
+	previousLexicalNames := g.lexicalNames
+	g.lexicalNames = make(map[string]string, len(previousLexicalNames)+len(fields))
+	for name, target := range previousLexicalNames {
+		g.lexicalNames[name] = target
+	}
+	g.executionActive = execution
+	for index, field := range fields {
+		local := locals[index]
+		if field.Default != nil {
+			g.line(local+" = "+g.expr(field.Default)+" unless "+local+"_provided", "")
+		}
+		g.lexicalNames[field.Name] = local
+	}
+	g.executionActive = previousExecution
+	g.lexicalNames = previousLexicalNames
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		values[index] = field.Name + ": " + locals[index]
+	}
+	g.line("new("+strings.Join(values, ", ")+")", "")
+	g.indent--
+	g.line("end", "")
+}
+
+func rubyRecordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func rubyRecordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func rubyRecordTarget(expression ir.Expression) ir.Expression {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return node
+	case *ir.Member:
+		if node.Namespace {
+			if node.Reference != nil && node.Reference.Package != "" {
+				name := node.Name
+				if node.Reference.Symbol != "" {
+					name = node.Reference.Symbol
+				}
+				return &ir.Identifier{ExprBase: node.ExprBase, Name: name, Reference: node.Reference}
+			}
+			return node
+		}
+	case *ir.TypeApply:
+		return rubyRecordTarget(node.Receiver)
+	}
+	return nil
+}
+
+func (g *generator) recordDefaultCall(call *ir.Call, record ir.Expression, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+	explicit := map[string]string{}
+	statements := make([]string, 0, len(arguments)+1)
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		g.temporary++
+		name := "__trb_record_arg_" + strconv.Itoa(g.temporary)
+		statements = append(statements, name+" = "+g.expr(argument.Value))
+		explicit[argument.Name] = name
+	}
+	values := make([]string, 0, len(fields)*2)
+	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
+		values = append(values, g.executionScopeArgument())
+	}
+	for _, field := range fields {
+		value, provided := explicit[field.Name]
+		if !provided {
+			value = "nil"
+		}
+		values = append(values, value)
+		if field.HasDefault {
+			values = append(values, strconv.FormatBool(provided))
+		}
+	}
+	statements = append(statements, g.expr(record)+".__trb_record_new("+strings.Join(values, ", ")+")")
+	return "-> { " + strings.Join(statements, "; ") + " }.call"
 }
 
 func isCheckedIntegerAssignment(operator string) bool {

@@ -675,10 +675,14 @@ nominal source newtypes. The compiler host validates and copies that data into
 its private semantic representation.
 
 The Jobs, ORM, and Web declaration providers also receive versioned, validated
-Project Declaration Input snapshots. Version 5 adds record declarations and
-their declarative field attributes, top-level function signatures, and
-resolved type arguments on direct class-body calls. Version 4 added named-only
-parameter identity. The snapshot also contains canonical module and import
+Project Declaration Input snapshots. Version 6 adds record-default presence
+and enum-member attributes. Nested records and enums use qualified names, such
+as `CLI::Options`, so same-leaf declarations remain distinct; other
+declaration categories and imports remain top-level-only in this protocol
+version. Version 5 added record declarations and their
+declarative field attributes, top-level function signatures, and resolved type
+arguments on direct class-body calls. Version 4 added named-only parameter
+identity. The snapshot also contains canonical module and import
 identity, transparent type aliases, nominal newtypes with concrete
 representations, enum and class declarations, method signatures, authored,
 resolved, and boundary representation types, declarative class-body call

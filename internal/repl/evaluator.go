@@ -1852,6 +1852,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 
 func (e *Evaluator) constructRecord(definition *recordDefinition, arguments []evaluatedArgument) (Value, error) {
 	fields := map[string]Value{}
+	recordScope := &scope{parent: e.global, values: fields}
 	for _, field := range definition.Fields {
 		found := false
 		for _, argument := range arguments {
@@ -1864,7 +1865,15 @@ func (e *Evaluator) constructRecord(definition *recordDefinition, arguments []ev
 			}
 		}
 		if !found {
-			return Value{}, fmt.Errorf("missing record field %s", field.Name)
+			if field.Default == nil {
+				return Value{}, fmt.Errorf("missing record field %s", field.Name)
+			}
+			value, err := e.expression(field.Default, definition.Module, recordScope)
+			if err != nil {
+				return Value{}, err
+			}
+			value.Type = field.Type
+			fields[field.Name] = value
 		}
 	}
 	return Value{Type: types.FromName(definition.Node.Name), Data: &recordInstance{Definition: definition, Fields: fields}}, nil
