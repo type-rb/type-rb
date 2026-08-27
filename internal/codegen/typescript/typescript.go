@@ -1429,6 +1429,14 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.awaitCall(n, generated)
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if n.RecordTarget != nil {
+				if target, record := g.typescriptRecordTarget(n.RecordTarget); record {
+					if tsRecordContractHasDefaults(n.RecordFields) {
+						return g.awaitCall(n, g.recordDefaultTargetCall(n, target, n.Arguments))
+					}
+					return g.awaitCall(n, g.recordTargetLiteral(target, n.Arguments))
+				}
+			}
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
 				if identifier, named := application.Receiver.(*ir.Identifier); named {
 					if tsRecordContractHasDefaults(n.RecordFields) {
@@ -1477,6 +1485,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		default:
 			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.EnumCallDefaults[n])
 			owner := g.runtimeName(n.EnumName)
+			if n.Reference == nil && n.Owner != "" {
+				owner = strings.ReplaceAll(n.Owner, "::", ".")
+			}
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
@@ -1672,6 +1683,9 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	resultType := g.tsType(call.ExprType())
 	result := g.runtimeName("Result")
 	owner := g.runtimeName(call.EnumName)
+	if call.Reference == nil && call.Owner != "" {
+		owner = strings.ReplaceAll(call.Owner, "::", ".")
+	}
 	parts := []string{"((): " + resultType + " => { const value = " + argument + "; switch (value) {"}
 	for _, item := range call.RawValues {
 		parts = append(parts, "case "+item.Raw+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
@@ -2226,7 +2240,44 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgument) string {
+type typescriptRecordConstructionTarget struct {
+	typeName      string
+	helperName    string
+	typeArguments []types.Type
+}
+
+func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescriptRecordConstructionTarget, bool) {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		target := typescriptRecordConstructionTarget{
+			typeName:   g.runtimeName(node.Name),
+			helperName: tsRecordConstructorName(node.Name),
+		}
+		if alias := g.typeAliases[node.Name]; alias != "" {
+			target.helperName = alias + "." + target.helperName
+		}
+		return target, true
+	case *ir.Member:
+		if !node.Namespace {
+			return typescriptRecordConstructionTarget{}, false
+		}
+		return typescriptRecordConstructionTarget{
+			typeName:   g.expr(node),
+			helperName: g.expr(node.Receiver) + "." + tsRecordConstructorName(node.Name),
+		}, true
+	case *ir.TypeApply:
+		target, ok := g.typescriptRecordTarget(node.Receiver)
+		if !ok {
+			return typescriptRecordConstructionTarget{}, false
+		}
+		target.typeArguments = append([]types.Type(nil), node.Arguments...)
+		return target, true
+	default:
+		return typescriptRecordConstructionTarget{}, false
+	}
+}
+
+func (g *generator) recordTargetLiteral(target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
 	fields := make([]string, 0, len(arguments))
 	for _, argument := range arguments {
 		if argument.Name == "" {
@@ -2234,23 +2285,26 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		}
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
-	return "({" + strings.Join(fields, ", ") + "} satisfies " + record.Name + ")"
+	typeName := target.typeName
+	if len(target.typeArguments) > 0 {
+		items := make([]string, len(target.typeArguments))
+		for index, argument := range target.typeArguments {
+			items[index] = g.tsType(argument)
+		}
+		typeName += "<" + strings.Join(items, ", ") + ">"
+	}
+	return "({" + strings.Join(fields, ", ") + "} satisfies " + typeName + ")"
+}
+
+func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgument) string {
+	target, _ := g.typescriptRecordTarget(record)
+	return g.recordTargetLiteral(target, arguments)
 }
 
 func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
-	fields := make([]string, 0, len(arguments))
-	for _, argument := range arguments {
-		if argument.Name == "" {
-			continue
-		}
-		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
-	}
-	items := make([]string, len(typeArguments))
-	for index, argument := range typeArguments {
-		items[index] = g.tsType(argument)
-	}
-	name := g.runtimeName(record.Name) + "<" + strings.Join(items, ", ") + ">"
-	return "({" + strings.Join(fields, ", ") + "} satisfies " + name + ")"
+	target, _ := g.typescriptRecordTarget(record)
+	target.typeArguments = append([]types.Type(nil), typeArguments...)
+	return g.recordTargetLiteral(target, arguments)
 }
 
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
@@ -2330,13 +2384,16 @@ func tsRecordConstructorName(name string) string {
 }
 
 func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
-	name := tsRecordConstructorName(record.Name)
-	if alias := g.typeAliases[record.Name]; alias != "" {
-		name = alias + "." + name
-	}
-	if len(typeArguments) > 0 {
-		items := make([]string, len(typeArguments))
-		for index, argument := range typeArguments {
+	target, _ := g.typescriptRecordTarget(record)
+	target.typeArguments = append([]types.Type(nil), typeArguments...)
+	return g.recordDefaultTargetCall(call, target, arguments)
+}
+
+func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
+	name := target.helperName
+	if len(target.typeArguments) > 0 {
+		items := make([]string, len(target.typeArguments))
+		for index, argument := range target.typeArguments {
 			items[index] = g.tsType(argument)
 		}
 		name += "<" + strings.Join(items, ", ") + ">"

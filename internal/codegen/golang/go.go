@@ -1673,6 +1673,17 @@ func (g *generator) expr(expression ir.Expression) string {
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if n.RecordTarget != nil {
+				if identifier, typeArguments, record := goRecordTarget(n.RecordTarget); record {
+					if recordContractHasDefaults(n.RecordFields) {
+						return g.recordDefaultCall(n, identifier, typeArguments, n.Arguments, n.RecordFields)
+					}
+					if len(typeArguments) > 0 {
+						return g.recordLiteralApplied(identifier, typeArguments, n.Arguments)
+					}
+					return g.recordLiteral(identifier, n.Arguments)
+				}
+			}
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && (application.Kind == "class" || application.Kind == "record") {
 				identifier, named := application.Receiver.(*ir.Identifier)
 				if named {
@@ -2391,6 +2402,26 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 		fields = append(fields, goIdentifier(argument.Name, true)+": "+g.expr(argument.Value))
 	}
 	return name + "{" + strings.Join(fields, ", ") + "}"
+}
+
+func goRecordTarget(expression ir.Expression) (*ir.Identifier, []types.Type, bool) {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return node, nil, true
+	case *ir.Member:
+		if !node.Namespace {
+			return nil, nil, false
+		}
+		return &ir.Identifier{ExprBase: node.ExprBase, Name: node.Name, Reference: node.Reference}, nil, true
+	case *ir.TypeApply:
+		identifier, _, ok := goRecordTarget(node.Receiver)
+		if !ok {
+			return nil, nil, false
+		}
+		return identifier, node.Arguments, true
+	default:
+		return nil, nil, false
+	}
 }
 
 func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {

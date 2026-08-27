@@ -669,6 +669,7 @@ type Call struct {
 	CallSignature   []callsignature.Parameter
 	Block           *Block
 	Codec           *CodecSchema
+	RecordTarget    Expression
 	RecordFields    []RecordFieldContract
 	DeclarationOnly bool
 }
@@ -729,9 +730,11 @@ func (*EnumConstruct) irExpression() {}
 // EnumCall preserves source-level enum methods independently from backend
 // enum representations. Generated raw_value/from_raw operations use the same
 // node so every backend and the REPL share one checked semantic boundary.
+// Owner preserves the exact local declaration identity across namespaces.
 type EnumCall struct {
 	ExprBase
 	EnumName      string
+	Owner         string
 	Method        string
 	Receiver      Expression
 	Arguments     []CallArgument

@@ -953,7 +953,11 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		for _, argument := range node.Arguments {
 			suspends = a.expressionReaches(argument.Value, context, record) || suspends
 		}
-		owner := declarationIdentity{module: context.module, name: qualifiedDeclarationName(context.namespace, node.EnumName)}
+		ownerName := node.Owner
+		if ownerName == "" {
+			ownerName = node.EnumName
+		}
+		owner := declarationIdentity{module: context.module, name: ownerName}
 		classMember := false
 		if node.Reference != nil && (node.Reference.Package != "" || node.Reference.Owner != "") {
 			if node.Reference.Package != "" {
@@ -963,6 +967,8 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 				owner.name = node.Reference.Owner
 			}
 			classMember = node.Reference.ClassMember
+		} else if node.Owner == "" {
+			owner = a.declarationIdentityInNamespace(context.module, context.namespace, node.EnumName)
 		}
 		owner = a.canonicalDeclarationIdentity(owner)
 		targets := a.memberMethods[dispatchIdentity{owner: owner, name: node.Method, class: classMember}]

@@ -70,6 +70,7 @@ type CodecApplication struct {
 
 type RecordConstruction struct {
 	Fields []resolver.RecordField
+	Target ast.Expression
 }
 
 type CallSpecializationRequest struct {
@@ -94,6 +95,7 @@ type RawEnumValue struct {
 
 type EnumCall struct {
 	EnumName  string
+	Owner     string
 	Method    string
 	Receiver  ast.Expression
 	Reference *resolver.Binding
@@ -501,6 +503,7 @@ type Checker struct {
 	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
 	authoredOwnedMethods        map[string]*ast.MethodStatement
 	authoredTypes               map[string]string
+	authoredEnumOwners          map[string]string
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredConstructorCalls    map[*ast.MethodStatement]map[*ast.MethodStatement]bool
 	authoredOrdinaryCalls       map[*ast.MethodStatement]map[*ast.MethodStatement]bool
@@ -861,6 +864,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		concurrentInterfaceMembers: map[*ast.MemberExpression]bool{},
 		authoredOwnedMethods:       map[string]*ast.MethodStatement{},
 		authoredTypes:              map[string]string{},
+		authoredEnumOwners:         map[string]string{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredOrdinaryCalls:      map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
@@ -917,6 +921,13 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 			if !strings.Contains(node.Name, "::") {
 				c.authoredTypes[nestedAuthoredOwner(owner, node.Name)] = node.Name
 			}
+		case *ast.EnumStatement:
+			qualified := nestedAuthoredOwner(owner, node.Name)
+			if !strings.Contains(node.Name, "::") {
+				c.authoredTypes[qualified] = node.Name
+				c.authoredEnumOwners[node.Name] = qualified
+			}
+			c.indexAuthoredMethods(node.Body, qualified)
 		case *ast.ModuleStatement:
 			c.indexAuthoredMethods(node.Body, nestedAuthoredOwner(owner, node.Name))
 		}
@@ -1763,7 +1774,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			for _, parameter := range n.TypeParameters {
 				selfType.Args = append(selfType.Args, types.FromName(parameter.Name))
 			}
-			enumScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: selfType}}}
+			enumScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: selfType}}, constantOwner: c.authoredEnumOwners[n.Name]}
 			for _, statement := range n.Body {
 				if method, ok := statement.(*ast.MethodStatement); ok {
 					c.checkMethod(method, enumScope)
@@ -6202,6 +6213,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		receiverType := c.checkExpression(n.Receiver, sc)
+		if n.Namespace {
+			if name, authored := c.authoredTypeInScope(expressionTypeName(n), sc); authored {
+				typ = types.FromName(name)
+				break
+			}
+		}
 		if receiverType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
@@ -6552,7 +6569,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			if binding.Member != nil && binding.Member.EnumOwner != "" {
 				copy := binding
-				call := EnumCall{EnumName: binding.Member.EnumOwner, Method: binding.Name, Reference: &copy}
+				call := EnumCall{EnumName: binding.Member.EnumOwner, Owner: binding.Member.EnumOwner, Method: binding.Name, Reference: &copy}
 				if member, ok := n.Callee.(*ast.MemberExpression); ok {
 					call.Receiver = member.Receiver
 				}
@@ -6667,13 +6684,22 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 			case *ast.MemberExpression:
 				if receiver.Namespace {
-					name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
-					if record := c.records[name]; local && record != nil {
-						typ = types.FromName(name)
-						c.checkLocalRecordArguments(n, record)
-					} else if info := c.classes[name]; local && info != nil {
-						typ = types.FromName(name)
-						c.checkArguments(n, info.methods["initialize"], argumentTypes)
+					if binding, imported := c.result.References[receiver]; imported && binding.Export != nil {
+						typ = binding.Type()
+						if binding.Export.Kind == resolver.RecordExport {
+							c.checkImportedRecordArguments(n, binding.Export)
+						} else {
+							c.checkImportedArguments(n, binding, argumentTypes, sc)
+						}
+					} else {
+						name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
+						if record := c.records[name]; local && record != nil {
+							typ = types.FromName(name)
+							c.checkLocalRecordArguments(n, record)
+						} else if info := c.classes[name]; local && info != nil {
+							typ = types.FromName(name)
+							c.checkArguments(n, info.methods["initialize"], argumentTypes)
+						}
 					}
 				}
 			}
@@ -6702,7 +6728,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 				}
 				if info := c.enums[receiverType.Name]; info != nil && (local.method != nil || info.raw != nil && (member.Name == "raw_value" || member.Name == "from_raw")) {
-					call := EnumCall{EnumName: receiverType.Name, Method: member.Name, Receiver: member.Receiver}
+					call := EnumCall{EnumName: receiverType.Name, Owner: c.authoredEnumOwners[receiverType.Name], Method: member.Name, Receiver: member.Receiver}
 					if info.raw != nil && (member.Name == "raw_value" || member.Name == "from_raw") {
 						call.Raw = info.raw
 					}
@@ -6726,7 +6752,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					typ = c.methodReturnType(method)
 					c.checkArguments(n, method, argumentTypes)
 					if c.currentEnum != nil {
-						c.result.EnumCalls[n] = EnumCall{EnumName: c.currentEnum.name, Method: identifier.Name}
+						c.result.EnumCalls[n] = EnumCall{EnumName: c.currentEnum.name, Owner: c.authoredEnumOwners[c.currentEnum.name], Method: identifier.Name}
 					}
 				}
 			} else if method := c.functions[identifier.Name]; method != nil {
@@ -7372,7 +7398,11 @@ func (c *Checker) checkImportedRecordArguments(call *ast.CallExpression, record 
 }
 
 func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fields []resolver.RecordField) {
-	c.result.RecordConstructions[call] = RecordConstruction{Fields: append([]resolver.RecordField(nil), fields...)}
+	var target ast.Expression
+	if member, ok := call.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
+		target = member.Receiver
+	}
+	c.result.RecordConstructions[call] = RecordConstruction{Fields: append([]resolver.RecordField(nil), fields...), Target: target}
 	byName := map[string]resolver.RecordField{}
 	for _, field := range fields {
 		byName[field.Name] = field

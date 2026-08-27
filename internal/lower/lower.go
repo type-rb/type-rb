@@ -1032,6 +1032,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			result := &ir.EnumCall{
 				ExprBase:      base,
 				EnumName:      semantic.EnumName,
+				Owner:         semantic.Owner,
 				Method:        semantic.Method,
 				CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 				Reference:     l.reference(n.Callee),
@@ -1089,6 +1090,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
 		}
 		if construction, ok := l.checked.RecordConstructions[n]; ok {
+			result.RecordTarget = l.expression(construction.Target)
 			for _, field := range construction.Fields {
 				result.RecordFields = append(result.RecordFields, ir.RecordFieldContract{Name: field.Name, Type: field.Type, HasDefault: field.HasDefault})
 			}

@@ -102,6 +102,42 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	}
 }
 
+func TestNestedEnumCallUsesItsExactDeclarationOwner(t *testing.T) {
+	voidType := types.Type{Kind: types.Void, Name: "Void"}
+	functionType := types.Type{Kind: types.Function, Args: []types.Type{voidType}}
+	effectRoot := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, voidType),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, functionType), Name: "effect_root",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+				Identity: "example.com/runtime#effect", PropagatesExecutionScope: true,
+			}},
+		},
+	}
+	effectful := &ir.Method{Name: "effectful", ReturnType: voidType, Body: []ir.Statement{
+		&ir.ExpressionStatement{Expression: effectRoot},
+	}}
+	forwardCall := &ir.EnumCall{
+		ExprBase: ir.NewExprBase(token.Span{}, voidType), EnumName: "Status", Owner: "Services::Status", Method: "effectful",
+		Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Status")), Name: "self", Lexical: true},
+	}
+	forwarded := &ir.Method{Name: "forwarded", ReturnType: voidType, Body: []ir.Statement{
+		&ir.ExpressionStatement{Expression: forwardCall},
+	}}
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		&ir.Module{Name: "Services", Body: []ir.Statement{
+			&ir.Enum{Name: "Status", Body: []ir.Statement{effectful, forwarded}},
+		}},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.Methods[effectful] || !plan.Methods[forwarded] || !plan.EnumCalls[forwardCall] {
+		t.Fatalf("nested enum call did not retain its exact effect owner: %#v", plan)
+	}
+}
+
 func TestInheritedAndOverriddenMethodsShareEffectABIs(t *testing.T) {
 	stringType := types.FromName("String")
 	functionType := types.Type{Kind: types.Function, Args: []types.Type{stringType, stringType}}

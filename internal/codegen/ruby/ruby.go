@@ -864,9 +864,17 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
-		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" && rubyRecordContractHasDefaults(n.RecordFields) {
-			if identifier := rubyRecordIdentifier(member.Receiver); identifier != nil {
-				return g.recordDefaultCall(n, identifier, n.Arguments, n.RecordFields)
+		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if target := rubyRecordTarget(n.RecordTarget); target != nil {
+				if rubyRecordContractHasDefaults(n.RecordFields) {
+					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
+				}
+				return g.expr(target) + ".new(" + strings.Join(parts, ", ") + ")"
+			}
+			if rubyRecordContractHasDefaults(n.RecordFields) {
+				if target := rubyRecordTarget(member.Receiver); target != nil {
+					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
+				}
 			}
 		}
 		parts = g.executionArguments(n, parts)
@@ -888,9 +896,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		case "raw_value":
 			return g.expr(n.Receiver) + ".raw_value"
 		case "from_raw":
+			owner := n.EnumName
+			if n.Reference == nil && n.Owner != "" {
+				owner = n.Owner
+			}
 			branches := make([]string, 0, len(n.RawValues))
 			for _, item := range n.RawValues {
-				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+n.EnumName+"::"+item.Member+")")
+				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+owner+"::"+item.Member+")")
 			}
 			message := strconv.Quote("unknown raw value for " + n.EnumName)
 			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
@@ -975,19 +987,28 @@ func rubyRecordContractHasDefaults(fields []ir.RecordFieldContract) bool {
 	return false
 }
 
-func rubyRecordIdentifier(expression ir.Expression) *ir.Identifier {
+func rubyRecordTarget(expression ir.Expression) ir.Expression {
 	switch node := expression.(type) {
 	case *ir.Identifier:
 		return node
-	case *ir.TypeApply:
-		if identifier, ok := node.Receiver.(*ir.Identifier); ok {
-			return identifier
+	case *ir.Member:
+		if node.Namespace {
+			if node.Reference != nil && node.Reference.Package != "" {
+				name := node.Name
+				if node.Reference.Symbol != "" {
+					name = node.Reference.Symbol
+				}
+				return &ir.Identifier{ExprBase: node.ExprBase, Name: name, Reference: node.Reference}
+			}
+			return node
 		}
+	case *ir.TypeApply:
+		return rubyRecordTarget(node.Receiver)
 	}
 	return nil
 }
 
-func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+func (g *generator) recordDefaultCall(call *ir.Call, record ir.Expression, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
 	explicit := map[string]string{}
 	statements := make([]string, 0, len(arguments)+1)
 	for _, argument := range arguments {
@@ -1013,7 +1034,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, argu
 			values = append(values, strconv.FormatBool(provided))
 		}
 	}
-	statements = append(statements, g.rubyClassName(record.Name, record.Reference)+".__trb_record_new("+strings.Join(values, ", ")+")")
+	statements = append(statements, g.expr(record)+".__trb_record_new("+strings.Join(values, ", ")+")")
 	return "-> { " + strings.Join(statements, "; ") + " }.call"
 }
 
