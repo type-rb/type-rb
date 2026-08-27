@@ -174,6 +174,31 @@ end
 	}
 }
 
+func TestExportProjectDeclarationInputIgnoresNestedImportsDuringResolution(t *testing.T) {
+	program := parseProjectInputTest(t, "contracts/envelope", `import { Unit } from trb/std/unit
+
+module Hidden
+	import { Unit } from missing/package
+end
+
+record Envelope
+	value: Unit
+end
+`)
+	input, err := ExportProjectDeclarationInput("review/provider", []*ast.Program{program}, ProjectDeclarationInputOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := input.Modules[0]
+	if len(module.Imports) != 1 || module.Imports[0].Path != "trb/std/unit" {
+		t.Fatalf("PDI exported a nested import: %#v", module.Imports)
+	}
+	field := module.Records[0].Fields[0].Type.Authored
+	if field.Definition == nil || field.Definition.ImportPath != "trb/std/unit" || field.Definition.ModulePath != "trb/std/unit" {
+		t.Fatalf("nested import replaced the top-level type identity: %#v", field.Definition)
+	}
+}
+
 func TestExportProjectDeclarationInputIncludesNestedModuleMetadataWithQualifiedIdentity(t *testing.T) {
 	program := parseProjectInputTest(t, "commands", `module CLI
 	alias Count = Integer

@@ -147,6 +147,9 @@ func (r projectInputResolver) collectStatements(modulePath, namespace string, st
 		case *ast.ModuleStatement:
 			r.collectStatements(modulePath, projectQualifiedName(namespace, node.Name), node.Body)
 		case *ast.ImportStatement:
+			if namespace != "" {
+				continue
+			}
 			for _, symbol := range node.Symbols {
 				r.imports[modulePath][symbol] = projectImportBinding{
 					importPath: node.Path, modulePath: r.importModulePath(modulePath, node.Path),
