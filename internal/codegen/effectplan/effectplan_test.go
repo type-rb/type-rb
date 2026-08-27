@@ -41,6 +41,18 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	moduleInitializer := newConfig()
 	nestedModuleInitializer := newConfig()
 	classInitializer := newConfig()
+	holderType := types.FromName("Holder")
+	holderConstruction := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, holderType),
+		Callee: &ir.Member{
+			ExprBase: ir.NewExprBase(token.Span{}, functionType),
+			Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, holderType), Name: "Holder"},
+			Name:     "new",
+		},
+	}
+	holder := &ir.Class{Name: "Holder", Body: []ir.Statement{
+		&ir.Field{Name: "@config", Type: configType, Value: classInitializer},
+	}}
 	method := &ir.Method{
 		Name: "load", Parameters: []ir.Parameter{{Name: "config", Type: configType, Default: parameterDefault}}, ReturnType: configType,
 		Body: []ir.Statement{&ir.Return{Value: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, configType), Name: "config", Lexical: true}}},
@@ -62,9 +74,8 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 				&ir.Variable{Name: "CONFIG", Type: configType, Value: nestedModuleInitializer, Constant: true},
 			}},
 		}},
-		&ir.Class{Name: "Holder", Body: []ir.Statement{
-			&ir.Field{Name: "@config", Type: configType, Value: classInitializer},
-		}},
+		holder,
+		&ir.ExpressionStatement{Expression: holderConstruction},
 	}}
 
 	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
@@ -85,6 +96,9 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	}
 	if !plan.Calls[loadCall] || !plan.CallParameterDefaults[loadCall] {
 		t.Fatalf("call of method with an effectful default was not recorded")
+	}
+	if !plan.ClassConstructors[holder] || !plan.Calls[holderConstruction] {
+		t.Fatal("class field default did not mark the constructor and its call")
 	}
 }
 

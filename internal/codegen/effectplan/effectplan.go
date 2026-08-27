@@ -13,8 +13,11 @@ import (
 // Plan records the declarations and expressions that transitively reach one
 // of the backend effects selected by Options.
 type Plan struct {
-	Methods               map[*ir.Method]bool
-	ParameterDefaults     map[*ir.Method]bool
+	Methods           map[*ir.Method]bool
+	ParameterDefaults map[*ir.Method]bool
+	// ClassConstructors includes direct field defaults and the class's own
+	// initialize method, but never an inherited initializer.
+	ClassConstructors     map[*ir.Class]bool
 	RecordDefaults        map[*ir.Record]bool
 	Lambdas               map[*ir.Lambda]bool
 	Calls                 map[*ir.Call]bool
@@ -58,14 +61,21 @@ func (p *Plan) RecordDefault(module, name string) bool {
 
 type methodContext struct {
 	module string
-	owner  string
+	owner  declarationIdentity
 	method *ir.Method
 }
 
 type classContext struct {
-	name       string
-	superclass string
-	implements []types.Type
+	identity   declarationIdentity
+	class      *ir.Class
+	superclass declarationIdentity
+	implements []declarationIdentity
+	initialize *ir.Method
+}
+
+type interfaceContext struct {
+	identity declarationIdentity
+	methods  []*ir.Method
 }
 
 type recordContext struct {
@@ -74,19 +84,32 @@ type recordContext struct {
 }
 
 type analyzer struct {
-	programs          []*ir.Program
-	plan              *Plan
-	options           Options
-	methods           []methodContext
-	records           []recordContext
-	methodInfo        map[*ir.Method]methodContext
-	topMethods        map[string][]*ir.Method
-	memberMethods     map[string][]*ir.Method
-	classInitializers map[string][]*ir.Method
-	recordDefinitions map[string][]*ir.Record
-	interfaceMethods  map[string][]*ir.Method
-	classes           []classContext
-	lambdaBindings    map[functionBindingKey]*ir.Lambda
+	programs             []*ir.Program
+	plan                 *Plan
+	options              Options
+	methods              []methodContext
+	records              []recordContext
+	methodInfo           map[*ir.Method]methodContext
+	topMethods           map[string][]*ir.Method
+	memberMethods        map[dispatchIdentity][]*ir.Method
+	classDefinitions     map[declarationIdentity]*classContext
+	interfaceDefinitions map[declarationIdentity]*interfaceContext
+	recordDefinitions    map[declarationIdentity][]*ir.Record
+	classes              []*classContext
+	lambdaBindings       map[functionBindingKey]*ir.Lambda
+}
+
+type declarationIdentity struct {
+	module string
+	name   string
+}
+
+func (i declarationIdentity) empty() bool { return i.name == "" }
+
+type dispatchIdentity struct {
+	owner declarationIdentity
+	name  string
+	class bool
 }
 
 type functionBindingKey struct {
@@ -110,6 +133,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
 		Methods:               map[*ir.Method]bool{},
 		ParameterDefaults:     map[*ir.Method]bool{},
+		ClassConstructors:     map[*ir.Class]bool{},
 		RecordDefaults:        map[*ir.Record]bool{},
 		Lambdas:               map[*ir.Lambda]bool{},
 		Calls:                 map[*ir.Call]bool{},
@@ -125,18 +149,19 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
-		topMethods: map[string][]*ir.Method{}, memberMethods: map[string][]*ir.Method{},
-		classInitializers: map[string][]*ir.Method{},
-		recordDefinitions: map[string][]*ir.Record{},
-		interfaceMethods:  map[string][]*ir.Method{},
-		lambdaBindings:    map[functionBindingKey]*ir.Lambda{},
+		topMethods:           map[string][]*ir.Method{},
+		memberMethods:        map[dispatchIdentity][]*ir.Method{},
+		classDefinitions:     map[declarationIdentity]*classContext{},
+		interfaceDefinitions: map[declarationIdentity]*interfaceContext{},
+		recordDefinitions:    map[declarationIdentity][]*ir.Record{},
+		lambdaBindings:       map[functionBindingKey]*ir.Lambda{},
 	}
 	for _, program := range programs {
-		analyzer.collect(program.ModulePath, "", program.Statements, false)
+		analyzer.collect(program.ModulePath, declarationIdentity{}, program.Statements)
 	}
 	if options.WebNext {
 		for _, method := range analyzer.methods {
-			if method.owner == "Next" && method.method.Name == "call" {
+			if method.owner.name == "Next" && method.method.Name == "call" {
 				plan.Methods[method.method] = true
 			}
 		}
@@ -163,6 +188,20 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 			plan.RecordDefaults[record.record] = true
 			changed = true
 		}
+		for _, class := range analyzer.classes {
+			fieldsReach := analyzer.classFieldDefaultsReach(class, false)
+			if fieldsReach && class.initialize != nil && !plan.Methods[class.initialize] {
+				// Backend constructors evaluate direct field defaults as part of
+				// initialize, so an explicit initializer owns the same hidden ABI.
+				plan.Methods[class.initialize] = true
+				changed = true
+			}
+			constructorReaches := fieldsReach || class.initialize != nil && plan.Methods[class.initialize]
+			if constructorReaches && !plan.ClassConstructors[class.class] {
+				plan.ClassConstructors[class.class] = true
+				changed = true
+			}
+		}
 		if analyzer.propagateDispatchEffects() {
 			changed = true
 		}
@@ -172,8 +211,11 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		analyzer.parameterDefaultsReach(method, true)
 		analyzer.statementsReach(method.method.Body, method, true)
 		if plan.Methods[method.method] {
-			plan.methodKeys[methodKey{module: method.module, owner: method.owner, name: method.method.Name}] = true
+			plan.methodKeys[methodKey{module: method.module, owner: method.owner.name, name: method.method.Name}] = true
 		}
+	}
+	for _, class := range analyzer.classes {
+		analyzer.classFieldDefaultsReach(class, true)
 	}
 	for _, record := range analyzer.records {
 		analyzer.recordDefaultsReach(record, true)
@@ -189,68 +231,88 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 	return plan
 }
 
-func (a *analyzer) collect(module, owner string, statements []ir.Statement, interfaceOwner bool) {
+func (a *analyzer) collect(module string, owner declarationIdentity, statements []ir.Statement) {
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			a.addClass(module, node)
-			a.classes = append(a.classes, classContext{
-				name: node.Name, superclass: referencedTypeName(node.Superclass),
-				implements: append([]types.Type(nil), node.Implements...),
-			})
-			a.collect(module, node.Name, node.Body, false)
+			class := a.addClass(module, node)
+			a.collect(module, class.identity, node.Body)
 		case *ir.Enum:
-			a.collect(module, node.Name, node.Body, false)
+			a.collect(module, declarationIdentity{module: module, name: node.Name}, node.Body)
 		case *ir.Record:
 			a.addRecord(recordContext{module: module, record: node})
-			a.collect(module, node.Name, node.Body, false)
+			a.collect(module, declarationIdentity{module: module, name: node.Name}, node.Body)
 		case *ir.Interface:
+			interfaceDeclaration := a.addInterface(module, node)
 			for _, method := range node.Methods {
-				a.addMethod(methodContext{module: module, owner: node.Name, method: method}, true)
+				a.addMethod(methodContext{module: module, owner: interfaceDeclaration.identity, method: method})
 			}
 		case *ir.Module:
-			a.collect(module, owner, node.Body, interfaceOwner)
+			a.collect(module, owner, node.Body)
 		case *ir.Method:
-			a.addMethod(methodContext{module: module, owner: owner, method: node}, interfaceOwner)
+			a.addMethod(methodContext{module: module, owner: owner, method: node})
 		}
 	}
 }
 
-func (a *analyzer) addClass(module string, class *ir.Class) {
+func (a *analyzer) addClass(module string, class *ir.Class) *classContext {
+	context := &classContext{
+		identity:   declarationIdentity{module: module, name: class.Name},
+		class:      class,
+		superclass: referencedDeclarationIdentity(class.Superclass, module),
+	}
 	for _, statement := range class.Body {
 		method, ok := statement.(*ir.Method)
-		if !ok || method.Name != "initialize" || method.Class {
-			continue
-		}
-		for _, alias := range moduleAliases(module) {
-			key := callableKey(alias, class.Name)
-			a.classInitializers[key] = append(a.classInitializers[key], method)
+		if ok && method.Name == "initialize" && !method.Class {
+			context.initialize = method
+			break
 		}
 	}
+	for index, implemented := range class.Implements {
+		var reference *ir.Reference
+		if index < len(class.ImplementReferences) {
+			reference = class.ImplementReferences[index]
+		}
+		context.implements = append(context.implements, referencedTypeIdentity(implemented, reference, module))
+	}
+	a.classes = append(a.classes, context)
+	for _, identity := range declarationAliases(module, class.Name) {
+		a.classDefinitions[identity] = context
+	}
+	return context
+}
+
+func (a *analyzer) addInterface(module string, declaration *ir.Interface) *interfaceContext {
+	context := &interfaceContext{
+		identity: declarationIdentity{module: module, name: declaration.Name},
+		methods:  append([]*ir.Method(nil), declaration.Methods...),
+	}
+	for _, identity := range declarationAliases(module, declaration.Name) {
+		a.interfaceDefinitions[identity] = context
+	}
+	return context
 }
 
 func (a *analyzer) addRecord(record recordContext) {
 	a.records = append(a.records, record)
-	for _, module := range moduleAliases(record.module) {
-		key := callableKey(module, record.record.Name)
-		a.recordDefinitions[key] = append(a.recordDefinitions[key], record.record)
+	for _, identity := range declarationAliases(record.module, record.record.Name) {
+		a.recordDefinitions[identity] = append(a.recordDefinitions[identity], record.record)
 	}
 }
 
-func (a *analyzer) addMethod(method methodContext, interfaceMethod bool) {
+func (a *analyzer) addMethod(method methodContext) {
 	a.methods = append(a.methods, method)
 	a.methodInfo[method.method] = method
-	if method.owner == "" {
+	if method.owner.empty() {
 		for _, module := range moduleAliases(method.module) {
 			key := callableKey(module, method.method.Name)
 			a.topMethods[key] = append(a.topMethods[key], method.method)
 		}
 		return
 	}
-	key := memberKey(method.owner, method.method.Name)
-	a.memberMethods[key] = append(a.memberMethods[key], method.method)
-	if interfaceMethod {
-		a.interfaceMethods[key] = append(a.interfaceMethods[key], method.method)
+	for _, owner := range declarationAliases(method.owner.module, method.owner.name) {
+		key := dispatchIdentity{owner: owner, name: method.method.Name, class: method.method.Class}
+		a.memberMethods[key] = append(a.memberMethods[key], method.method)
 	}
 }
 
@@ -260,6 +322,15 @@ func moduleAliases(module string) []string {
 		return append(result, strings.TrimSuffix(module, "/index"))
 	}
 	return append(result, strings.TrimSuffix(module, "/")+"/index")
+}
+
+func declarationAliases(module, name string) []declarationIdentity {
+	aliases := moduleAliases(module)
+	result := make([]declarationIdentity, len(aliases))
+	for index, alias := range aliases {
+		result[index] = declarationIdentity{module: alias, name: name}
+	}
+	return result
 }
 
 func (a *analyzer) propagateDispatchEffects() bool {
@@ -274,15 +345,13 @@ func (a *analyzer) propagateInterfaces() bool {
 	changed := false
 	for _, class := range a.classes {
 		for _, implemented := range class.implements {
-			interfaceName := implemented.Name
-			for key, declarations := range a.interfaceMethods {
-				prefix := interfaceName + "\x00"
-				if !strings.HasPrefix(key, prefix) {
-					continue
-				}
-				name := strings.TrimPrefix(key, prefix)
-				implementations := a.inheritedMemberMethods(class.name, name)
-				methods := append(append([]*ir.Method(nil), declarations...), implementations...)
+			declaration := a.interfaceDefinitions[implemented]
+			if declaration == nil {
+				continue
+			}
+			for _, interfaceMethod := range declaration.methods {
+				implementations := a.inheritedMemberMethods(class.identity, interfaceMethod.Name, interfaceMethod.Class)
+				methods := append([]*ir.Method{interfaceMethod}, implementations...)
 				if a.propagateMethodEffects(methods) {
 					changed = true
 				}
@@ -295,16 +364,24 @@ func (a *analyzer) propagateInterfaces() bool {
 func (a *analyzer) propagateInheritance() bool {
 	changed := false
 	for _, class := range a.classes {
-		lineage := a.classLineage(class.name)
-		methodsByName := map[string][]*ir.Method{}
+		lineage := a.classLineage(class)
+		methodsByDispatch := map[struct {
+			name  string
+			class bool
+		}][]*ir.Method{}
 		for _, method := range a.methods {
 			// Constructors own their initialization ABI and do not participate in
 			// ordinary inherited method dispatch.
-			if method.owner != "" && method.method.Name != "initialize" && lineage[method.owner] {
-				methodsByName[method.method.Name] = append(methodsByName[method.method.Name], method.method)
+			owner := a.classDefinitions[method.owner]
+			if owner != nil && method.method.Name != "initialize" && lineage[owner] {
+				key := struct {
+					name  string
+					class bool
+				}{name: method.method.Name, class: method.method.Class}
+				methodsByDispatch[key] = append(methodsByDispatch[key], method.method)
 			}
 		}
-		for _, methods := range methodsByName {
+		for _, methods := range methodsByDispatch {
 			if a.propagateMethodEffects(methods) {
 				changed = true
 			}
@@ -333,35 +410,35 @@ func (a *analyzer) propagateMethodEffects(methods []*ir.Method) bool {
 	return changed
 }
 
-func (a *analyzer) classLineage(name string) map[string]bool {
-	result := map[string]bool{}
-	var visit func(string)
-	visit = func(current string) {
-		if current == "" || result[current] {
+func (a *analyzer) classLineage(class *classContext) map[*classContext]bool {
+	result := map[*classContext]bool{}
+	var visit func(*classContext)
+	visit = func(current *classContext) {
+		if current == nil || result[current] {
 			return
 		}
 		result[current] = true
-		for _, class := range a.classes {
-			if class.name == current {
-				visit(class.superclass)
-			}
-		}
+		visit(a.classDefinitions[current.superclass])
 	}
-	visit(name)
+	visit(class)
 	return result
 }
 
-func (a *analyzer) inheritedMemberMethods(owner, name string) []*ir.Method {
+func (a *analyzer) inheritedMemberMethods(owner declarationIdentity, name string, class bool) []*ir.Method {
+	declaration := a.classDefinitions[owner]
+	if declaration == nil {
+		return a.memberMethods[dispatchIdentity{owner: owner, name: name, class: class}]
+	}
 	var result []*ir.Method
-	seenClasses := map[string]bool{}
+	seenClasses := map[*classContext]bool{}
 	seenMethods := map[*ir.Method]bool{}
-	var visit func(string)
-	visit = func(current string) {
-		if current == "" || seenClasses[current] {
+	var visit func(*classContext)
+	visit = func(current *classContext) {
+		if current == nil || seenClasses[current] {
 			return
 		}
 		seenClasses[current] = true
-		methods := a.memberMethods[memberKey(current, name)]
+		methods := a.memberMethods[dispatchIdentity{owner: current.identity, name: name, class: class}]
 		if len(methods) > 0 {
 			for _, method := range methods {
 				if !seenMethods[method] {
@@ -371,29 +448,48 @@ func (a *analyzer) inheritedMemberMethods(owner, name string) []*ir.Method {
 			}
 			return
 		}
-		for _, class := range a.classes {
-			if class.name == current {
-				visit(class.superclass)
-			}
-		}
+		visit(a.classDefinitions[current.superclass])
 	}
-	visit(owner)
+	visit(declaration)
 	return result
 }
 
-func referencedTypeName(expression ir.Expression) string {
+func referencedDeclarationIdentity(expression ir.Expression, currentModule string) declarationIdentity {
 	switch node := expression.(type) {
 	case *ir.Identifier:
-		if node.Reference != nil && node.Reference.Symbol != "" {
-			return node.Reference.Symbol
+		if node.Reference != nil && node.Reference.Package != "" {
+			name := node.Name
+			if node.Reference.Symbol != "" {
+				name = node.Reference.Symbol
+			}
+			return declarationIdentity{module: node.Reference.Package, name: name}
 		}
-		return node.Name
+		return declarationIdentity{module: currentModule, name: node.Name}
 	case *ir.TypeApply:
-		return referencedTypeName(node.Receiver)
+		return referencedDeclarationIdentity(node.Receiver, currentModule)
 	case *ir.Member:
-		return node.Name
+		if node.Reference != nil && node.Reference.Package != "" {
+			name := node.Name
+			if node.Reference.Symbol != "" {
+				name = node.Reference.Symbol
+			}
+			return declarationIdentity{module: node.Reference.Package, name: name}
+		}
+		return declarationIdentity{module: currentModule, name: node.Name}
 	}
-	return ""
+	return declarationIdentity{}
+}
+
+func referencedTypeIdentity(typ types.Type, reference *ir.Reference, currentModule string) declarationIdentity {
+	identity := declarationIdentity{module: currentModule, name: typ.Name}
+	if reference == nil || reference.Package == "" {
+		return identity
+	}
+	identity.module = reference.Package
+	if reference.Symbol != "" {
+		identity.name = reference.Symbol
+	}
+	return identity
 }
 
 func anyReached(methods map[*ir.Method]bool, candidates []*ir.Method) bool {
@@ -415,11 +511,23 @@ func anyRecordReached(records map[*ir.Record]bool, candidates []*ir.Record) bool
 }
 
 func callableKey(module, name string) string { return module + "\x00" + name }
-func memberKey(owner, name string) string    { return owner + "\x00" + name }
+
+func (a *analyzer) classFieldDefaultsReach(context *classContext, record bool) bool {
+	reaches := false
+	method := methodContext{module: context.identity.module, owner: context.identity, method: context.initialize}
+	for _, statement := range context.class.Body {
+		field, ok := statement.(*ir.Field)
+		if !ok {
+			continue
+		}
+		reaches = a.expressionReaches(field.Value, method, record) || reaches
+	}
+	return reaches
+}
 
 func (a *analyzer) recordDefaultsReach(context recordContext, record bool) bool {
 	reaches := false
-	method := methodContext{module: context.module, owner: context.record.Name}
+	method := methodContext{module: context.module, owner: declarationIdentity{module: context.module, name: context.record.Name}}
 	for _, statement := range context.record.Body {
 		field, ok := statement.(*ir.RecordField)
 		if !ok {
@@ -443,7 +551,7 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			classContext := methodContext{module: context.module, owner: node.Name}
+			classContext := methodContext{module: context.module, owner: declarationIdentity{module: context.module, name: node.Name}}
 			suspends = a.statementsReach(node.Body, classContext, record) || suspends
 		case *ir.Module:
 			suspends = a.statementsReach(node.Body, context, record) || suspends
@@ -608,7 +716,16 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		for _, argument := range node.Arguments {
 			suspends = a.expressionReaches(argument.Value, context, record) || suspends
 		}
-		targets := a.memberMethods[memberKey(node.EnumName, node.Method)]
+		owner := declarationIdentity{module: context.module, name: node.EnumName}
+		classMember := false
+		if node.Reference != nil && node.Reference.Package != "" {
+			owner.module = node.Reference.Package
+			if node.Reference.Owner != "" {
+				owner.name = node.Reference.Owner
+			}
+			classMember = node.Reference.ClassMember
+		}
+		targets := a.memberMethods[dispatchIdentity{owner: owner, name: node.Method, class: classMember}]
 		if record && anyReached(a.plan.ParameterDefaults, targets) {
 			a.plan.EnumCallDefaults[node] = true
 		}
@@ -638,11 +755,11 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {
-	if key, ok := constructorKey(callee, context.module); ok {
-		if initializers := a.classInitializers[key]; len(initializers) > 0 {
-			return anyReached(a.plan.Methods, initializers)
+	if identity, ok := constructorIdentity(callee, context.module); ok {
+		if class := a.classDefinitions[identity]; class != nil {
+			return a.plan.ClassConstructors[class.class]
 		}
-		return anyRecordReached(a.plan.RecordDefaults, a.recordDefinitions[key])
+		return anyRecordReached(a.plan.RecordDefaults, a.recordDefinitions[identity])
 	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
 		if lambda, ok := callee.(*ir.Lambda); ok {
@@ -672,7 +789,8 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		if context.owner != "" && anyReached(a.plan.Methods, a.inheritedMemberMethods(context.owner, node.Name)) {
+		classMember := context.method != nil && context.method.Class
+		if !context.owner.empty() && anyReached(a.plan.Methods, a.memberMethodsFor(context.owner, node.Name, classMember)) {
 			return true
 		}
 		return anyReached(a.plan.Methods, a.topMethods[callableKey(context.module, node.Name)])
@@ -680,28 +798,28 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return false
 		}
-		owner := node.Receiver.ExprType().Name
-		if candidates := a.inheritedMemberMethods(owner, node.Name); len(candidates) > 0 {
-			return anyReached(a.plan.Methods, candidates)
+		if owner, classMember, ok := a.memberTargetIdentity(node, context); ok {
+			candidates := a.memberMethodsFor(owner, node.Name, classMember)
+			if len(candidates) > 0 {
+				return anyReached(a.plan.Methods, candidates)
+			}
 		}
-		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
+		if node.Reference != nil && node.Reference.Package != "" && node.Reference.Owner == "" && node.Reference.ExportKind == "function" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		if member, ok := node.Receiver.(*ir.Identifier); ok && member.Reference != nil && member.Reference.Package != "" {
+		if member, ok := node.Receiver.(*ir.Identifier); ok && member.Reference != nil && member.Reference.Package != "" && member.Reference.ExportKind == "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(member.Reference.Package, node.Name)])
 		}
-		if owner == "" {
-			return false
-		}
-		return anyReached(a.plan.Methods, a.inheritedMemberMethods(owner, node.Name))
+		return false
 	default:
 		return false
 	}
 }
 
 func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context methodContext) bool {
-	if key, ok := constructorKey(callee, context.module); ok {
-		return anyReached(a.plan.ParameterDefaults, a.classInitializers[key])
+	if identity, ok := constructorIdentity(callee, context.module); ok {
+		class := a.classDefinitions[identity]
+		return class != nil && class.initialize != nil && a.plan.ParameterDefaults[class.initialize]
 	}
 	switch node := callee.(type) {
 	case *ir.TypeApply:
@@ -710,15 +828,19 @@ func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context met
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
-		if context.owner != "" && anyReached(a.plan.ParameterDefaults, a.inheritedMemberMethods(context.owner, node.Name)) {
+		classMember := context.method != nil && context.method.Class
+		if !context.owner.empty() && anyReached(a.plan.ParameterDefaults, a.memberMethodsFor(context.owner, node.Name, classMember)) {
 			return true
 		}
 		return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(context.module, node.Name)])
 	case *ir.Member:
-		if candidates := a.inheritedMemberMethods(node.Receiver.ExprType().Name, node.Name); len(candidates) > 0 {
-			return anyReached(a.plan.ParameterDefaults, candidates)
+		if owner, classMember, ok := a.memberTargetIdentity(node, context); ok {
+			candidates := a.memberMethodsFor(owner, node.Name, classMember)
+			if len(candidates) > 0 {
+				return anyReached(a.plan.ParameterDefaults, candidates)
+			}
 		}
-		if node.Reference != nil && node.Reference.Package != "" && node.Reference.ExportKind == "function" {
+		if node.Reference != nil && node.Reference.Package != "" && node.Reference.Owner == "" && node.Reference.ExportKind == "function" {
 			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
 		return false
@@ -726,10 +848,52 @@ func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context met
 	return false
 }
 
-func constructorKey(callee ir.Expression, currentModule string) (string, bool) {
+func (a *analyzer) memberMethodsFor(owner declarationIdentity, name string, class bool) []*ir.Method {
+	if a.classDefinitions[owner] != nil {
+		return a.inheritedMemberMethods(owner, name, class)
+	}
+	return a.memberMethods[dispatchIdentity{owner: owner, name: name, class: class}]
+}
+
+func (a *analyzer) memberTargetIdentity(member *ir.Member, context methodContext) (declarationIdentity, bool, bool) {
+	if member.Reference != nil && member.Reference.Package != "" && member.Reference.Owner != "" {
+		return declarationIdentity{module: member.Reference.Package, name: member.Reference.Owner}, member.Reference.ClassMember, true
+	}
+	receiver := member.Receiver
+	if application, ok := receiver.(*ir.TypeApply); ok {
+		receiver = application.Receiver
+	}
+	if identifier, ok := receiver.(*ir.Identifier); ok {
+		if identifier.Name == "self" && !context.owner.empty() {
+			return context.owner, context.method != nil && context.method.Class, true
+		}
+		if identifier.Reference != nil && identifier.Reference.Package != "" && identifier.Reference.ExportKind == "class" {
+			name := identifier.Name
+			if identifier.Reference.Symbol != "" {
+				name = identifier.Reference.Symbol
+			}
+			return declarationIdentity{module: identifier.Reference.Package, name: name}, true, true
+		}
+	}
+	name := receiver.ExprType().Name
+	if name == "" {
+		return declarationIdentity{}, false, false
+	}
+	owner := declarationIdentity{module: context.module, name: name}
+	if member.Reference != nil && member.Reference.Package != "" && a.classDefinitions[declarationIdentity{module: member.Reference.Package, name: name}] != nil {
+		owner.module = member.Reference.Package
+	}
+	classMember := false
+	if identifier, ok := receiver.(*ir.Identifier); ok && !identifier.Lexical && a.classDefinitions[owner] != nil {
+		classMember = true
+	}
+	return owner, classMember, true
+}
+
+func constructorIdentity(callee ir.Expression, currentModule string) (declarationIdentity, bool) {
 	member, ok := callee.(*ir.Member)
 	if !ok || member.Name != "new" {
-		return "", false
+		return declarationIdentity{}, false
 	}
 	receiver := member.Receiver
 	if application, ok := receiver.(*ir.TypeApply); ok {
@@ -737,17 +901,16 @@ func constructorKey(callee ir.Expression, currentModule string) (string, bool) {
 	}
 	identifier, ok := receiver.(*ir.Identifier)
 	if !ok {
-		return "", false
+		return declarationIdentity{}, false
 	}
-	module := currentModule
-	name := identifier.Name
+	identity := declarationIdentity{module: currentModule, name: identifier.Name}
 	if identifier.Reference != nil && identifier.Reference.Package != "" {
-		module = identifier.Reference.Package
+		identity.module = identifier.Reference.Package
 		if identifier.Reference.Symbol != "" {
-			name = identifier.Reference.Symbol
+			identity.name = identifier.Reference.Symbol
 		}
 	}
-	return callableKey(module, name), true
+	return identity, true
 }
 
 func referenceIntrinsic(expression ir.Expression) string {

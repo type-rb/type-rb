@@ -532,6 +532,11 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		for _, implemented := range n.Implements {
 			result.Implements = append(result.Implements, lowerType(implemented))
+			var reference *ir.Reference
+			if binding, ok := l.checked.Resolution.ImportedType(implemented.Name); ok {
+				reference = referenceFromBinding(&binding)
+			}
+			result.ImplementReferences = append(result.ImplementReferences, reference)
 		}
 		return result
 	case *ast.RecordStatement:
@@ -1294,6 +1299,10 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	}
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
+		result.ClassMember = binding.Member.Class
+		if binding.Export != nil {
+			result.Owner = binding.Export.Name
+		}
 	}
 	return result
 }
@@ -1316,6 +1325,10 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	}
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
+		result.ClassMember = binding.Member.Class
+		if binding.Export != nil {
+			result.Owner = binding.Export.Name
+		}
 	}
 	return result
 }

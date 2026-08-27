@@ -58,20 +58,30 @@ func TestEffectfulParameterDefaultsUseTheCalleeExecutionScope(t *testing.T) {
 	}
 }
 
-func TestNestedInitializersUseRootScopeInSynchronousBackends(t *testing.T) {
+func TestNestedInitializersUseTheirDeclarationExecutionScopes(t *testing.T) {
 	tests := []struct {
 		name     string
 		generate func(*ir.Program) string
-		want     string
+		root     string
+		class    []string
 	}{
-		{name: "go", generate: golang.Generate, want: "TrbRecordNewConfig(trbcontext.Background()"},
-		{name: "ruby", generate: ruby.Generate, want: "Config.__trb_record_new(TrbExecutionScope.root"},
+		{name: "go", generate: golang.Generate, root: "TrbRecordNewConfig(trbcontext.Background()", class: []string{
+			"func NewHolder(__trbScope trbcontext.Context)", "TrbRecordNewConfig(__trbScope",
+		}},
+		{name: "ruby", generate: ruby.Generate, root: "Config.__trb_record_new(TrbExecutionScope.root", class: []string{
+			"def initialize(__trb_scope, ...)", "Config.__trb_record_new(__trb_scope",
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			output := test.generate(effectfulNestedInitializerProgram(test.name))
-			if count := strings.Count(output, test.want); count != 2 {
-				t.Fatalf("generated %s root-scope initializer count=%d, want 2:\n%s", test.name, count, output)
+			if count := strings.Count(output, test.root); count != 1 {
+				t.Fatalf("generated %s root-scope initializer count=%d, want 1:\n%s", test.name, count, output)
+			}
+			for _, want := range test.class {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s class initializer is missing %q:\n%s", test.name, want, output)
+				}
 			}
 		})
 	}

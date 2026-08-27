@@ -1129,14 +1129,11 @@ func (g *generator) class(class *ir.Class) {
 
 	initialize := findInitialize(methods)
 	{
-		parameters := ""
-		if initialize != nil {
-			parameters = g.methodParameters(initialize)
-		}
+		parameters := g.classConstructorParameters(class, initialize)
 		g.line("func New" + name + typeDeclarations + "(" + parameters + ") *" + name + typeArguments + " {")
 		g.indent++
 		previousExecution := g.executionActive
-		g.executionActive = g.methodUsesExecutionScope(initialize)
+		g.executionActive = g.classConstructorUsesExecutionScope(class, initialize)
 		if initialize != nil {
 			g.parameterDefaults(initialize.Parameters)
 		}
@@ -1232,6 +1229,25 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 	return method != nil && (strings.HasPrefix(method.TargetName, "trb_web_route_") ||
 		strings.HasPrefix(method.TargetName, "trb_web_middleware_") ||
 		g.execution != nil && g.execution.Methods[method])
+}
+
+func (g *generator) classConstructorUsesExecutionScope(class *ir.Class, initialize *ir.Method) bool {
+	return g.methodUsesExecutionScope(initialize) || g.execution != nil && g.execution.ClassConstructors[class]
+}
+
+func (g *generator) classConstructorParameters(class *ir.Class, initialize *ir.Method) string {
+	parameters := ""
+	if initialize != nil {
+		parameters = g.parameters(initialize.Parameters)
+	}
+	if !g.classConstructorUsesExecutionScope(class, initialize) {
+		return parameters
+	}
+	g.requireImport("context", "trbcontext")
+	if parameters == "" {
+		return "__trbScope trbcontext.Context"
+	}
+	return "__trbScope trbcontext.Context, " + parameters
 }
 
 func (g *generator) methodParameters(method *ir.Method) string {

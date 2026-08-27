@@ -144,7 +144,10 @@ type Class struct {
 	External       bool
 	Superclass     Expression
 	Implements     []types.Type
-	Body           []Statement
+	// ImplementReferences is parallel to Implements and retains the resolved
+	// module identity for imported interfaces.
+	ImplementReferences []*Reference
+	Body                []Statement
 }
 
 func (*Class) irStatement() {}
@@ -799,9 +802,13 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 // project references use Package, Alias, Symbol, and ExportKind for
 // target-specific qualification.
 type Reference struct {
-	Package        string
-	Alias          string
-	Symbol         string
+	Package string
+	Alias   string
+	Symbol  string
+	// Owner and ClassMember distinguish imported type-member dispatch from a
+	// package function and preserve the source class/instance member kind.
+	Owner          string
+	ClassMember    bool
 	ExportKind     string
 	Intrinsic      string
 	ReceiverMethod bool

@@ -208,7 +208,7 @@ func (g *generator) statement(statement ir.Statement) {
 		for _, member := range n.Body {
 			if method, ok := member.(*ir.Method); ok && method.Name == "initialize" {
 				foundInitialize = true
-				g.method(method, fields)
+				g.classInitializer(n, method, fields)
 				continue
 			}
 			if _, isField := member.(*ir.Field); !isField {
@@ -216,10 +216,22 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 		}
 		if !foundInitialize && hasDefaults(fields) {
-			g.line("def initialize(...)", "")
+			constructorExecution := g.classConstructorUsesExecutionScope(n, nil)
+			header := "def initialize(...)"
+			if constructorExecution {
+				header = "def initialize(__trb_scope, ...)"
+			}
+			g.line(header, "")
 			g.indent++
-			g.line("super", "")
+			previousExecution := g.executionActive
+			g.executionActive = constructorExecution
+			if constructorExecution {
+				g.line("super(...)", "")
+			} else {
+				g.line("super", "")
+			}
 			g.fieldDefaults(fields)
+			g.executionActive = previousExecution
 			g.indent--
 			g.line("end", "")
 		}
@@ -580,6 +592,14 @@ func enumMethods(enum *ir.Enum) []*ir.Method {
 }
 
 func (g *generator) method(method *ir.Method, fields []*ir.Field) {
+	g.emitMethod(method, fields, g.methodUsesExecutionScope(method))
+}
+
+func (g *generator) classInitializer(class *ir.Class, method *ir.Method, fields []*ir.Field) {
+	g.emitMethod(method, fields, g.classConstructorUsesExecutionScope(class, method))
+}
+
+func (g *generator) emitMethod(method *ir.Method, fields []*ir.Field, execution bool) {
 	name := method.Name
 	if !method.Class {
 		if target := g.topMethodTargets[method]; target != "" {
@@ -591,10 +611,10 @@ func (g *generator) method(method *ir.Method, fields []*ir.Field) {
 	if method.Class {
 		name = "self." + name
 	}
-	g.line("def "+name+"("+g.methodParameters(method)+")", method.TrailingComment)
+	g.line("def "+name+"("+g.methodParametersWithExecution(method, execution)+")", method.TrailingComment)
 	g.indent++
 	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
+	g.executionActive = execution
 	if method.Name == "initialize" {
 		g.fieldDefaults(fields)
 	}
@@ -641,12 +661,20 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 		g.execution != nil && g.execution.Methods[method])
 }
 
+func (g *generator) classConstructorUsesExecutionScope(class *ir.Class, initialize *ir.Method) bool {
+	return g.methodUsesExecutionScope(initialize) || class != nil && g.execution != nil && g.execution.ClassConstructors[class]
+}
+
 func (g *generator) methodParameters(method *ir.Method) string {
+	return g.methodParametersWithExecution(method, g.methodUsesExecutionScope(method))
+}
+
+func (g *generator) methodParametersWithExecution(method *ir.Method, execution bool) string {
 	previousExecution := g.executionActive
-	g.executionActive = g.methodUsesExecutionScope(method)
+	g.executionActive = execution
 	parameters := g.parameters(method.Parameters)
 	g.executionActive = previousExecution
-	if !g.methodUsesExecutionScope(method) {
+	if !execution {
 		return parameters
 	}
 	if parameters == "" {
