@@ -98,10 +98,10 @@ The alias changes the source and generated local binding. It does not change
 the canonical exported or native declaration identity, owner, runtime export
 name, or provider selection.
 
-A source module binds one imported declaration identity under at most one local
-name. An identical repeated binding is redundant. Importing the same
-declaration again under a different alias is an error rather than a way to
-create synonymous local spellings.
+Within one authored source scope, a module binds one imported declaration
+identity under at most one local name. An identical repeated binding is
+redundant. Importing the same declaration again under a different alias is an
+error rather than a way to create synonymous local spellings.
 
 ### Bare root shorthand
 
@@ -294,6 +294,13 @@ initial model has no generated-source operation that enables an additional
 capability. Compiler-generated source cannot contain `activate`; a generated
 import does not contribute to the authored source module's active capability
 set or affect an unrelated generated fragment.
+
+Physical deduplication of imports or runtime dependencies does not merge their
+source-consumption edges. A generated reference consumes the generated
+required-import edge for its fragment and never marks an authored import or
+specifier as used. An authored alias and a generated exact binding remain in
+separate scopes even when they resolve to the same declaration identity and the
+backend emits one canonical dependency.
 
 A provider-generated public member belongs to its owning nominal declaration
 identity and remains visible wherever that declaration or a value of its type
