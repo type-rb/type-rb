@@ -512,6 +512,9 @@ func (g *generator) statement(statement ir.Statement) {
 					types = append(types, symbol)
 					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
 						values = append(values, tsRecordConstructorName(symbol))
+						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
+							values = append(values, tsRecordSyncConstructorName(symbol))
+						}
 					}
 				case "function":
 					values = append(values, tsCallableName(symbol))
@@ -3014,10 +3017,17 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 }
 
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	g.emitRecordDefaultConstructor(record, fields, tsRecordConstructorName(record.Name), false)
+	if g.suspension != nil && g.suspension.RecordDefaultFor(record) {
+		g.emitRecordDefaultConstructor(record, fields, tsRecordSyncConstructorName(record.Name), true)
+	}
+}
+
+func (g *generator) emitRecordDefaultConstructor(record *ir.Record, fields []*ir.RecordField, name string, synchronous bool) {
 	properties := make([]string, len(fields))
 	for index, field := range fields {
 		optional := ""
-		if field.Default != nil {
+		if field.Default != nil && (!synchronous || g.suspension == nil || !g.suspension.RecordFieldDefaultFor(field)) {
 			optional = "?"
 		}
 		properties[index] = field.Name + optional + ": " + g.tsType(field.Type)
@@ -3025,7 +3035,7 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 	parameters := tsTypeParameterDeclarations(record.TypeParameters)
 	result := record.Name + tsTypeParameterArguments(record.TypeParameters)
 	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
-	suspends := g.suspension != nil && g.suspension.RecordDefaultFor(record)
+	suspends := !synchronous && g.suspension != nil && g.suspension.RecordDefaultFor(record)
 	arguments := "__trbArgs: { " + strings.Join(properties, "; ") + " }"
 	if execution {
 		arguments = "__trbScope: AbortSignal | undefined, " + arguments
@@ -3036,7 +3046,7 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 		prefix = "export async function "
 		returnType = "Promise<" + result + ">"
 	}
-	g.line(prefix + tsRecordConstructorName(record.Name) + parameters + "(" + arguments + "): " + returnType + " {")
+	g.line(prefix + name + parameters + "(" + arguments + "): " + returnType + " {")
 	g.indent++
 	previousExecution := g.executionActive
 	previousLexicalNames := g.lexicalNames
@@ -3048,7 +3058,7 @@ func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.Rec
 	values := make([]string, len(fields))
 	for index, field := range fields {
 		value := "__trbArgs." + field.Name
-		if field.Default != nil {
+		if field.Default != nil && (!synchronous || g.suspension == nil || !g.suspension.RecordFieldDefaultFor(field)) {
 			value = "Object.prototype.hasOwnProperty.call(__trbArgs, " + strconv.Quote(field.Name) + ") ? __trbArgs." + field.Name + " as " + g.tsType(field.Type) + " : " + g.expr(field.Default)
 		}
 		local := "__trbField" + strconv.Itoa(index)
@@ -3095,6 +3105,10 @@ func tsRecordConstructorName(name string) string {
 	return "__trbRecordNew" + name
 }
 
+func tsRecordSyncConstructorName(name string) string {
+	return tsRecordConstructorName(name) + "Sync"
+}
+
 func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
 	target, _ := g.typescriptRecordTarget(record)
 	target.typeArguments = append([]types.Type(nil), typeArguments...)
@@ -3103,6 +3117,9 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, type
 
 func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
 	name := target.helperName
+	if g.suspension != nil && g.suspension.RecordCallSync[call] {
+		name += "Sync"
+	}
 	if len(target.typeArguments) > 0 {
 		identity := g.expressionTypeIdentity(call.ExprType(), call)
 		items := make([]string, len(target.typeArguments))
@@ -3119,7 +3136,7 @@ func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptReco
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
 	values := []string{"{ " + strings.Join(fields, ", ") + " }"}
-	if g.execution != nil && g.execution.Calls[call] {
+	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
 		values = append([]string{g.executionScopeArgument()}, values...)
 	}
 	return name + "(" + strings.Join(values, ", ") + ")"

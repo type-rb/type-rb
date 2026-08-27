@@ -102,6 +102,89 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	}
 }
 
+func TestRecordDefaultsTreatEarlierFunctionFieldsAsSuspendingCandidates(t *testing.T) {
+	integer := types.FromName("Integer")
+	callback := types.FunctionOf(nil, integer)
+	loader := &ir.RecordField{Name: "loader", Type: callback}
+	loadCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee:   &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, callback), Name: "loader", Lexical: true},
+	}
+	value := &ir.RecordField{Name: "value", Type: integer, Default: loadCall}
+	record := &ir.Record{Name: "Config", Body: []ir.Statement{loader, value}}
+
+	plan := Analyze([]*ir.Program{{ModulePath: "main", Statements: []ir.Statement{record}}}, Options{PassToFunctions: true})
+	if !plan.RecordDefaultFor(record) || !plan.RecordFieldDefaultFor(value) || !plan.Calls[loadCall] {
+		t.Fatalf("function-valued earlier field was not treated as a suspending candidate: %#v", plan)
+	}
+	if plan.RecordFieldDefaultFor(loader) {
+		t.Fatal("required function field was recorded as an effectful default")
+	}
+}
+
+func TestRecordConstructionEffectsUseOnlyOmittedDefaults(t *testing.T) {
+	integer := types.FromName("Integer")
+	function := types.FunctionOf(nil, integer)
+	effectCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, integer),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, function), Name: "load_value",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{
+				Identity: "example.com/runtime#load", PropagatesExecutionScope: true,
+			}},
+		},
+	}
+	pure := &ir.RecordField{Name: "pure", Type: integer, Default: &ir.Literal{
+		ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "1",
+	}}
+	effectful := &ir.RecordField{Name: "effectful", Type: integer, Default: effectCall}
+	record := &ir.Record{Name: "Config", Body: []ir.Statement{pure, effectful}}
+	construct := func(arguments ...ir.CallArgument) *ir.Call {
+		return &ir.Call{
+			ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Config")),
+			Callee: &ir.Member{
+				ExprBase: ir.NewExprBase(token.Span{}, function),
+				Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Config")), Name: "Config"},
+				Name:     "new",
+			},
+			Arguments: arguments,
+			RecordFields: []ir.RecordFieldContract{
+				{Name: "pure", Type: integer, HasDefault: true},
+				{Name: "effectful", Type: integer, HasDefault: true},
+			},
+		}
+	}
+	omittedEffect := construct()
+	effectExplicit := construct(ir.CallArgument{Name: "effectful", Value: &ir.Literal{
+		ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "2",
+	}})
+	allExplicit := construct(
+		ir.CallArgument{Name: "effectful", Value: &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "2"}},
+		ir.CallArgument{Name: "pure", Value: &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "3"}},
+	)
+	program := &ir.Program{ModulePath: "main", Statements: []ir.Statement{
+		record,
+		&ir.ExpressionStatement{Expression: omittedEffect},
+		&ir.ExpressionStatement{Expression: effectExplicit},
+		&ir.ExpressionStatement{Expression: allExplicit},
+	}}
+
+	plan := Analyze([]*ir.Program{program}, Options{Runtime: func(binding *ir.RuntimeBinding) bool {
+		return binding.PropagatesExecutionScope
+	}})
+	if !plan.RecordFieldDefaultFor(effectful) || plan.RecordFieldDefaultFor(pure) {
+		t.Fatalf("record field effects were not kept separate: %#v", plan.RecordFieldDefaults)
+	}
+	if !plan.Calls[omittedEffect] || !plan.RecordCallDefaults[omittedEffect] || plan.RecordCallSync[omittedEffect] {
+		t.Fatal("omitting the effectful default did not mark the construction")
+	}
+	for name, call := range map[string]*ir.Call{"effect explicit": effectExplicit, "all explicit": allExplicit} {
+		if plan.Calls[call] || plan.RecordCallDefaults[call] || !plan.RecordCallSync[call] {
+			t.Errorf("%s did not retain a synchronous construction path", name)
+		}
+	}
+}
+
 func TestNestedEnumCallUsesItsExactDeclarationOwner(t *testing.T) {
 	voidType := types.Type{Kind: types.Void, Name: "Void"}
 	functionType := types.Type{Kind: types.Function, Args: []types.Type{voidType}}

@@ -174,6 +174,60 @@ end
 	}
 }
 
+func TestExportProjectDeclarationInputIncludesNestedModuleMetadataWithQualifiedIdentity(t *testing.T) {
+	program := parseProjectInputTest(t, "commands", `module CLI
+	record Payload
+		value: String
+	end
+
+	record Options
+		payload: Payload
+		count: Integer = 1 @schema(label: "count")
+	end
+
+	enum Command
+		Run(options: Options) @schema(label: "run")
+	end
+end
+
+module Admin
+	record Options
+		name: String = "admin"
+	end
+end
+`)
+	input, err := ExportProjectDeclarationInput("review/provider", []*ast.Program{program}, ProjectDeclarationInputOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := input.Modules[0]
+	if len(module.Records) != 3 {
+		t.Fatalf("nested records were not exported: %#v", module.Records)
+	}
+	byName := map[string]packageextension.ProjectRecord{}
+	for _, record := range module.Records {
+		byName[record.Name] = record
+	}
+	options, ok := byName["CLI::Options"]
+	if !ok || byName["CLI::Payload"].Name == "" || byName["Admin::Options"].Name == "" {
+		t.Fatalf("nested record identities are incomplete: %#v", byName)
+	}
+	if len(options.Fields) != 2 || !options.Fields[1].HasDefault || len(options.Fields[1].Attributes) != 1 {
+		t.Fatalf("nested record default metadata is incomplete: %#v", options)
+	}
+	payload := options.Fields[0].Type
+	if payload.Authored.Name != "Payload" || payload.Authored.Definition == nil || payload.Authored.Definition.ModulePath != "commands" || payload.Resolved.Name != "CLI::Payload" || len(payload.ResolutionPath) != 1 || payload.ResolutionPath[0].Name != "CLI::Payload" {
+		t.Fatalf("nested record type identity is incomplete: %#v", payload)
+	}
+	if len(module.Enums) != 1 || module.Enums[0].Name != "CLI::Command" || len(module.Enums[0].Members[0].Attributes) != 1 {
+		t.Fatalf("nested enum metadata is incomplete: %#v", module.Enums)
+	}
+	parameter := module.Enums[0].Members[0].Parameters[0].Type
+	if parameter.Resolved.Name != "CLI::Options" || len(parameter.ResolutionPath) != 1 || parameter.ResolutionPath[0].Name != "CLI::Options" {
+		t.Fatalf("nested enum payload identity is incomplete: %#v", parameter)
+	}
+}
+
 func containsProjectTypeReference(references []packageextension.ProjectTypeReference, name, importPath string) bool {
 	for _, reference := range references {
 		if reference.Name == name && reference.ImportPath == importPath {

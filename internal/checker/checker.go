@@ -516,6 +516,8 @@ type Checker struct {
 	concurrentOrdinaryRoots     map[*ast.MethodStatement]bool
 	concurrentClassRoots        map[string]bool
 	concurrentInitTargets       map[*ast.Identifier]bool
+	recordDefaultUnavailable    map[string]bool
+	recordDefaultCallee         *ast.Identifier
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -1652,6 +1654,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.RecordStatement:
 			c.checkTypeParameters(n.TypeParameters)
 			recordScope := &scope{parent: sc, values: map[string]symbol{}}
+			unavailable := map[string]bool{}
+			for _, member := range n.Body {
+				if field, ok := member.(*ast.RecordFieldStatement); ok {
+					unavailable[field.Name] = true
+				}
+			}
 			seenDefault := false
 			for _, member := range n.Body {
 				field, ok := member.(*ast.RecordFieldStatement)
@@ -1664,7 +1672,10 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				fieldType := c.typeFromRef(field.Type)
 				if field.Default != nil {
 					seenDefault = true
+					previousUnavailable := c.recordDefaultUnavailable
+					c.recordDefaultUnavailable = unavailable
 					actual := c.checkExpression(field.Default, recordScope)
+					c.recordDefaultUnavailable = previousUnavailable
 					actual = c.contextualizeCollectionLiteral(field.Default, fieldType, actual)
 					if !c.assignable(field.Default, fieldType, actual) {
 						c.error(field.Default.Span(), fmt.Sprintf("record field default has type %s, expected %s", actual, fieldType))
@@ -1681,6 +1692,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					}
 				}
 				recordScope.values[field.Name] = symbol{typ: fieldType, mutable: false, span: field.Span()}
+				delete(unavailable, field.Name)
 			}
 		case *ast.EnumStatement:
 			if !sc.enumsAllowed {
@@ -5606,6 +5618,29 @@ func expressionTypeName(expression ast.Expression) string {
 	}
 }
 
+func directCallIdentifier(expression ast.Expression) *ast.Identifier {
+	switch node := expression.(type) {
+	case *ast.Identifier:
+		return node
+	case *ast.GenericExpression:
+		return directCallIdentifier(node.Receiver)
+	default:
+		return nil
+	}
+}
+
+func (c *Checker) recordDefaultCallable(name string) bool {
+	if c.functions[name] != nil {
+		return true
+	}
+	if c.current != nil {
+		if method := c.current.methods[name]; method != nil && method.Class == c.classMethod {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Checker) authoredTypeInScope(name string, sc *scope) (string, bool) {
 	owner := ""
 	for current := sc; current != nil; current = current.parent {
@@ -5819,6 +5854,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if field, ok := c.current.fields[n.Name]; ok {
 				typ = c.typeFromRef(field.Type)
 			}
+		} else if c.recordDefaultUnavailable[n.Name] && (c.recordDefaultCallee != n || !c.recordDefaultCallable(n.Name)) {
+			c.error(n.Span(), fmt.Sprintf("record field default cannot reference current or later field %s", n.Name))
+			typ = invalidType()
 		} else if isConstant(n.Name) {
 			typ = types.FromName(n.Name)
 			if c.declarationReferences == 0 && !c.declarationTypeVisible(n.Name) {
@@ -6478,7 +6516,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee++
 		}
+		previousRecordDefaultCallee := c.recordDefaultCallee
+		c.recordDefaultCallee = directCallIdentifier(n.Callee)
 		calleeType := c.checkExpression(n.Callee, sc)
+		c.recordDefaultCallee = previousRecordDefaultCallee
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
 		}

@@ -19,6 +19,9 @@ type Plan struct {
 	// initialize method, but never an inherited initializer.
 	ClassConstructors     map[*ir.Class]bool
 	RecordDefaults        map[*ir.Record]bool
+	RecordFieldDefaults   map[*ir.RecordField]bool
+	RecordCallDefaults    map[*ir.Call]bool
+	RecordCallSync        map[*ir.Call]bool
 	Lambdas               map[*ir.Lambda]bool
 	Calls                 map[*ir.Call]bool
 	CallParameterDefaults map[*ir.Call]bool
@@ -66,11 +69,22 @@ func (p *Plan) RecordDefaultFor(record *ir.Record) bool {
 	return p != nil && p.RecordDefaults[record]
 }
 
+// RecordFieldDefaultFor reports whether one field's default reaches an effect
+// root. Calls use this finer-grained fact so explicitly supplied fields do not
+// make an otherwise synchronous construction effectful.
+func (p *Plan) RecordFieldDefaultFor(field *ir.RecordField) bool {
+	return p != nil && p.RecordFieldDefaults[field]
+}
+
 type methodContext struct {
 	module    string
 	namespace string
 	owner     declarationIdentity
 	method    *ir.Method
+	// fieldValues contains record fields that are already initialized at the
+	// current default expression. Function-typed values may be backed by either
+	// synchronous or backend-suspending callbacks.
+	fieldValues map[string]bool
 }
 
 type classContext struct {
@@ -158,6 +172,9 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		ParameterDefaults:     map[*ir.Method]bool{},
 		ClassConstructors:     map[*ir.Class]bool{},
 		RecordDefaults:        map[*ir.Record]bool{},
+		RecordFieldDefaults:   map[*ir.RecordField]bool{},
+		RecordCallDefaults:    map[*ir.Call]bool{},
+		RecordCallSync:        map[*ir.Call]bool{},
 		Lambdas:               map[*ir.Lambda]bool{},
 		Calls:                 map[*ir.Call]bool{},
 		CallParameterDefaults: map[*ir.Call]bool{},
@@ -211,11 +228,14 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 			}
 		}
 		for _, record := range analyzer.records {
-			if plan.RecordDefaults[record.record] || !analyzer.recordDefaultsReach(record, false) {
-				continue
+			defaultsReach, fieldChanged := analyzer.recordDefaultsReach(record, false)
+			if fieldChanged {
+				changed = true
 			}
-			plan.RecordDefaults[record.record] = true
-			changed = true
+			if defaultsReach && !plan.RecordDefaults[record.record] {
+				plan.RecordDefaults[record.record] = true
+				changed = true
+			}
 		}
 		for _, class := range analyzer.classes {
 			fieldsReach := analyzer.classFieldDefaultsReach(class, false)
@@ -744,6 +764,31 @@ func anyRecordReached(records map[*ir.Record]bool, candidates []*ir.Record) bool
 	return false
 }
 
+func (a *analyzer) recordCallDefaultsReach(call *ir.Call, records []*ir.Record) (bool, bool) {
+	provided := map[string]bool{}
+	for _, argument := range call.Arguments {
+		if argument.Name != "" {
+			provided[argument.Name] = true
+		}
+	}
+	omittedReaches := false
+	targetHasEffects := false
+	for _, record := range records {
+		targetHasEffects = a.plan.RecordDefaults[record] || targetHasEffects
+		for _, statement := range record.Body {
+			field, ok := statement.(*ir.RecordField)
+			if !ok || field.Default == nil || !a.plan.RecordFieldDefaults[field] {
+				continue
+			}
+			targetHasEffects = true
+			if !provided[field.Name] {
+				omittedReaches = true
+			}
+		}
+	}
+	return omittedReaches, targetHasEffects
+}
+
 func callableKey(module, name string) string { return module + "\x00" + name }
 
 func (a *analyzer) classFieldDefaultsReach(context *classContext, record bool) bool {
@@ -759,17 +804,27 @@ func (a *analyzer) classFieldDefaultsReach(context *classContext, record bool) b
 	return reaches
 }
 
-func (a *analyzer) recordDefaultsReach(context recordContext, record bool) bool {
+func (a *analyzer) recordDefaultsReach(context recordContext, record bool) (bool, bool) {
 	reaches := false
-	method := methodContext{module: context.module, namespace: context.identity.name, owner: context.identity}
+	changed := false
+	method := methodContext{
+		module: context.module, namespace: context.identity.name, owner: context.identity,
+		fieldValues: map[string]bool{},
+	}
 	for _, statement := range context.record.Body {
 		field, ok := statement.(*ir.RecordField)
 		if !ok {
 			continue
 		}
-		reaches = a.expressionReaches(field.Default, method, record) || reaches
+		fieldReaches := a.expressionReaches(field.Default, method, record)
+		if fieldReaches && !a.plan.RecordFieldDefaults[field] {
+			a.plan.RecordFieldDefaults[field] = true
+			changed = true
+		}
+		reaches = fieldReaches || reaches
+		method.fieldValues[field.Name] = true
 	}
-	return reaches
+	return reaches, changed
 }
 
 func (a *analyzer) parameterDefaultsReach(context methodContext, record bool) bool {
@@ -939,7 +994,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if record && parameterDefaultsReach {
 			a.plan.CallParameterDefaults[node] = true
 		}
-		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.runtimeReaches(referenceRuntime(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node.Callee, context)
+		callSuspends := a.intrinsicReaches(referenceIntrinsic(node.Callee)) || a.runtimeReaches(referenceRuntime(node.Callee)) || a.options.WebNext && isWebNextCall(node.Callee) || a.callTargetReaches(node, node.Callee, context, record)
 		if record && callSuspends {
 			a.plan.Calls[node] = true
 		}
@@ -1000,12 +1055,20 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	return suspends
 }
 
-func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext) bool {
+func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, context methodContext, record bool) bool {
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		if class := a.classDefinitions[identity]; class != nil {
 			return a.plan.ClassConstructors[class.class]
 		}
-		return anyRecordReached(a.plan.RecordDefaults, a.recordDefinitions[identity])
+		omittedDefaultsReach, targetHasEffects := a.recordCallDefaultsReach(call, a.recordDefinitions[identity])
+		if record {
+			if omittedDefaultsReach {
+				a.plan.RecordCallDefaults[call] = true
+			} else if targetHasEffects {
+				a.plan.RecordCallSync[call] = true
+			}
+		}
+		return omittedDefaultsReach
 	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
 		if lambda, ok := callee.(*ir.Lambda); ok {
@@ -1014,6 +1077,9 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 		if identifier, ok := callee.(*ir.Identifier); ok {
 			if lambda := a.lambdaBindings[functionBindingKey{module: context.module, method: context.method, name: identifier.Name}]; lambda != nil {
 				return a.plan.Lambdas[lambda]
+			}
+			if context.fieldValues[identifier.Name] {
+				return true
 			}
 			if context.method != nil {
 				for _, parameter := range context.method.Parameters {
@@ -1030,7 +1096,7 @@ func (a *analyzer) callTargetReaches(callee ir.Expression, context methodContext
 	}
 	switch node := callee.(type) {
 	case *ir.TypeApply:
-		return a.callTargetReaches(node.Receiver, context)
+		return a.callTargetReaches(call, node.Receiver, context, record)
 	case *ir.Identifier:
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])

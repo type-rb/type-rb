@@ -676,7 +676,9 @@ its private semantic representation.
 
 The Jobs, ORM, and Web declaration providers also receive versioned, validated
 Project Declaration Input snapshots. Version 6 adds record-default presence
-and enum-member attributes. Version 5 added record declarations and their
+and enum-member attributes. Declarations nested in TypeRB modules use their
+qualified names, such as `CLI::Options`, so same-leaf declarations remain
+distinct. Version 5 added record declarations and their
 declarative field attributes, top-level function signatures, and resolved type
 arguments on direct class-body calls. Version 4 added named-only parameter
 identity. The snapshot also contains canonical module and import

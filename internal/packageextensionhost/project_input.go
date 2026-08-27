@@ -3,6 +3,7 @@ package packageextensionhost
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/packageextension"
@@ -15,7 +16,7 @@ type ProjectDeclarationInputOptions struct {
 	PackageAliasesByModule map[string]map[string]string
 	// KnownModulePaths resolves imports against modules deliberately excluded
 	// from the exported declaration snapshot, without exposing their contents.
-	KnownModulePaths       []string
+	KnownModulePaths []string
 }
 
 type projectImportBinding struct {
@@ -49,39 +50,47 @@ func ExportProjectDeclarationInput(provider string, programs []*ast.Program, opt
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ModulePath < ordered[j].ModulePath })
 	for _, program := range ordered {
 		module := packageextension.ProjectModule{ModulePath: program.ModulePath}
-		for _, statement := range program.Statements {
-			switch node := statement.(type) {
-			case *ast.ImportStatement:
-				module.Imports = append(module.Imports, packageextension.ProjectImport{
-					Path: node.Path, ModulePath: resolver.importModulePath(program.ModulePath, node.Path),
-					Symbols: append([]string(nil), node.Symbols...), Alias: node.Alias, Span: exportSourceSpan(node.Span()),
-				})
-			case *ast.TypeAliasStatement:
-				module.TypeAliases = append(module.TypeAliases, packageextension.ProjectTypeAlias{
-					Name: node.Name, TypeParameters: projectTypeParameterNames(node.TypeParameters),
-					Target: resolver.typeUse(program.ModulePath, node.Target, projectTypeParameterSet(node.TypeParameters)),
-					Span:   exportSourceSpan(node.Span()),
-				})
-			case *ast.NewtypeStatement:
-				module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
-					Name: node.Name, Target: resolver.typeUse(program.ModulePath, node.Target, nil), Span: exportSourceSpan(node.Span()),
-				})
-			case *ast.RecordStatement:
-				module.Records = append(module.Records, resolver.exportRecord(program.ModulePath, node))
-			case *ast.ClassStatement:
-				module.Classes = append(module.Classes, resolver.exportClass(program.ModulePath, node))
-			case *ast.EnumStatement:
-				module.Enums = append(module.Enums, resolver.exportEnum(program.ModulePath, node))
-			case *ast.MethodStatement:
-				module.Functions = append(module.Functions, resolver.exportMethod(program.ModulePath, node, nil))
-			}
-		}
+		resolver.exportStatements(program.ModulePath, "", program.Statements, &module)
 		result.Modules = append(result.Modules, module)
 	}
 	if err := packageextension.ValidateProjectDeclarationInput(result); err != nil {
 		return packageextension.ProjectDeclarationInput{}, err
 	}
 	return result, nil
+}
+
+func (r projectInputResolver) exportStatements(modulePath, namespace string, statements []ast.Statement, module *packageextension.ProjectModule) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.ModuleStatement:
+			r.exportStatements(modulePath, projectQualifiedName(namespace, node.Name), node.Body, module)
+		case *ast.ImportStatement:
+			module.Imports = append(module.Imports, packageextension.ProjectImport{
+				Path: node.Path, ModulePath: r.importModulePath(modulePath, node.Path),
+				Symbols: append([]string(nil), node.Symbols...), Alias: node.Alias, Span: exportSourceSpan(node.Span()),
+			})
+		case *ast.TypeAliasStatement:
+			module.TypeAliases = append(module.TypeAliases, packageextension.ProjectTypeAlias{
+				Name: projectQualifiedName(namespace, node.Name), TypeParameters: projectTypeParameterNames(node.TypeParameters),
+				Target: r.typeUse(modulePath, namespace, node.Target, projectTypeParameterSet(node.TypeParameters)),
+				Span:   exportSourceSpan(node.Span()),
+			})
+		case *ast.NewtypeStatement:
+			module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
+				Name: projectQualifiedName(namespace, node.Name), Target: r.typeUse(modulePath, namespace, node.Target, nil), Span: exportSourceSpan(node.Span()),
+			})
+		case *ast.RecordStatement:
+			module.Records = append(module.Records, r.exportRecord(modulePath, namespace, node))
+		case *ast.ClassStatement:
+			module.Classes = append(module.Classes, r.exportClass(modulePath, namespace, node))
+		case *ast.EnumStatement:
+			module.Enums = append(module.Enums, r.exportEnum(modulePath, namespace, node))
+		case *ast.MethodStatement:
+			method := r.exportMethod(modulePath, namespace, node, nil)
+			method.Name = projectQualifiedName(namespace, method.Name)
+			module.Functions = append(module.Functions, method)
+		}
+	}
 }
 
 func newProjectInputResolver(programs []*ast.Program, options ProjectDeclarationInputOptions) (projectInputResolver, error) {
@@ -112,37 +121,45 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		result.imports[program.ModulePath] = map[string]projectImportBinding{}
 	}
 	for _, program := range programs {
-		for _, statement := range program.Statements {
-			switch node := statement.(type) {
-			case *ast.ImportStatement:
-				for _, symbol := range node.Symbols {
-					result.imports[program.ModulePath][symbol] = projectImportBinding{
-						importPath: node.Path, modulePath: result.importModulePath(program.ModulePath, node.Path),
-					}
-				}
-			case *ast.TypeAliasStatement:
-				result.aliases[program.ModulePath][node.Name] = node
-				result.definitions[program.ModulePath][node.Name] = true
-			case *ast.NewtypeStatement:
-				result.newtypes[program.ModulePath][node.Name] = node
-				result.definitions[program.ModulePath][node.Name] = true
-			case *ast.ClassStatement:
-				result.definitions[program.ModulePath][node.Name] = true
-			case *ast.RecordStatement:
-				result.definitions[program.ModulePath][node.Name] = true
-			case *ast.EnumStatement:
-				result.definitions[program.ModulePath][node.Name] = true
-			case *ast.InterfaceStatement:
-				result.definitions[program.ModulePath][node.Name] = true
-			}
-		}
+		result.collectStatements(program.ModulePath, "", program.Statements)
 	}
 	return result, nil
 }
 
-func (r projectInputResolver) exportRecord(modulePath string, record *ast.RecordStatement) packageextension.ProjectRecord {
+func (r projectInputResolver) collectStatements(modulePath, namespace string, statements []ast.Statement) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ast.ModuleStatement:
+			r.collectStatements(modulePath, projectQualifiedName(namespace, node.Name), node.Body)
+		case *ast.ImportStatement:
+			for _, symbol := range node.Symbols {
+				r.imports[modulePath][symbol] = projectImportBinding{
+					importPath: node.Path, modulePath: r.importModulePath(modulePath, node.Path),
+				}
+			}
+		case *ast.TypeAliasStatement:
+			name := projectQualifiedName(namespace, node.Name)
+			r.aliases[modulePath][name] = node
+			r.definitions[modulePath][name] = true
+		case *ast.NewtypeStatement:
+			name := projectQualifiedName(namespace, node.Name)
+			r.newtypes[modulePath][name] = node
+			r.definitions[modulePath][name] = true
+		case *ast.ClassStatement:
+			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
+		case *ast.RecordStatement:
+			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
+		case *ast.EnumStatement:
+			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
+		case *ast.InterfaceStatement:
+			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
+		}
+	}
+}
+
+func (r projectInputResolver) exportRecord(modulePath, namespace string, record *ast.RecordStatement) packageextension.ProjectRecord {
 	result := packageextension.ProjectRecord{
-		Name: record.Name, TypeParameters: projectTypeParameterNames(record.TypeParameters), Span: exportSourceSpan(record.Span()),
+		Name: projectQualifiedName(namespace, record.Name), TypeParameters: projectTypeParameterNames(record.TypeParameters), Span: exportSourceSpan(record.Span()),
 	}
 	typeParameters := projectTypeParameterSet(record.TypeParameters)
 	for _, statement := range record.Body {
@@ -151,12 +168,12 @@ func (r projectInputResolver) exportRecord(modulePath string, record *ast.Record
 			continue
 		}
 		converted := packageextension.ProjectRecordField{
-			Name: field.Name, Type: r.typeUse(modulePath, field.Type, typeParameters), HasDefault: field.Default != nil, Span: exportSourceSpan(field.Span()),
+			Name: field.Name, Type: r.typeUse(modulePath, namespace, field.Type, typeParameters), HasDefault: field.Default != nil, Span: exportSourceSpan(field.Span()),
 		}
 		for _, attribute := range field.Attributes {
 			projectAttribute := packageextension.ProjectAttribute{Name: attribute.Name, Span: exportSourceSpan(attribute.Span())}
 			for _, argument := range attribute.Arguments {
-				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, argument))
+				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, namespace, argument))
 			}
 			converted.Attributes = append(converted.Attributes, projectAttribute)
 		}
@@ -165,9 +182,9 @@ func (r projectInputResolver) exportRecord(modulePath string, record *ast.Record
 	return result
 }
 
-func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatement) packageextension.ProjectEnum {
+func (r projectInputResolver) exportEnum(modulePath, namespace string, enum *ast.EnumStatement) packageextension.ProjectEnum {
 	result := packageextension.ProjectEnum{
-		Name: enum.Name, TypeParameters: projectTypeParameterNames(enum.TypeParameters), Span: exportSourceSpan(enum.Span()),
+		Name: projectQualifiedName(namespace, enum.Name), TypeParameters: projectTypeParameterNames(enum.TypeParameters), Span: exportSourceSpan(enum.Span()),
 	}
 	typeParameters := projectTypeParameterSet(enum.TypeParameters)
 	for _, statement := range enum.Body {
@@ -178,19 +195,19 @@ func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatem
 		converted := packageextension.ProjectEnumMember{Name: member.Name, Span: exportSourceSpan(member.Span())}
 		for _, parameter := range member.Parameters {
 			converted.Parameters = append(converted.Parameters, packageextension.ProjectParameter{
-				Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, typeParameters),
+				Name: parameter.Name, Type: r.typeUse(modulePath, namespace, parameter.Type, typeParameters),
 				NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
 				Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
 			})
 		}
 		if member.RawValue != nil {
-			value := r.exportProjectValue(modulePath, member.RawValue, true)
+			value := r.exportProjectValue(modulePath, namespace, member.RawValue, true)
 			converted.RawValue = &value
 		}
 		for _, attribute := range member.Attributes {
 			projectAttribute := packageextension.ProjectAttribute{Name: attribute.Name, Span: exportSourceSpan(attribute.Span())}
 			for _, argument := range attribute.Arguments {
-				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, argument))
+				projectAttribute.Arguments = append(projectAttribute.Arguments, r.exportProjectArgument(modulePath, namespace, argument))
 			}
 			converted.Attributes = append(converted.Attributes, projectAttribute)
 		}
@@ -199,22 +216,23 @@ func (r projectInputResolver) exportEnum(modulePath string, enum *ast.EnumStatem
 	return result
 }
 
-func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassStatement) packageextension.ProjectClass {
+func (r projectInputResolver) exportClass(modulePath, namespace string, class *ast.ClassStatement) packageextension.ProjectClass {
+	className := projectQualifiedName(namespace, class.Name)
 	result := packageextension.ProjectClass{
-		Name: class.Name, TypeParameters: projectTypeParameterNames(class.TypeParameters), Span: exportSourceSpan(class.Span()),
+		Name: className, TypeParameters: projectTypeParameterNames(class.TypeParameters), Span: exportSourceSpan(class.Span()),
 	}
 	classTypeParameters := projectTypeParameterSet(class.TypeParameters)
 	if superclass, ok := class.Superclass.(*ast.Identifier); ok {
 		ref := ast.TypeRef{Base: superclass.Base, Name: superclass.Name}
-		converted := r.typeUse(modulePath, ref, classTypeParameters)
+		converted := r.typeUse(modulePath, namespace, ref, classTypeParameters)
 		result.Superclass = &converted
 	}
 	for _, statement := range class.Body {
 		switch node := statement.(type) {
 		case *ast.MethodStatement:
-			result.Methods = append(result.Methods, r.exportMethod(modulePath, node, classTypeParameters))
+			result.Methods = append(result.Methods, r.exportMethod(modulePath, className, node, classTypeParameters))
 		case *ast.ExpressionStatement:
-			if directive, ok := r.exportProjectDirective(modulePath, node, classTypeParameters); ok {
+			if directive, ok := r.exportProjectDirective(modulePath, className, node, classTypeParameters); ok {
 				result.Directives = append(result.Directives, directive)
 			}
 		}
@@ -222,7 +240,7 @@ func (r projectInputResolver) exportClass(modulePath string, class *ast.ClassSta
 	return result
 }
 
-func (r projectInputResolver) exportMethod(modulePath string, node *ast.MethodStatement, ownerTypeParameters map[string]bool) packageextension.ProjectMethod {
+func (r projectInputResolver) exportMethod(modulePath, namespace string, node *ast.MethodStatement, ownerTypeParameters map[string]bool) packageextension.ProjectMethod {
 	methodTypeParameters := cloneStringSet(ownerTypeParameters)
 	for _, parameter := range node.TypeParameters {
 		methodTypeParameters[parameter.Name] = true
@@ -232,19 +250,19 @@ func (r projectInputResolver) exportMethod(modulePath string, node *ast.MethodSt
 	}
 	for _, parameter := range node.Parameters {
 		result.Parameters = append(result.Parameters, packageextension.ProjectParameter{
-			Name: parameter.Name, Type: r.typeUse(modulePath, parameter.Type, methodTypeParameters),
+			Name: parameter.Name, Type: r.typeUse(modulePath, namespace, parameter.Type, methodTypeParameters),
 			NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest,
 			Optional: parameter.Default != nil, Span: exportSourceSpan(parameter.Span()),
 		})
 	}
 	if !node.ReturnType.Empty() {
-		converted := r.typeUse(modulePath, node.ReturnType, methodTypeParameters)
+		converted := r.typeUse(modulePath, namespace, node.ReturnType, methodTypeParameters)
 		result.Return = &converted
 	}
 	return result
 }
 
-func (r projectInputResolver) exportProjectDirective(modulePath string, statement *ast.ExpressionStatement, typeParameters map[string]bool) (packageextension.ProjectDirective, bool) {
+func (r projectInputResolver) exportProjectDirective(modulePath, namespace string, statement *ast.ExpressionStatement, typeParameters map[string]bool) (packageextension.ProjectDirective, bool) {
 	call, ok := statement.Expression.(*ast.CallExpression)
 	if !ok {
 		return packageextension.ProjectDirective{}, false
@@ -261,10 +279,10 @@ func (r projectInputResolver) exportProjectDirective(modulePath string, statemen
 	}
 	result := packageextension.ProjectDirective{Name: identifier.Name, Span: exportSourceSpan(call.Span())}
 	for _, argument := range typeArguments {
-		result.TypeArguments = append(result.TypeArguments, r.typeUse(modulePath, argument, typeParameters))
+		result.TypeArguments = append(result.TypeArguments, r.typeUse(modulePath, namespace, argument, typeParameters))
 	}
 	for _, argument := range call.Arguments {
-		result.Arguments = append(result.Arguments, r.exportProjectArgument(modulePath, argument))
+		result.Arguments = append(result.Arguments, r.exportProjectArgument(modulePath, namespace, argument))
 	}
 	if call.Block != nil {
 		result.Block = &packageextension.ProjectDirectiveBlock{
@@ -278,19 +296,19 @@ func (r projectInputResolver) exportProjectDirective(modulePath string, statemen
 	return result, true
 }
 
-func (r projectInputResolver) exportProjectArgument(modulePath string, argument ast.CallArgument) packageextension.ProjectDirectiveArgument {
+func (r projectInputResolver) exportProjectArgument(modulePath, namespace string, argument ast.CallArgument) packageextension.ProjectDirectiveArgument {
 	return packageextension.ProjectDirectiveArgument{
 		Name: argument.Name, Splat: argument.Splat,
-		Value: r.exportProjectValue(modulePath, argument.Value, false), Span: exportSourceSpan(argument.Value.Span()),
+		Value: r.exportProjectValue(modulePath, namespace, argument.Value, false), Span: exportSourceSpan(argument.Value.Span()),
 	}
 }
 
-func (r projectInputResolver) exportProjectValue(modulePath string, expression ast.Expression, negativeInteger bool) packageextension.ProjectValue {
+func (r projectInputResolver) exportProjectValue(modulePath, namespace string, expression ast.Expression, negativeInteger bool) packageextension.ProjectValue {
 	result := exportStandaloneProjectValue(expression, negativeInteger)
 	if result.Kind != "reference" {
 		return result
 	}
-	if reference, ok := r.reference(modulePath, result.Name); ok {
+	if reference, ok := r.reference(modulePath, namespace, result.Name); ok {
 		copy := reference
 		result.Reference = &copy
 	}
@@ -314,52 +332,54 @@ func exportStandaloneProjectValue(expression ast.Expression, negativeInteger boo
 	return packageextension.ProjectValue{Kind: "unsupported"}
 }
 
-func (r projectInputResolver) typeUse(modulePath string, ref ast.TypeRef, typeParameters map[string]bool) packageextension.ProjectTypeUse {
+func (r projectInputResolver) typeUse(modulePath, namespace string, ref ast.TypeRef, typeParameters map[string]bool) packageextension.ProjectTypeUse {
 	authored := exportType(projectInputTypeRef(ref))
-	r.attachDefinitions(modulePath, &authored, typeParameters)
-	resolved, path := r.resolveType(modulePath, authored, map[string]bool{})
+	r.attachDefinitions(modulePath, namespace, &authored, typeParameters)
+	resolved, path := r.resolveType(modulePath, namespace, authored, map[string]bool{})
 	result := packageextension.ProjectTypeUse{
 		Authored: authored, Resolved: resolved, ResolutionPath: path, Span: exportSourceSpan(ref.Span()),
 	}
-	if representation, newtype := r.resolveRepresentation(modulePath, authored, map[string]bool{}); newtype {
+	if representation, newtype := r.resolveRepresentation(modulePath, namespace, authored, map[string]bool{}); newtype {
 		result.Representation = &representation
 	}
 	return result
 }
 
-func (r projectInputResolver) resolveRepresentation(modulePath string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, bool) {
+func (r projectInputResolver) resolveRepresentation(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, bool) {
 	foundNewtype := false
 	for index := range typ.Arguments {
-		resolved, found := r.resolveRepresentation(modulePath, typ.Arguments[index], cloneBoolMap(visiting))
+		resolved, found := r.resolveRepresentation(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting))
 		typ.Arguments[index] = resolved
 		foundNewtype = foundNewtype || found
 	}
 	if typ.Kind != "named" || len(typ.Arguments) != 0 {
 		return typ, foundNewtype
 	}
-	reference, ok := projectTypeReference(typ)
+	reference, ok := r.reference(modulePath, namespace, typ.Name)
 	if !ok {
 		return typ, foundNewtype
 	}
-	key := reference.ModulePath + "\x00" + typ.Name
+	key := reference.ModulePath + "\x00" + reference.Name
 	if visiting[key] {
 		return typ, foundNewtype
 	}
 	visiting[key] = true
-	if alias := r.aliases[reference.ModulePath][typ.Name]; alias != nil && len(alias.TypeParameters) == 0 {
+	targetNamespace := projectDeclarationOwner(reference.Name)
+	if alias := r.aliases[reference.ModulePath][reference.Name]; alias != nil && len(alias.TypeParameters) == 0 {
 		target := exportType(projectInputTypeRef(alias.Target))
 		target.Nullable = target.Nullable || typ.Nullable
-		r.attachDefinitions(reference.ModulePath, &target, nil)
-		resolved, found := r.resolveRepresentation(reference.ModulePath, target, visiting)
+		r.attachDefinitions(reference.ModulePath, targetNamespace, &target, nil)
+		resolved, found := r.resolveRepresentation(reference.ModulePath, targetNamespace, target, visiting)
 		return resolved, foundNewtype || found
 	}
-	if newtype := r.newtypes[reference.ModulePath][typ.Name]; newtype != nil {
+	if newtype := r.newtypes[reference.ModulePath][reference.Name]; newtype != nil {
 		target := exportType(projectInputTypeRef(newtype.Target))
 		target.Nullable = target.Nullable || typ.Nullable
-		r.attachDefinitions(reference.ModulePath, &target, nil)
-		resolved, _ := r.resolveRepresentation(reference.ModulePath, target, visiting)
+		r.attachDefinitions(reference.ModulePath, targetNamespace, &target, nil)
+		resolved, _ := r.resolveRepresentation(reference.ModulePath, targetNamespace, target, visiting)
 		return resolved, true
 	}
+	typ.Name = reference.Name
 	return typ, foundNewtype
 }
 
@@ -391,62 +411,61 @@ func projectInputTypeRef(ref ast.TypeRef) types.Type {
 	return result
 }
 
-func (r projectInputResolver) attachDefinitions(modulePath string, typ *packageextension.Type, typeParameters map[string]bool) {
+func (r projectInputResolver) attachDefinitions(modulePath, namespace string, typ *packageextension.Type, typeParameters map[string]bool) {
 	if typ.Kind == "named" && !typeParameters[typ.Name] {
-		if reference, ok := r.reference(modulePath, typ.Name); ok {
+		if reference, ok := r.reference(modulePath, namespace, typ.Name); ok {
 			typ.Definition = &packageextension.Definition{ModulePath: reference.ModulePath, ImportPath: reference.ImportPath}
 		}
 	}
 	for index := range typ.Arguments {
-		r.attachDefinitions(modulePath, &typ.Arguments[index], typeParameters)
+		r.attachDefinitions(modulePath, namespace, &typ.Arguments[index], typeParameters)
 	}
 }
 
-func (r projectInputResolver) resolveType(modulePath string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, []packageextension.ProjectTypeReference) {
+func (r projectInputResolver) resolveType(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, []packageextension.ProjectTypeReference) {
 	for index := range typ.Arguments {
-		resolved, _ := r.resolveType(modulePath, typ.Arguments[index], cloneBoolMap(visiting))
+		resolved, _ := r.resolveType(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting))
 		typ.Arguments[index] = resolved
 	}
-	if typ.Kind != "named" || typ.Nullable || len(typ.Arguments) != 0 {
+	if typ.Kind != "named" {
 		return typ, nil
 	}
-	reference, ok := projectTypeReference(typ)
+	reference, ok := r.reference(modulePath, namespace, typ.Name)
 	if !ok {
 		return typ, nil
 	}
 	path := []packageextension.ProjectTypeReference{reference}
-	alias := r.aliases[reference.ModulePath][typ.Name]
-	if alias == nil || len(alias.TypeParameters) != 0 {
+	if typ.Nullable || len(typ.Arguments) != 0 {
+		typ.Name = reference.Name
 		return typ, path
 	}
-	key := reference.ModulePath + "\x00" + typ.Name
+	alias := r.aliases[reference.ModulePath][reference.Name]
+	if alias == nil || len(alias.TypeParameters) != 0 {
+		typ.Name = reference.Name
+		return typ, path
+	}
+	key := reference.ModulePath + "\x00" + reference.Name
 	if visiting[key] {
 		return typ, path
 	}
 	visiting[key] = true
+	targetNamespace := projectDeclarationOwner(reference.Name)
 	target := exportType(projectInputTypeRef(alias.Target))
-	r.attachDefinitions(reference.ModulePath, &target, nil)
-	resolved, nestedPath := r.resolveType(reference.ModulePath, target, visiting)
+	r.attachDefinitions(reference.ModulePath, targetNamespace, &target, nil)
+	resolved, nestedPath := r.resolveType(reference.ModulePath, targetNamespace, target, visiting)
 	return resolved, append(path, nestedPath...)
 }
 
-func (r projectInputResolver) reference(modulePath, name string) (packageextension.ProjectTypeReference, bool) {
-	if r.definitions[modulePath][name] {
-		return packageextension.ProjectTypeReference{Name: name, ModulePath: modulePath}, true
+func (r projectInputResolver) reference(modulePath, namespace, name string) (packageextension.ProjectTypeReference, bool) {
+	for _, candidate := range projectNameCandidates(namespace, name) {
+		if r.definitions[modulePath][candidate] {
+			return packageextension.ProjectTypeReference{Name: candidate, ModulePath: modulePath}, true
+		}
 	}
 	if imported, ok := r.imports[modulePath][name]; ok {
 		return packageextension.ProjectTypeReference{Name: name, ModulePath: imported.modulePath, ImportPath: imported.importPath}, true
 	}
 	return packageextension.ProjectTypeReference{}, false
-}
-
-func projectTypeReference(typ packageextension.Type) (packageextension.ProjectTypeReference, bool) {
-	if typ.Definition == nil || typ.Definition.ModulePath == "" || typ.Name == "" {
-		return packageextension.ProjectTypeReference{}, false
-	}
-	return packageextension.ProjectTypeReference{
-		Name: typ.Name, ModulePath: typ.Definition.ModulePath, ImportPath: typ.Definition.ImportPath,
-	}, true
 }
 
 func (r projectInputResolver) modulePath(importPath string) string {
@@ -461,6 +480,37 @@ func (r projectInputResolver) modulePath(importPath string) string {
 
 func (r projectInputResolver) importModulePath(modulePath, importPath string) string {
 	return r.modulePath(resolver.CanonicalPackageImport(importPath, r.packageAliasesByModule[modulePath]))
+}
+
+func projectQualifiedName(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	return namespace + "::" + name
+}
+
+func projectDeclarationOwner(name string) string {
+	separator := strings.LastIndex(name, "::")
+	if separator < 0 {
+		return ""
+	}
+	return name[:separator]
+}
+
+func projectNameCandidates(namespace, name string) []string {
+	result := []string{}
+	seen := map[string]bool{}
+	for current := namespace; ; current = projectDeclarationOwner(current) {
+		candidate := projectQualifiedName(current, name)
+		if !seen[candidate] {
+			result = append(result, candidate)
+			seen[candidate] = true
+		}
+		if current == "" {
+			break
+		}
+	}
+	return result
 }
 
 func projectTypeParameterNames(parameters []ast.TypeParameter) []string {

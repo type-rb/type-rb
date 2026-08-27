@@ -88,17 +88,53 @@ func TestRecordFieldDefaultDiagnostics(t *testing.T) {
 			want:   "required record field cannot follow a default field",
 		},
 		{
-			name:   "later field reference",
+			name:   "self field reference",
+			source: "record Range\n\tstart: Integer = start\nend\n",
+			want:   "record field default cannot reference current or later field start",
+		},
+		{
+			name:   "self field call",
+			source: "record Range\n\tstart: Integer = start()\nend\n",
+			want:   "record field default cannot reference current or later field start",
+		},
+		{
+			name:   "direct later field reference",
+			source: "record Range\n\tfinish: Integer = start\n\tstart: Integer = 0\nend\n",
+			want:   "record field default cannot reference current or later field start",
+		},
+		{
+			name:   "nested later field reference",
 			source: "record Range\n\tfinish: Integer = start + 1\n\tstart: Integer = 0\nend\n",
-			want:   "operator + does not support Any and Integer",
+			want:   "record field default cannot reference current or later field start",
 		},
 	}
 
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := Compile("config.trb", []byte(test.source), "go")
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Compile() error=%v, want %q", err, test.want)
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			t.Run(test.name+"/"+mode, func(t *testing.T) {
+				_, err := Compile("config.trb", []byte(test.source), mode)
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("Compile() error=%v, want %q", err, test.want)
+				}
+			})
+		}
+	}
+}
+
+func TestRecordFieldDefaultMayCallOuterFunctionWithLaterFieldName(t *testing.T) {
+	source := []byte(`def finish(): Integer
+	return 9
+end
+
+record Range
+	start: Integer = finish()
+	finish: Integer = 0
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := Compile("range.trb", source, mode); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -219,6 +255,154 @@ end
 			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
 		}
 	}
+}
+
+func TestFunctionValuedEarlierFieldSuspendsTypeScriptRecordDefault(t *testing.T) {
+	source := []byte(`import { Result } from trb/std/result
+
+record AppError
+	message: String
+end
+
+record Config
+	loader: () -> Result<Integer, AppError>
+	value: Result<Integer, AppError> = loader()
+end
+
+def main()
+	loader: () -> Result<Integer, AppError> := fn(): Result<Integer, AppError>
+		values := [7].concurrent_map do |value|
+			value
+		end
+		return Result<Integer, AppError>::Ok(values.size())
+	end
+	config := Config.new(loader: loader)
+	case config.value
+	when Result::Ok(value)
+		puts(value.to_s())
+	when Result::Err(error)
+		puts(error.message)
+	end
+	return
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: "main.trb", ModulePath: "main", Package: "main", Source: source,
+	}}, Options{Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project", ProjectRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "main").Output)
+	for _, fragment := range []string{
+		"export async function __trbRecordNewConfig(",
+		"const __trbField1 = Object.prototype.hasOwnProperty.call(__trbArgs, \"value\") ? __trbArgs.value as Result<number, AppError> : (await __trbField0());",
+		"const config: Config = (await __trbRecordNewConfig({ loader: loader }));",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
+		}
+	}
+	checkTypeScriptArtifacts(t, artifacts, "record_function_field_default")
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireEffectRuntime(t, mode)
+			project, err := CompileProject([]SourceUnit{{
+				Filename: "main.trb", ModulePath: "main", Package: "main", Source: source,
+			}}, Options{
+				Mode: mode, GoModule: "example.com/record-function-field", RubyLoader: "require_relative",
+				TypeScriptRuntime: "bun", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSpace(runEffectProject(t, mode, project, "example.com/record-function-field")); got != "1" {
+				t.Fatalf("unexpected %s output: got %q, want %q", mode, got, "1")
+			}
+		})
+	}
+}
+
+func TestExplicitEffectfulRecordFieldKeepsTypeScriptConstructionSynchronous(t *testing.T) {
+	source := []byte(`def defaults(): Array<Integer>
+	return [1].concurrent_map do |value|
+		value
+	end
+end
+
+record Config
+	values: Array<Integer> = defaults()
+	label: String = "default"
+end
+
+module Settings
+	CONFIG := Config.new(values: [2])
+end
+
+def main()
+	puts(Settings::CONFIG.label)
+	return
+end
+`)
+	artifact, err := Compile("main.trb", source, "typescript")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifact.Output)
+	for _, fragment := range []string{
+		"export async function __trbRecordNewConfig(",
+		"export function __trbRecordNewConfigSync(__trbScope: AbortSignal | undefined, __trbArgs: { values: Array<number>; label?: string }): Config",
+		"export const CONFIG: Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
+		}
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			runEffectSource(t, mode, "explicit_effectful_record_default.trb", source, "default")
+		})
+	}
+}
+
+func TestImportedRecordSyncHelperIsRetainedForPureOmissions(t *testing.T) {
+	model := SourceUnit{Filename: "config.trb", ModulePath: "models/config", Source: []byte(`def defaults(): Array<Integer>
+	return [1].concurrent_map do |value|
+		value
+	end
+end
+
+record Config
+	values: Array<Integer> = defaults()
+	label: String = "default"
+end
+`)}
+	main := SourceUnit{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { Config } from models/config
+
+module Settings
+	CONFIG := Config.new(values: [2])
+end
+
+def main()
+	puts(Settings::CONFIG.label)
+	return
+end
+`)}
+	artifacts, err := CompileProject([]SourceUnit{model, main}, Options{
+		Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "main").Output)
+	for _, fragment := range []string{
+		`import { __trbRecordNewConfig, __trbRecordNewConfigSync } from "./models/config.ts";`,
+		"export const CONFIG: Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated importing module is missing %q:\n%s", fragment, output)
+		}
+	}
+	checkTypeScriptArtifacts(t, artifacts, "imported_record_sync_helper")
 }
 
 func TestTopLevelSuspendingTypeScriptRecordDefaultsUseRootExecutionScope(t *testing.T) {

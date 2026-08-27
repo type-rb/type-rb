@@ -2478,7 +2478,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, type
 		explicit[argument.Name] = name
 	}
 	values := make([]string, 0, len(fields)*2)
-	if g.execution != nil && g.execution.Calls[call] {
+	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
 		values = append(values, g.executionScopeArgument())
 	}
 	for _, field := range fields {

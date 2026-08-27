@@ -58,7 +58,9 @@ An attribute has no core-language behavior merely because it is present. A
 compiler-integrated package owns the meaning and validation of its attribute
 name. The Project Declaration Input protocol is version 6: record fields
 expose `hasDefault`, and enum members expose their data-only attributes. It
-does not serialize executable default expressions.
+does not serialize executable default expressions. Declarations nested in
+modules retain their qualified owner identity, such as `CLI::Options`, in the
+snapshot.
 
 ## Consequences
 
