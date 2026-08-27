@@ -2,6 +2,7 @@ package typescript
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -38,7 +39,100 @@ func AnalyzeSuspension(programs []*ir.Program) (*SuspensionPlan, error) {
 			return nil, fmt.Errorf("TypeScript function values that may suspend must omit their return type")
 		}
 	}
+	for method, suspends := range plan.ParameterDefaults {
+		if suspends && isReactComponent(method) {
+			return nil, fmt.Errorf("TypeScript React component parameter defaults cannot use an operation that may suspend")
+		}
+	}
+	if err := validateSuspendingDeclarationInitializers(programs, plan); err != nil {
+		return nil, err
+	}
 	return plan, nil
+}
+
+func validateSuspendingDeclarationInitializers(programs []*ir.Program, plan *SuspensionPlan) error {
+	for _, program := range programs {
+		if err := suspendingDeclarationInitializerError(program.Statements, plan, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func suspendingDeclarationInitializerError(statements []ir.Statement, plan *SuspensionPlan, namespace string) error {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Module:
+			owner := qualifiedInitializerOwner(namespace, node.Name)
+			if err := suspendingModuleInitializerError(node.Body, plan, owner); err != nil {
+				return err
+			}
+		case *ir.Class:
+			if err := suspendingClassInitializerError(node, plan, qualifiedInitializerOwner(namespace, node.Name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func suspendingModuleInitializerError(statements []ir.Statement, plan *SuspensionPlan, owner string) error {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Variable:
+			if expressionSuspends(plan, node.Value) {
+				return fmt.Errorf("TypeScript module constant %s::%s cannot use an operation that may suspend", owner, node.Name)
+			}
+		case *ir.Module:
+			if err := suspendingModuleInitializerError(node.Body, plan, qualifiedInitializerOwner(owner, node.Name)); err != nil {
+				return err
+			}
+		case *ir.Class:
+			if err := suspendingClassInitializerError(node, plan, qualifiedInitializerOwner(owner, node.Name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func suspendingClassInitializerError(class *ir.Class, plan *SuspensionPlan, owner string) error {
+	for _, statement := range class.Body {
+		switch node := statement.(type) {
+		case *ir.Field:
+			if expressionSuspends(plan, node.Value) {
+				return fmt.Errorf("TypeScript class field %s#%s cannot use an operation that may suspend", owner, strings.TrimPrefix(node.Name, "@"))
+			}
+		case *ir.Variable:
+			if expressionSuspends(plan, node.Value) {
+				return fmt.Errorf("TypeScript class constant %s::%s cannot use an operation that may suspend", owner, node.Name)
+			}
+		case *ir.Method:
+			if node.Name == "initialize" && plan.Methods[node] {
+				return fmt.Errorf("TypeScript class initializer %s#initialize cannot use an operation that may suspend", owner)
+			}
+		case *ir.Module:
+			if err := suspendingModuleInitializerError(node.Body, plan, qualifiedInitializerOwner(owner, node.Name)); err != nil {
+				return err
+			}
+		case *ir.Class:
+			if err := suspendingClassInitializerError(node, plan, qualifiedInitializerOwner(owner, node.Name)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func expressionSuspends(plan *SuspensionPlan, expression ir.Expression) bool {
+	return expression != nil && plan != nil && plan.Expressions[expression]
+}
+
+func qualifiedInitializerOwner(namespace, name string) string {
+	if namespace == "" {
+		return name
+	}
+	return namespace + "::" + name
 }
 
 func functionReturnsStandardResult(function types.Type) bool {

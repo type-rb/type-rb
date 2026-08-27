@@ -100,8 +100,9 @@ and `set(value)` members while generated TSX uses React `useState`.
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, positional-only and
 bare-`*` named-only parameters with callee-owned defaults, and classes, modules and
-generic interfaces, records, ordinary and raw-value enums, payload enums as sum
-types, enum instance methods, transparent `alias` declarations, nominal
+generic interfaces, records with per-construction field defaults, ordinary and
+raw-value enums, payload enums as sum types, enum instance methods, transparent
+`alias` declarations, nominal
 `newtype` declarations over concrete non-nullable representations, explicit
 generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
@@ -120,6 +121,12 @@ expression. Their structured typed IR runs the same block scope in generated
 Go, Ruby, TypeScript, and the REPL. TypeScript lowers a transformation that
 reaches a suspending platform operation to a sequential async loop without
 adding `async` or `await` to TypeRB source.
+
+TypeScript also lowers suspending parameter defaults into the function body.
+Module constants and class initialization cannot currently suspend because
+JavaScript namespace and constructor initialization have no async evaluation
+boundary; the compiler reports these initializers instead of emitting invalid
+code.
 
 Arrays also provide import-free `concurrent_map` for bounded I/O fan-out. Its
 fixed portable default is 8, an explicit positive `limit` can replace or
@@ -434,9 +441,10 @@ Retry policy, SQL worker lifecycle, and the SQL adapter's final native
 persistence primitives remain a separate bundled runtime boundary. Jobs and
 ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
-Version 5 contains canonical module/import identity, aliases, newtypes and
+Version 6 contains canonical module/import identity, aliases, newtypes and
 their concrete boundary representations, record declarations and field
-attributes, enum and class declarations, top-level function and class method
+attributes, record-default presence, enum declarations and member attributes,
+class declarations, top-level function and class method
 signatures, authored and resolved types, resolved generic directive arguments,
 declarative call values, structural block summaries, and source spans. The ORM
 host combines that project snapshot with a separate versioned ORM schema snapshot containing

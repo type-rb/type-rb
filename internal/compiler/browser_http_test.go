@@ -128,6 +128,43 @@ end
 	}
 }
 
+func TestTypeScriptBrowserJSONCodecsQualifyNestedTypes(t *testing.T) {
+	source := []byte(`import { RequestBody, RequestError, Response, json_body } from trb/platform/typescript/browser
+import { Body } from trb/http
+import { Result } from trb/std/result
+
+module Services
+	record Todo
+		title: String
+	end
+end
+
+def decode_todo(response: Response<Body>): Result<Response<Todo>, RequestError>
+	return response.json<Todo>()
+end
+
+def encode_todo(todo: Todo): Result<RequestBody, RequestError>
+	return json_body(todo)
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{
+		Filename: "main.trb", ModulePath: "main", Package: "main", Source: source,
+	}}, Options{Mode: "typescript", TypeScriptRuntime: "bun", SourceRoot: "/project", ProjectRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "main").Output)
+	for _, expected := range []string{
+		"(value: JsonValue, path: string): Services.Todo",
+		"(value: Services.Todo): JsonValue",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("generated browser JSON codec is missing qualified type %q:\n%s", expected, output)
+		}
+	}
+	checkTypeScriptArtifacts(t, artifacts, "qualified_browser_json_codecs")
+}
+
 func TestBrowserHTTPInferredTypesRemainUsableWithoutTypeImports(t *testing.T) {
 	source := []byte(`import { HttpClient, RequestError } from trb/platform/typescript/browser
 import { Result } from trb/std/result

@@ -1018,32 +1018,42 @@ func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.Enum
 	if len(parts) == 0 || parts[0].Kind != token.Identifier {
 		return nil
 	}
+	attributeAt := topLevelAttributeIndex(parts, 1)
+	core := parts
+	if attributeAt >= 0 {
+		core = parts[:attributeAt]
+	}
 	member := &ast.EnumMemberStatement{
 		Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing},
 		Name: parts[0].Lexeme,
 	}
-	if len(parts) == 1 {
-		return member
-	}
-	if parts[1].Lexeme == "=" {
-		if len(parts) == 2 {
+	if len(core) == 1 {
+		// Payloadless member.
+	} else if core[1].Lexeme == "=" {
+		if len(core) == 2 {
 			return nil
 		}
-		value, ok := p.parseExpression(parts[2:])
+		value, ok := p.parseExpression(core[2:])
 		if !ok {
 			return nil
 		}
 		member.RawValue = value
-		return member
-	}
-	if parts[1].Lexeme != "(" {
+	} else if core[1].Lexeme != "(" {
 		return nil
+	} else {
+		close := matchingIndex(core, 1, "(", ")")
+		if close != len(core)-1 {
+			return nil
+		}
+		member.Parameters = p.parseParameters(core[2:close])
 	}
-	close := matchingIndex(parts, 1, "(", ")")
-	if close != len(parts)-1 {
-		return nil
+	if attributeAt >= 0 {
+		attributes, ok := p.parseAttributes(parts[attributeAt:])
+		if !ok {
+			return nil
+		}
+		member.Attributes = attributes
 	}
-	member.Parameters = p.parseParameters(parts[2:close])
 	return member
 }
 
@@ -1051,43 +1061,78 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 	if len(line) < 3 || line[0].Kind != token.Identifier || strings.HasPrefix(line[0].Lexeme, "@") || line[1].Lexeme != ":" {
 		return nil
 	}
-	attributeAt := len(line)
-	depth := 0
-	for index := 2; index < len(line); index++ {
-		switch line[index].Lexeme {
-		case "<", "[":
-			depth++
-		case ">", "]":
-			if depth > 0 {
-				depth--
-			}
-		}
-		if depth == 0 && strings.HasPrefix(line[index].Lexeme, "@") {
-			attributeAt = index
-			break
-		}
+	attributeAt := topLevelAttributeIndex(line, 2)
+	if attributeAt < 0 {
+		attributeAt = len(line)
 	}
-	if attributeAt == 2 {
+	equal := topLevelIndex(line[2:attributeAt], "=")
+	if equal >= 0 {
+		equal += 2
+	}
+	typeEnd := attributeAt
+	if equal >= 0 {
+		typeEnd = equal
+	}
+	if typeEnd == 2 {
 		return nil
 	}
 	field := &ast.RecordFieldStatement{
 		Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment},
 		Name: line[0].Lexeme,
-		Type: p.parseTypeRef(line[2:attributeAt]),
+		Type: p.parseTypeRef(line[2:typeEnd]),
 	}
-	for index := attributeAt; index < len(line); {
-		name := line[index]
-		if !strings.HasPrefix(name.Lexeme, "@") {
+	if equal >= 0 {
+		if equal+1 >= attributeAt {
 			return nil
+		}
+		field.Default, _ = p.parseExpression(line[equal+1 : attributeAt])
+		if field.Default == nil {
+			return nil
+		}
+	}
+	if attributeAt < len(line) {
+		attributes, ok := p.parseAttributes(line[attributeAt:])
+		if !ok {
+			return nil
+		}
+		field.Attributes = attributes
+	}
+	return field
+}
+
+func topLevelAttributeIndex(tokens []token.Token, start int) int {
+	depth := 0
+	for index := start; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth == 0 && strings.HasPrefix(tokens[index].Lexeme, "@") {
+			return index
+		}
+	}
+	return -1
+}
+
+func (p *Parser) parseAttributes(tokens []token.Token) ([]ast.Attribute, bool) {
+	attributes := []ast.Attribute{}
+	for index := 0; index < len(tokens); {
+		name := tokens[index]
+		if !strings.HasPrefix(name.Lexeme, "@") {
+			return nil, false
 		}
 		attribute := ast.Attribute{Base: ast.Base{SourceSpan: name.Span}, Name: strings.TrimPrefix(name.Lexeme, "@")}
 		index++
-		if index < len(line) && line[index].Lexeme == "(" {
-			close := matchingIndex(line, index, "(", ")")
+		if index < len(tokens) && tokens[index].Lexeme == "(" {
+			close := matchingIndex(tokens, index, "(", ")")
 			if close < 0 {
-				return nil
+				return nil, false
 			}
-			for _, part := range splitTopLevel(line[index+1:close], ",") {
+			for _, part := range splitTopLevel(tokens[index+1:close], ",") {
 				if len(part) == 0 {
 					continue
 				}
@@ -1098,16 +1143,16 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 				}
 				argument.Value, _ = p.parseExpression(part)
 				if argument.Value == nil {
-					return nil
+					return nil, false
 				}
 				attribute.Arguments = append(attribute.Arguments, argument)
 			}
-			attribute.SourceSpan.End = line[close].Span.End
+			attribute.SourceSpan.End = tokens[close].Span.End
 			index = close + 1
 		}
-		field.Attributes = append(field.Attributes, attribute)
+		attributes = append(attributes, attribute)
 	}
-	return field
+	return attributes, true
 }
 
 func (p *Parser) parseNativeLine() ast.Statement {

@@ -105,6 +105,7 @@ type RecordFieldStatement struct {
 	Base
 	Name       string
 	Type       TypeRef
+	Default    Expression
 	Attributes []Attribute
 }
 
@@ -126,6 +127,7 @@ type EnumMemberStatement struct {
 	Name       string
 	Parameters []Parameter
 	RawValue   Expression
+	Attributes []Attribute
 }
 
 func (*EnumMemberStatement) statementNode() {}

@@ -90,6 +90,7 @@ type RecordField struct {
 	JSONName     string
 	Type         types.Type
 	Optional     bool
+	HasDefault   bool
 	ResultBridge NativeResultBridge
 }
 
@@ -1377,7 +1378,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 						continue
 					}
 					typ := typeRef(field.Type)
-					exported.Fields = append(exported.Fields, RecordField{Name: field.Name, JSONName: recordJSONName(field), Type: typ})
+					exported.Fields = append(exported.Fields, RecordField{Name: field.Name, JSONName: recordJSONName(field), Type: typ, HasDefault: field.Default != nil})
 					exported.Members[field.Name] = Member{Name: field.Name, Kind: ValueExport, Type: typ}
 				}
 				result[node.Name] = exported

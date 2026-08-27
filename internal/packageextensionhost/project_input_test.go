@@ -25,11 +25,12 @@ func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
 	ids := parseProjectInputTest(t, "contracts/ids", `newtype ReceiptID = Integer
 
 enum DeliveryState
-	Pending = "pending"
+	Pending = "pending" @json("delivery_state")
 end
 
 record Envelope<T>
 	payload: T @json("data")
+	trace: Boolean = false @json("trace")
 end
 `)
 	job := parseProjectInputTest(t, "jobs/send_receipt", `import { Job, JobResult } from trb/jobs
@@ -71,14 +72,14 @@ end
 	if len(input.Modules[0].Newtypes) != 1 || input.Modules[0].Newtypes[0].Name != "ReceiptID" || input.Modules[0].Newtypes[0].Target.Resolved.Kind != "int" {
 		t.Fatalf("newtype declaration facts are incomplete: %#v", input.Modules[0].Newtypes)
 	}
-	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` {
+	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` || len(input.Modules[0].Enums[0].Members[0].Attributes) != 1 || input.Modules[0].Enums[0].Members[0].Attributes[0].Arguments[0].Value.Raw != `"delivery_state"` {
 		t.Fatalf("enum declaration facts are incomplete: %#v", input.Modules[0].Enums)
 	}
-	if len(input.Modules[0].Records) != 1 || len(input.Modules[0].Records[0].Fields) != 1 {
+	if len(input.Modules[0].Records) != 1 || len(input.Modules[0].Records[0].Fields) != 2 {
 		t.Fatalf("record declaration facts are incomplete: %#v", input.Modules[0].Records)
 	}
 	record := input.Modules[0].Records[0]
-	if len(record.TypeParameters) != 1 || record.Fields[0].Type.Authored.Name != "T" || len(record.Fields[0].Attributes) != 1 || record.Fields[0].Attributes[0].Arguments[0].Value.Raw != `"data"` {
+	if len(record.TypeParameters) != 1 || record.Fields[0].Type.Authored.Name != "T" || len(record.Fields[0].Attributes) != 1 || record.Fields[0].Attributes[0].Arguments[0].Value.Raw != `"data"` || !record.Fields[1].HasDefault || record.Fields[1].Attributes[0].Arguments[0].Value.Raw != `"trace"` {
 		t.Fatalf("generic record field facts are incomplete: %#v", record)
 	}
 	if len(module.Imports) != 2 || module.Imports[1].ModulePath != "contracts/ids" || len(module.TypeAliases) != 1 || len(module.Classes) != 1 {

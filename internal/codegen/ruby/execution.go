@@ -5,6 +5,50 @@ import "github.com/type-rb/type-rb/internal/ir"
 func (g *generator) programUsesExecutionScope(statements []ir.Statement) bool {
 	for _, statement := range statements {
 		switch node := statement.(type) {
+		case *ir.Field:
+			if g.expressionUsesExecutionScope(node.Value) {
+				return true
+			}
+		case *ir.Variable:
+			if g.expressionUsesExecutionScope(node.Value) {
+				return true
+			}
+		case *ir.Assignment:
+			if g.expressionUsesExecutionScope(node.Target) || g.expressionUsesExecutionScope(node.Value) {
+				return true
+			}
+		case *ir.Return:
+			if g.expressionUsesExecutionScope(node.Value) {
+				return true
+			}
+		case *ir.ExpressionStatement:
+			if g.expressionUsesExecutionScope(node.Expression) {
+				return true
+			}
+		case *ir.If:
+			if g.expressionUsesExecutionScope(node) {
+				return true
+			}
+		case *ir.Case:
+			if g.expressionUsesExecutionScope(node) {
+				return true
+			}
+		case *ir.While:
+			if g.expressionUsesExecutionScope(node.Condition) || g.programUsesExecutionScope(node.Body) {
+				return true
+			}
+		case *ir.Iterate:
+			if g.execution != nil && g.execution.Iterations[node] {
+				return true
+			}
+		case *ir.StructuredBlock:
+			if g.execution != nil && g.execution.StructuredBlocks[node] {
+				return true
+			}
+		case *ir.NativeBlock:
+			if g.programUsesExecutionScope(node.Body) {
+				return true
+			}
 		case *ir.Method:
 			if g.methodUsesExecutionScope(node) {
 				return true
@@ -15,6 +59,10 @@ func (g *generator) programUsesExecutionScope(statements []ir.Statement) bool {
 			}
 		case *ir.Enum:
 			if g.programUsesExecutionScope(node.Body) {
+				return true
+			}
+		case *ir.Record:
+			if g.execution != nil && g.execution.RecordDefaultFor(node) {
 				return true
 			}
 		case *ir.Module:
@@ -30,6 +78,10 @@ func (g *generator) programUsesExecutionScope(statements []ir.Statement) bool {
 		}
 	}
 	return false
+}
+
+func (g *generator) expressionUsesExecutionScope(expression ir.Expression) bool {
+	return expression != nil && g.execution != nil && g.execution.Expressions[expression]
 }
 
 func (g *generator) executionScopeRuntime() {
