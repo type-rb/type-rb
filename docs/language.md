@@ -766,7 +766,7 @@ labels := [1, 2, 3].map do |value|
 end
 
 visible := labels.select.with_index do |label, index|
-	!label.empty?() and index < 2
+	!label.empty?() && index < 2
 end
 
 total := [1, 2, 3].reduce(0) do |sum, value|

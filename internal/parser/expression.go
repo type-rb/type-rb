@@ -35,8 +35,8 @@ func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.E
 const highestBinaryPrecedence = 12
 
 var precedences = map[string]int{
-	"or": 1, "||": 1,
-	"and": 2, "&&": 2,
+	"||": 1,
+	"&&": 2,
 	"..": 3, "...": 3,
 	"==": 4, "!=": 4, "=~": 4, "!~": 4,
 	"<": 5, "<=": 5, ">": 5, ">=": 5, "<=>": 5,
@@ -128,6 +128,10 @@ func (p *exprParser) parse(min int) ast.Expression {
 			}
 			continue
 		}
+		if tok.Lexeme == "and" || tok.Lexeme == "or" {
+			p.reportAt(tok.Span, "unexpected token "+tok.Lexeme)
+			return left
+		}
 		prec, ok := precedences[tok.Lexeme]
 		if !ok || prec <= min {
 			break
@@ -209,7 +213,10 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		return expression
 	}
 	switch tok.Lexeme {
-	case "!", "not", "-", "+", "~":
+	case "not":
+		p.reportAt(tok.Span, "unexpected token not")
+		return nil
+	case "!", "-", "+", "~":
 		operand := p.parse(11)
 		if operand == nil {
 			return nil
@@ -321,7 +328,7 @@ func (p *exprParser) startsRemovedAttemptOperand() bool {
 	switch next.Lexeme {
 	case "(", "[", "{", ".", "&.", "::", ")", "]", "}", ",", ";", ":=", "=", "=>", "catch", "do":
 		return false
-	case "!", "not", "~", ":", "try":
+	case "!", "~", ":", "try":
 		return true
 	}
 	switch next.Kind {

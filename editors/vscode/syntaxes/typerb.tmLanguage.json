@@ -327,10 +327,6 @@
           "match": "\\b(?:if|elsif|else|then|case|when|while|do|try|catch|return|break|next|end)(?![?!_=])\\b"
         },
         {
-          "name": "keyword.operator.logical.trb",
-          "match": "\\b(?:and|or|not)\\b"
-        },
-        {
           "name": "constant.language.boolean.trb",
           "match": "\\b(?:true|false)\\b"
         },

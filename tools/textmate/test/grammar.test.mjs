@@ -153,3 +153,14 @@ end`);
   assertNotInScope(tokens, "try!", "keyword.control");
   assert.equal(ruleStack.depth, 1, "callable suffix fixture left an open TextMate rule");
 });
+
+test("does not highlight removed word logical operators", () => {
+  const { tokens, ruleStack } = tokenize("value := true and not false or true");
+
+  assert.equal(
+    tokens.some((token) => token.scopes.includes("keyword.operator.logical.trb")),
+    false,
+    "removed word forms were highlighted as logical operators"
+  );
+  assert.equal(ruleStack.depth, 1, "removed logical operator fixture left an open TextMate rule");
+});

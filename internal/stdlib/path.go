@@ -14,15 +14,15 @@ func pathSource() string {
 		parts := value.split("/")
 		mut normalized: Array<String> := []
 		parts.each do |part|
-			if part == "" or part == "."
+			if part == "" || part == "."
 				next
 			end
 			if part == ".."
 				if absolute
-					if not normalized.empty?()
+					if !normalized.empty?()
 						normalized.pop()
 					end
-				elsif normalized.empty?() or normalized.last() == ".."
+				elsif normalized.empty?() || normalized.last() == ".."
 					normalized.push("..")
 				else
 					normalized.pop()
@@ -61,7 +61,7 @@ func pathSource() string {
 	def self.components(value: String): Array<String>
 		cleaned := Path.clean(value)
 		mut result: Array<String> := []
-		if cleaned == "." or cleaned == "/"
+		if cleaned == "." || cleaned == "/"
 			return result
 		end
 		cleaned.split("/").each do |part|
@@ -74,7 +74,7 @@ func pathSource() string {
 
 	def self.base(value: String): String
 		cleaned := Path.clean(value)
-		if cleaned == "/" or cleaned == "."
+		if cleaned == "/" || cleaned == "."
 			return cleaned
 		end
 		return Path.components(cleaned).last()
@@ -82,7 +82,7 @@ func pathSource() string {
 
 	def self.directory(value: String): String
 		cleaned := Path.clean(value)
-		if cleaned == "/" or cleaned == "."
+		if cleaned == "/" || cleaned == "."
 			return cleaned
 		end
 		absolute := Path.absolute(cleaned)

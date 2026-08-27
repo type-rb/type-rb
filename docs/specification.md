@@ -668,7 +668,7 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 
 ### 3.10 Operators
 
-- `!` and `not` accept non-nullable `Boolean`; unary `+` and `-` accept a
+- `!` accepts non-nullable `Boolean`; unary `+` and `-` accept a
   non-nullable `Integer` or `Float` and preserve that type.
 - `+` accepts numeric values or two `String` values. `-`, `*`, `/`, and `**`
   accept numeric values. When one numeric operand is `Float`, an `Integer`
@@ -680,7 +680,7 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   or a nullable value with `nil`. Equality for payload-bearing enums is
   reserved until one structural rule can be implemented identically by every
   backend.
-- `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
+- `&&` and `||` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.
 - Integer `/` truncates toward zero, `%` is its corresponding remainder, and a

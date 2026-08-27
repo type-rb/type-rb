@@ -1112,7 +1112,7 @@ func TestPortableOperatorRulesAndBackendSemantics(t *testing.T) {
   accumulated += 2
   mut enabled: Boolean := true
   enabled &&= false
-  words: Boolean := true and false
+  words: Boolean := true && false
   return grouped == 9 && quotient == -2 && remainder == -1 && power == 8 && float_power == 8.0 && ratio >= 4.0 && mixed_product == 25.0 && widened == 9.0 && accumulated == 3.0 && 1 == 1.0 && 1 < 1.5 && message == "typerb" && updated == 2 && !enabled && !words
 end
 `)
@@ -1263,11 +1263,11 @@ def branched(value: String?): Integer
 end
 
 def short_circuit(value: String?): Boolean
-	return value != nil and value.size() > 0
+	return value != nil && value.size() > 0
 end
 
 def inverse_short_circuit(value: String?): Boolean
-	return value == nil or value.size() == 0
+	return value == nil || value.size() == 0
 end
 
 def elsif_branch(value: String?): String
@@ -1359,7 +1359,7 @@ def email_size(account: Account): Integer
 end
 
 def has_name(profile: Profile): Boolean
-	return profile.nickname != nil and profile.nickname.size() > 0
+	return profile.nickname != nil && profile.nickname.size() > 0
 end
 `)
 
@@ -1963,6 +1963,24 @@ func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWordLogicalOperatorsAreRejectedAcrossModes(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "def bad(): Boolean\n\treturn true and false\nend\n", want: "unexpected token and"},
+		{source: "def bad(): Boolean\n\treturn true or false\nend\n", want: "unexpected token or"},
+		{source: "def bad(): Boolean\n\treturn not false\nend\n", want: "unexpected token not"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("word_logical_operator.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s expected %q, got %v", mode, test.want, err)
+			}
+		}
 	}
 }
 

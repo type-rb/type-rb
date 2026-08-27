@@ -4081,13 +4081,13 @@ func (c *Checker) checkUnaryOperator(span token.Span, operator string, operand t
 		return types.Type{Kind: types.Never, Name: "Never"}
 	}
 	if operand.Kind == types.Any && c.rubyNativeSyntax() {
-		if operator == "!" || operator == "not" {
+		if operator == "!" {
 			return types.FromName("Boolean")
 		}
 		return types.FromName("Any")
 	}
 	switch operator {
-	case "!", "not":
+	case "!":
 		if isNonNullable(operand, types.Bool) {
 			return types.FromName("Boolean")
 		}
@@ -4119,7 +4119,7 @@ func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, ri
 		return types.Type{Kind: types.Never, Name: "Never"}
 	}
 	if right.Kind == types.Never {
-		if operator == "&&" || operator == "||" || operator == "and" || operator == "or" {
+		if operator == "&&" || operator == "||" {
 			if isNonNullable(left, types.Bool) {
 				return types.FromName("Boolean")
 			}
@@ -4137,7 +4137,7 @@ func (c *Checker) checkBinaryOperator(span token.Span, operator string, left, ri
 	}
 
 	switch operator {
-	case "&&", "||", "and", "or":
+	case "&&", "||":
 		if isNonNullable(left, types.Bool) && isNonNullable(right, types.Bool) {
 			return types.FromName("Boolean")
 		}
@@ -5741,9 +5741,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.BinaryExpression:
 		left := c.checkExpression(n.Left, sc)
 		rightScope := sc
-		if n.Operator == "and" || n.Operator == "&&" {
+		if n.Operator == "&&" {
 			rightScope, _ = c.nullableConditionScopes(n.Left, sc)
-		} else if n.Operator == "or" || n.Operator == "||" {
+		} else if n.Operator == "||" {
 			_, rightScope = c.nullableConditionScopes(n.Left, sc)
 		}
 		right := c.checkExpression(n.Right, rightScope)
