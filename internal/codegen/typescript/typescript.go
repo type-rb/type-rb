@@ -1896,12 +1896,12 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	resultType := g.rawEnumResultType(call)
 	result := g.runtimeName("Result")
 	owner := g.enumCallOwner(call)
-	parts := []string{"((): " + resultType + " => { const value = " + argument + "; switch (value) {"}
+	parts := []string{"((value: " + g.tsType(call.RawType) + "): " + resultType + " => { switch (value) {"}
 	for _, item := range call.RawValues {
 		parts = append(parts, "case "+item.Raw+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
 	}
 	message := strconv.Quote("unknown raw value for " + call.EnumName)
-	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })()")
+	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })("+argument+")")
 	return strings.Join(parts, " ")
 }
 
@@ -3143,11 +3143,11 @@ func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptReco
 }
 
 func portableFloatInteger(value, operation string) string {
-	return "((): number => { const value = " + value + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = " + operation + "; if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
+	return "((value: number): number => { if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = " + operation + "; if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })(" + value + ")"
 }
 
 func portableFloatString(value string) string {
-	return "((): string => { const value = " + value + "; if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })()"
+	return "((value: number): string => { if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })(" + value + ")"
 }
 
 func tsJSONParse(call *ir.Call, argument string, comments bool) string {
