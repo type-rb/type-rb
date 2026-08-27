@@ -90,6 +90,7 @@ type RecordField struct {
 	JSONName     string
 	Type         types.Type
 	Optional     bool
+	NamedOnly    bool
 	ResultBridge NativeResultBridge
 }
 
@@ -1404,18 +1405,17 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 						}
 						exported.EnumMembers = append(exported.EnumMembers, member.Name)
 						variant := EnumVariant{Name: member.Name, RawValue: rawExpression(member.RawValue)}
-						parameterTypes := make([]types.Type, 0, len(member.Parameters))
 						for _, parameter := range member.Parameters {
 							fieldType := typeRef(parameter.Type)
-							variant.Fields = append(variant.Fields, RecordField{Name: parameter.Name, Type: fieldType})
-							parameterTypes = append(parameterTypes, fieldType)
+							variant.Fields = append(variant.Fields, RecordField{Name: parameter.Name, Type: fieldType, NamedOnly: parameter.NamedOnly})
 						}
 						exported.EnumVariants = append(exported.EnumVariants, variant)
 						kind := ValueExport
-						if len(parameterTypes) > 0 {
+						if len(member.Parameters) > 0 {
 							kind = FunctionExport
 						}
-						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: callsignature.FromPositionalTypes(parameterTypes, len(parameterTypes)), Class: true}
+						parameterSignature, variadic := parameters(member.Parameters)
+						exported.Members[member.Name] = Member{Name: member.Name, Kind: kind, Type: typ, Parameters: parameterSignature, Variadic: variadic, Class: true}
 					case *ast.MethodStatement:
 						if public(member.Name) {
 							parameterTypes, variadic := parameters(member.Parameters)

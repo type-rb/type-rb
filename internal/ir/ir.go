@@ -640,6 +640,9 @@ type CallArgument struct {
 	Name  string
 	Value Expression
 	Splat string
+	// Field is populated for enum construction after positional and named-only
+	// arguments have been bound to their declared payload fields.
+	Field string
 }
 type Call struct {
 	ExprBase
@@ -692,7 +695,8 @@ type EnumConstruct struct {
 	EnumName      string
 	Member        string
 	TypeArguments []types.Type
-	Arguments     []Expression
+	Arguments     []CallArgument
+	CallSignature []callsignature.Parameter
 	Reference     *Reference
 }
 

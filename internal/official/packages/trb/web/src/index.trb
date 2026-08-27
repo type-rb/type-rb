@@ -35,9 +35,9 @@ end
 
 enum ParameterError
 	MalformedQuery(error: PercentDecodeError)
-	Missing(source: ParameterSource, name: String)
-	Duplicate(source: ParameterSource, name: String)
-	Invalid(source: ParameterSource, name: String, value: String, expected: String)
+	Missing(*, source: ParameterSource, name: String)
+	Duplicate(*, source: ParameterSource, name: String)
+	Invalid(*, source: ParameterSource, name: String, value: String, expected: String)
 end
 
 enum EndpointInputError

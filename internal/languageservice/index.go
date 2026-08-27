@@ -1058,15 +1058,26 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 			if privateName(member.Name) {
 				continue
 			}
-			parameters := make([]string, 0, len(member.Fields))
+			parameters := make([]string, 0, len(member.Fields)+1)
+			callParameters := make([]CallParameter, 0, len(member.Fields))
+			namedBoundary := false
 			for _, field := range member.Fields {
+				if field.NamedOnly && !namedBoundary {
+					parameters = append(parameters, "*")
+					namedBoundary = true
+				}
 				parameters = append(parameters, field.Name+": "+displayType(field.Type))
+				callParameters = append(callParameters, callParameter(field))
 			}
 			detail := member.Name
 			if len(parameters) > 0 {
 				detail += "(" + strings.Join(parameters, ", ") + ")"
 			}
-			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail, Definition: sourceDefinition(sourcePath, member.Name, member.SourceSpan())})
+			var call *CallInfo
+			if len(member.Fields) > 0 {
+				call = &CallInfo{ParameterCount: len(member.Fields), Parameters: callParameters}
+			}
+			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail, Type: types.FromName(owner), Call: call, Definition: sourceDefinition(sourcePath, member.Name, member.SourceSpan())})
 		case *ir.Method:
 			if !privateName(member.Name) {
 				instance = append(instance, methodSymbol(member, CompletionMethod, sourcePath))

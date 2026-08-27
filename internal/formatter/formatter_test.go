@@ -551,12 +551,12 @@ func TestFormatConditionalExpressionAndTransfers(t *testing.T) {
 }
 
 func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
-	source := []byte("enum  Token # token\nText(value:String) # text\nPair(left:Integer,right:Integer)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Pair(left,right)\nreturn \"pair\"\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
+	source := []byte("enum  Token # token\nText(value:String) # text\nSpan(id:Integer,*,before:String,after:String)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Span(id,after:current,before:previous)\nreturn previous+current+id.to_s()\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "enum Token # token\n\tText(value: String) # text\n\tPair(left: Integer, right: Integer)\n\tEOF\nend\ndef render(value: Token): String\n\tcase value\n\twhen Token::Text(text) # bind\n\t\treturn text\n\twhen Token::Pair(left, right)\n\t\treturn \"pair\"\n\twhen Token::EOF\n\t\treturn \"eof\"\n\tend\nend\n"
+	want := "enum Token # token\n\tText(value: String) # text\n\tSpan(id: Integer, *, before: String, after: String)\n\tEOF\nend\ndef render(value: Token): String\n\tcase value\n\twhen Token::Text(text) # bind\n\t\treturn text\n\twhen Token::Span(id, after: current, before: previous)\n\t\treturn previous + current + id.to_s()\n\twhen Token::EOF\n\t\treturn \"eof\"\n\tend\nend\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected payload enum formatting:\n%s", formatted)
 	}

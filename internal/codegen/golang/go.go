@@ -847,6 +847,7 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 		returnType := name + goTypeParameterArguments(alias.TypeParameters)
 		g.line("func " + constructor + goTypeParameterDeclarations(alias.TypeParameters) + "(" + g.parameters(variant.Fields) + ") " + returnType + " {")
 		g.indent++
+		g.parameterDefaults(variant.Fields)
 		targetConstructor := targetPrefix + "New" + targetName + goIdentifier(variant.Name, true)
 		if len(alias.Target.Args) > 0 {
 			arguments := make([]string, len(alias.Target.Args))
@@ -855,10 +856,7 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 			}
 			targetConstructor += "[" + strings.Join(arguments, ", ") + "]"
 		}
-		values := make([]string, len(variant.Fields))
-		for index, field := range variant.Fields {
-			values[index] = g.bindingIdentifier(field.Name)
-		}
+		values := g.enumParameterArguments(variant.Fields)
 		g.line("return " + targetConstructor + "(" + strings.Join(values, ", ") + ")")
 		g.indent--
 		g.line("}")
@@ -922,6 +920,7 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		genericArguments := goTypeParameterArguments(enum.TypeParameters)
 		g.line("func " + constructor + genericDeclarations + "(" + g.parameters(member.Fields) + ") " + name + genericArguments + " {")
 		g.indent++
+		g.parameterDefaults(member.Fields)
 		fields := []string{"Kind: " + constant + "Tag"}
 		for _, field := range member.Fields {
 			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
@@ -941,6 +940,23 @@ func enumHasPayload(enum *ir.Enum) bool {
 		}
 	}
 	return false
+}
+
+func (g *generator) enumParameterArguments(parameters []ir.Parameter) []string {
+	positional := []string{}
+	named := []string{}
+	for _, parameter := range parameters {
+		value := g.bindingIdentifier(parameter.Name)
+		if parameter.NamedOnly {
+			named = append(named, strconv.Quote(parameter.Name)+": "+value)
+		} else {
+			positional = append(positional, value)
+		}
+	}
+	if len(named) > 0 {
+		positional = append(positional, "map[string]any{"+strings.Join(named, ", ")+"}")
+	}
+	return positional
 }
 
 func goTypeParameterDeclarations(parameters []string) string {
@@ -1614,8 +1630,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument)
+			parts[index] = g.expr(argument.Value)
 		}
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 		name := "New" + goIdentifier(n.EnumName, true) + goIdentifier(n.Member, true)
 		if alias := g.referenceAlias(n.Reference); alias != "" {
 			name = alias + "." + name

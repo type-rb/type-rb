@@ -552,7 +552,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		member := &ir.EnumMember{Base: base(n.Base), Name: n.Name}
 		member.RawValue = l.expression(n.RawValue)
 		for _, field := range n.Parameters {
-			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type)})
+			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type), NamedOnly: field.NamedOnly})
 		}
 		return member
 	case *ast.TypeAliasStatement:
@@ -564,7 +564,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		for _, variant := range semantic.Variants {
 			member := ir.EnumMember{Name: variant.Name}
 			for _, field := range variant.Fields {
-				member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: field.Type})
+				member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: field.Type, NamedOnly: field.NamedOnly})
 			}
 			result.Variants = append(result.Variants, member)
 		}
@@ -1025,9 +1025,19 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			return result
 		}
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
-			result := &ir.EnumConstruct{ExprBase: base, EnumName: variant.EnumName, Member: variant.Name, TypeArguments: append([]types.Type(nil), variant.TypeArguments...), Reference: l.reference(n.Callee)}
-			for _, argument := range n.Arguments {
-				result.Arguments = append(result.Arguments, l.expression(argument.Value))
+			result := &ir.EnumConstruct{
+				ExprBase: base, EnumName: variant.EnumName, Member: variant.Name,
+				TypeArguments: append([]types.Type(nil), variant.TypeArguments...),
+				CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
+				Reference:     l.reference(n.Callee),
+			}
+			indexes := l.checked.EnumArgumentIndexes[n]
+			for index, argument := range n.Arguments {
+				field := ""
+				if index < len(indexes) && indexes[index] >= 0 && indexes[index] < len(variant.Fields) {
+					field = variant.Fields[indexes[index]].Name
+				}
+				result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat, Field: field})
 			}
 			return result
 		}
@@ -1335,7 +1345,7 @@ func (l *lowerer) resultFailure(span token.Span, boundary resultBoundary, value 
 		EnumName:      "Result",
 		Member:        "Err",
 		TypeArguments: []types.Type{boundary.success, boundary.fails},
-		Arguments:     []ir.Expression{value},
+		Arguments:     []ir.CallArgument{{Value: value, Field: "error"}},
 		Reference:     resultReference(),
 	}
 }

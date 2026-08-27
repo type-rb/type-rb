@@ -1548,16 +1548,24 @@ func (p *Parser) parseCase() ast.Statement {
 						p.errorAt(call.Span(), "union type pattern expects exactly one binding")
 						valid = false
 					}
+					seenNamed := false
 					for _, argument := range call.Arguments {
 						identifier, identifierOK := argument.Value.(*ast.Identifier)
-						if !identifierOK || argument.Name != "" || argument.Splat != "" {
+						if argument.Name != "" {
+							seenNamed = true
+						} else if seenNamed {
+							p.errorAt(argument.Value.Span(), "positional pattern binding cannot follow a named binding")
+							valid = false
+						}
+						if !identifierOK || argument.Splat != "" || typePattern && argument.Name != "" {
 							p.errorAt(argument.Value.Span(), "case pattern bindings must be identifiers")
 							valid = false
 							continue
 						}
 						branch.Bindings = append(branch.Bindings, ast.PatternBinding{
-							Base: ast.Base{SourceSpan: identifier.Span()},
-							Name: identifier.Name,
+							Base:  ast.Base{SourceSpan: identifier.Span()},
+							Name:  identifier.Name,
+							Label: argument.Name,
 						})
 					}
 					if valid {

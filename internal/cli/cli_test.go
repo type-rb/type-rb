@@ -6640,11 +6640,11 @@ def parameter_error(error: ParameterError): Response
 	case error
 	when ParameterError::MalformedQuery(decode_error)
 		return text("malformed:" + decode_error.input, 400)
-	when ParameterError::Missing(source, name)
+	when ParameterError::Missing(source: source, name: name)
 		return text("missing:" + source_name(source) + ":" + name, 400)
-	when ParameterError::Duplicate(source, name)
+	when ParameterError::Duplicate(source: source, name: name)
 		return text("duplicate:" + source_name(source) + ":" + name, 400)
-	when ParameterError::Invalid(source, name, value, expected)
+	when ParameterError::Invalid(source: source, name: name, value: value, expected: expected)
 		return text("invalid:" + source_name(source) + ":" + name + ":" + value + ":" + expected, 400)
 	end
 end
@@ -6767,11 +6767,11 @@ def parameter_error_kind(error: ParameterError): String
 	case error
 	when ParameterError::MalformedQuery(_error)
 		return "malformed"
-	when ParameterError::Missing(_source, _name)
+	when ParameterError::Missing(source: _source, name: _name)
 		return "missing"
-	when ParameterError::Duplicate(_source, _name)
+	when ParameterError::Duplicate(source: _source, name: _name)
 		return "duplicate"
-	when ParameterError::Invalid(_source, _name, _value, _expected)
+	when ParameterError::Invalid(source: _source, name: _name, value: _value, expected: _expected)
 		return "invalid"
 	end
 end

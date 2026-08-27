@@ -283,11 +283,13 @@ type CaseBranch struct {
 	Body         []Statement
 }
 
-// PatternBinding is a name introduced by a payload enum pattern. The payload
-// type comes from the matched enum member and is attached in typed IR.
+// PatternBinding is a name introduced by a payload enum pattern. Label names a
+// named-only payload field; an empty label binds the next positional field. The
+// payload type comes from the matched enum member and is attached in typed IR.
 type PatternBinding struct {
 	Base
-	Name string
+	Name  string
+	Label string
 }
 
 type CaseStatement struct {

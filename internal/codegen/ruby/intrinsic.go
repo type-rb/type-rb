@@ -514,13 +514,13 @@ func rubyWebParameterBinding(call *ir.Call, receiver, source string) string {
 	}
 	sourceValue := "ParameterSource::" + sourceName
 	missing := func(name string) string {
-		return "Result::Err.new(ParameterError::Missing.new(" + sourceValue + ", " + strconv.Quote(name) + "))"
+		return "Result::Err.new(ParameterError::Missing.new(source: " + sourceValue + ", name: " + strconv.Quote(name) + "))"
 	}
 	duplicate := func(name string) string {
-		return "Result::Err.new(ParameterError::Duplicate.new(" + sourceValue + ", " + strconv.Quote(name) + "))"
+		return "Result::Err.new(ParameterError::Duplicate.new(source: " + sourceValue + ", name: " + strconv.Quote(name) + "))"
 	}
 	invalid := func(name, value, expected string) string {
-		return "Result::Err.new(ParameterError::Invalid.new(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + "))"
+		return "Result::Err.new(ParameterError::Invalid.new(source: " + sourceValue + ", name: " + strconv.Quote(name) + ", value: " + value + ", expected: " + strconv.Quote(expected) + "))"
 	}
 	var body strings.Builder
 	body.WriteString("parameter_values = Hash.new { |hash, key| hash[key] = [] }; ")

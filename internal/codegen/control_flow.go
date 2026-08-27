@@ -711,11 +711,16 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		return prefix, &copy
 	case *ir.EnumConstruct:
 		copy := *node
-		prefix, values, ok := n.expressions(node.Arguments)
-		if !ok {
-			return prefix, nil
+		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
+		prefix := []ir.Statement{}
+		for index := range copy.Arguments {
+			argumentPrefix, value := n.expression(copy.Arguments[index].Value)
+			prefix = append(prefix, argumentPrefix...)
+			if value == nil {
+				return prefix, nil
+			}
+			copy.Arguments[index].Value = value
 		}
-		copy.Arguments = values
 		return prefix, &copy
 	case *ir.TypeApply:
 		prefix, receiver := n.expression(node.Receiver)

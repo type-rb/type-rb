@@ -907,7 +907,16 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			for _, field := range member.Fields {
 				fields = append(fields, field.Name)
 			}
-			g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			if hasNamedOnlyParameters(member.Fields) {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => {" + tsTrailingComment(member.TrailingComment))
+				g.indent++
+				g.parameterDefaults(member.Fields)
+				g.line("return { " + strings.Join(fields, ", ") + " };")
+				g.indent--
+				g.line("},")
+			} else {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			}
 		}
 	}
 	g.enumMethodProperties(enum)
@@ -1467,8 +1476,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument)
+			parts[index] = g.expr(argument.Value)
 		}
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 		name := n.EnumName + "." + n.Member
 		if len(n.TypeArguments) > 0 {
 			arguments := make([]string, len(n.TypeArguments))

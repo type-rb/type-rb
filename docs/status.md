@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -99,9 +99,10 @@ and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, positional-only and
-bare-`*` named-only parameters with callee-owned defaults, and classes, modules and
-generic interfaces, records, ordinary and raw-value enums, payload enums as sum
-types, enum instance methods, transparent `alias` declarations, nominal
+bare-`*` named-only parameters with callee-owned defaults, and classes, modules
+and generic interfaces, records, ordinary and raw-value enums, payload enums as
+sum types with positional and named-only fields in constructors and patterns,
+enum instance methods, transparent `alias` declarations, nominal
 `newtype` declarations over concrete non-nullable representations, explicit
 generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
