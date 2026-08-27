@@ -65,27 +65,42 @@ func (r projectInputResolver) exportStatements(modulePath, namespace string, sta
 		case *ast.ModuleStatement:
 			r.exportStatements(modulePath, projectQualifiedName(namespace, node.Name), node.Body, module)
 		case *ast.ImportStatement:
+			if namespace != "" {
+				continue
+			}
 			module.Imports = append(module.Imports, packageextension.ProjectImport{
 				Path: node.Path, ModulePath: r.importModulePath(modulePath, node.Path),
 				Symbols: append([]string(nil), node.Symbols...), Alias: node.Alias, Span: exportSourceSpan(node.Span()),
 			})
 		case *ast.TypeAliasStatement:
+			if namespace != "" {
+				continue
+			}
 			module.TypeAliases = append(module.TypeAliases, packageextension.ProjectTypeAlias{
 				Name: projectQualifiedName(namespace, node.Name), TypeParameters: projectTypeParameterNames(node.TypeParameters),
 				Target: r.typeUse(modulePath, namespace, node.Target, projectTypeParameterSet(node.TypeParameters)),
 				Span:   exportSourceSpan(node.Span()),
 			})
 		case *ast.NewtypeStatement:
+			if namespace != "" {
+				continue
+			}
 			module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
 				Name: projectQualifiedName(namespace, node.Name), Target: r.typeUse(modulePath, namespace, node.Target, nil), Span: exportSourceSpan(node.Span()),
 			})
 		case *ast.RecordStatement:
 			module.Records = append(module.Records, r.exportRecord(modulePath, namespace, node))
 		case *ast.ClassStatement:
+			if namespace != "" {
+				continue
+			}
 			module.Classes = append(module.Classes, r.exportClass(modulePath, namespace, node))
 		case *ast.EnumStatement:
 			module.Enums = append(module.Enums, r.exportEnum(modulePath, namespace, node))
 		case *ast.MethodStatement:
+			if namespace != "" {
+				continue
+			}
 			method := r.exportMethod(modulePath, namespace, node, nil)
 			method.Name = projectQualifiedName(namespace, method.Name)
 			module.Functions = append(module.Functions, method)

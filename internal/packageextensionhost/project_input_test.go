@@ -176,13 +176,25 @@ end
 
 func TestExportProjectDeclarationInputIncludesNestedModuleMetadataWithQualifiedIdentity(t *testing.T) {
 	program := parseProjectInputTest(t, "commands", `module CLI
+	alias Count = Integer
+
+	def build_count(): Integer
+		return 1
+	end
+
+	class Helper
+		def value(): Integer
+			return 1
+		end
+	end
+
 	record Payload
 		value: String
 	end
 
 	record Options
 		payload: Payload
-		count: Integer = 1 @schema(label: "count")
+		count: Count = 1 @schema(label: "count")
 	end
 
 	enum Command
@@ -204,6 +216,9 @@ end
 	if len(module.Records) != 3 {
 		t.Fatalf("nested records were not exported: %#v", module.Records)
 	}
+	if len(module.TypeAliases) != 0 || len(module.Classes) != 0 || len(module.Functions) != 0 {
+		t.Fatalf("nested declarations outside the v6 metadata contract leaked into provider discovery: %#v", module)
+	}
 	byName := map[string]packageextension.ProjectRecord{}
 	for _, record := range module.Records {
 		byName[record.Name] = record
@@ -214,6 +229,10 @@ end
 	}
 	if len(options.Fields) != 2 || !options.Fields[1].HasDefault || len(options.Fields[1].Attributes) != 1 {
 		t.Fatalf("nested record default metadata is incomplete: %#v", options)
+	}
+	count := options.Fields[1].Type
+	if count.Resolved.Name != "Integer" || len(count.ResolutionPath) != 1 || count.ResolutionPath[0].Name != "CLI::Count" {
+		t.Fatalf("hidden nested alias did not participate in type resolution: %#v", count)
 	}
 	payload := options.Fields[0].Type
 	if payload.Authored.Name != "Payload" || payload.Authored.Definition == nil || payload.Authored.Definition.ModulePath != "commands" || payload.Resolved.Name != "CLI::Payload" || len(payload.ResolutionPath) != 1 || payload.ResolutionPath[0].Name != "CLI::Payload" {
