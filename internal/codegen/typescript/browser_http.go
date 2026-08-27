@@ -140,7 +140,7 @@ func (g *generator) browserResponseJSON(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	resultType, successType, _ := g.browserResultParts(call)
-	builder := &tsJSONCodecBuilder{}
+	builder := g.jsonCodecBuilder("")
 	decoder := builder.decoder(call.Codec)
 	jsonValue := "JsonValue"
 	contractError := g.browserError(call, "Contract", "message", "response")
@@ -155,7 +155,7 @@ func (g *generator) browserJSONBody(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	resultType, _, _ := g.browserResultParts(call)
-	builder := &tsJSONCodecBuilder{}
+	builder := g.jsonCodecBuilder("")
 	encoder := builder.encoder(call.Codec)
 	contractError := g.browserError(call, "Contract", "message", "null")
 	return "((): " + resultType + " => { " + builder.source.String() +

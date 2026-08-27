@@ -15,6 +15,45 @@ import { SQLAdapter, SQLDialect } from trb/jobs/sql
 JOBS_ADAPTER: JobAdapter := SQLAdapter.new(dialect: SQLDialect::SQLite, source: "jobs.sqlite3")
 `
 
+func TestCompileProjectKeepsNestedJobSubclassOutsideProviderDiscovery(t *testing.T) {
+	sources := []SourceUnit{
+		{
+			Filename: "/project/src/admin/jobs.trb", ModulePath: "admin/jobs", Package: "admin",
+			Source: []byte(`import { Job } from trb/jobs
+
+module Admin
+	class CleanupJob < Job
+		def perform()
+			return
+		end
+	end
+end
+`),
+		},
+		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
+		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
+	}
+	for _, options := range []Options{
+		{Mode: "go", GoModule: "example.com/jobs"},
+		{Mode: "ruby", RubyLoader: "require_relative"},
+		{Mode: "typescript", TypeScriptRuntime: "bun"},
+	} {
+		t.Run(options.Mode, func(t *testing.T) {
+			options.SourceRoot = "/project/src"
+			options.ProjectRoot = "/project"
+			options.JobsConfiguration = "config/jobs"
+			artifacts, err := CompileProject(sources, options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest := jobsintegration.ManifestFrom(artifactForModule(artifacts, "admin/jobs").IR.Extensions)
+			if manifest == nil || len(manifest.Jobs) != 0 {
+				t.Fatalf("nested class unexpectedly entered Jobs discovery: %#v", manifest)
+			}
+		})
+	}
+}
+
 func TestCompileProjectGeneratesTypedGoJobEnqueueRuntime(t *testing.T) {
 	sources := []SourceUnit{
 		{

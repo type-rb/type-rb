@@ -92,6 +92,10 @@ type Import struct {
 	SymbolTypes          map[string]types.Type
 	SymbolParameters     map[string][]callsignature.Parameter
 	SymbolTypeParameters map[string][]string
+	// RecordDefaults identifies imported records whose generated constructor
+	// owns one or more source defaults. TypeScript uses this to retain a value
+	// import for construction while ordinary records remain type-only imports.
+	RecordDefaults map[string]bool
 	// TypeContracts retain the structural declarations referenced by native
 	// package signatures so editor tooling can instantiate their members.
 	TypeContracts map[string]TypeContract
@@ -140,7 +144,15 @@ type Class struct {
 	External       bool
 	Superclass     Expression
 	Implements     []types.Type
-	Body           []Statement
+	// ResolvedImplements is parallel to Implements and expands transparent
+	// aliases for semantic dispatch without changing generated source types.
+	ResolvedImplements []types.Type
+	// ImplementReferences is parallel to Implements and retains the resolved
+	// module identity for imported interfaces.
+	ImplementReferences []*Reference
+	// ResolvedImplementReferences is parallel to ResolvedImplements.
+	ResolvedImplementReferences []*Reference
+	Body                        []Statement
 }
 
 func (*Class) irStatement() {}
@@ -163,6 +175,7 @@ type RecordField struct {
 	Base
 	Name       string
 	Type       types.Type
+	Default    Expression
 	Attributes []Attribute
 }
 
@@ -180,9 +193,10 @@ func (*Enum) irStatement() {}
 
 type EnumMember struct {
 	Base
-	Name     string
-	Fields   []Parameter
-	RawValue Expression
+	Name       string
+	Fields     []Parameter
+	RawValue   Expression
+	Attributes []Attribute
 }
 
 func (*EnumMember) irStatement() {}
@@ -191,8 +205,15 @@ type TypeAlias struct {
 	Base
 	Name           string
 	TypeParameters []string
-	Target         types.Type
-	Variants       []EnumMember
+	AuthoredTarget types.Type
+	// AuthoredTargetReference identifies the declaration named directly in
+	// source, independently of the fully expanded semantic target.
+	AuthoredTargetReference *Reference
+	Target                  types.Type
+	// TargetReference retains the declaration that owns the semantically
+	// expanded target so transparent aliases share one declaration identity.
+	TargetReference *Reference
+	Variants        []EnumMember
 }
 
 func (*TypeAlias) irStatement() {}
@@ -648,10 +669,18 @@ type Call struct {
 	CallSignature   []callsignature.Parameter
 	Block           *Block
 	Codec           *CodecSchema
+	RecordTarget    Expression
+	RecordFields    []RecordFieldContract
 	DeclarationOnly bool
 }
 
 func (*Call) irExpression() {}
+
+type RecordFieldContract struct {
+	Name       string
+	Type       types.Type
+	HasDefault bool
+}
 
 // Lambda is a first-class lexical function. Parameters and result remain
 // target-independent so every backend can emit its native closure form.
@@ -690,6 +719,7 @@ type CodecField struct {
 type EnumConstruct struct {
 	ExprBase
 	EnumName      string
+	Owner         string
 	Member        string
 	TypeArguments []types.Type
 	Arguments     []Expression
@@ -701,9 +731,11 @@ func (*EnumConstruct) irExpression() {}
 // EnumCall preserves source-level enum methods independently from backend
 // enum representations. Generated raw_value/from_raw operations use the same
 // node so every backend and the REPL share one checked semantic boundary.
+// Owner preserves the exact local declaration identity across namespaces.
 type EnumCall struct {
 	ExprBase
 	EnumName      string
+	Owner         string
 	Method        string
 	Receiver      Expression
 	Arguments     []CallArgument
@@ -786,9 +818,13 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 // project references use Package, Alias, Symbol, and ExportKind for
 // target-specific qualification.
 type Reference struct {
-	Package        string
-	Alias          string
-	Symbol         string
+	Package string
+	Alias   string
+	Symbol  string
+	// Owner and ClassMember distinguish imported type-member dispatch from a
+	// package function and preserve the source class/instance member kind.
+	Owner          string
+	ClassMember    bool
 	ExportKind     string
 	Intrinsic      string
 	ReceiverMethod bool

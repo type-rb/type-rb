@@ -911,13 +911,29 @@ type of each named field. `Array<Integer | String>[0]` therefore remains
 The complete public collection receiver API belongs to the
 [standard-library reference](standard-library.md).
 
-### 3.13 Enums, raw values, and sum types
+### 3.13 Records
+
+- A record is a closed nominal product with immutable named fields.
+- Construction is keyword-only. Every required field is supplied exactly once;
+  unknown and duplicate field labels are errors.
+- A field may use `name: Type = expression`. Required fields must precede
+  fields with defaults. A default is checked against its declared type and may
+  reference only earlier fields.
+- Explicit argument expressions are evaluated left to right in authored order.
+  Omitted defaults are then evaluated once per construction, in declaration
+  order and in the defining module. Explicit `nil` is not omission.
+- Constructor defaults are not a wire-decoding policy. JSON, ORM, web, and
+  other decoders apply only their explicitly declared missing-field behavior.
+- The canonical annotated spelling is
+  `name: Type = expression @attribute(...)`.
+
+### 3.14 Enums, raw values, and sum types
 
 An `enum` declaration defines a closed nominal set of uppercase variants. It
 is allowed at top level or directly inside a module. TypeRB uses the shared
 variant and exhaustive-case model for two related but distinct purposes.
 
-#### 3.13.1 Enumerated values and raw values
+#### 3.14.1 Enumerated values and raw values
 
 - An ordinary member is a payloadless value such as `Ready`.
 - A raw-value enum assigns every payloadless member an explicit String or
@@ -951,7 +967,7 @@ Typed JSON codecs encode a raw-value enum as its raw String or Integer and
 decode only declared raw values. Unknown input produces `JsonError`; the
 target-language object representation never determines the wire value.
 
-#### 3.13.2 Payload enums as sum types
+#### 3.14.2 Payload enums as sum types
 
 - A payload enum has at least one payload-bearing variant such as
   `Value(value: String)`. It may also contain payloadless variants. Payload
@@ -983,7 +999,7 @@ def describe(token: Token): String
 end
 ```
 
-#### 3.13.3 Shared enum behavior
+#### 3.14.3 Shared enum behavior
 
 - Members are explicitly qualified with `EnumName::Member`. They infer the
   enum's nominal type and cannot be mixed with members of another enum even
@@ -999,8 +1015,12 @@ end
 - Without `else`, a case must list every member. With `else`, omitted members
   are handled by that branch. The selector is evaluated exactly once in every
   backend and the REPL.
+- An enum member may carry postfix attributes after its name, payload, or raw
+  value. The core language preserves and type-checks attribute arguments but
+  assigns no behavior to an attribute name; a compiler-integrated package owns
+  that contract.
 
-### 3.14 Value-producing control flow
+### 3.15 Value-producing control flow
 
 - `if` and `case` retain their statement forms and may also appear wherever an
   expression is accepted.
@@ -1054,7 +1074,7 @@ when Result::Err(error)
 end
 ```
 
-### 3.15 Class member model and deferred design
+### 3.16 Class member model and deferred design
 
 - Instance fields and instance methods are accessed through an instance. A
   method declared with `def self.name()` is a class member and is accessed
