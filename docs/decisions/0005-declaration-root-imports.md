@@ -98,6 +98,11 @@ The alias changes the source and generated local binding. It does not change
 the canonical exported or native declaration identity, owner, runtime export
 name, or provider selection.
 
+A source module binds one imported declaration identity under at most one local
+name. An identical repeated binding is redundant. Importing the same
+declaration again under a different alias is an error rather than a way to
+create synonymous local spellings.
+
 ### Bare root shorthand
 
 A bare import binds one root-eligible public top-level declaration whose name
@@ -159,8 +164,7 @@ is ambiguous. Exact named imports remain available when the declaration source
 is allowed to contain the collision:
 
 ```trb
-import { JSON } from some/json
-import { Json as LegacyJson } from some/json
+import { JSON, Json as LegacyJson } from some/json
 ```
 
 A bare import may use `as` to resolve a local binding conflict. The resolver
@@ -174,12 +178,18 @@ WireJSON.encode(value)
 
 ### Root stability and declaration provenance
 
-Formatting stability is a property of the resolved target's effective export
-surface, not merely of its source file. A target is root-stable only when every
-contribution that can add a root-eligible public declaration is subject to the
-TypeRB root-collision rule. Contributions include authored TypeRB source,
-compiler-generated declarations, attached provider catalogs, and native
-declaration data.
+Root stability does not change bare-import resolution. Both root-stable and
+non-root-stable targets use the same current zero-, one-, or multiple-match
+rule. It determines only whether tooling may automatically convert between a
+bare root and its exact named form while canonicalizing imports.
+
+Root stability is a compiler-derived proof for a resolved target, selected
+mode, and locked version. It is not a package-authored boolean or formatting
+preference. The proof covers the target's effective export surface, not merely
+its source file. A target is root-stable only when every contribution that can
+add a root-eligible public declaration is subject to the TypeRB root-collision
+rule. Contributions include authored TypeRB source, compiler-generated
+declarations, attached provider catalogs, and native declaration data.
 
 For a root-stable target, at most one root-eligible declaration may match the
 final path segment after ASCII case folding. The compiler validates the rule
@@ -190,7 +200,10 @@ case-fold-equivalent names.
 
 The unique root candidate set is part of a root-stable target's public API.
 Removing or renaming its unique root is a breaking change. Adding a second
-matching root is invalid rather than a compatible extension.
+matching root is invalid rather than a compatible extension. Changing a
+root-stable target to non-root-stable is also a breaking change even when its
+current root remains unique, because it withdraws the compatibility guarantee
+used by formatter canonicalization.
 
 A target is non-root-stable when any contribution preserves names from an
 ecosystem that TypeRB cannot constrain. Examples include TypeScript
@@ -209,10 +222,20 @@ Capability-only use has a separate bindingless form:
 activate trb/platform/ruby/native
 ```
 
-`activate` is a contextual top-level statement introducer, not a globally
-reserved identifier. It is recognized as this form only when followed by a
-valid import path in statement position. Existing declarations and calls named
-`activate`, such as `activate(user)`, remain valid.
+`activate` is a contextual source-module top-level statement introducer, not a
+globally reserved identifier. The unparenthesized command-shaped form
+`activate PATH` enters activation grammar before target resolution and then
+requires exactly one syntactically valid import path. An unknown target,
+unsupported mode, missing capability, or malformed activation produces an
+activation diagnostic; the parser never falls back to a Ruby-native call based
+on resolver metadata.
+
+Identifier uses outside that statement form remain valid, including
+`activate(user)`, `receiver.activate(user)`, and declarations named `activate`.
+In Ruby mode, an unparenthesized top-level native call such as `activate user`
+or `activate "plugin"` conflicts with the activation form and must use
+parentheses. Calls in class or method bodies are not source-module activation
+statements.
 
 `activate` uses the same canonical path and mode resolution as an import, but
 does not perform declaration-root matching and does not accept a named list or
@@ -222,10 +245,10 @@ or more of the following:
 - a compiler-owned syntax, type, JSX, or framework capability; or
 - a manifest-authorized and validated declaration-provider activation.
 
-The target declares a mode-specific set of applicable capabilities. Both
-`activate` and any normal declaration import from that target enable the full
-applicable set. Capability-specific selectors are deferred. Adding or removing
-an applicable capability can change source or runtime behavior and is
+The target declares a mode-specific set of applicable capabilities. Both an
+authored `activate` and any authored declaration import from that target enable
+the full applicable set. Capability-specific selectors are deferred. Adding or
+removing an applicable capability can change source or runtime behavior and is
 therefore a breaking change to the target's public contract.
 
 Activating an ordinary module with no declared capability is an error. An
@@ -233,10 +256,10 @@ arbitrary module cannot use this form merely to request runtime side effects.
 The compiler never executes package-supplied source code as part of capability
 activation or provider evaluation.
 
-A normal declaration import also enables the declared applicable capabilities
-attached to its resolved target. A module that imports and uses `ReactNode`,
-for example, does not need a second activation line to select the React JSX and
-type support:
+An authored declaration import also enables the declared applicable
+capabilities attached to its resolved target. A module that imports and uses
+`ReactNode`, for example, does not need a second activation line to select the
+React JSX and type support:
 
 ```trb
 import { ReactNode } from trb/platform/typescript/react
@@ -254,20 +277,36 @@ end
 ```
 
 Each source module has its own active capability set, derived from that
-module's imports and `activate` forms. Module-local syntax gates, JSX rules,
-unbound provider declarations, and framework DSL or name-resolution rules are
-available only when their capability is active in that source module.
-Activation in one file does not grant those facilities to another file and is
-not re-exported transitively.
+module's authored imports and authored `activate` forms. Module-local syntax
+gates, JSX rules, unbound provider declarations, and framework DSL or
+name-resolution rules are available only when their capability is active in
+that source module. Activation in one file does not grant those facilities to
+another file and is not re-exported transitively.
 
-A provider-generated member that is part of an imported declaration's
-effective public surface follows that declaration instead. For example, a
-module that imports an application model may use its public generated query
-methods without separately activating the ORM provider. This does not activate
-the capability in the consuming module: native syntax, JSX, unbound provider
-declarations, and unrelated framework rules remain unavailable. Provider
-members added to an ambient declaration with no imported owner remain
-capability-gated.
+A compiler-generated required import is a binding dependency scoped to the
+generated fragment or fragments for which the host accepted it. It may bind
+declarations needed by generated source, but it does not enable syntax, JSX,
+type, project, or framework providers, expose unbound declarations to authored
+source, include a capability runtime root, satisfy an authored activation
+requirement, or activate another provider. A generated fragment may use the
+capabilities already activated by authored source in its owning module, but the
+initial model has no generated-source operation that enables an additional
+capability. Compiler-generated source cannot contain `activate`; a generated
+import does not contribute to the authored source module's active capability
+set or affect an unrelated generated fragment.
+
+A provider-generated public member belongs to its owning nominal declaration
+identity and remains visible wherever that declaration or a value of its type
+is reached through a valid declaration or contract edge. Such an edge may be a
+direct import, alias, inheritance relationship, field or generic contract, or
+an imported function's return type. Direct import of the owning type name is
+not a member-visibility gate. For example, a model returned by an imported
+function retains its public generated query methods even when the source did
+not import the model type by name. This does not make the unqualified type name
+available for source annotations or activate the provider capability in the
+consuming module. Native syntax, JSX, unbound provider declarations, unrelated
+framework rules, and members added to an ambient declaration with no reached
+owner remain capability-gated.
 
 A provider may compute and cache project-wide data once and may inspect the
 project inputs allowed by its documented contract. Declaration computation is
@@ -298,6 +337,50 @@ overlapping capabilities; incompatible overlaps are diagnosed separately.
 
 ### Canonical formatting
 
+After ordinary import-path canonicalization, `trb fmt` combines compatible
+named imports of the same canonical target and import group into one named
+list. This operation preserves every exact imported name and local alias, so it
+does not depend on root stability:
+
+```trb
+import { JSON } from vendor/json
+import { Json as LegacyJson } from vendor/json
+```
+
+becomes:
+
+```trb
+import { JSON, Json as LegacyJson } from vendor/json
+```
+
+Specifier ordering follows one deterministic formatter rule. Identical
+specifier bindings may be deduplicated, but binding one declaration identity
+under different aliases or reusing one local name for different declarations
+remains a diagnostic rather than being renamed by the formatter. Imports
+remain separate across a blank-line group boundary or when merging would lose
+an attached comment or directive. An `activate` form is never merged with a
+declaration import because it expresses different source semantics.
+
+For a root-stable target, the formatter may also expand a bare root to its
+proven exact name when that allows compatible imports of the same target to use
+one named list:
+
+```trb
+import trb/std/json
+import { Parser } from trb/std/json
+```
+
+becomes:
+
+```trb
+import { JSON, Parser } from trb/std/json
+```
+
+The same rule preserves a bare root alias as an exact named-specifier alias.
+For a non-root-stable target, a bare import and named import remain separate;
+the formatter does not invent an exact name from a root whose continued
+uniqueness is not guaranteed.
+
 When project-aware resolution proves that a singleton named import selects the
 unique matching root of a root-stable target, `trb fmt` uses the bare
 shorthand:
@@ -315,9 +398,11 @@ import acme/json as WireJSON
 ```
 
 The target-wide root-stability rule makes this rewrite stable against a future
-second matching root. A named import containing multiple declarations, a
-declaration that does not match the path root, an unresolved import, or
-source-only formatting without a project snapshot is preserved.
+second matching root. After compatible named imports are merged, a named list
+containing multiple declarations remains named. A declaration that does not
+match the path root, an unresolved import, or source-only formatting without a
+project snapshot is also preserved rather than rewritten between named and
+bare forms.
 
 For a non-root-stable target, `trb fmt` preserves an authored exact named
 import even when the current effective catalog has one matching root. A future
@@ -325,6 +410,13 @@ package version may add a case-fold-equivalent declaration that TypeRB cannot
 forbid, while the exact named import remains valid. This includes mixed targets
 whose TypeRB source is augmented by an unconstrained native provider. Tooling
 may offer an explicit code action to adopt the shorter bare form.
+
+An already-authored bare import is preserved for a non-root-stable target when
+the current effective catalog has one matching root. The formatter does not
+expand it back to an exact named import; a dependency migration may offer that
+change as an explicit code action. Automatic conversion between exact named
+and bare forms in either direction is outside the formatter's scope when
+continued root uniqueness cannot be proven.
 
 Formatting never converts between `import` and `activate`; they express
 different source semantics.
@@ -377,8 +469,16 @@ fails declaration resolution does not activate the target. Provider selection
 must derive from validated dependency edges rather than unresolved source
 strings.
 
+The compiler must preserve authored and generated provenance while deriving
+capability sets. Existing generated-import markers must be applied consistently
+to native syntax, JSX, provider discovery, unbound declarations, and runtime
+roots rather than only to declaration-binding visibility. Required imports may
+be collected or emitted together as an implementation detail, but their
+semantic scope remains limited to the generated fragments that requested them.
+
 Root-stability classification uses the effective target after provider data is
-loaded. If any declaration contributor is not subject to the root-collision
+loaded and is derived by the compiler rather than asserted by package
+metadata. If any declaration contributor is not subject to the root-collision
 rule, the entire target is non-root-stable for formatter canonicalization even
 when the selected declaration itself came from TypeRB source.
 
@@ -403,8 +503,9 @@ a source module uses module-local syntax, an unbound provider declaration, or
 a framework rule without its own declaration import or activation edge, the
 compiler diagnoses that module and offers a code action to add the appropriate
 normal import or `activate` form. This does not apply to the effective public
-members of a declaration that the module already imports. Replacing only the
-legacy import that originally enabled the provider is not sufficient.
+members of a nominal declaration reached through an already-valid declaration
+or contract edge. Replacing only the legacy import that originally enabled the
+provider is not sufficient.
 
 Declaration-bearing root imports may be implemented incrementally, but any
 temporary zero-binding exception remains limited to existing registered
@@ -418,7 +519,8 @@ public extension mechanism for arbitrary package activation.
 - Public top-level functions such as `describe`, `expect`, and `test` remain
   directly importable without making module members directly importable.
 - Multiple peer declarations and collision-resolving aliases still fit on one
-  import line.
+  import line, and compatible repeated named imports are formatted into that
+  canonical list without discarding exact identities.
 - `JSON`, `URL`, and other acronyms retain their declared capitalization
   without compiler vocabulary or inflection configuration.
 - A bare declaration import exposes exactly one binding. Source scope does not
@@ -426,6 +528,12 @@ public extension mechanism for arbitrary package activation.
 - Root-stable targets guarantee a unique root across their effective export
   surface, while targets with unconstrained native or provider contributions
   retain exact names and exact-import escape hatches.
+- Generated required imports cannot widen authored syntax, provider, framework,
+  or runtime capabilities. Generated fragments initially use only capabilities
+  already activated by authored source in their owning module.
+- Provider-generated public members follow their nominal declaration identity
+  through resolved contracts without implicitly exposing the declaration name
+  or activating its provider.
 - Packages whose path contains a separator that is absent from the root name
   use an explicit named import in the initial model.
 - Capability-only source remains rare and explicit without synthetic marker
@@ -484,6 +592,10 @@ public extension mechanism for arbitrary package activation.
 - Wildcard imports and general public re-export syntax.
 - Capability-specific selectors for a target that declares more than one
   capability.
+- Structured, host-validated, fragment-scoped capability edges for generated
+  source. Any future protocol must authorize provider identity, fragment
+  identity, target capability, provider-discovery behavior, and runtime-root
+  inclusion separately rather than treating generated source text as authority.
 - Arbitrary runtime side-effect imports, conditional activation, and
   package-supplied executable compiler extensions.
 - A general third-party executable activation protocol. Existing validated
