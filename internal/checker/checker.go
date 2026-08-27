@@ -37,6 +37,7 @@ type Result struct {
 	Resolution                 resolver.Result
 	References                 map[ast.Expression]resolver.Binding
 	EnumConstructors           map[*ast.CallExpression]EnumVariant
+	EnumArgumentIndexes        map[*ast.CallExpression][]int
 	CasePatterns               map[ast.Expression]CasePattern
 	CaseNarrowings             map[*ast.CaseStatement]CaseNarrowing
 	GenericApplications        map[*ast.GenericExpression]GenericApplication
@@ -187,8 +188,9 @@ type CodecField struct {
 }
 
 type EnumField struct {
-	Name string
-	Type types.Type
+	Name      string
+	Type      types.Type
+	NamedOnly bool
 }
 
 type EnumVariant struct {
@@ -817,6 +819,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			Resolution:                 resolution,
 			References:                 map[ast.Expression]resolver.Binding{},
 			EnumConstructors:           map[*ast.CallExpression]EnumVariant{},
+			EnumArgumentIndexes:        map[*ast.CallExpression][]int{},
 			CasePatterns:               map[ast.Expression]CasePattern{},
 			CaseNarrowings:             map[*ast.CaseStatement]CaseNarrowing{},
 			GenericApplications:        map[*ast.GenericExpression]GenericApplication{},
@@ -1758,8 +1761,8 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					if parameter.Name == "" || parameter.Type.Empty() {
 						c.error(parameter.Span(), fmt.Sprintf("enum payload %s requires a name and type", parameter.Name))
 					}
-					if parameter.Default != nil || parameter.NamedOnly || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
-						c.error(parameter.Span(), "enum payload fields must be required positional values")
+					if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
+						c.error(parameter.Span(), "enum payload fields must be required positional or named-only values")
 					}
 					if seenFields[parameter.Name] {
 						c.error(parameter.Span(), fmt.Sprintf("enum payload field %s is duplicated", parameter.Name))
@@ -2774,16 +2777,20 @@ func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool)
 			if len(branch.Bindings) != len(variant.Fields) {
 				c.error(branch.Value.Span(), fmt.Sprintf("enum pattern %s::%s expects %d binding(s), got %d", variant.EnumName, variant.Name, len(variant.Fields), len(branch.Bindings)))
 			}
+			patternFields := c.enumPatternFields(branch.Bindings, variant)
 			bindings := make([]CaseBinding, 0, len(branch.Bindings))
 			for index, binding := range branch.Bindings {
-				if index >= len(variant.Fields) {
+				if index >= len(patternFields) {
 					break
+				}
+				if patternFields[index].Type.Kind == types.Invalid {
+					continue
 				}
 				if _, duplicate := branchScope.values[binding.Name]; duplicate {
 					c.error(binding.Span(), fmt.Sprintf("enum pattern binding %s is duplicated", binding.Name))
 					continue
 				}
-				field := variant.Fields[index]
+				field := patternFields[index]
 				declared := symbol{
 					typ:                field.Type,
 					span:               binding.Span(),
@@ -3229,7 +3236,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 			member := info.byName[name]
 			variant := EnumVariant{EnumName: typ.Name, Owner: c.authoredEnumOwners[typ.Name], Name: name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, parameter := range member.Parameters {
-				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: substituteType(c.typeFromRef(parameter.Type), substitutions)})
+				variant.Fields = append(variant.Fields, EnumField{Name: parameter.Name, Type: substituteType(c.typeFromRef(parameter.Type), substitutions), NamedOnly: parameter.NamedOnly})
 			}
 			variants = append(variants, variant)
 		}
@@ -3241,7 +3248,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		for _, imported := range binding.Export.EnumVariants {
 			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, field := range imported.Fields {
-				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions)})
+				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions), NamedOnly: field.NamedOnly})
 			}
 			if reference, exists := c.resolution.TypeMember(typ.Name, imported.Name); exists {
 				variant.Reference = &reference
@@ -3262,7 +3269,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		for _, imported := range exported.EnumVariants {
 			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, field := range imported.Fields {
-				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions)})
+				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions), NamedOnly: field.NamedOnly})
 			}
 			variants = append(variants, variant)
 		}
@@ -3334,25 +3341,85 @@ func (c *Checker) enumVariantForMember(member *ast.MemberExpression) (EnumVarian
 	return enumVariantNamed(variants, member.Name)
 }
 
-func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVariant, arguments []types.Type) {
+func enumVariantCallSignature(variant EnumVariant) ([]callsignature.Parameter, []string) {
+	parameters := make([]callsignature.Parameter, len(variant.Fields))
+	names := make([]string, len(variant.Fields))
+	for index, field := range variant.Fields {
+		kind := callsignature.Positional
+		label := ""
+		if field.NamedOnly {
+			kind = callsignature.NamedOnly
+			label = field.Name
+		}
+		parameters[index] = callsignature.Parameter{Kind: kind, Label: label, Type: field.Type, Presence: callsignature.Required}
+		names[index] = field.Name
+	}
+	return parameters, names
+}
+
+func (c *Checker) enumPatternFields(bindings []ast.PatternBinding, variant EnumVariant) []EnumField {
+	result := make([]EnumField, len(bindings))
+	used := make([]bool, len(variant.Fields))
+	position := 0
+	qualified := variant.EnumName + "::" + variant.Name
+	for index, binding := range bindings {
+		fieldIndex := -1
+		if binding.Label != "" {
+			for candidate, field := range variant.Fields {
+				if field.NamedOnly && field.Name == binding.Label {
+					fieldIndex = candidate
+					break
+				}
+			}
+			if fieldIndex < 0 {
+				positionalOnly := false
+				for _, field := range variant.Fields {
+					if !field.NamedOnly && field.Name == binding.Label {
+						positionalOnly = true
+						break
+					}
+				}
+				if positionalOnly {
+					c.error(binding.Span(), fmt.Sprintf("enum payload field %s is positional-only in pattern %s", binding.Label, qualified))
+				} else {
+					c.error(binding.Span(), fmt.Sprintf("enum pattern %s has no named payload field %s", qualified, binding.Label))
+				}
+			}
+		} else {
+			for position < len(variant.Fields) && variant.Fields[position].NamedOnly {
+				position++
+			}
+			if position < len(variant.Fields) {
+				fieldIndex = position
+				position++
+			} else {
+				c.error(binding.Span(), fmt.Sprintf("enum pattern %s requires named bindings for its remaining payload fields", qualified))
+			}
+		}
+		if fieldIndex < 0 || fieldIndex >= len(variant.Fields) {
+			result[index] = EnumField{Type: invalidType()}
+			continue
+		}
+		if used[fieldIndex] {
+			c.error(binding.Span(), fmt.Sprintf("enum pattern %s binds payload field %s more than once", qualified, variant.Fields[fieldIndex].Name))
+			result[index] = EnumField{Type: invalidType()}
+			continue
+		}
+		used[fieldIndex] = true
+		result[index] = variant.Fields[fieldIndex]
+	}
+	return result
+}
+
+func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVariant, arguments []types.Type) []int {
 	if len(variant.Fields) == 0 {
 		c.error(call.Span(), fmt.Sprintf("enum member %s::%s has no payload and is not callable", variant.EnumName, variant.Name))
-		return
+		return nil
 	}
-	if len(call.Arguments) != len(variant.Fields) {
-		c.error(call.Span(), fmt.Sprintf("enum member %s::%s expects %d payload argument(s), got %d", variant.EnumName, variant.Name, len(variant.Fields), len(call.Arguments)))
-	}
-	for index, argument := range call.Arguments {
-		if index >= len(variant.Fields) {
-			break
-		}
-		if argument.Name != "" || argument.Splat != "" {
-			c.error(argument.Value.Span(), "enum payload arguments must be positional values")
-		}
-		if !c.assignable(argument.Value, variant.Fields[index].Type, arguments[index]) {
-			c.error(argument.Value.Span(), fmt.Sprintf("enum payload argument %d has type %s, expected %s", index+1, arguments[index], variant.Fields[index].Type))
-		}
-	}
+	parameters, names := enumVariantCallSignature(variant)
+	indexes := c.checkCallSignature(call.Span(), variant.EnumName+"::"+variant.Name, parameters, false, call.Arguments, arguments, names, nil)
+	c.result.CallSignatures[call] = append([]callsignature.Parameter(nil), parameters...)
+	return indexes
 }
 
 func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (GenericApplication, bool) {
@@ -6613,9 +6680,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			if variant, enum := c.enumVariantForMember(member); enum {
 				typ = calleeType
-				c.checkEnumConstructor(n, variant, argumentTypes)
+				indexes := c.checkEnumConstructor(n, variant, argumentTypes)
 				if len(variant.Fields) > 0 {
 					c.result.EnumConstructors[n] = variant
+					c.result.EnumArgumentIndexes[n] = indexes
 				}
 				break
 			}

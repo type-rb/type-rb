@@ -2515,7 +2515,7 @@ def bad(): Result<Integer, String>
 	return Result<Integer, String>::Ok("not an integer")
 end
 `)
-	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
+	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "argument 1 to Result::Ok() has type String, expected Integer") {
 		t.Fatalf("expected standard Result payload diagnostic, got %v", err)
 	}
 }

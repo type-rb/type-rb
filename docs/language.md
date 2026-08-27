@@ -74,8 +74,9 @@ Parameters before `*` cannot be supplied by name, and positional arguments
 cannot follow a named argument. Positional defaults remain available for
 naturally ordered APIs. Explicit argument expressions run left to right;
 omitted defaults run at the selected callee's entry in declaration order.
-Record construction labels are field labels and follow their existing record
-rules.
+Payload enum variants use the same `positional-only | * | named-only` boundary,
+but every payload field is required. Record construction labels are field
+labels and follow their existing record rules.
 
 Writing `: Void` on a `def` or `fn` declaration is an error; omit the return
 annotation instead. `Void` appears in function types when a stored callable
@@ -472,7 +473,7 @@ different typed data, and it may mix payload-bearing and payloadless variants:
 ```trb
 enum Token
 	Text(value: String)
-	Integer(value: Integer)
+	Renamed(id: Integer, *, before: String, after: String)
 	EOF
 end
 
@@ -480,12 +481,15 @@ def describe(token: Token): String
 	case token
 	when Token::Text(value)
 		return value
-	when Token::Integer(value)
-		return value.to_s()
+	when Token::Renamed(id, after: current, before: previous)
+		return id.to_s() + ": " + previous + " -> " + current
 	when Token::EOF
 		return "eof"
 	end
 end
+
+renamed := Token::Renamed(7, after: "new", before: "old")
+describe(renamed)
 ```
 
 Enum members may carry postfix attributes after their payload or raw value.
@@ -493,9 +497,11 @@ Attributes are inert language metadata until a compiler-integrated package
 defines their meaning.
 
 A `case` without `else` must handle every member. Payload patterns introduce
-immutable bindings with types from the variant declaration. A payload enum
-cannot also declare raw values. `Result<T, E>` is the standard generic payload
-enum, with `Ok(value: T)` and `Err(error: E)` variants.
+immutable bindings with types from the variant declaration. Positional fields
+are matched in order; named-only fields are matched by label and may be
+reordered after the positional bindings. Every field must currently be bound.
+A payload enum cannot also declare raw values. `Result<T, E>` is the standard
+generic payload enum, with `Ok(value: T)` and `Err(error: E)` variants.
 
 Ordinary, raw-value, and payload enums all remain nominal, use qualified member
 names, support exhaustive `case`, and may define instance methods after their

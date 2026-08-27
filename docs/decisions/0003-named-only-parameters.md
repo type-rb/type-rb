@@ -22,6 +22,10 @@ Portable TypeRB has exactly two parameter regions:
 positional-only | * | named-only
 ```
 
+The same boundary applies to portable function and method declarations and to
+payload enum variant declarations. Payload enum fields are always required;
+ordinary callable parameters may be required or omittable as described below.
+
 A bare `*` starts the named-only region. It is a separator, not a rest
 parameter:
 
@@ -46,6 +50,16 @@ appear in any order, but all positional arguments must appear first:
 ```trb
 connect(host: "example.com")
 connect(port: 8443, host: "example.com")
+```
+
+Payload enum constructors follow the same binding rule:
+
+```trb
+enum Change
+	Renamed(id: Integer, *, before: String, after: String)
+end
+
+change := Change::Renamed(7, after: "new", before: "old")
 ```
 
 The following calls are errors for
@@ -84,6 +98,17 @@ callee entry; neither the caller nor the receiver's static type materializes a
 source default. A native declaration's omittable parameter is different: the
 TypeRB caller preserves omission and the native callee handles it.
 
+Payload enum patterns preserve the declaration boundary too. Positional fields
+bind in order, while named-only fields bind by label and may be reordered after
+the positional bindings:
+
+```trb
+when Change::Renamed(id, after: current, before: previous)
+```
+
+Every payload field must currently be bound. Partial, nested, guarded, and
+wildcard payload patterns remain separate future work.
+
 ### Call-signature equivalence
 
 One shared parameter descriptor carries these contracts through local source,
@@ -118,6 +143,10 @@ reject `*values` and `**values`. Only bare `*` is accepted as the named-only
 separator. Explicit Ruby-native source retains Ruby compatibility syntax behind
 its platform import, except for the removed `name:: Type` spelling.
 
+Payload enum variants also reject defaults, rest fields, native keyword syntax,
+and untyped fields. This keeps every constructed alternative complete while
+allowing labels where field order would obscure meaning.
+
 Ruby lowers named-only parameters to native keyword parameters. TypeScript
 uses a compiler-owned labelled options object. Go uses a compiler-owned
 labelled map. Calls pass omission through those representations, and generated
@@ -126,11 +155,15 @@ depend on named-only declaration order.
 
 Record construction such as `User.new(id: id, name: name)` remains a separate
 field-labelled construction feature. It does not declare or infer named-only
-method parameters.
+method parameters. Payload enum construction is different: its declaration
+explicitly chooses which fields remain positional and which cross the `*`
+boundary.
 
 ## Consequences
 
 - Public APIs visibly distinguish positional-only and named-only parameters.
+- Multi-field payload enum APIs can make order-sensitive fields explicit in
+  constructors and patterns without turning every payload into a record.
 - Reordering named arguments and named-only declarations cannot change
   binding, backend ABI, or signature equivalence.
 - Default evaluation has one target-independent owner and order.

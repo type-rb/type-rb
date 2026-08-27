@@ -1097,7 +1097,16 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			for _, field := range member.Fields {
 				fields = append(fields, field.Name)
 			}
-			g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			if hasNamedOnlyParameters(member.Fields) {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => {" + tsTrailingComment(member.TrailingComment))
+				g.indent++
+				g.enumPayloadBindings(member.Fields)
+				g.line("return { " + strings.Join(fields, ", ") + " };")
+				g.indent--
+				g.line("},")
+			} else {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			}
 		}
 	}
 	g.enumMethodProperties(enum)
@@ -1294,6 +1303,14 @@ func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
 		}
 	}
 	return false
+}
+
+func (g *generator) enumPayloadBindings(parameters []ir.Parameter) {
+	for _, parameter := range parameters {
+		if parameter.NamedOnly {
+			g.line("let " + parameter.Name + ": " + g.tsType(parameter.Type) + " = __trbNamed." + parameter.Name + ";")
+		}
+	}
 }
 
 func (g *generator) parameterDefaults(method *ir.Method) {
@@ -1702,8 +1719,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument)
+			parts[index] = g.expr(argument.Value)
 		}
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, false)
 		owner := g.runtimeName(n.EnumName)
 		if n.Reference == nil && n.Owner != "" {
 			owner = strings.ReplaceAll(n.Owner, "::", ".")
@@ -2847,8 +2865,8 @@ func (g *generator) expressionTypeIdentity(expected types.Type, expression ir.Ex
 		}
 		result := &typescriptTypeIdentity{name: owner, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
 		for _, argument := range node.Arguments {
-			identity := g.expressionTypeIdentity(argument.ExprType(), argument)
-			mergeUniqueGenericArgumentIdentities(result, expected, argument.ExprType(), identity)
+			identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
+			mergeUniqueGenericArgumentIdentities(result, expected, argument.Value.ExprType(), identity)
 		}
 		return result
 	case *ir.Member:

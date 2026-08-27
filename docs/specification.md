@@ -86,6 +86,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   declaration order, and default expressions do not participate.
 - Portable parameter rest forms and call splats are not supported. `fn`
   values and first-class function types remain required-positional only.
+- Payload enum variant declarations use the same
+  `positional-only | * | named-only` regions. Every payload field is required,
+  and variant construction follows the same positional and label binding and
+  source evaluation-order rules as an ordinary call.
 - Record construction labels are field labels and remain separate from method
   parameters.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
@@ -971,19 +975,23 @@ target-language object representation never determines the wire value.
 
 - A payload enum has at least one payload-bearing variant such as
   `Value(value: String)`. It may also contain payloadless variants. Payload
-  variants use one or more required, positional, typed fields; default,
-  keyword, rest, and untyped fields are rejected.
+  variants use one or more required typed fields in the
+  `positional-only | * | named-only` regions. Defaults, rest fields, native
+  keyword syntax, and untyped fields are rejected.
 - A payload enum cannot also be a raw-value enum. The payload is variant data,
   not the external representation of an enumerated constant.
-- A payload value is constructed with `EnumName::Member(value, ...)`.
-  Payloadless members are values and are not callable.
+- A payload value is constructed with `EnumName::Member(value, ...)`, using
+  labels for fields declared after `*`. Named-only arguments may be reordered
+  after all positional arguments. Unknown or duplicate labels, missing fields,
+  and using the wrong region are compile-time errors. Payloadless members are
+  values and are not callable.
 - A separate `sum` declaration is not introduced. Payload-bearing enum
   variants provide TypeRB's closed sum-type model.
 
 ```trb
 enum Token
 	Text(value: String)
-	Integer(value: Integer)
+	Renamed(id: Integer, *, before: String, after: String)
 	EOF
 end
 
@@ -991,12 +999,14 @@ def describe(token: Token): String
 	case token
 	when Token::Text(value)
 		return value
-	when Token::Integer(value)
-		return value.to_s()
+	when Token::Renamed(id, after: current, before: previous)
+		return id.to_s() + ": " + previous + " -> " + current
 	when Token::EOF
 		return "eof"
 	end
 end
+
+renamed := Token::Renamed(7, after: "new", before: "old")
 ```
 
 #### 3.14.3 Shared enum behavior
@@ -1009,9 +1019,13 @@ end
   and payload enums. Enum class methods are not yet user-definable.
 - Portable `case` dispatches on variants. A payload pattern such as
   `when Token::Text(value)` introduces immutable bindings whose types come from
-  the variant declaration. Current patterns bind every payload field
-  positionally; partial patterns, guards, nested patterns, and wildcard syntax
-  are reserved. Duplicate branches and duplicate bindings are errors.
+  the variant declaration. Positional payload fields are bound in order;
+  named-only payload fields use their labels and may be reordered after all
+  positional bindings, such as
+  `when Token::Renamed(id, after: current, before: previous)`. Current patterns
+  bind every payload field; partial patterns, guards, nested patterns, and
+  wildcard syntax are reserved. Unknown or duplicate field labels, duplicate
+  branches, and duplicate bindings are errors.
 - Without `else`, a case must list every member. With `else`, omitted members
   are handled by that branch. The selector is evaluated exactly once in every
   backend and the REPL.

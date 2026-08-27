@@ -538,6 +538,15 @@ func enumHasPayload(enum *ir.Enum) bool {
 	return false
 }
 
+func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
+	for _, parameter := range parameters {
+		if parameter.NamedOnly {
+			return true
+		}
+	}
+	return false
+}
+
 func caseHasPayload(value *ir.Case) bool {
 	for _, branch := range value.Branches {
 		if branch.PayloadEnum {
@@ -570,6 +579,31 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 				fields[index] = ":" + field.Name
 			}
 			definition := "Data.define(" + strings.Join(fields, ", ") + ")"
+			namedOnly := hasNamedOnlyParameters(member.Fields)
+			if namedOnly {
+				g.line(member.Name+" = "+definition+" do", member.TrailingComment)
+				g.indent++
+				if len(methods) > 0 {
+					g.line("include Methods", "")
+				}
+				g.line("class << self", "")
+				g.indent++
+				g.line("alias __trb_data_new new", "")
+				g.line("def new("+g.parameters(member.Fields)+")", "")
+				g.indent++
+				values := make([]string, len(member.Fields))
+				for index, field := range member.Fields {
+					values[index] = field.Name
+				}
+				g.line("__trb_data_new("+strings.Join(values, ", ")+")", "")
+				g.indent--
+				g.line("end", "")
+				g.indent--
+				g.line("end", "")
+				g.indent--
+				g.line("end", "")
+				continue
+			}
 			if len(methods) > 0 {
 				definition += " { include Methods }"
 			}
@@ -929,7 +963,10 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument)
+			parts[index] = g.expr(argument.Value)
+			if argument.Name != "" {
+				parts[index] = argument.Name + ": " + parts[index]
+			}
 		}
 		owner := n.EnumName
 		if n.Reference == nil && n.Owner != "" {

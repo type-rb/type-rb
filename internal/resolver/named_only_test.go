@@ -14,6 +14,9 @@ end
 interface Client
 	request(*, host: String, token: String): String
 end
+enum Change
+	Renamed(id: Integer, *, before: String, after: String)
+end
 `))
 	if len(diagnostics) != 0 {
 		t.Fatal(diagnostics)
@@ -35,5 +38,13 @@ end
 	member := exports["Client"].Members["request"]
 	if len(member.Parameters) != 2 || member.Parameters[0].Label != "host" || member.Parameters[1].Label != "token" {
 		t.Fatalf("interface labels were not exported: %#v", member.Parameters)
+	}
+	change := exports["Change"]
+	if len(change.EnumVariants) != 1 || len(change.EnumVariants[0].Fields) != 3 || change.EnumVariants[0].Fields[0].NamedOnly || !change.EnumVariants[0].Fields[1].NamedOnly || !change.EnumVariants[0].Fields[2].NamedOnly {
+		t.Fatalf("enum payload parameter regions were not exported: %#v", change.EnumVariants)
+	}
+	renamed := change.Members["Renamed"]
+	if len(renamed.Parameters) != 3 || renamed.Parameters[0].Kind != callsignature.Positional || renamed.Parameters[1].Kind != callsignature.NamedOnly || renamed.Parameters[1].Label != "before" {
+		t.Fatalf("enum member call signature was not exported: %#v", renamed.Parameters)
 	}
 }

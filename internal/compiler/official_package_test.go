@@ -112,7 +112,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
-			if err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
+			if err == nil || !strings.Contains(err.Error(), "argument 1 to ResponseCookieAttribute::MaxAge() has type String, expected Integer") {
 				t.Fatalf("unexpected diagnostic: %v", err)
 			}
 		})

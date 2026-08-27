@@ -627,13 +627,13 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
 	missing := func(name string) string {
-		return errResult("__trb_web.ParameterError.Missing(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult("__trb_web.ParameterError.Missing({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
 	}
 	duplicate := func(name string) string {
-		return errResult("__trb_web.ParameterError.Duplicate(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult("__trb_web.ParameterError.Duplicate({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
 	}
 	invalid := func(name, value, expected string) string {
-		return errResult("__trb_web.ParameterError.Invalid(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + ")")
+		return errResult("__trb_web.ParameterError.Invalid({ source: " + sourceValue + ", name: " + strconv.Quote(name) + ", value: " + value + ", expected: " + strconv.Quote(expected) + " })")
 	}
 	var body strings.Builder
 	body.WriteString("const parameterValues = new Map<string, Array<string>>(); ")

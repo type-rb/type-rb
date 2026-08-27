@@ -3408,8 +3408,8 @@ func TestPayloadEnumDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{"missing payload type", "enum Token\n\tText(value)\nend\n", "enum payload value requires a name and type"},
-		{"constructor type", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text(1)\nend\n", "enum payload argument 1 has type Integer, expected String"},
-		{"constructor arity", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text()\nend\n", "expects 1 payload argument(s), got 0"},
+		{"constructor type", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text(1)\nend\n", "argument 1 to Token::Text() has type Integer, expected String"},
+		{"constructor arity", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text()\nend\n", "Token::Text() is missing required argument 1"},
 		{"payload member value", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text\nend\n", "requires 1 payload argument(s)"},
 		{"payloadless call", "enum Token\n\tEOF\nend\ndef bad(): Token\n\treturn Token::EOF()\nend\n", "has no payload and is not callable"},
 		{"pattern arity", "enum Token\n\tText(value: String)\nend\ndef bad(token: Token): String\n\tcase token\n\twhen Token::Text\n\t\treturn \"bad\"\n\tend\nend\n", "expects 1 binding(s), got 0"},

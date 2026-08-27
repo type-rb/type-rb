@@ -1120,12 +1120,16 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("enum %s has no member %s", node.EnumName, node.Member)
 		}
 		payload := map[string]Value{}
-		for index, field := range member.Fields {
-			value, err := e.expression(node.Arguments[index], module, sc)
+		for index, argument := range node.Arguments {
+			value, err := e.expression(argument.Value, module, sc)
 			if err != nil {
 				return Value{}, err
 			}
-			payload[field.Name] = value
+			field := argument.Field
+			if field == "" && index < len(member.Fields) {
+				field = member.Fields[index].Name
+			}
+			payload[field] = value
 		}
 		return Value{Type: node.ExprType(), Data: &enumValue{Definition: typeDefinition.Enum, Name: node.Member, Payload: payload}}, nil
 	case *ir.TypeApply:

@@ -1001,7 +1001,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		suspends = callSuspends || suspends
 	case *ir.EnumConstruct:
 		for _, argument := range node.Arguments {
-			suspends = a.expressionReaches(argument, context, record) || suspends
+			suspends = a.expressionReaches(argument.Value, context, record) || suspends
 		}
 	case *ir.EnumCall:
 		suspends = a.expressionReaches(node.Receiver, context, record)
