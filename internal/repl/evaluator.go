@@ -859,7 +859,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			if err != nil {
 				return Value{}, err
 			}
-			output.WriteString(plain(value))
+			text, ok := value.Data.(string)
+			if !ok {
+				return Value{}, fmt.Errorf("string interpolation requires String, got %s", value.Type)
+			}
+			output.WriteString(text)
 		}
 		return Value{Type: node.ExprType(), Data: output.String()}, nil
 	case *ir.Symbol:

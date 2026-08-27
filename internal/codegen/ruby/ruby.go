@@ -702,7 +702,19 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Literal:
 		return n.Raw
 	case *ir.InterpolatedString:
-		return n.Raw
+		var value strings.Builder
+		value.WriteByte('"')
+		for _, part := range n.Parts {
+			if part.Expression != nil {
+				value.WriteString("#{")
+				value.WriteString(g.expr(part.Expression))
+				value.WriteByte('}')
+			} else {
+				value.WriteString(part.Text)
+			}
+		}
+		value.WriteByte('"')
+		return value.String()
 	case *ir.Symbol:
 		if !g.nativeSyntax {
 			return strconv.Quote(n.Name)

@@ -1390,7 +1390,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		var arguments []string
 		for _, part := range n.Parts {
 			if part.Expression != nil {
-				format.WriteString("%v")
+				format.WriteString("%s")
 				arguments = append(arguments, g.expr(part.Expression))
 				continue
 			}

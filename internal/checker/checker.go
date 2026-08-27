@@ -5622,7 +5622,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.InterpolatedString:
 		for _, part := range n.Parts {
 			if part.Expression != nil {
-				c.checkExpression(part.Expression, sc)
+				actual := c.checkExpression(part.Expression, sc)
+				expanded := scalarType(c.expandAlias(actual, map[string]bool{}))
+				if expanded.Kind != types.Invalid && !isNonNullable(expanded, types.String) {
+					c.error(part.Expression.Span(), fmt.Sprintf("string interpolation requires String, got %s", actual))
+				}
 			}
 		}
 		typ = types.FromName("String")

@@ -3320,7 +3320,7 @@ def render(token: Token): String
 	when Token::Text(value)
 		return value
 	when Token::Pair(left, right)
-		return "#{left}:#{right}"
+		return "#{left.to_s()}:#{right.to_s()}"
 	when Token::EOF
 		return "eof"
 	end
@@ -3440,7 +3440,7 @@ end
 def render(result: Result<Integer, String>): String
 	case result
 	when Result::Ok(value)
-		return identity<String>("#{value}")
+		return identity<String>("#{value.to_s()}")
 	when Result::Err(error)
 		return error
 	end
@@ -3487,7 +3487,7 @@ end
 	}
 
 	rubyOutput := string(artifacts["ruby"].Output)
-	for _, want := range []string{"module Result", "Ok = Data.define(:value)", "def identity(value)", "Result::Ok.new(42)", "identity(\"#{value}\")"} {
+	for _, want := range []string{"module Result", "Ok = Data.define(:value)", "def identity(value)", "Result::Ok.new(42)", "identity(\"#{value.to_s}\")"} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
 		}
@@ -3895,7 +3895,7 @@ end
 		t.Fatal(err)
 	}
 	goOutput := string(goArtifact.Output)
-	if !strings.Contains(goOutput, `import "fmt"`) || !strings.Contains(goOutput, `fmt.Sprintf("Hello, %v!", name)`) {
+	if !strings.Contains(goOutput, `import "fmt"`) || !strings.Contains(goOutput, `fmt.Sprintf("Hello, %s!", name)`) {
 		t.Fatalf("unexpected Go interpolation:\n%s", goOutput)
 	}
 	if !strings.Contains(goOutput, `fmt.Println(Greet("World"))`) {
@@ -3910,15 +3910,82 @@ end
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, goOutput)
 	}
 
-	tsArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
+	rubyArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
   return "Hello, #{name}!"
+end
+`), "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rubyArtifact.Output), `return "Hello, #{name}!"`) {
+		t.Fatalf("unexpected Ruby interpolation:\n%s", rubyArtifact.Output)
+	}
+
+	tsArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
+  return "Hello, ${target} #{name}!"
 end
 `), "typescript")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(tsArtifact.Output), "return `Hello, ${name}!`;") {
+	if !strings.Contains(string(tsArtifact.Output), "return `Hello, \\${target} ${name}!`;") {
 		t.Fatalf("unexpected TypeScript interpolation:\n%s", tsArtifact.Output)
+	}
+}
+
+func TestStringInterpolationRequiresNonNullableStringAcrossModes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "Integer", source: "def render(value: Integer): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Integer"},
+		{name: "Float", source: "def render(value: Float): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Float"},
+		{name: "Boolean", source: "def render(value: Boolean): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Boolean"},
+		{name: "nullable String", source: "def render(value: String?): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got String?"},
+		{name: "Any", source: "def render(value: Any): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Any"},
+		{name: "record", source: "record Point\n\tx: Integer\nend\ndef render(value: Point): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Point"},
+		{name: "enum", source: "enum Color\n\tRed\nend\ndef render(value: Color): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Color"},
+		{name: "String newtype", source: "newtype Label = String\ndef render(value: Label): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Label"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				if _, err := Compile("invalid_interpolation.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %q, got %v", test.want, err)
+				}
+			})
+		}
+	}
+}
+
+func TestStringInterpolationAcceptsExplicitStringsAcrossModes(t *testing.T) {
+	source := []byte(`import trb/std/strings
+
+alias Label = String
+
+def render(label: Label, ratio: Float): String
+	return "#{strings.uppercase(label)}:#{ratio.to_s()}"
+end
+
+def render_optional(label: Label?): String
+	if label == nil
+		return ""
+	end
+	return "#{label}"
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("valid_interpolation.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected String interpolation: %v", mode, err)
+		}
+		if mode == "ruby" {
+			output := string(artifact.Output)
+			if !strings.Contains(output, `return "#{label.upcase}:#{`) || strings.Contains(output, "strings.uppercase") || strings.Contains(output, "ratio.to_s()") {
+				t.Fatalf("Ruby interpolation did not lower its expressions:\n%s", output)
+			}
+		}
 	}
 }
 

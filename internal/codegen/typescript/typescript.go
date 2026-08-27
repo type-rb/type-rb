@@ -1302,7 +1302,8 @@ func (g *generator) expr(expression ir.Expression) string {
 				value.WriteString(g.expr(part.Expression))
 				value.WriteByte('}')
 			} else {
-				value.WriteString(strings.ReplaceAll(part.Text, "`", "\\`"))
+				text := strings.ReplaceAll(part.Text, "`", "\\`")
+				value.WriteString(strings.ReplaceAll(text, "${", "\\${"))
 			}
 		}
 		value.WriteByte('`')

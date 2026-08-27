@@ -34,7 +34,7 @@ func TestRunStandaloneFileAcrossBackends(t *testing.T) {
 			}
 			root := t.TempDir()
 			filename := filepath.Join(root, "hello.trb")
-			source := "def main()\n\tputs(\"standalone-ok\")\n\treturn\nend\n"
+			source := "def main()\n\tlabel := \"standalone\"\n\tratio := 2.0\n\tputs(\"${literal}:#{label}-#{ratio.to_s()}\")\n\treturn\nend\n"
 			if err := os.WriteFile(filename, []byte(source), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -47,7 +47,7 @@ func TestRunStandaloneFileAcrossBackends(t *testing.T) {
 			if status := command.Run(test.args(filename)); status != 0 {
 				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
-			if stdout.String() != "standalone-ok\n" || stderr.Len() != 0 {
+			if stdout.String() != "${literal}:standalone-2.0\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 			for _, path := range []string{filepath.Join(root, project.ConfigName), filepath.Join(root, ".trb")} {

@@ -197,6 +197,12 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   Runtime arithmetic may produce positive or negative infinity and NaN. These
   values are ordinary `Float` values, not `Integer` values, and have no source
   literal spelling in the current grammar.
+- A double-quoted String may embed `#{expression}`. Every interpolation
+  expression must have the non-nullable `String` type after transparent alias
+  expansion. Nullable Strings, `Any`, numeric and Boolean values, collections,
+  enums, newtypes, and other user-defined values are rejected rather than
+  inheriting a target runtime's implicit String conversion. Convert a value
+  explicitly, for example with `value.to_s()`, before interpolation.
 
 #### Aliases and nominal newtypes
 
