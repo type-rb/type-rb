@@ -921,7 +921,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Operator {
-		case "!", "not":
+		case "!":
 			return Value{Type: node.ExprType(), Data: !truthy(value)}, nil
 		case "-":
 			switch number := value.Data.(type) {
@@ -983,12 +983,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if err != nil {
 			return Value{}, err
 		}
-		if node.Operator == "and" || node.Operator == "&&" {
+		if node.Operator == "&&" {
 			if !truthy(left) {
 				return Value{Type: node.ExprType(), Data: false}, nil
 			}
 		}
-		if node.Operator == "or" || node.Operator == "||" {
+		if node.Operator == "||" {
 			if truthy(left) {
 				return Value{Type: node.ExprType(), Data: true}, nil
 			}
@@ -1964,9 +1964,9 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 		return Value{Type: typ, Data: equal(left, right)}, nil
 	case "!=":
 		return Value{Type: typ, Data: !equal(left, right)}, nil
-	case "and", "&&":
+	case "&&":
 		return Value{Type: typ, Data: truthy(left) && truthy(right)}, nil
-	case "or", "||":
+	case "||":
 		return Value{Type: typ, Data: truthy(left) || truthy(right)}, nil
 	}
 	if leftString, ok := left.Data.(string); ok {

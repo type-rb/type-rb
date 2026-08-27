@@ -62,9 +62,9 @@ let runtime = null;
 let tourURL = new URL("../tour.json", document.baseURI);
 
 const keywords = new Set([
-	"alias", "and", "break", "case", "catch", "class", "def", "do", "else", "elsif", "end", "enum", "fn",
-	"false", "if", "implements", "import", "module", "mut", "next", "nil", "not",
-	"newtype", "or", "readonly", "record", "return", "self", "then", "true", "try", "when", "while",
+	"alias", "break", "case", "catch", "class", "def", "do", "else", "elsif", "end", "enum", "fn",
+	"false", "if", "implements", "import", "module", "mut", "next", "nil",
+	"newtype", "readonly", "record", "return", "self", "then", "true", "try", "when", "while",
 ]);
 const builtInTypes = new Set([
 	"Any", "Array", "Boolean", "Bytes", "Float", "Hash", "Integer", "Range", "Result",

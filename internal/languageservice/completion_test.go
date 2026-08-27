@@ -168,9 +168,9 @@ func TestCompletionOffersAliasAndNewtypeKeywords(t *testing.T) {
 	}
 }
 
-func TestCompletionOmitsLegacyEffectKeywords(t *testing.T) {
+func TestCompletionOmitsRemovedSyntaxKeywords(t *testing.T) {
 	service := languageservice.New("go")
-	for _, keyword := range []string{"attempt", "fails"} {
+	for _, keyword := range []string{"attempt", "fails", "and", "or", "not"} {
 		if item, ok := findCompletion(service.Complete(keyword[:2], 2), keyword); ok {
 			t.Errorf("%s completion=%#v, want no legacy keyword", keyword, item)
 		}

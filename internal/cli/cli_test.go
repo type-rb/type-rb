@@ -2660,7 +2660,7 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 			t.Fatal(err)
 		}
 
-		input := "[1, 2, 3].map do |value|\ndoubled := value * 2\ndoubled\nend\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
+		input := "[1, 2, 3].map do |value|\ndoubled := value * 2\ndoubled\nend\n[1, 2, 3].select.with_index { |value, index| value > 1 && index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -5527,7 +5527,7 @@ def main()
 	end
 	selected := mapped.select.with_index do |value, index|
 		large_enough := value > 2
-		large_enough and index < 2
+		large_enough && index < 2
 	end
 	total := selected.reduce(10) do |sum, value|
 		next_sum := sum + value
@@ -5900,11 +5900,11 @@ def label(value: String?): String
 end
 
 def has_name(value: String?): Boolean
-	return value != nil and value.size() > 0
+	return value != nil && value.size() > 0
 end
 
 def missing_or_empty(value: String?): Boolean
-	return value == nil or value.size() == 0
+	return value == nil || value.size() == 0
 end
 
 def main()
@@ -6126,7 +6126,7 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 			"import { Result } from trb/std/result\n\n" +
 			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
 			"def error_path(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
-			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() or !error.message.empty?(); end; end\n\n" +
+			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() || !error.message.empty?(); end; end\n\n" +
 			"def main()\n" +
 			"\tputs(render(jsonc.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
 			"\tputs(error_path(parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +

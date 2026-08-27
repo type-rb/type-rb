@@ -18,7 +18,6 @@ import (
 
 var keywordDetails = map[string]string{
 	"alias":      "declare a transparent type alias",
-	"and":        "Boolean conjunction",
 	"break":      "exit the current loop",
 	"case":       "dispatch on an enum",
 	"catch":      "recover from a Result error",
@@ -40,8 +39,6 @@ var keywordDetails = map[string]string{
 	"newtype":    "declare a nominal representation type",
 	"next":       "continue the current loop",
 	"nil":        "empty value",
-	"not":        "Boolean negation",
-	"or":         "Boolean disjunction",
 	"readonly":   "declare a readonly field",
 	"record":     "declare a data value",
 	"return":     "return from a function",

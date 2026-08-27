@@ -1421,7 +1421,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.goType(n.ExprType()) + "{" + strings.Join(parts, ", ") + "}"
 	case *ir.Unary:
 		op := n.Operator
-		if op == "not" || op == "!" {
+		if op == "!" {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
 		if op == "-" && n.ExprType().Kind == types.Int {
@@ -1453,11 +1453,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 	case *ir.Binary:
 		op := n.Operator
-		if op == "and" {
-			op = "&&"
-		} else if op == "or" {
-			op = "||"
-		}
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
 		if op == "**" && n.ExprType().Kind != types.Int {
