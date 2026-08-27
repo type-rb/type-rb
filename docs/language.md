@@ -194,7 +194,7 @@ end
 
 The same narrowing is available in the matching branch of `name != nil`, in
 the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
-right side of a compatible short-circuit `and` or `or`. Reassigning the binding
+right side of a compatible short-circuit `&&` or `||`. Reassigning the binding
 invalidates the narrowed type.
 
 A direct nullable record field or `readonly` class field follows the same
@@ -212,6 +212,19 @@ end
 Reassigning `profile` invalidates the field narrowing. Mutable class fields,
 indexes, calls, and chained member paths must be read into a local binding
 before narrowing.
+
+Double-quoted Strings support interpolation with `#{expression}`. The embedded
+expression must already be a non-nullable `String`; TypeRB does not inherit a
+backend's implicit conversion rules. Convert other values explicitly:
+
+<!-- trb-doc-test: language-string-interpolation -->
+```trb
+radius := 2.5
+description := "circle r=#{radius.to_s()}"
+```
+
+A nullable String must be narrowed or converted to a non-nullable String before
+it can be interpolated.
 
 Identifiers beginning with an uppercase letter are immutable constants. They
 are allowed at top level or directly inside a module or class:
