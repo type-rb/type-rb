@@ -96,7 +96,7 @@ func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
 			testSource := `import { AlphaError, AlphaResult, alpha_failure } from alpha
 import { BetaError, BetaResult, beta_failure } from beta
 import { add } from calculator
-import { describe, expect, test } from trb/std/test
+import { describe, expect, expect_err, expect_ok, test } from trb/std/test
 
 record Point
 	x: Integer
@@ -131,28 +131,11 @@ describe("Calculator") do
 	end
 
 	test("keeps private helpers isolated by source module") do
-		case alpha_failure()
-		when AlphaResult::Err(error)
-			case error
-			when AlphaError::Invalid(message)
-				expect(message).to_equal("alpha")
-			else
-				expect(false).to_be_true()
-			end
-		when AlphaResult::Ok(_value)
-			expect(false).to_be_true()
-		end
-		case beta_failure()
-		when BetaResult::Err(error)
-			case error
-			when BetaError::Invalid(message)
-				expect(message).to_equal("beta")
-			else
-				expect(false).to_be_true()
-			end
-		when BetaResult::Ok(_value)
-			expect(false).to_be_true()
-		end
+		alpha_error := expect_err(alpha_failure())
+		expect(alpha_error).to_equal(AlphaError::Invalid("alpha"))
+		expect(expect_err(beta_failure())).to_equal(BetaError::Invalid("beta"))
+		expect(expect_ok(AlphaResult::Ok(7))).to_equal(7)
+		expect(expect_ok(BetaResult::Ok(8))).to_equal(8)
 	end
 end
 `
@@ -182,6 +165,82 @@ end
 			entries, err := os.ReadDir(filepath.Join(root, ".trb", "test"))
 			if err != nil || len(entries) != 0 {
 				t.Fatalf("test workspace leaked: entries=%v err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends(t *testing.T) {
+	const source = `import { Result } from trb/std/result
+import { describe, expect_err, expect_ok, test } from trb/std/test
+
+alias SampleResult = Result<Integer, String>
+
+describe("Result expectations") do
+	test("requires Ok") do
+		expect_ok(SampleResult::Err("problem"))
+	end
+
+	test("requires Err") do
+		expect_err(SampleResult::Ok(7))
+	end
+end
+`
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			required := map[string]string{"go": "go", "ruby": "ruby", "typescript": "bun"}[mode]
+			if _, err := exec.LookPath(required); err != nil {
+				t.Skipf("%s is unavailable: %v", required, err)
+			}
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if mode == "go" {
+				config.Go.Module = "example.com/type-rb/test-result-expectations"
+			}
+			if mode == "typescript" {
+				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+				config.TypeScript.PackageManager = "bun"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "go" {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-result-expectations\n\ngo 1.27\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			testPath := filepath.Join(config.SourcePath(), "result_test.trb")
+			if err := os.WriteFile(testPath, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"test", "--config", config.Path}); status != 1 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			for _, expected := range []string{
+				"PASS",
+				"expected Ok, got Err(\"problem\")",
+				"expected Err, got Ok(7)",
+				testPath + ":8:3:",
+				testPath + ":12:3:",
+				"2 test(s), 2 failure(s)",
+			} {
+				if expected == "PASS" {
+					if strings.Contains(stdout.String(), expected) {
+						t.Fatalf("failed Result expectation was reported as passing:\n%s", stdout.String())
+					}
+					continue
+				}
+				if !strings.Contains(stdout.String(), expected) {
+					t.Fatalf("%s output is missing %q:\n%s\nstderr:\n%s", mode, expected, stdout.String(), stderr.String())
+				}
 			}
 		})
 	}

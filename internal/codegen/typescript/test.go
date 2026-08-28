@@ -19,10 +19,21 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 	case "trb.std.test.expect":
 		position := call.SourceSpan().Start
 		return "new " + g.testAlias(call) + ".Expectation(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")", true
+	case "trb.std.test.expect_ok", "trb.std.test.expect_err":
+		position := call.SourceSpan().Start
+		method := "ok"
+		if name == "trb.std.test.expect_err" {
+			method = "err"
+		}
+		return "new " + g.testAlias(call) + ".ResultExpectation(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")." + method + "()", true
 	case "trb.std.test.finish":
 		return g.testAlias(call) + ".trbTestFinish()", true
 	case "trb.internal.test.assert_equal", "trb.internal.test.assert_not_equal", "trb.internal.test.assert_true", "trb.internal.test.assert_false", "trb.internal.test.assert_nil":
 		return "trbTest" + upperCamel(strings.TrimPrefix(name, "trb.internal.test.")) + "(" + strings.Join(arguments, ", ") + ")", true
+	case "trb.internal.test.assert_result_ok":
+		return "((): " + g.tsType(call.ExprType()) + " => { const actual = " + arguments[0] + "; if (actual.kind !== \"Ok\") throw new TrbTestFailure(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Ok, got Err(\" + trbTestInspect(actual.error) + \")\"); return actual.value; })()", true
+	case "trb.internal.test.assert_result_err":
+		return "((): " + g.tsType(call.ExprType()) + " => { const actual = " + arguments[0] + "; if (actual.kind !== \"Err\") throw new TrbTestFailure(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Err, got Ok(\" + trbTestInspect(actual.value) + \")\"); return actual.error; })()", true
 	case "trb.std.test.describe", "trb.std.test.test":
 		return "", true
 	default:

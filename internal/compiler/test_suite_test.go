@@ -101,6 +101,23 @@ func TestTestRunnerProtocolIsNotAUserImport(t *testing.T) {
 	}
 }
 
+func TestResultExpectationRequiresAStandardResultAcrossBackends(t *testing.T) {
+	const source = `import { expect_ok } from trb/std/test
+
+def unwrap(): Integer
+	return expect_ok(1)
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := Compile("result_expectation.trb", []byte(source), mode)
+			if err == nil || !strings.Contains(err.Error(), "argument 1 to expect_ok() has type Integer, expected Result<T, E>") {
+				t.Fatalf("unexpected Result expectation diagnostic: %v", err)
+			}
+		})
+	}
+}
+
 func TestPortableTestBlocksRejectEscapingControlAcrossBackends(t *testing.T) {
 	tests := []struct {
 		keyword string

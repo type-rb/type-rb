@@ -7810,7 +7810,11 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 	name := binding.Name
 	var library *stdlib.Symbol
 	if binding.Library != nil {
-		specialized := stdlib.Instantiate(*binding.Library, actual)
+		inferenceArguments := make([]types.Type, len(actual))
+		for index, argument := range actual {
+			inferenceArguments[index] = c.expandAlias(argument, map[string]bool{})
+		}
+		specialized := stdlib.Instantiate(*binding.Library, inferenceArguments)
 		library = &specialized
 		for _, parameter := range specialized.Parameters {
 			parameters = append(parameters, parameter.Type)

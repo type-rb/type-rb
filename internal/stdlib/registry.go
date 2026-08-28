@@ -130,6 +130,7 @@ var booleanType = types.FromName("Boolean")
 var voidType = types.FromName("Void")
 var anyType = types.FromName("Any")
 var typeT = types.FromName("T")
+var typeE = types.FromName("E")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
 var fileErrorType = types.FromName("FileError")
@@ -153,6 +154,7 @@ var durationType = types.FromName("Duration")
 var timeZoneType = types.FromName("TimeZone")
 var dateTimeErrorType = types.FromName("DateTimeError")
 var expectationTType = types.Type{Kind: types.Named, Name: "Expectation", Args: []types.Type{typeT}}
+var resultTEType = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, typeE}}
 
 var registry = map[string]*Package{
 	"trb/std/unit": {
@@ -184,8 +186,10 @@ end
 		RuntimeAlias: "__trb_test",
 		RuntimeExports: []RuntimeExport{
 			{Name: "Expectation", Kind: "class"},
+			{Name: "ResultExpectation", Kind: "class"},
 		},
-		Source: `import { assert_equal, assert_false, assert_nil, assert_not_equal, assert_true } from trb/internal/test
+		Source: `import { assert_equal, assert_false, assert_nil, assert_not_equal, assert_result_err, assert_result_ok, assert_true } from trb/internal/test
+import { Result } from trb/std/result
 
 class Expectation<T>
 	readonly @actual: T
@@ -226,6 +230,29 @@ class Expectation<T>
 		return
 	end
 end
+
+class ResultExpectation<T, E>
+	readonly @actual: Result<T, E>
+	readonly @path: String
+	readonly @line: Integer
+	readonly @column: Integer
+
+	def initialize(actual: Result<T, E>, path: String, line: Integer, column: Integer)
+		@actual = actual
+		@path = path
+		@line = line
+		@column = column
+		return
+	end
+
+	def ok(): T
+		return assert_result_ok<T, E>(@actual, @path, @line, @column)
+	end
+
+	def err(): E
+		return assert_result_err<T, E>(@actual, @path, @line, @column)
+	end
+end
 `,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
@@ -234,6 +261,14 @@ end
 			"expect": {
 				Name: "expect", Intrinsic: "trb.std.test.expect", RequiredSymbols: []string{"Expectation"}, TypeParameters: []string{"T"},
 				Parameters: []Parameter{{Name: "actual", Type: typeT}}, Return: expectationTType,
+			},
+			"expect_ok": {
+				Name: "expect_ok", Intrinsic: "trb.std.test.expect_ok", RequiredSymbols: []string{"ResultExpectation"}, TypeParameters: []string{"T", "E"},
+				Parameters: []Parameter{{Name: "actual", Type: resultTEType}}, Return: typeT,
+			},
+			"expect_err": {
+				Name: "expect_err", Intrinsic: "trb.std.test.expect_err", RequiredSymbols: []string{"ResultExpectation"}, TypeParameters: []string{"T", "E"},
+				Parameters: []Parameter{{Name: "actual", Type: resultTEType}}, Return: typeE,
 			},
 			"finish": {Name: "finish", Intrinsic: "trb.std.test.finish", CompilerOnly: true, Return: voidType},
 		},
@@ -248,6 +283,14 @@ end
 			"assert_true":      testAssertion("assert_true", false),
 			"assert_false":     testAssertion("assert_false", false),
 			"assert_nil":       testAssertion("assert_nil", false),
+			"assert_result_ok": {
+				Name: "assert_result_ok", Intrinsic: "trb.internal.test.assert_result_ok", RuntimeIndependent: true, TypeParameters: []string{"T", "E"},
+				Parameters: []Parameter{{Name: "actual", Type: resultTEType}, {Name: "path", Type: stringType}, {Name: "line", Type: integerType}, {Name: "column", Type: integerType}}, Return: typeT,
+			},
+			"assert_result_err": {
+				Name: "assert_result_err", Intrinsic: "trb.internal.test.assert_result_err", RuntimeIndependent: true, TypeParameters: []string{"T", "E"},
+				Parameters: []Parameter{{Name: "actual", Type: resultTEType}, {Name: "path", Type: stringType}, {Name: "line", Type: integerType}, {Name: "column", Type: integerType}}, Return: typeE,
+			},
 		},
 	},
 	"trb/std/errors": {
