@@ -53,16 +53,24 @@ func TestCompileProjectGeneratesStaticGoCLI(t *testing.T) {
 	}
 	output := string(main.Output)
 	for _, fragment := range []string{
-		"func trbCliRun0(__trbScope trbcontext.Context, name string, version *string, about *string) AppArgs",
+		"func trb__cliRun0(__trbScope trbcontext.Context, name string, version *string, about *string) AppArgs",
 		`Name: "serve", About: "Start the server"`,
-		"trbCliCommand = NewCommandServe(Trb__RecordNew__ServeArgs(",
-		"return AppArgs{Command: trbCliCommand}",
-		"func trbCliParse(args []string",
+		"trb__cliCommand = NewCommandServe(Trb__RecordNew__ServeArgs(",
+		"return AppArgs{Command: trb__cliCommand}",
+		"func trb__cliParse(args []string",
 		"os.Args[1:]",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("generated Go is missing %q:\n%s", fragment, output)
 		}
+	}
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, main.Filename, main.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, output)
 	}
 }
 
@@ -82,6 +90,47 @@ end
 	})
 	if err == nil || !strings.Contains(err.Error(), "must use String, Integer, Float, or Boolean") {
 		t.Fatalf("CompileProject() error=%v, want unsupported CLI field diagnostic", err)
+	}
+}
+
+func TestCLIRejectsUnsupportedRootTypeShapes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "nullable root",
+			source: `record Args
+end
+
+def parse(): Args?
+	return run<Args?>(name: "nullable")
+end`,
+			want: "run root Args? must be non-nullable",
+		},
+		{
+			name: "generic root",
+			source: `record Args<T>
+	name: String
+end
+
+def parse(): Args<Integer>
+	return run<Args<Integer>>(name: "generic")
+end`,
+			want: "run root Args<Integer> must be non-generic",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := []byte("import { run } from trb/platform/go/cli\n" + test.source + "\n")
+			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+				Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("CompileProject() error=%v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
@@ -128,11 +177,54 @@ end
 			files = append(files, parsed)
 		}
 	}
-	if count := strings.Count(output.String(), "type trbCliField struct"); count != 1 {
+	if count := strings.Count(output.String(), "type trb__cliField struct"); count != 1 {
 		t.Fatalf("CLI runtime generated %d times in one Go package:\n%s", count, output.String())
 	}
 	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("app", fileSet, files, nil); typeErr != nil {
 		t.Fatalf("generated Go package does not type-check: %v\n%s", typeErr, output.String())
+	}
+}
+
+func TestCLIRuntimeNamesDoNotCollideWithPrivateFunctions(t *testing.T) {
+	source := []byte(`import { run } from trb/platform/go/cli
+
+def _trb_cli_parse()
+	return
+end
+
+def _trb_cli_fail()
+	return
+end
+
+def _trb_cli_run0()
+	return
+end
+
+record Args
+end
+
+def main()
+	_args := run<Args>(name: "collision")
+	_trb_cli_parse()
+	_trb_cli_fail()
+	_trb_cli_run0()
+	return
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := artifactForModule(artifacts, "main")
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, artifact.Filename, artifact.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, artifact.Output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, artifact.Output)
 	}
 }
 
@@ -425,7 +517,7 @@ end
 	output := string(artifactForModule(artifacts, "main").Output)
 	for _, fragment := range []string{
 		"func Parse(__trbScope trbcontext.Context) Args",
-		"trbCliRun0(__trbScope",
+		"trb__cliRun0(__trbScope",
 		"Trb__RecordNew__Args(__trbScope",
 	} {
 		if !strings.Contains(output, fragment) {

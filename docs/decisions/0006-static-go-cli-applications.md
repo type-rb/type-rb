@@ -22,6 +22,10 @@ Applications parse one root record with an explicit generic call:
 args := run<AppArgs>(name: "server", version: "1.0.0", about: "Serve a directory")
 ```
 
+The type argument resolves through transparent aliases to one non-nullable,
+non-generic root record. Nullable and instantiated generic root records are
+rejected before Go generation in the initial contract.
+
 The canonical schema model is:
 
 - a record is a set of arguments;
@@ -58,8 +62,9 @@ does not use runtime reflection, dynamic command registration, or an external
 CLI framework. `trb build --compile` therefore produces the intended single
 binary.
 
-A transparent type alias of the root record resolves to that record before
-schema analysis. Aliases do not create a second CLI schema identity.
+A transparent, non-generic type alias of the root record resolves to that
+record before schema analysis. Aliases do not create a second CLI schema
+identity.
 
 The record/payload-enum model is canonical. A later function-based shorthand
 may lower into the same schema, but it must not create a second parser model or

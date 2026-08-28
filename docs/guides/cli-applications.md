@@ -47,6 +47,11 @@ The root `@cli(:subcommand)` field is required and non-nullable and cannot have
 a record default in the initial contract. Defaults and nullable types make
 ordinary scalar positional or option fields omittable.
 
+The record passed to `run<...>` must itself be non-nullable and non-generic in
+the initial contract. Transparent non-generic aliases are accepted, but forms
+such as `run<AppArgs?>` and `run<AppArgs<Integer>>` are reported before Go
+generation.
+
 A transparent alias of the root record uses the same schema:
 
 ```trb

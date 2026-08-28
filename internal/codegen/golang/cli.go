@@ -9,6 +9,9 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
+// Package-scope CLI support uses the trb__cli prefix. Source identifier
+// lowering removes separator runs, so TypeRB declarations cannot produce this
+// consecutive-underscore spelling and collide with compiler-owned support.
 func (g *generator) cliRun(call *ir.Call) string {
 	index, _, ok := g.cli.InvocationIndex(g.modulePath, call.SourceSpan().Start.Offset)
 	if !ok {
@@ -20,7 +23,7 @@ func (g *generator) cliRun(call *ir.Call) string {
 	for _, argument := range call.Arguments {
 		if argument.Name != "" {
 			g.temporary++
-			name := "__trbCliArgument" + strconv.Itoa(g.temporary)
+			name := "__trb__cliArgument" + strconv.Itoa(g.temporary)
 			typeName := "*string"
 			if argument.Name == "name" {
 				typeName = "string"
@@ -41,7 +44,7 @@ func (g *generator) cliRun(call *ir.Call) string {
 	if about == "" {
 		about = "nil"
 	}
-	invocation := "trbCliRun" + strconv.Itoa(index) + "(" + strings.Join([]string{g.executionScopeArgument(), name, version, about}, ", ") + ")"
+	invocation := "trb__cliRun" + strconv.Itoa(index) + "(" + strings.Join([]string{g.executionScopeArgument(), name, version, about}, ", ") + ")"
 	if len(statements) == 0 {
 		return invocation
 	}
@@ -91,17 +94,17 @@ func (g *generator) cliInvocation(index int, invocation *cliapp.Invocation) {
 	}
 	schema := invocation.Schema
 	resultType := g.cliTypeName(schema.Root.ModulePath, schema.Root.Name)
-	g.line("func trbCliRun" + strconv.Itoa(index) + "(__trbScope trbcontext.Context, name string, version *string, about *string) " + resultType + " {")
+	g.line("func trb__cliRun" + strconv.Itoa(index) + "(__trbScope trbcontext.Context, name string, version *string, about *string) " + resultType + " {")
 	g.indent++
 	g.line("spec := " + g.cliSpecLiteral(schema))
-	g.line("parsed := trbCliParse(os.Args[1:], name, version, about, spec)")
+	g.line("parsed := trb__cliParse(os.Args[1:], name, version, about, spec)")
 	if len(schema.Root.Fields) == 0 && len(schema.Commands) == 0 {
 		g.line("_ = parsed")
 	}
 	rootValues := g.cliFieldValues(schema.Root, "root", "root")
 	commandValue := ""
 	if schema.SubcommandField != "" {
-		commandValue = "trbCliCommand"
+		commandValue = "trb__cliCommand"
 		enumType := g.cliTypeName(schema.SubcommandEnum.ModulePath, schema.SubcommandEnum.Name)
 		g.line("var " + commandValue + " " + enumType)
 		g.line("switch parsed.Command {")
@@ -150,7 +153,7 @@ func (g *generator) cliEnumValue(command cliapp.Command, commandIndex int) strin
 func (g *generator) cliFieldValues(record cliapp.Record, prefix, keyPrefix string) []cliConstructField {
 	result := make([]cliConstructField, 0, len(record.Fields))
 	for _, field := range record.Fields {
-		name := "trbCli" + goIdentifier(prefix, true) + goIdentifier(field.Name, true)
+		name := "trb__cli" + goIdentifier(prefix, true) + goIdentifier(field.Name, true)
 		provided := name + "Provided"
 		key := keyPrefix + "." + field.Name
 		g.line(provided + " := parsed.Provided[" + strconv.Quote(key) + "]")
@@ -195,18 +198,18 @@ func (g *generator) cliParsedScalar(field cliapp.Field, raw, name string) cliPar
 	case cliapp.IntegerValue:
 		return cliParsedScalar{Lines: []string{
 			name + "Parsed, " + name + "Err := strconv.ParseInt(" + raw + ", 10, 64)",
-			"if " + name + "Err != nil || " + name + "Parsed < -9007199254740991 || " + name + "Parsed > 9007199254740991 { trbCliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
+			"if " + name + "Err != nil || " + name + "Parsed < -9007199254740991 || " + name + "Parsed > 9007199254740991 { trb__cliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
 			name + " := int(" + name + "Parsed)",
 		}, Value: name}
 	case cliapp.FloatValue:
 		return cliParsedScalar{Lines: []string{
 			name + ", " + name + "Err := strconv.ParseFloat(" + raw + ", 64)",
-			"if " + name + "Err != nil { trbCliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
+			"if " + name + "Err != nil { trb__cliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
 		}, Value: name}
 	case cliapp.BooleanValue:
 		return cliParsedScalar{Lines: []string{
 			name + ", " + name + "Err := strconv.ParseBool(" + raw + ")",
-			"if " + name + "Err != nil { trbCliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
+			"if " + name + "Err != nil { trb__cliInvalidValue(" + strconv.Quote(field.Name) + ", " + raw + ") }",
 		}, Value: name}
 	default:
 		return cliParsedScalar{Lines: []string{name + " := " + raw}, Value: name}
@@ -298,9 +301,9 @@ func (g *generator) cliSpecLiteral(schema cliapp.Schema) string {
 				commandFields[fieldIndex] = cliFieldLiteral(cliCommandKeyPrefix(index)+"."+field.Name, field)
 			}
 		}
-		commands[index] = "{Name: " + strconv.Quote(command.Name) + ", About: " + strconv.Quote(command.About) + ", Fields: []trbCliField{" + strings.Join(commandFields, ", ") + "}}"
+		commands[index] = "{Name: " + strconv.Quote(command.Name) + ", About: " + strconv.Quote(command.About) + ", Fields: []trb__cliField{" + strings.Join(commandFields, ", ") + "}}"
 	}
-	return "trbCliSpec{Fields: []trbCliField{" + strings.Join(fields, ", ") + "}, Commands: []trbCliCommand{" + strings.Join(commands, ", ") + "}}"
+	return "trb__cliSpec{Fields: []trb__cliField{" + strings.Join(fields, ", ") + "}, Commands: []trb__cliCommand{" + strings.Join(commands, ", ") + "}}"
 }
 
 func cliCommandKeyPrefix(index int) string {
@@ -320,59 +323,59 @@ func cliFieldLiteral(key string, field cliapp.Field) string {
 }
 
 func (g *generator) cliRuntimeSupport() {
-	g.line("type trbCliField struct { Key, Name, Long, Short, About, ValueName string; Positional, Boolean, Required bool }")
-	g.line("type trbCliCommand struct { Name, About string; Fields []trbCliField }")
-	g.line("type trbCliSpec struct { Fields []trbCliField; Commands []trbCliCommand }")
-	g.line("type trbCliParsed struct { Values map[string]string; Provided map[string]bool; Command string }")
+	g.line("type trb__cliField struct { Key, Name, Long, Short, About, ValueName string; Positional, Boolean, Required bool }")
+	g.line("type trb__cliCommand struct { Name, About string; Fields []trb__cliField }")
+	g.line("type trb__cliSpec struct { Fields []trb__cliField; Commands []trb__cliCommand }")
+	g.line("type trb__cliParsed struct { Values map[string]string; Provided map[string]bool; Command string }")
 	g.b.WriteByte('\n')
-	g.line("func trbCliParse(args []string, name string, version *string, about *string, spec trbCliSpec) trbCliParsed {")
+	g.line("func trb__cliParse(args []string, name string, version *string, about *string, spec trb__cliSpec) trb__cliParsed {")
 	g.indent++
-	g.line("result := trbCliParsed{Values: map[string]string{}, Provided: map[string]bool{}}")
+	g.line("result := trb__cliParsed{Values: map[string]string{}, Provided: map[string]bool{}}")
 	g.line("fields := spec.Fields")
 	g.line("position := 0")
 	g.line("positionalOnly := false")
-	g.line("var command *trbCliCommand")
+	g.line("var command *trb__cliCommand")
 	g.line("for index := 0; index < len(args); index++ {")
 	g.indent++
 	g.line("argument := args[index]")
-	g.line("if !positionalOnly && (argument == \"--help\" || argument == \"-h\") { trbCliPrintHelp(name, version, about, spec, command); os.Exit(0) }")
+	g.line("if !positionalOnly && (argument == \"--help\" || argument == \"-h\") { trb__cliPrintHelp(name, version, about, spec, command); os.Exit(0) }")
 	g.line("if !positionalOnly && argument == \"--version\" && version != nil { fmt.Fprintln(os.Stdout, name+\" \"+*version); os.Exit(0) }")
 	g.line("if !positionalOnly && argument == \"--\" { positionalOnly = true; continue }")
 	g.line("if !positionalOnly && result.Command == \"\" && len(spec.Commands) > 0 && !strings.HasPrefix(argument, \"-\") {")
 	g.indent++
-	g.line("command = trbCliFindCommand(spec.Commands, argument)")
-	g.line("if command == nil { trbCliFail(name, \"unknown command \"+strconv.Quote(argument)) }")
+	g.line("command = trb__cliFindCommand(spec.Commands, argument)")
+	g.line("if command == nil { trb__cliFail(name, \"unknown command \"+strconv.Quote(argument)) }")
 	g.line("result.Command = command.Name; fields = command.Fields; position = 0; positionalOnly = false; continue")
 	g.indent--
 	g.line("}")
 	g.line("if !positionalOnly && strings.HasPrefix(argument, \"--\") {")
 	g.indent++
 	g.line("parts := strings.SplitN(strings.TrimPrefix(argument, \"--\"), \"=\", 2)")
-	g.line("field := trbCliFindLong(fields, parts[0])")
-	g.line("if field == nil { trbCliFail(name, \"unknown option --\"+parts[0]) }")
+	g.line("field := trb__cliFindLong(fields, parts[0])")
+	g.line("if field == nil { trb__cliFail(name, \"unknown option --\"+parts[0]) }")
 	g.line("value := \"true\"")
-	g.line("if len(parts) == 2 { value = parts[1] } else if !field.Boolean { if index+1 >= len(args) { trbCliFail(name, \"option --\"+field.Long+\" requires a value\") }; index++; value = args[index] }")
+	g.line("if len(parts) == 2 { value = parts[1] } else if !field.Boolean { if index+1 >= len(args) { trb__cliFail(name, \"option --\"+field.Long+\" requires a value\") }; index++; value = args[index] }")
 	g.line("result.Values[field.Key] = value; result.Provided[field.Key] = true; continue")
 	g.indent--
 	g.line("}")
 	g.line("if !positionalOnly && strings.HasPrefix(argument, \"-\") && argument != \"-\" {")
 	g.indent++
 	g.line("short := strings.TrimPrefix(argument, \"-\")")
-	g.line("field := trbCliFindShort(fields, short)")
-	g.line("if field == nil { trbCliFail(name, \"unknown option -\"+short) }")
+	g.line("field := trb__cliFindShort(fields, short)")
+	g.line("if field == nil { trb__cliFail(name, \"unknown option -\"+short) }")
 	g.line("value := \"true\"")
-	g.line("if !field.Boolean { if index+1 >= len(args) { trbCliFail(name, \"option -\"+field.Short+\" requires a value\") }; index++; value = args[index] }")
+	g.line("if !field.Boolean { if index+1 >= len(args) { trb__cliFail(name, \"option -\"+field.Short+\" requires a value\") }; index++; value = args[index] }")
 	g.line("result.Values[field.Key] = value; result.Provided[field.Key] = true; continue")
 	g.indent--
 	g.line("}")
-	g.line("field := trbCliPositional(fields, position)")
-	g.line("if field == nil { trbCliFail(name, \"unexpected argument \"+strconv.Quote(argument)) }")
+	g.line("field := trb__cliPositional(fields, position)")
+	g.line("if field == nil { trb__cliFail(name, \"unexpected argument \"+strconv.Quote(argument)) }")
 	g.line("result.Values[field.Key] = argument; result.Provided[field.Key] = true; position++")
 	g.indent--
 	g.line("}")
-	g.line("if len(spec.Commands) > 0 && result.Command == \"\" { trbCliFail(name, \"a command is required\") }")
-	g.line("trbCliRequire(name, spec.Fields, result.Provided)")
-	g.line("if command != nil { trbCliRequire(name, command.Fields, result.Provided) }")
+	g.line("if len(spec.Commands) > 0 && result.Command == \"\" { trb__cliFail(name, \"a command is required\") }")
+	g.line("trb__cliRequire(name, spec.Fields, result.Provided)")
+	g.line("if command != nil { trb__cliRequire(name, command.Fields, result.Provided) }")
 	g.line("return result")
 	g.indent--
 	g.line("}")
@@ -381,14 +384,14 @@ func (g *generator) cliRuntimeSupport() {
 }
 
 func (g *generator) cliRuntimeHelpers() {
-	g.line("func trbCliFindCommand(commands []trbCliCommand, name string) *trbCliCommand { for index := range commands { if commands[index].Name == name { return &commands[index] } }; return nil }")
-	g.line("func trbCliFindLong(fields []trbCliField, name string) *trbCliField { for index := range fields { if !fields[index].Positional && fields[index].Long == name { return &fields[index] } }; return nil }")
-	g.line("func trbCliFindShort(fields []trbCliField, name string) *trbCliField { for index := range fields { if !fields[index].Positional && fields[index].Short == name { return &fields[index] } }; return nil }")
-	g.line("func trbCliPositional(fields []trbCliField, position int) *trbCliField { for index := range fields { if fields[index].Positional { if position == 0 { return &fields[index] }; position-- } }; return nil }")
-	g.line("func trbCliRequire(name string, fields []trbCliField, provided map[string]bool) { for _, field := range fields { if field.Required && !provided[field.Key] { if field.Positional { trbCliFail(name, \"missing argument \"+field.Name) } else { trbCliFail(name, \"missing option --\"+field.Long) } } } }")
-	g.line("func trbCliInvalidValue(field string, value string) { fmt.Fprintln(os.Stderr, \"error: invalid value \"+strconv.Quote(value)+\" for \"+field); os.Exit(2) }")
-	g.line("func trbCliFail(name string, message string) { fmt.Fprintln(os.Stderr, \"error: \"+message); fmt.Fprintln(os.Stderr, \"Try '\"+name+\" --help' for more information.\"); os.Exit(2) }")
-	g.line("func trbCliPrintHelp(name string, version *string, about *string, spec trbCliSpec, command *trbCliCommand) {")
+	g.line("func trb__cliFindCommand(commands []trb__cliCommand, name string) *trb__cliCommand { for index := range commands { if commands[index].Name == name { return &commands[index] } }; return nil }")
+	g.line("func trb__cliFindLong(fields []trb__cliField, name string) *trb__cliField { for index := range fields { if !fields[index].Positional && fields[index].Long == name { return &fields[index] } }; return nil }")
+	g.line("func trb__cliFindShort(fields []trb__cliField, name string) *trb__cliField { for index := range fields { if !fields[index].Positional && fields[index].Short == name { return &fields[index] } }; return nil }")
+	g.line("func trb__cliPositional(fields []trb__cliField, position int) *trb__cliField { for index := range fields { if fields[index].Positional { if position == 0 { return &fields[index] }; position-- } }; return nil }")
+	g.line("func trb__cliRequire(name string, fields []trb__cliField, provided map[string]bool) { for _, field := range fields { if field.Required && !provided[field.Key] { if field.Positional { trb__cliFail(name, \"missing argument \"+field.Name) } else { trb__cliFail(name, \"missing option --\"+field.Long) } } } }")
+	g.line("func trb__cliInvalidValue(field string, value string) { fmt.Fprintln(os.Stderr, \"error: invalid value \"+strconv.Quote(value)+\" for \"+field); os.Exit(2) }")
+	g.line("func trb__cliFail(name string, message string) { fmt.Fprintln(os.Stderr, \"error: \"+message); fmt.Fprintln(os.Stderr, \"Try '\"+name+\" --help' for more information.\"); os.Exit(2) }")
+	g.line("func trb__cliPrintHelp(name string, version *string, about *string, spec trb__cliSpec, command *trb__cliCommand) {")
 	g.indent++
 	g.line("fields := spec.Fields; commandName := \"\"; description := about")
 	g.line("if command != nil { fields = command.Fields; commandName = \" \"+command.Name; if command.About != \"\" { value := command.About; description = &value } }")

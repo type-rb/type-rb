@@ -25,6 +25,7 @@ func analyzeCLI(context Context) (Contribution, []Issue) {
 		return Contribution{}, []Issue{{Message: err.Error()}}
 	}
 	var requests []cliapp.InvocationRequest
+	var issues []Issue
 	for _, source := range context.Sources {
 		resolution := context.Resolutions[source.ModulePath]
 		walkCLIStatements(source.Program.Statements, func(call *ast.CallExpression) {
@@ -35,9 +36,11 @@ func analyzeCLI(context Context) (Contribution, []Issue) {
 			if len(generic.Arguments) != 1 {
 				return
 			}
-			root, ok := cliRootReference(source.ModulePath, generic.Arguments[0], resolution)
-			if !ok {
-				root = cliapp.TypeReference{ModulePath: source.ModulePath, Name: generic.Arguments[0].Name}
+			rootType := generic.Arguments[0]
+			root, diagnostic := cliRootReference(source.ModulePath, rootType, resolution)
+			if diagnostic != "" {
+				issues = append(issues, Issue{Filename: source.Filename, Message: diagnostic, Span: rootType.Span()})
+				return
 			}
 			requests = append(requests, cliapp.InvocationRequest{
 				ModulePath: source.ModulePath, Offset: call.Span().Start.Offset, Root: root,
@@ -46,7 +49,6 @@ func analyzeCLI(context Context) (Contribution, []Issue) {
 		})
 	}
 	manifest, schemaIssues := cliapp.Analyze(input, requests)
-	issues := make([]Issue, 0, len(schemaIssues))
 	filenames := map[string]string{}
 	for _, source := range context.Sources {
 		filenames[source.ModulePath] = source.Filename
@@ -72,14 +74,20 @@ func cliRunBinding(expression ast.Expression, resolution resolver.Result) bool {
 	return ok && binding.Import != nil && binding.Import.Path == cliapp.PackageName && binding.Name == "run"
 }
 
-func cliRootReference(modulePath string, ref ast.TypeRef, resolution resolver.Result) (cliapp.TypeReference, bool) {
-	if ref.Name == "" || ref.Nullable || ref.Array || len(ref.Arguments) > 0 || len(ref.Union) > 0 || ref.FunctionReturn != nil {
-		return cliapp.TypeReference{}, false
+func cliRootReference(modulePath string, ref ast.TypeRef, resolution resolver.Result) (cliapp.TypeReference, string) {
+	if ref.Nullable {
+		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must be non-nullable"
+	}
+	if len(ref.Arguments) > 0 {
+		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must be non-generic"
+	}
+	if ref.Name == "" || ref.Array || len(ref.Union) > 0 || ref.FunctionReturn != nil {
+		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must name a record type directly"
 	}
 	if binding, ok := resolution.ImportedType(ref.Name); ok && binding.Import != nil && binding.Export != nil {
-		return cliapp.TypeReference{ModulePath: binding.Import.RuntimePath(), Name: binding.Export.Name}, true
+		return cliapp.TypeReference{ModulePath: binding.Import.RuntimePath(), Name: binding.Export.Name}, ""
 	}
-	return cliapp.TypeReference{ModulePath: modulePath, Name: ref.Name}, true
+	return cliapp.TypeReference{ModulePath: modulePath, Name: ref.Name}, ""
 }
 
 func walkCLIStatements(statements []ast.Statement, visit func(*ast.CallExpression)) {
