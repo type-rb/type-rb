@@ -662,7 +662,7 @@ future compiler provider for cases that genuinely need project-aware discovery.
 
 TypeRB 0.x has experimental data boundaries for declaration discovery and
 output from bundled, compiler-integrated packages. `trb/orm`, `trb/jobs`,
-`trb/web`, and `trb/platform/go/cli` are the first consumers. The ORM provider
+`trb/web`, and `trb/cli` are the first consumers. The ORM provider
 discovers project models and schema metadata, the Jobs provider derives typed
 enqueue methods from Job classes, the Web provider identifies exact endpoint
 contract classes, and the CLI provider derives a closed argument schema.

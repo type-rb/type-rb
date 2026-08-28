@@ -21,7 +21,7 @@ func TestRunGeneratedStaticCLIApplication(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { run } from trb/platform/go/cli
+	source := `import { run } from trb/cli
 
 record ServeArgs
 	directory: String
@@ -114,7 +114,7 @@ func TestRunGeneratedStaticCLIPreservesMetadataArgumentOrder(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { run } from trb/platform/go/cli
+	source := `import { run } from trb/cli
 
 record Args
 end
@@ -164,7 +164,7 @@ alias Arguments = Args
 	if err := os.WriteFile(filepath.Join(models, "arguments.trb"), []byte(arguments), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	main := `import { run } from trb/platform/go/cli
+	main := `import { run } from trb/cli
 import { Arguments } from models/arguments
 
 def main()
@@ -212,7 +212,7 @@ func TestRunGeneratedStaticCLIPositionalHelpDoesNotClaimOptions(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { run } from trb/platform/go/cli
+	source := `import { run } from trb/cli
 
 record Args
 	path: String @cli(about: "Input path", value_name: "FILE")
@@ -248,7 +248,7 @@ func TestRunGeneratedStaticCLISeparatesRootAndCommandValues(t *testing.T) {
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { run } from trb/platform/go/cli
+	source := `import { run } from trb/cli
 
 record CommandArgs
 	value: String @cli(:option, long: "command-value")

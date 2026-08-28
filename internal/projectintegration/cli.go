@@ -71,18 +71,18 @@ func cliRunBinding(expression ast.Expression, resolution resolver.Result) bool {
 			binding, ok = resolution.Member(receiver.Name, node.Name)
 		}
 	}
-	return ok && binding.Import != nil && binding.Import.Path == cliapp.PackageName && binding.Name == "run"
+	return ok && binding.Import != nil && binding.Import.RuntimePath() == cliapp.ModulePath && binding.Name == "run"
 }
 
 func cliRootReference(modulePath string, ref ast.TypeRef, resolution resolver.Result) (cliapp.TypeReference, string) {
 	if ref.Nullable {
-		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must be non-nullable"
+		return cliapp.TypeReference{}, "trb/cli run root " + ref.String() + " must be non-nullable"
 	}
 	if len(ref.Arguments) > 0 {
-		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must be non-generic"
+		return cliapp.TypeReference{}, "trb/cli run root " + ref.String() + " must be non-generic"
 	}
 	if ref.Name == "" || ref.Array || len(ref.Union) > 0 || ref.FunctionReturn != nil {
-		return cliapp.TypeReference{}, "trb/platform/go/cli run root " + ref.String() + " must name a record type directly"
+		return cliapp.TypeReference{}, "trb/cli run root " + ref.String() + " must name a record type directly"
 	}
 	if binding, ok := resolution.ImportedType(ref.Name); ok && binding.Import != nil && binding.Export != nil {
 		return cliapp.TypeReference{ModulePath: binding.Import.RuntimePath(), Name: binding.Export.Name}, ""

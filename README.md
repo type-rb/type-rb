@@ -176,9 +176,10 @@ trb build --compile
 ./bin/hello
 ```
 
-For a typed single-binary command-line application, the Go-only
-`trb/platform/go/cli` package derives arguments, options, and subcommands from
-records and payload enums. See the
+For a typed single-binary command-line application, `trb/cli` derives
+arguments, options, and subcommands from records and payload enums. Building
+currently requires the Go toolchain, but application source does not use Go
+APIs. See the
 [CLI application guide](docs/guides/cli-applications.md).
 
 To start a portable JSON API with file-based routes and explicit request ID

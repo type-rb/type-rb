@@ -1,15 +1,17 @@
 # Build a command-line application
 
-`trb/platform/go/cli` generates a typed command-line parser for a Go project. The result
-can be compiled as one native executable; Ruby and TypeScript CLI backends are
-not provided.
+`trb/cli` generates a typed command-line parser and compiles the application as
+one native executable. Its records, payload enums, and metadata are TypeRB
+APIs; users do not program against Go APIs. The current native executable
+backend requires `mode: "go"` and the Go toolchain. Ruby and TypeScript launcher
+generation is not provided.
 
 ## Define the schema
 
 Use records for argument groups and a payload enum for subcommands:
 
 ```trb
-import { run } from trb/platform/go/cli
+import { run } from trb/cli
 
 record ServeArgs
 	directory: String
@@ -49,8 +51,8 @@ ordinary scalar positional or option fields omittable.
 
 The record passed to `run<...>` must itself be non-nullable and non-generic in
 the initial contract. Transparent non-generic aliases are accepted, but forms
-such as `run<AppArgs?>` and `run<AppArgs<Integer>>` are reported before Go
-generation.
+such as `run<AppArgs?>` and `run<AppArgs<Integer>>` are reported before native
+executable generation.
 
 A transparent alias of the root record uses the same schema:
 
@@ -95,7 +97,8 @@ Generated usage errors go to standard error and exit with status 2.
 
 ## Compile one executable
 
-Configure the project for Go, then compile the entrypoint:
+The current native executable backend uses the Go toolchain. Configure the
+project with `mode: "go"`, then compile the entrypoint:
 
 ```sh
 trb check
@@ -103,8 +106,9 @@ trb build --compile
 ./bin/fileserver --help
 ```
 
-The generated parser uses only the Go standard library. It does not require a
-Ruby or JavaScript runtime, runtime reflection, or a separate schema file.
+The generated parser uses only the Go standard library internally. The
+resulting program does not require a Go, Ruby, or JavaScript runtime, runtime
+reflection, or a separate schema file.
 
 ## Initial contract
 
@@ -116,5 +120,8 @@ Repeated values and Arrays, environment fallback, option aliases, validation
 constraints, mutually exclusive groups, shell completion, nested subcommands,
 optional or default root commands, and combined short flags are not yet
 supported. These are reserved as extensions to the same record and
-payload-enum schema. Dynamic plugins and Ruby or TypeScript CLI generation are
-outside the package's single-binary model.
+payload-enum schema. Dynamic plugins and Ruby or TypeScript launcher generation
+are outside the package's single-binary model.
+
+`trb/platform/go/cli` was published in TypeRB 0.3.44 and remains accepted as a
+compatibility import. Use `trb/cli` in new source.

@@ -120,11 +120,11 @@ than detailed syntax.
 
 ## 6. Application-level proof
 
-- Evolve the initial Go-only `trb/platform/go/cli` static schema from
-  application evidence. Consider repeated values, environment fallback,
+- Evolve the initial `trb/cli` single-binary schema from application evidence.
+  Consider repeated values, environment fallback,
   validation constraints, aliases, completion, and nested subcommands only as
   extensions to the shared record and payload-enum model; keep dynamic plugins
-  and Ruby/TypeScript CLI generation outside its single-binary direction.
+  and Ruby/TypeScript launcher generation outside its single-binary direction.
 - Harden the official portable `trb/web` package around its existing
   compile-time file-based routes, typed JSON requests and responses,
   middleware, initial versioned endpoint catalog, and consistent HTTP behavior
