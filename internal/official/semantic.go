@@ -19,8 +19,30 @@ func semanticSymbols(provider string) map[string]stdlib.Symbol {
 		return typescriptBrowserSymbols()
 	case "trb.typescript.react":
 		return reactSymbols()
+	case "trb.cli":
+		return cliSymbols()
 	default:
 		panic(fmt.Sprintf("unknown official package semantic provider %q", provider))
+	}
+}
+
+func cliSymbols() map[string]stdlib.Symbol {
+	typeT := types.FromName("T")
+	optionalString := types.FromName("String")
+	optionalString.Nullable = true
+	return map[string]stdlib.Symbol{
+		"run": {
+			Name:               "run",
+			Intrinsic:          "trb.cli.run",
+			RuntimeIndependent: true,
+			TypeParameters:     []string{"T"},
+			Parameters: []stdlib.Parameter{
+				{Name: "name", Type: types.FromName("String"), Keyword: true},
+				{Name: "version", Type: optionalString, Optional: true, Keyword: true},
+				{Name: "about", Type: optionalString, Optional: true, Keyword: true},
+			},
+			Return: typeT,
+		},
 	}
 }
 
