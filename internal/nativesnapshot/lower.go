@@ -370,8 +370,8 @@ func (l *functionLowerer) emitBinary(operator string, left, right valueRef, span
 	}
 	op := "integer_binary"
 	if typeName == "Float" {
-		if operator == "%" {
-			return valueRef{}, unsupported(l.program, span, "Float remainder")
+		if operator == "%" || operator == "**" {
+			return valueRef{}, unsupported(l.program, span, "Gate 1 Float operator "+operator)
 		}
 		op = "float_binary"
 	} else if typeName != "Integer" {
@@ -518,6 +518,8 @@ func arithmeticOperator(operator string) (string, bool) {
 		return "divide", true
 	case "%":
 		return "remainder", true
+	case "**":
+		return "power", true
 	default:
 		return "", false
 	}

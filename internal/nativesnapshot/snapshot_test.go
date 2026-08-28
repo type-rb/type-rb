@@ -33,13 +33,19 @@ def countdown(mut value: Integer): Integer
 	return value
 end
 
+def squared(value: Integer): Integer
+	return value ** 2
+end
+
 def main()
 	answer := sum_to(5)
 	if answer == 15
 		if scaled(1.5) == 3.0
 			if countdown(2) == 0
-				puts("ok")
-				return
+				if squared(3) == 9
+					puts("ok")
+					return
+				end
 			end
 		end
 	end
@@ -63,7 +69,7 @@ func TestBuildLowersTheGate1ScalarControlFlowSubset(t *testing.T) {
 	if snapshot.Format != Format || snapshot.Version != Version || snapshot.Module != "main" || snapshot.EntryFunction != "main#main" {
 		t.Fatalf("unexpected snapshot envelope: %#v", snapshot)
 	}
-	if len(snapshot.Sources) != 1 || snapshot.Sources[0].Path != "main.trb" || len(snapshot.Functions) != 4 {
+	if len(snapshot.Sources) != 1 || snapshot.Sources[0].Path != "main.trb" || len(snapshot.Functions) != 5 {
 		t.Fatalf("unexpected snapshot inputs: %#v", snapshot)
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -84,6 +90,7 @@ func TestBuildLowersTheGate1ScalarControlFlowSubset(t *testing.T) {
 	text := string(encoded)
 	for _, expected := range []string{
 		`"op":"integer_binary"`,
+		`"operator":"power"`,
 		`"op":"float_binary"`,
 		`"op":"call"`,
 		`"op":"branch"`,
@@ -107,6 +114,21 @@ func TestBuildRejectsDynamicOutputExplicitly(t *testing.T) {
 	}
 	_, err = Build(artifacts, "/project/src")
 	if err == nil || !strings.Contains(err.Error(), "native snapshot v2 does not support dynamic puts() output") {
+		t.Fatalf("Build() error=%v", err)
+	}
+}
+
+func TestBuildRejectsFloatPowerExplicitly(t *testing.T) {
+	source := []byte("def square(value: Float): Float\n\treturn value ** 2.0\nend\n\ndef main()\n\treturn\nend\n")
+	artifacts, err := compiler.AnalyzeProject(
+		[]compiler.SourceUnit{{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: source}},
+		compiler.Options{Mode: "go", GoModule: "example.com/native-snapshot", SourceRoot: "/project/src", ProjectRoot: "/project"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Build(artifacts, "/project/src")
+	if err == nil || !strings.Contains(err.Error(), "native snapshot v2 does not support Gate 1 Float operator **") {
 		t.Fatalf("Build() error=%v", err)
 	}
 }
