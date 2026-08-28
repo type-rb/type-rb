@@ -18,19 +18,22 @@ type Plan struct {
 	ParameterDefaults map[*ir.Method]bool
 	// ClassConstructors includes direct field defaults and the class's own
 	// initialize method, but never an inherited initializer.
-	ClassConstructors     map[*ir.Class]bool
-	RecordDefaults        map[*ir.Record]bool
-	RecordFieldDefaults   map[*ir.RecordField]bool
-	RecordCallDefaults    map[*ir.Call]bool
-	RecordCallSync        map[*ir.Call]bool
-	Lambdas               map[*ir.Lambda]bool
-	Calls                 map[*ir.Call]bool
-	CallParameterDefaults map[*ir.Call]bool
-	EnumCalls             map[*ir.EnumCall]bool
-	EnumCallDefaults      map[*ir.EnumCall]bool
-	Expressions           map[ir.Expression]bool
-	Iterations            map[*ir.Iterate]bool
-	StructuredBlocks      map[*ir.StructuredBlock]bool
+	ClassConstructors   map[*ir.Class]bool
+	RecordDefaults      map[*ir.Record]bool
+	RecordFieldDefaults map[*ir.RecordField]bool
+	// RecordConstructDefaults marks sites that evaluate an omitted selected
+	// effect. RecordConstructSync marks sites that still need the declaration's
+	// helper ABI but supplied every field whose default has that effect.
+	RecordConstructDefaults map[*ir.RecordConstruct]bool
+	RecordConstructSync     map[*ir.RecordConstruct]bool
+	Lambdas                 map[*ir.Lambda]bool
+	Calls                   map[*ir.Call]bool
+	CallParameterDefaults   map[*ir.Call]bool
+	EnumCalls               map[*ir.EnumCall]bool
+	EnumCallDefaults        map[*ir.EnumCall]bool
+	Expressions             map[ir.Expression]bool
+	Iterations              map[*ir.Iterate]bool
+	StructuredBlocks        map[*ir.StructuredBlock]bool
 	// LambdaModules retains the source module that owns each first-class
 	// function. Backend policy can use that identity without moving target-
 	// specific suspension rules into shared TypeRB semantics.
@@ -170,24 +173,24 @@ type Options struct {
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
 	plan := &Plan{
-		Methods:               map[*ir.Method]bool{},
-		ParameterDefaults:     map[*ir.Method]bool{},
-		ClassConstructors:     map[*ir.Class]bool{},
-		RecordDefaults:        map[*ir.Record]bool{},
-		RecordFieldDefaults:   map[*ir.RecordField]bool{},
-		RecordCallDefaults:    map[*ir.Call]bool{},
-		RecordCallSync:        map[*ir.Call]bool{},
-		Lambdas:               map[*ir.Lambda]bool{},
-		Calls:                 map[*ir.Call]bool{},
-		CallParameterDefaults: map[*ir.Call]bool{},
-		EnumCalls:             map[*ir.EnumCall]bool{},
-		EnumCallDefaults:      map[*ir.EnumCall]bool{},
-		Expressions:           map[ir.Expression]bool{},
-		Iterations:            map[*ir.Iterate]bool{},
-		StructuredBlocks:      map[*ir.StructuredBlock]bool{},
-		LambdaModules:         map[*ir.Lambda]string{},
-		methodKeys:            map[methodKey]bool{},
-		recordKeys:            map[recordKey]bool{},
+		Methods:                 map[*ir.Method]bool{},
+		ParameterDefaults:       map[*ir.Method]bool{},
+		ClassConstructors:       map[*ir.Class]bool{},
+		RecordDefaults:          map[*ir.Record]bool{},
+		RecordFieldDefaults:     map[*ir.RecordField]bool{},
+		RecordConstructDefaults: map[*ir.RecordConstruct]bool{},
+		RecordConstructSync:     map[*ir.RecordConstruct]bool{},
+		Lambdas:                 map[*ir.Lambda]bool{},
+		Calls:                   map[*ir.Call]bool{},
+		CallParameterDefaults:   map[*ir.Call]bool{},
+		EnumCalls:               map[*ir.EnumCall]bool{},
+		EnumCallDefaults:        map[*ir.EnumCall]bool{},
+		Expressions:             map[ir.Expression]bool{},
+		Iterations:              map[*ir.Iterate]bool{},
+		StructuredBlocks:        map[*ir.StructuredBlock]bool{},
+		LambdaModules:           map[*ir.Lambda]string{},
+		methodKeys:              map[methodKey]bool{},
+		recordKeys:              map[recordKey]bool{},
 	}
 	analyzer := &analyzer{
 		programs: programs, plan: plan, options: options, methodInfo: map[*ir.Method]methodContext{},
@@ -820,9 +823,9 @@ func anyRecordReached(records map[*ir.Record]bool, candidates []*ir.Record) bool
 	return false
 }
 
-func (a *analyzer) recordCallDefaultsReach(call *ir.Call, records []*ir.Record) (bool, bool) {
+func (a *analyzer) recordConstructDefaultsReach(construction *ir.RecordConstruct, records []*ir.Record) (bool, bool) {
 	provided := map[string]bool{}
-	for _, argument := range call.Arguments {
+	for _, argument := range construction.Arguments {
 		if argument.Name != "" {
 			provided[argument.Name] = true
 		}
@@ -1041,6 +1044,12 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if a.options.Transform != nil && a.options.Transform(node) {
 			suspends = true
 		}
+	case *ir.RecordConstruct:
+		suspends = a.expressionReaches(node.Target, context, record)
+		for _, argument := range node.Arguments {
+			suspends = a.expressionReaches(argument.Value, context, record) || suspends
+		}
+		suspends = a.recordConstructReaches(node, context, record) || suspends
 	case *ir.Call:
 		suspends = a.expressionReaches(node.Callee, context, record)
 		for _, argument := range node.Arguments {
@@ -1128,31 +1137,10 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, context methodContext, record bool) bool {
-	if !call.RecordDeclaration.Empty() {
-		identity := a.canonicalDeclarationIdentity(effectDeclarationIdentity(call.RecordDeclaration, context.module, ""))
-		omittedDefaultsReach, targetHasEffects := a.recordCallDefaultsReach(call, a.recordDefinitions[identity])
-		if record {
-			if omittedDefaultsReach {
-				a.plan.RecordCallDefaults[call] = true
-			} else if targetHasEffects {
-				a.plan.RecordCallSync[call] = true
-			}
-		}
-		return omittedDefaultsReach
-	}
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		if class := a.classDefinitions[identity]; class != nil {
 			return a.plan.ClassConstructors[class.class]
 		}
-		omittedDefaultsReach, targetHasEffects := a.recordCallDefaultsReach(call, a.recordDefinitions[identity])
-		if record {
-			if omittedDefaultsReach {
-				a.plan.RecordCallDefaults[call] = true
-			} else if targetHasEffects {
-				a.plan.RecordCallSync[call] = true
-			}
-		}
-		return omittedDefaultsReach
 	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
 		if lambda, ok := callee.(*ir.Lambda); ok {
@@ -1221,6 +1209,25 @@ func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, contex
 	default:
 		return false
 	}
+}
+
+func (a *analyzer) recordConstructReaches(construction *ir.RecordConstruct, context methodContext, record bool) bool {
+	declaration := effectDeclarationIdentity(construction.Declaration, context.module, "")
+	if construction.Declaration.Empty() {
+		if resolved, _, ok := a.expressionDeclarationIdentity(construction.Target, context); ok {
+			declaration = resolved
+		}
+	}
+	declaration = a.canonicalDeclarationIdentity(declaration)
+	omittedDefaultsReach, targetHasEffects := a.recordConstructDefaultsReach(construction, a.recordDefinitions[declaration])
+	if record {
+		if omittedDefaultsReach {
+			a.plan.RecordConstructDefaults[construction] = true
+		} else if targetHasEffects {
+			a.plan.RecordConstructSync[construction] = true
+		}
+	}
+	return omittedDefaultsReach
 }
 
 func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context methodContext) bool {
@@ -1395,6 +1402,12 @@ func (a *analyzer) expressionDeclarationIdentity(expression ir.Expression, conte
 				return identity, true, true
 			}
 		}
+	case *ir.RecordConstruct:
+		if !node.Declaration.Empty() {
+			declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Declaration, context.module, ""))
+			return declaration, false, true
+		}
+		return a.expressionDeclarationIdentity(node.Target, context)
 	case *ir.Call:
 		if identity, ok := a.constructorIdentity(node.Callee, context); ok {
 			return identity, false, true

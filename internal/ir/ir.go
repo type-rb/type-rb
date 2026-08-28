@@ -680,18 +680,31 @@ type CallArgument struct {
 }
 type Call struct {
 	ExprBase
-	Callee            Expression
-	Arguments         []CallArgument
-	CallSignature     []callsignature.Parameter
-	Block             *Block
-	Codec             *CodecSchema
-	RecordTarget      Expression
-	RecordDeclaration identity.Declaration
-	RecordFields      []RecordFieldContract
-	DeclarationOnly   bool
+	Callee          Expression
+	Arguments       []CallArgument
+	CallSignature   []callsignature.Parameter
+	Block           *Block
+	Codec           *CodecSchema
+	DeclarationOnly bool
 }
 
 func (*Call) irExpression() {}
+
+// RecordConstruct preserves checked record construction independently from an
+// ordinary callable invocation. Declaration owns semantic identity, while
+// Target retains only the authored/import projection needed by backends.
+// Arguments retain authored evaluation order and Fields retain declaration
+// order, because record defaults require both orders.
+type RecordConstruct struct {
+	ExprBase
+	Declaration   identity.Declaration
+	Target        Expression
+	TypeArguments []types.Type
+	Arguments     []CallArgument
+	Fields        []RecordFieldContract
+}
+
+func (*RecordConstruct) irExpression() {}
 
 type RecordFieldContract struct {
 	Name       string

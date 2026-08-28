@@ -890,6 +890,10 @@ func expressionWithType(expression ir.Expression, typ types.Type) ir.Expression 
 		copy := *node
 		copy.ExprBase.Type = typ
 		return &copy
+	case *ir.RecordConstruct:
+		copy := *node
+		copy.ExprBase.Type = typ
+		return &copy
 	default:
 		return nil
 	}
@@ -1099,17 +1103,29 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				Arguments: arguments,
 			}
 		}
+		if construction, ok := l.checked.RecordConstructions[n]; ok {
+			target := l.expression(construction.Target)
+			typeArguments := []types.Type(nil)
+			if application, generic := target.(*ir.TypeApply); generic {
+				target = application.Receiver
+				typeArguments = append(typeArguments, application.Arguments...)
+			}
+			result := &ir.RecordConstruct{
+				ExprBase: base, Declaration: construction.Declaration, Target: target,
+				TypeArguments: typeArguments,
+			}
+			for _, field := range construction.Fields {
+				result.Fields = append(result.Fields, ir.RecordFieldContract{Name: field.Name, Type: field.Type, HasDefault: field.HasDefault})
+			}
+			for _, argument := range n.Arguments {
+				result.Arguments = append(result.Arguments, ir.CallArgument{Name: argument.Name, Value: l.expression(argument.Value), Splat: argument.Splat})
+			}
+			return result
+		}
 		result := &ir.Call{
 			ExprBase: base, Callee: l.expression(n.Callee),
 			CallSignature:   append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
-		}
-		if construction, ok := l.checked.RecordConstructions[n]; ok {
-			result.RecordTarget = l.expression(construction.Target)
-			result.RecordDeclaration = construction.Declaration
-			for _, field := range construction.Fields {
-				result.RecordFields = append(result.RecordFields, ir.RecordFieldContract{Name: field.Name, Type: field.Type, HasDefault: field.HasDefault})
-			}
 		}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = l.lowerCodecSchema(codec.Schema)

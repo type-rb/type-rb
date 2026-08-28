@@ -888,6 +888,26 @@ func (g *generator) expr(expression ir.Expression) string {
 			return receiver + op + "__trb_field_" + n.Name
 		}
 		return receiver + op + n.Name
+	case *ir.RecordConstruct:
+		target := rubyRecordTarget(n.Target)
+		if target == nil {
+			return ""
+		}
+		if rubyRecordContractHasDefaults(n.Fields) {
+			return g.recordDefaultCall(n, target, n.Arguments, n.Fields)
+		}
+		parts := make([]string, len(n.Arguments))
+		for index, argument := range n.Arguments {
+			value := g.expr(argument.Value)
+			if argument.Splat != "" {
+				value = argument.Splat + value
+			}
+			if argument.Name != "" {
+				value = argument.Name + ": " + value
+			}
+			parts[index] = value
+		}
+		return g.expr(target) + ".new(" + strings.Join(parts, ", ") + ")"
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -911,19 +931,6 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			return g.intrinsic(reference.Intrinsic, n, parts)
-		}
-		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
-			if target := rubyRecordTarget(n.RecordTarget); target != nil {
-				if rubyRecordContractHasDefaults(n.RecordFields) {
-					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
-				}
-				return g.expr(target) + ".new(" + strings.Join(parts, ", ") + ")"
-			}
-			if rubyRecordContractHasDefaults(n.RecordFields) {
-				if target := rubyRecordTarget(member.Receiver); target != nil {
-					return g.recordDefaultCall(n, target, n.Arguments, n.RecordFields)
-				}
-			}
 		}
 		parts = g.executionArguments(n, parts)
 		callee := g.expr(n.Callee)
@@ -1074,7 +1081,7 @@ func rubyRecordTarget(expression ir.Expression) ir.Expression {
 	return nil
 }
 
-func (g *generator) recordDefaultCall(call *ir.Call, record ir.Expression, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+func (g *generator) recordDefaultCall(construction *ir.RecordConstruct, record ir.Expression, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
 	explicit := map[string]string{}
 	statements := make([]string, 0, len(arguments)+1)
 	for _, argument := range arguments {
@@ -1087,7 +1094,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record ir.Expression, argum
 		explicit[argument.Name] = name
 	}
 	values := make([]string, 0, len(fields)*2)
-	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
+	if g.execution != nil && (g.execution.RecordConstructDefaults[construction] || g.execution.RecordConstructSync[construction]) {
 		values = append(values, g.executionScopeArgument())
 	}
 	for _, field := range fields {

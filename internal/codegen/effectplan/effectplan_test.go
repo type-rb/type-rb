@@ -26,15 +26,11 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	record := &ir.Record{Name: "Config", Body: []ir.Statement{
 		&ir.RecordField{Name: "value", Type: stringType, Default: loadDefault},
 	}}
-	newConfig := func() *ir.Call {
-		return &ir.Call{
+	newConfig := func() *ir.RecordConstruct {
+		return &ir.RecordConstruct{
 			ExprBase: ir.NewExprBase(token.Span{}, configType),
-			Callee: &ir.Member{
-				ExprBase: ir.NewExprBase(token.Span{}, functionType),
-				Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, configType), Name: "Config"},
-				Name:     "new",
-			},
-			RecordFields: []ir.RecordFieldContract{{Name: "value", Type: stringType, HasDefault: true}},
+			Target:   &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, configType), Name: "Config"},
+			Fields:   []ir.RecordFieldContract{{Name: "value", Type: stringType, HasDefault: true}},
 		}
 	}
 	parameterDefault := newConfig()
@@ -84,13 +80,13 @@ func TestEffectsIncludeParameterDefaultsAndNestedInitializers(t *testing.T) {
 	if !plan.Methods[method] || !plan.ParameterDefaults[method] {
 		t.Fatalf("parameter default did not mark its method: %#v", plan)
 	}
-	for name, call := range map[string]*ir.Call{
+	for name, construction := range map[string]*ir.RecordConstruct{
 		"parameter default":         parameterDefault,
 		"module initializer":        moduleInitializer,
 		"nested module initializer": nestedModuleInitializer,
 		"class initializer":         classInitializer,
 	} {
-		if !plan.Calls[call] || !plan.Expressions[call] {
+		if !plan.RecordConstructDefaults[construction] || !plan.Expressions[construction] {
 			t.Errorf("%s was not recorded as effectful", name)
 		}
 	}
@@ -139,16 +135,12 @@ func TestRecordConstructionEffectsUseOnlyOmittedDefaults(t *testing.T) {
 	}}
 	effectful := &ir.RecordField{Name: "effectful", Type: integer, Default: effectCall}
 	record := &ir.Record{Name: "Config", Body: []ir.Statement{pure, effectful}}
-	construct := func(arguments ...ir.CallArgument) *ir.Call {
-		return &ir.Call{
-			ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Config")),
-			Callee: &ir.Member{
-				ExprBase: ir.NewExprBase(token.Span{}, function),
-				Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Config")), Name: "Config"},
-				Name:     "new",
-			},
+	construct := func(arguments ...ir.CallArgument) *ir.RecordConstruct {
+		return &ir.RecordConstruct{
+			ExprBase:  ir.NewExprBase(token.Span{}, types.FromName("Config")),
+			Target:    &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Config")), Name: "Config"},
 			Arguments: arguments,
-			RecordFields: []ir.RecordFieldContract{
+			Fields: []ir.RecordFieldContract{
 				{Name: "pure", Type: integer, HasDefault: true},
 				{Name: "effectful", Type: integer, HasDefault: true},
 			},
@@ -175,11 +167,11 @@ func TestRecordConstructionEffectsUseOnlyOmittedDefaults(t *testing.T) {
 	if !plan.RecordFieldDefaultFor(effectful) || plan.RecordFieldDefaultFor(pure) {
 		t.Fatalf("record field effects were not kept separate: %#v", plan.RecordFieldDefaults)
 	}
-	if !plan.Calls[omittedEffect] || !plan.RecordCallDefaults[omittedEffect] || plan.RecordCallSync[omittedEffect] {
+	if !plan.RecordConstructDefaults[omittedEffect] || plan.RecordConstructSync[omittedEffect] {
 		t.Fatal("omitting the effectful default did not mark the construction")
 	}
-	for name, call := range map[string]*ir.Call{"effect explicit": effectExplicit, "all explicit": allExplicit} {
-		if plan.Calls[call] || plan.RecordCallDefaults[call] || !plan.RecordCallSync[call] {
+	for name, construction := range map[string]*ir.RecordConstruct{"effect explicit": effectExplicit, "all explicit": allExplicit} {
+		if plan.RecordConstructDefaults[construction] || !plan.RecordConstructSync[construction] {
 			t.Errorf("%s did not retain a synchronous construction path", name)
 		}
 	}
