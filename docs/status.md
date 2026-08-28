@@ -34,10 +34,10 @@ share strict Boolean conditions, narrowing, lazy branches, and backend or REPL
 semantics.
 
 `trb lint` runs project checking before a small configurable built-in ruleset.
-The initial recommended rule, `trb/prefer-conditional-transfer`, reports and
-safely fixes simple one-transfer guard blocks. Built-in rules share the TypeRB
-version, while JSON reports carry independent `schemaVersion` and
-`toolVersion` fields. Third-party rule execution remains deferred until a
+The recommended rules safely rewrite simple one-transfer guard blocks and
+remove redundant terminal bare returns from Void callables. Built-in rules
+share the TypeRB version, while JSON reports carry independent `schemaVersion`
+and `toolVersion` fields. Third-party rule execution remains deferred until a
 deterministic, resource-bounded extension protocol is designed.
 
 The CLI can also run one self-contained `.trb` file without creating project

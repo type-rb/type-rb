@@ -153,7 +153,8 @@ individual rule levels:
   "lint": {
     "preset": "recommended",
     "rules": {
-      "trb/prefer-conditional-transfer": "warning"
+      "trb/prefer-conditional-transfer": "warning",
+      "trb/omit-terminal-void-return": "warning"
     }
   }
 }

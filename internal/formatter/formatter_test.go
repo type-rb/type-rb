@@ -103,6 +103,18 @@ func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesTerminalVoidReturn(t *testing.T) {
+	source := []byte("def stop()\n  return\nend\n")
+	want := "def stop()\n\treturn\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("formatter changed terminal return semantics\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatCanonicalizesStructuredJSXAndIsIdempotent(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 def AnnouncementDetail():ReactNode

@@ -49,7 +49,6 @@ Create `hello.trb`:
 def main()
 	name := "TypeRB"
 	puts("Hello, " + name + "!")
-	return
 end
 ```
 
@@ -94,7 +93,6 @@ Create `main.trb`:
 ```trb
 def main()
 	puts("Hello from TypeRB")
-	return
 end
 ```
 
