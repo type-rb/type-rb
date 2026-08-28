@@ -157,6 +157,36 @@ end
 	}
 }
 
+func TestBuildV4ForwardsCapturesToNestedClosures(t *testing.T) {
+	source := `alias StringFactory = () -> String
+alias FactoryFactory = (String) -> StringFactory
+
+def main()
+	prefix := "nested"
+	make: FactoryFactory := fn(suffix: String): StringFactory
+		return fn(): String
+			return prefix + suffix
+		end
+	end
+	factory := make("-closure")
+	puts(factory())
+	return
+end
+`
+	snapshot, err := BuildV4(analyzeV4Program(t, source), "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outer := v4FunctionWithSuffix(t, snapshot.Functions, "#main$lambda0")
+	if len(outer.Captures) != 1 || outer.Captures[0].Type != "String" || len(outer.Parameters) != 1 {
+		t.Fatalf("unexpected outer closure signature: %#v", outer)
+	}
+	inner := v4FunctionWithSuffix(t, snapshot.Functions, "#main$lambda0$lambda0")
+	if len(inner.Captures) != 2 || inner.Captures[0].Type != "String" || inner.Captures[1].Type != "String" {
+		t.Fatalf("unexpected nested closure captures: %#v", inner.Captures)
+	}
+}
+
 func analyzeV4Program(t *testing.T, source string) []*compiler.Artifact {
 	t.Helper()
 	artifacts, err := compiler.AnalyzeProject(
