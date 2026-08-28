@@ -2,6 +2,24 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.45 - 2026-08-28
+
+### Breaking changes
+
+- Project Declaration Input advances from version 6 to 7. Strict consumers
+  must accept version 7 and read canonical declaration identities separately
+  from source display names. Nested records and enums now expose structured
+  owner identities, while the set of visible declaration categories remains
+  unchanged. ([#581](https://github.com/type-rb/type-rb/pull/581))
+
+### CLI
+
+- Single-binary CLI applications now use `trb/cli` as their canonical import.
+  The `trb/platform/go/cli` spelling introduced in 0.3.44 remains a compatible
+  alias. Building currently requires the Go toolchain, but TypeRB application
+  source does not expose Go APIs.
+  ([#580](https://github.com/type-rb/type-rb/pull/580))
+
 ## 0.3.44 - 2026-08-28
 
 ### Breaking changes
