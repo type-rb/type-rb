@@ -1818,7 +1818,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 		}
 		if found >= 0 {
 			used[found] = true
-			sc.values[parameter.Name] = arguments[found].Value
+			sc.declare(parameter.Name, arguments[found].Value, parameter.Mutable)
 			continue
 		}
 		if parameter.Default != nil {
@@ -1826,7 +1826,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 			if err != nil {
 				return err
 			}
-			sc.values[parameter.Name] = value
+			sc.declare(parameter.Name, value, parameter.Mutable)
 			continue
 		}
 		if parameter.Rest || parameter.KeywordRest {
@@ -1837,7 +1837,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 					used[index] = true
 				}
 			}
-			sc.values[parameter.Name] = Value{Type: parameter.Type, Data: &arrayValue{Items: values}}
+			sc.declare(parameter.Name, Value{Type: parameter.Type, Data: &arrayValue{Items: values}}, parameter.Mutable)
 			continue
 		}
 		return fmt.Errorf("missing argument %s", parameter.Name)

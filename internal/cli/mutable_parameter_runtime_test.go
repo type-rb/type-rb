@@ -21,14 +21,16 @@ func TestMutableParameterReassignmentStaysLocalAcrossBackends(t *testing.T) {
 			return []string{"run", "--mode", "typescript", "--runtime", "node", filename}
 		}},
 	}
-	source := `def advance(mut value: Integer): Integer
-	value += 1
-	return value
+	source := `def advance(mut value: Integer, *, mut amount: Integer = 1): Integer
+	value += amount
+	amount = 0
+	return value + amount
 end
 
 def main()
 	value := 3
 	puts(advance(value).to_s())
+	puts(advance(value, amount: 2).to_s())
 	puts(value.to_s())
 	advance_fn := fn(mut input: Integer): Integer
 		input += 2
@@ -53,7 +55,7 @@ end
 			if status := command.Run(test.args(filename)); status != 0 {
 				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
-			if stdout.String() != "4\n3\n5\n3\n" || stderr.Len() != 0 {
+			if stdout.String() != "4\n5\n3\n5\n3\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 		})
