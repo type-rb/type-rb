@@ -11,19 +11,93 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/nativesnapshot"
 	"github.com/type-rb/type-rb/internal/toolingprotocol"
 )
 
 func (c *CLI) runCompiler(args []string) error {
 	if len(args) == 0 {
-		return errors.New("compiler requires a subcommand: inspect")
+		return errors.New("compiler requires a subcommand: inspect or native-snapshot")
 	}
 	switch args[0] {
 	case "inspect":
 		return c.runCompilerInspect(args[1:])
+	case "native-snapshot":
+		return c.runCompilerNativeSnapshot(args[1:])
 	default:
 		return fmt.Errorf("unknown compiler command %q", args[0])
 	}
+}
+
+func (c *CLI) runCompilerNativeSnapshot(args []string) error {
+	flags := flag.NewFlagSet("compiler native-snapshot", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	mode := flags.String("mode", "", "standalone mode; Gate 1 requires go")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return errors.New("compiler native-snapshot accepts at most one standalone .trb file")
+	}
+
+	filename := ""
+	configStart := "."
+	if flags.NArg() == 1 {
+		if filepath.Ext(flags.Arg(0)) != ".trb" {
+			return errors.New("standalone native snapshot source must be a .trb file")
+		}
+		var err error
+		filename, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		configStart = filename
+	}
+
+	config, standalone, err := loadCommandConfig("compiler native-snapshot", *configPath, configStart, filename, *mode, "")
+	if err != nil {
+		return err
+	}
+	if config.Mode != "go" {
+		return errors.New("compiler native-snapshot Gate 1 requires go mode")
+	}
+
+	var (
+		units   []compiler.SourceUnit
+		options compiler.Options
+	)
+	if standalone {
+		graph, graphErr := loadFileRootSourceGraph(filename, os.ReadFile)
+		if graphErr != nil {
+			return graphErr
+		}
+		units, options, err = projectCompilationSources(config, graph.Sources)
+	} else {
+		files, collectErr := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if collectErr != nil {
+			return collectErr
+		}
+		if len(files) == 0 {
+			return errors.New("no .trb files found")
+		}
+		units, options, err = projectCompilation(config, files)
+	}
+	if err != nil {
+		return err
+	}
+	artifacts, err := compiler.AnalyzeProject(units, options)
+	if err != nil {
+		return err
+	}
+	snapshot, err := nativesnapshot.Build(artifacts, options.SourceRoot)
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(c.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func (c *CLI) runCompilerInspect(args []string) error {
