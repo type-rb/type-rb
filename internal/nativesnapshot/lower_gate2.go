@@ -305,7 +305,7 @@ func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2V
 	case *ir.RecordConstruct:
 		return l.lowerRecordConstruct(node)
 	case *ir.Member:
-		return l.lowerRecordProject(node)
+		return l.lowerMember(node)
 	case *ir.EnumConstruct:
 		return l.lowerVariantConstruct(node)
 	case *ir.Case:
@@ -328,6 +328,30 @@ func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2V
 	default:
 		return gate2ValueRef{}, unsupportedV3(l.program, expression.SourceSpan(), fmt.Sprintf("expression %T", expression))
 	}
+}
+
+func (l *gate2FunctionLowerer) lowerMember(node *ir.Member) (gate2ValueRef, error) {
+	if !node.Namespace {
+		return l.lowerRecordProject(node)
+	}
+	typeID, err := l.typeName(node.ExprType(), node.SourceSpan())
+	if err != nil {
+		return gate2ValueRef{}, err
+	}
+	definition, ok := l.registry.definition(typeID)
+	if !ok || definition.Kind != "tagged" {
+		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-enum namespace member "+node.Name)
+	}
+	variant, ok := gate2Variant(definition, node.Name)
+	if !ok || len(variant.Fields) != 0 {
+		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-nullary enum member "+node.Name)
+	}
+	id := l.newValue()
+	l.emit(VariantConstruct{
+		Op: "variant_construct", Result: id, Type: typeID, Variant: node.Name, Arguments: []string{},
+		Origin: l.origin(node.SourceSpan()),
+	})
+	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
 func (l *gate2FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (gate2ValueRef, error) {

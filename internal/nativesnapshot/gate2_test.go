@@ -21,6 +21,7 @@ record Box
 end
 
 enum Outcome
+	Ready
 	Found(point: Point)
 	Missing(code: Integer)
 end
@@ -31,6 +32,8 @@ end
 
 def inspect(outcome: Outcome): Integer
 	case outcome
+	when Outcome::Ready
+		return 0
 	when Outcome::Found(point)
 		return point.x + point.y
 	when Outcome::Missing(code)
@@ -52,16 +55,18 @@ end
 
 def main()
 	box := Box.new(point: shift(Point.new(x: 3, y: 4)), weight: 5)
-	if inspect(Outcome::Found(box.point)) == 10
-		case propagated(true)
-		when Result::Ok(value)
-			if value == 8
-				puts("ok")
+	if inspect(Outcome::Ready) == 0
+		if inspect(Outcome::Found(box.point)) == 10
+			case propagated(true)
+			when Result::Ok(value)
+				if value == 8
+					puts("ok")
+					return
+				end
+			when Result::Err(_error)
+				puts("bad")
 				return
 			end
-		when Result::Err(_error)
-			puts("bad")
-			return
 		end
 	end
 	puts("bad")
