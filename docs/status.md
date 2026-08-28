@@ -598,7 +598,8 @@ source-debugger adapters remain staged; both modes retain Run Without Debugging.
 Portable colocated tests use `*_test.trb`, nested `describe` suites, explicit
 `test` cases, and typed expectations from `trb/std/test`. `trb test` executes
 the same source through Go, Ruby, and TypeScript process backends, supports
-file/name filtering and JSON Lines events, preserves assertion locations, and
+positional file/directory selection, regular-expression name selection, and
+JSON Lines events, preserves assertion locations, and
 returns a nonzero failure status. The VS Code extension consumes compiler-owned
 LSP discovery through the native Test Explorer and test CodeLens. Go test
 selections can use the same Delve-backed TypeRB source debugger as application

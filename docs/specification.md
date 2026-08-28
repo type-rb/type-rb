@@ -1301,7 +1301,7 @@ end
   declarations. A suite contains only nested `describe` and `test`
   declarations. A `test` must be nested inside a suite.
 - Suite and test names are nonempty String literals. Their slash-separated
-  nesting path is the stable full test name used by filters and tools.
+  nesting path is the stable full test name used by name patterns and tools.
   Duplicate full names in one file are an error.
 - Suite and test blocks take no parameters. Test bodies otherwise use ordinary
   statements, helpers, Results, and imports. Expected errors are inspected with
@@ -1314,6 +1314,13 @@ end
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.
-- `trb test` creates a temporary entrypoint, invokes each test module in
-  deterministic module order, and returns a nonzero status when a case fails.
-  It suppresses application `main()` entrypoints for this compilation only.
+- `trb test` accepts zero or more `_test.trb` file and directory paths below
+  the configured `sourceDir`. Directories select test files recursively,
+  multiple paths form a union, and no paths select every project test. Shell
+  expansion may supply multiple paths; the CLI does not interpret glob syntax.
+  A focused run compiles all production files and only the selected test files.
+  `-t` and `--test-name-pattern` apply a Go regular expression to full test
+  names after path selection. The command creates a temporary entrypoint,
+  invokes each selected test module in deterministic module order, and returns
+  a nonzero status when a case fails. It suppresses application `main()`
+  entrypoints for this compilation only.

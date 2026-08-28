@@ -48,10 +48,21 @@ trb test
 Select a suite or case by its full display name:
 
 ```sh
-trb test --filter "Calculator / negative values"
+trb test -t "Calculator / negative values$"
 ```
 
-Use `--file calculator_test.trb` to select declarations from one file.
+Pass files or directories positionally to select their tests. Directories are
+searched recursively, and multiple paths form a union:
+
+```sh
+trb test src/calculator_test.trb
+trb test src/domain src/application/orders_test.trb
+trb test src/domain/*_test.trb
+```
+
+The last example relies on shell expansion; `trb test` does not interpret a
+quoted glob. Only selected test files are compiled during a focused run, while
+the complete set of production files remains available.
 Editors combine the file and full name so identically named suites in different
 modules remain independent.
 

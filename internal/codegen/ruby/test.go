@@ -37,6 +37,8 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`$trb_test_suites = []`, "")
 	g.line(`$trb_test_total = 0`, "")
 	g.line(`$trb_test_failed = 0`, "")
+	g.line(`trb_test_names_json = ENV["TRB_TEST_NAMES"]`, "")
+	g.line(`$trb_test_names = trb_test_names_json && !trb_test_names_json.empty? ? JSON.parse(trb_test_names_json) : []`, "")
 	g.line(`def trb_test_equal(left, right)`, "")
 	g.indent++
 	g.line(`return true if left.equal?(right)`, "")
@@ -83,7 +85,7 @@ func (g *generator) testRuntimeSupport() {
 	g.indent++
 	g.line(`full_name = ($trb_test_suites + [name]).join(" / ")`, "")
 	g.line(`selected_file = ENV["TRB_TEST_FILE"]; return if selected_file && !selected_file.empty? && selected_file != file`, "")
-	g.line(`return if ENV["TRB_TEST_FILTER"] && !full_name.include?(ENV["TRB_TEST_FILTER"])`, "")
+	g.line(`return if !$trb_test_names.empty? && !$trb_test_names.include?(full_name)`, "")
 	g.line(`$trb_test_total += 1`, "")
 	g.line(`trb_test_event("test_started", full_name, file, file, line, column)`, "")
 	g.line(`begin`, "")

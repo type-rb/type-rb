@@ -67,6 +67,7 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`var trbTestSuites []string`)
 	g.line(`var trbTestTotal int`)
 	g.line(`var trbTestFailed int`)
+	g.line(`var trbTestNames = func() map[string]bool { selected := map[string]bool{}; var names []string; _ = json.Unmarshal([]byte(os.Getenv("TRB_TEST_NAMES")), &names); for _, name := range names { selected[name] = true }; return selected }()`)
 	g.line(`func trbTestEvent(kind string, name string, testPath string, path string, line int, column int, message string) {`)
 	g.indent++
 	g.line(`if os.Getenv("TRB_TEST_REPORTER") == "json" {`)
@@ -87,7 +88,7 @@ func (g *generator) testRuntimeSupport() {
 	g.indent++
 	g.line(`fullName := strings.Join(append(append([]string{}, trbTestSuites...), name), " / ")`)
 	g.line(`if selected := os.Getenv("TRB_TEST_FILE"); selected != "" && selected != path { return }`)
-	g.line(`if filter := os.Getenv("TRB_TEST_FILTER"); filter != "" && !strings.Contains(fullName, filter) { return }`)
+	g.line(`if len(trbTestNames) > 0 && !trbTestNames[fullName] { return }`)
 	g.line(`trbTestTotal++`)
 	g.line(`trbTestEvent("test_started", fullName, path, path, line, column, "")`)
 	g.line(`failure := ""`)

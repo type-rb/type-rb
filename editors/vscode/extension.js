@@ -745,7 +745,8 @@ class TypeRBTestController {
 		if (running !== undefined) {
 			await vscode.debug.stopDebugging(running);
 		}
-		const configuration = debugConfigurationForTest(invocation.project, invocation.filter, invocation.file);
+		const names = invocation.tests.map((item) => this.metadata.get(item.id).fullName);
+		const configuration = debugConfigurationForTest(invocation.project, invocation.filter, invocation.file, names);
 		const started = await vscode.debug.startDebugging(invocation.project.workspaceFolder, configuration);
 		if (!started) {
 			void vscode.window.showErrorMessage(`Cannot debug TypeRB tests in ${invocation.project.label}.`);
@@ -838,10 +839,11 @@ class TypeRBTestController {
 		}
 		const args = ["test", "--config", invocation.project.configPath, "--reporter", "json"];
 		if (invocation.filter !== "") {
-			args.push("--filter", invocation.filter);
+			const names = invocation.tests.map((item) => this.metadata.get(item.id).fullName);
+			args.push("--test-name-pattern", exactTestNamePattern(names));
 		}
 		if (invocation.file !== "") {
-			args.push("--file", invocation.file);
+			args.push(invocation.file);
 		}
 		const runner = new TypeRBProcess({
 			command: invocation.project.testCommand || "trb",
@@ -1190,13 +1192,17 @@ function debugSessionKey(session) {
 	return typeof value === "string" && value !== "" ? path.resolve(value) : undefined;
 }
 
-function debugConfigurationForTest(project, filter, file) {
+function exactTestNamePattern(names) {
+	return `^(${[...new Set(names)].map((name) => name.replace(/[\\.^$|?*+()[\]{}]/g, "\\$&")).join("|")})$`;
+}
+
+function debugConfigurationForTest(project, filter, file, names) {
 	return {
 		...debugConfigurationForProject(project),
 		name: filter === "" ? `TypeRB Tests: ${project.label}` : `TypeRB Test: ${filter}`,
 		testFilter: filter,
 		env: {
-			TRB_TEST_FILTER: filter,
+			TRB_TEST_NAMES: names.length === 0 ? "" : JSON.stringify(names),
 			TRB_TEST_FILE: file,
 			TRB_TEST_REPORTER: "human",
 		},

@@ -170,6 +170,15 @@ end
 			if strings.Contains(stdout.String(), "APPLICATION MAIN RAN") {
 				t.Fatalf("trb test executed the application main():\n%s", stdout.String())
 			}
+
+			stdout.Reset()
+			stderr.Reset()
+			if status := command.Run([]string{"test", "--config", config.Path, "-t", `keeps private helpers isolated by source module$`, "--reporter", "json"}); status != 0 {
+				t.Fatalf("filtered status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if strings.Count(stdout.String(), `"type":"test_started"`) != 1 || !strings.Contains(stdout.String(), `"name":"Calculator / keeps private helpers isolated by source module"`) {
+				t.Fatalf("name pattern did not select the expected test:\n%s", stdout.String())
+			}
 			entries, err := os.ReadDir(filepath.Join(root, ".trb", "test"))
 			if err != nil || len(entries) != 0 {
 				t.Fatalf("test workspace leaked: entries=%v err=%v", entries, err)
@@ -291,7 +300,7 @@ func TestTestCompileCreatesDebuggableGoExecutable(t *testing.T) {
 	}
 }
 
-func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
+func TestTestPositionalFileDisambiguatesDuplicateNames(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("go is unavailable: %v", err)
 	}
@@ -317,11 +326,113 @@ func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"test", "--config", config.Path, "--file", selected, "--reporter", "json"}); status != 0 {
+	if status := command.Run([]string{"test", "--config", config.Path, selected, "--reporter", "json"}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if strings.Count(stdout.String(), `"type":"test_started"`) != 1 || !strings.Contains(stdout.String(), `"test_file":`) {
-		t.Fatalf("file filter did not select one declaration:\n%s", stdout.String())
+		t.Fatalf("positional file did not select one declaration:\n%s", stdout.String())
+	}
+}
+
+func TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/test-path-selection"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "domain", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "application"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "unrelated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-path-selection\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testSource := func(name string) []byte {
+		return []byte("import { describe, expect, test } from trb/std/test\n\ndescribe(\"" + name + "\") do\n\ttest(\"runs\") do\n\t\texpect(true).to_be_true()\n\tend\nend\n")
+	}
+	for filename, source := range map[string][]byte{
+		filepath.Join(config.SourcePath(), "domain", "account_test.trb"):          testSource("Account"),
+		filepath.Join(config.SourcePath(), "domain", "nested", "member_test.trb"): testSource("Member"),
+		filepath.Join(config.SourcePath(), "application", "order_test.trb"):       testSource("Order"),
+		filepath.Join(config.SourcePath(), "unrelated", "broken_test.trb"):        []byte("this is not valid TypeRB\n"),
+	} {
+		if err := os.WriteFile(filename, source, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	t.Chdir(root)
+	if status := command.Run([]string{
+		"test",
+		filepath.Join("src", "domain"),
+		"--config", config.Path,
+		filepath.Join("src", "application", "order_test.trb"),
+		"--reporter", "json",
+	}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if strings.Count(stdout.String(), `"type":"test_started"`) != 3 {
+		t.Fatalf("directory and file selection did not run three tests:\n%s", stdout.String())
+	}
+	for _, name := range []string{"Account / runs", "Member / runs", "Order / runs"} {
+		if !strings.Contains(stdout.String(), `"name":"`+name+`"`) {
+			t.Fatalf("selected output is missing %q:\n%s", name, stdout.String())
+		}
+	}
+}
+
+func TestTestSelectionRejectsInvalidInputs(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testFile := filepath.Join(config.SourcePath(), "sample_test.trb")
+	if err := os.WriteFile(testFile, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ordinaryFile := filepath.Join(config.SourcePath(), "sample.trb")
+	if err := os.WriteFile(ordinaryFile, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyDirectory := filepath.Join(config.SourcePath(), "empty")
+	if err := os.MkdirAll(emptyDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside_test.trb")
+	if err := os.WriteFile(outside, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, path := range map[string]string{
+		"ordinary file":     ordinaryFile,
+		"empty directory":   emptyDirectory,
+		"outside sourceDir": outside,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := selectProjectTestFiles(config, []string{testFile}, []string{path}); err == nil {
+				t.Fatalf("selectProjectTestFiles accepted %s", path)
+			}
+		})
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "-t", "["}); status == 0 || !strings.Contains(stderr.String(), "invalid --test-name-pattern") {
+		t.Fatalf("invalid pattern status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 }
 
