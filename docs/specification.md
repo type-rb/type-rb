@@ -331,9 +331,13 @@ end
 - A guard without `else` narrows the following statements when every matching
   branch returns. For example, after `if value == nil; return fallback; end`,
   `value` has its non-nullable type.
-- Reassignment invalidates the narrowing immediately. The assignment itself is
-  checked against the binding's declared nullable type, and subsequent uses
-  must narrow again.
+- Plain reassignment is checked against the binding's declared nullable type,
+  then gives subsequent statements in that control-flow path the assigned
+  value's precise flow type. Assigning a non-null value of the declared base
+  type therefore preserves non-nullability without another `nil` check;
+  assigning `nil` gives the path type `Nil`. A conditional, loop, or callback
+  does not export that assignment fact to a parent path that may not execute it.
+  Compound assignment does not establish a new nullable flow fact.
 - A direct nullable data field may also narrow when its receiver is a stable
   lexical binding and the field cannot change: record fields are always
   stable, and class fields must be declared `readonly`. Reassigning the
@@ -343,6 +347,9 @@ end
   assumed to produce the same value when evaluated again. Typed IR records
   each nullable unwrap explicitly so Go, Ruby, TypeScript, and the REPL use the
   same checked flow facts.
+
+See [ADR 0010](decisions/0010-assignment-based-nullable-narrowing.md) for the
+declared-type and flow-type split.
 
 #### Literal types and discriminated unions
 
