@@ -12,7 +12,7 @@ import (
 	cliapp "github.com/type-rb/type-rb/internal/cliapp"
 )
 
-const staticCLIAppSource = `import { run } from trb/platform/go/cli
+const singleBinaryCLIAppSource = `import { run } from trb/cli
 
 record ServeArgs
 	directory: String
@@ -36,8 +36,8 @@ def main()
 end
 `
 
-func TestCompileProjectGeneratesStaticGoCLI(t *testing.T) {
-	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(staticCLIAppSource)}}, Options{
+func TestCompileProjectGeneratesSingleBinaryCLI(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(singleBinaryCLIAppSource)}}, Options{
 		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestCompileProjectGeneratesStaticGoCLI(t *testing.T) {
 }
 
 func TestCLIRejectsUnsupportedSchemaShapes(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 record Args
 	values: Array<String>
 end
@@ -123,7 +123,7 @@ end`,
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := []byte("import { run } from trb/platform/go/cli\n" + test.source + "\n")
+			source := []byte("import { run } from trb/cli\n" + test.source + "\n")
 			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
 				Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
 			})
@@ -134,17 +134,40 @@ end`,
 	}
 }
 
-func TestCLIPackageIsGoOnly(t *testing.T) {
+func TestCLIPackageRequiresCurrentNativeExecutableTarget(t *testing.T) {
 	for _, mode := range []string{"ruby", "typescript"} {
-		_, err := Compile("main.trb", []byte("import { run } from trb/platform/go/cli\n"), mode)
+		_, err := Compile("main.trb", []byte("import { run } from trb/cli\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "does not support mode") {
 			t.Fatalf("%s Compile() error=%v, want target diagnostic", mode, err)
 		}
 	}
 }
 
+func TestLegacyGoPlatformCLIImportUsesCanonicalSchema(t *testing.T) {
+	source := []byte(`import { run } from trb/platform/go/cli
+
+record Args
+	name: String
+end
+
+def parse(): Args
+	return run<Args>(name: "legacy")
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-compat", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := cliapp.ManifestFrom(artifactForModule(artifacts, "main").IR.Extensions)
+	if manifest == nil || len(manifest.Invocations) != 1 || manifest.Invocations[0].Schema.Root.Name != "Args" {
+		t.Fatalf("legacy import did not use the canonical CLI schema: %#v", manifest)
+	}
+}
+
 func TestCLIRuntimeIsGeneratedOncePerGoPackage(t *testing.T) {
-	first := SourceUnit{Filename: "first.trb", ModulePath: "app/first", Package: "app", Source: []byte(`import { run } from trb/platform/go/cli
+	first := SourceUnit{Filename: "first.trb", ModulePath: "app/first", Package: "app", Source: []byte(`import { run } from trb/cli
 record FirstArgs
 	value: String
 end
@@ -152,7 +175,7 @@ def parse_first(): FirstArgs
 	return run<FirstArgs>(name: "first")
 end
 `)}
-	second := SourceUnit{Filename: "second.trb", ModulePath: "app/second", Package: "app", Source: []byte(`import { run } from trb/platform/go/cli
+	second := SourceUnit{Filename: "second.trb", ModulePath: "app/second", Package: "app", Source: []byte(`import { run } from trb/cli
 record SecondArgs
 	value: String
 end
@@ -186,7 +209,7 @@ end
 }
 
 func TestCLIRuntimeNamesDoNotCollideWithPrivateFunctions(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 
 def _trb_cli_parse()
 	return
@@ -240,7 +263,7 @@ func TestCLIRejectsGeneratedOptionCollisions(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := []byte("import { run } from trb/platform/go/cli\nrecord Args\n\t" + test.field + "\nend\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
+			source := []byte("import { run } from trb/cli\nrecord Args\n\t" + test.field + "\nend\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
 			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
 				Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
 			})
@@ -252,7 +275,7 @@ func TestCLIRejectsGeneratedOptionCollisions(t *testing.T) {
 }
 
 func TestCLIRejectsDuplicateMetadataAliases(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 record Args
 	value: String = "" @cli(:option, name: "first", long: "second")
 end
@@ -276,7 +299,7 @@ func TestCLIRootResolvesTransparentRecordAlias(t *testing.T) {
 	}{
 		{
 			name: "local alias",
-			sources: []SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/platform/go/cli
+			sources: []SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/cli
 
 record AppArgs
 	name: String
@@ -298,7 +321,7 @@ end
 alias BaseArguments = AppArgs
 alias Arguments = BaseArguments
 				`)},
-				{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/platform/go/cli
+				{Filename: "main.trb", ModulePath: "main", Package: "main", Source: []byte(`import { run } from trb/cli
 import { Arguments } from models/arguments
 
 args := run<Arguments>(name: "cli-alias")
@@ -380,7 +403,7 @@ end`,
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := []byte("import { run } from trb/platform/go/cli\n" + test.source + "\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
+			source := []byte("import { run } from trb/cli\n" + test.source + "\ndef parse(): Args\n\treturn run<Args>(name: \"test\")\nend\n")
 			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
 				Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
 			})
@@ -402,7 +425,7 @@ func TestCLIRejectsOptionalRootSubcommandSelectors(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := []byte(`import { run } from trb/platform/go/cli
+			source := []byte(`import { run } from trb/cli
 enum Command
 	Serve
 end
@@ -424,7 +447,7 @@ end
 }
 
 func TestCLIAllowsUnicodeNamesOtherThanNUL(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 enum Command
 	Serve @cli(name: "配信")
 end
@@ -443,7 +466,7 @@ args := run<Args>(name: "unicode")
 }
 
 func TestCLIQualifiedNestedSchemaUsesBackendIdentifiers(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 
 module Services
 	enum Command
@@ -486,7 +509,7 @@ end
 }
 
 func TestCLIRunForwardsExecutionScopeToRecordDefaults(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 
 def default_port(): Integer
 	values := [7000].concurrent_map do |value|
@@ -527,7 +550,7 @@ end
 }
 
 func TestCLINamedOnlyCommandPayloadUsesEnumABI(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 
 record ServeArgs
 	path: String
@@ -568,7 +591,7 @@ end
 }
 
 func TestCLIMetadataAcceptsExplicitNil(t *testing.T) {
-	source := []byte(`import { run } from trb/platform/go/cli
+	source := []byte(`import { run } from trb/cli
 
 record Args
 end

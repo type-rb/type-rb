@@ -1,4 +1,4 @@
-# 0006: Static Go command-line applications
+# 0006: Single-binary command-line applications
 
 ## Context
 
@@ -9,14 +9,17 @@ ArgumentParser derive a closed schema from typed declarations. Python Typer
 uses function signatures for a similarly concise surface.
 
 TypeRB already has records for product types, payload enums for closed choices,
-postfix declaration metadata, project-wide type information, and Go executable
-compilation. Generating Ruby or TypeScript launchers would weaken the
-single-binary goal without adding capability to that goal.
+postfix declaration metadata, project-wide type information, and native
+executable compilation through the Go toolchain. Generating Ruby or TypeScript
+launchers would weaken the single-binary goal without adding capability to
+that goal. The current backend choice is not part of the CLI application model
+exposed to users.
 
 ## Decision
 
-`trb/platform/go/cli` is an official platform package available only in `mode: "go"`.
-Applications parse one root record with an explicit generic call:
+`trb/cli` is the official compiler-integrated package for building
+single-binary command-line applications. Applications parse one root record
+with an explicit generic call:
 
 ```trb
 args := run<AppArgs>(name: "server", version: "1.0.0", about: "Serve a directory")
@@ -24,7 +27,7 @@ args := run<AppArgs>(name: "server", version: "1.0.0", about: "Serve a directory
 
 The type argument resolves through transparent aliases to one non-nullable,
 non-generic root record. Nullable and instantiated generic root records are
-rejected before Go generation in the initial contract.
+rejected before native executable generation in the initial contract.
 
 The canonical schema model is:
 
@@ -56,11 +59,11 @@ precede the selected subcommand. Usage errors are written to standard error
 and exit with status 2.
 
 Project analysis converts declarations into a closed, target-independent CLI
-schema. The Go backend generates the parser, conversions, payload-enum
-construction, and record construction using only the Go standard library. It
-does not use runtime reflection, dynamic command registration, or an external
-CLI framework. `trb build --compile` therefore produces the intended single
-binary.
+schema. The current native executable backend generates the parser,
+conversions, payload-enum construction, and record construction using only the
+Go standard library internally. It does not use runtime reflection, dynamic
+command registration, or an external CLI framework. `trb build --compile`
+therefore produces the intended single binary.
 
 A transparent, non-generic type alias of the root record resolves to that
 record before schema analysis. Aliases do not create a second CLI schema
@@ -79,11 +82,16 @@ nested subcommands, optional or default root commands, and options after a
 subcommand that target the root record. Each requires explicit metadata and
 deterministic conflict rules.
 
-Ruby and TypeScript CLI generation is deliberately outside this package's
-direction, not merely missing from the first implementation. Dynamic plugins
-and runtime-discovered subcommands are also excluded because they conflict
-with a closed schema and single executable. Applications needing those models
-can use a target-specific interoperability boundary instead.
+The initial compiler implementation requires `mode: "go"` and the Go
+toolchain to produce the native executable. This is a build requirement, not a
+Go API exposed by `trb/cli`. Ruby and TypeScript launcher generation is
+deliberately outside this package's direction, not merely missing from the
+first implementation. A future native executable backend may implement the
+same schema without changing application imports.
+
+Dynamic plugins and runtime-discovered subcommands are excluded because they
+conflict with a closed schema and single executable. Applications needing
+those models can use a target-specific interoperability boundary instead.
 
 ## Consequences
 
@@ -93,5 +101,9 @@ can use a target-specific interoperability boundary instead.
   schema.
 - The initial surface is smaller than Cobra, clap, or Typer, but its omitted
   capabilities can be added without changing the canonical data model.
-- CLI source is portable TypeRB syntax, while importing `trb/platform/go/cli` intentionally
-  selects a Go-only application capability.
+- Users select the CLI application capability with `trb/cli`; they do not
+  select or program against Go APIs.
+- Building currently requires the Go target and toolchain, while the schema,
+  diagnostics, and application-facing API remain target-independent.
+- `trb/platform/go/cli`, published in 0.3.44, remains a compatibility import;
+  new source and documentation use `trb/cli`.

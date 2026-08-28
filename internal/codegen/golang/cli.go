@@ -15,7 +15,7 @@ import (
 func (g *generator) cliRun(call *ir.Call) string {
 	index, _, ok := g.cli.InvocationIndex(g.modulePath, call.SourceSpan().Start.Offset)
 	if !ok {
-		return "func() " + g.goType(call.ExprType()) + " { panic(\"trb/platform/go/cli schema is unavailable\") }()"
+		return "func() " + g.goType(call.ExprType()) + " { panic(\"trb/cli schema is unavailable\") }()"
 	}
 	g.cliInvocations[index] = true
 	arguments := map[string]string{}

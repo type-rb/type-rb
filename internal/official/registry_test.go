@@ -54,6 +54,28 @@ func TestManifestRejectsInvalidPackageBoundary(t *testing.T) {
 	}
 }
 
+func TestBundledCLIUsesCanonicalProductPackageAndLegacyAlias(t *testing.T) {
+	canonical, ok := Lookup("trb/cli")
+	if !ok {
+		t.Fatal("trb/cli is not registered")
+	}
+	legacy, ok := Lookup("trb/platform/go/cli")
+	if !ok || legacy != canonical {
+		t.Fatalf("legacy CLI import does not resolve to the canonical package: %#v", legacy)
+	}
+	if canonical.Definition.ModulePath != "trb/cli/index" || canonical.Definition.Kind != "portable" {
+		t.Fatalf("unexpected CLI package boundary: %#v", canonical.Definition)
+	}
+	if !canonical.Definition.Supports("go") || canonical.Definition.Supports("ruby") || canonical.Definition.Supports("typescript") {
+		t.Fatalf("unexpected CLI target support: %#v", canonical.Definition.Targets)
+	}
+	for _, name := range Names() {
+		if name == "trb/platform/go/cli" {
+			t.Fatal("legacy CLI alias was exposed as a canonical package name")
+		}
+	}
+}
+
 func TestBundledReactPackage(t *testing.T) {
 	packageDefinition, ok := Lookup("trb/platform/typescript/react")
 	if !ok {
