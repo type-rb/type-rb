@@ -218,7 +218,7 @@ func (r *aggregateRegistry) registerArray(program *ir.Program, typ types.Type, s
 		return "", err
 	}
 	definition, defined := r.definitions[element]
-	if element != "Integer" && (!defined || definition.Kind != "string" && definition.Kind != "function") {
+	if element != "Integer" && (!defined || definition.Kind != "string" && definition.Kind != "function" && definition.Kind != "array") {
 		return "", r.unsupported(program, span, "Array element type "+typ.Args[0].String())
 	}
 	id := "Array<" + element + ">"
