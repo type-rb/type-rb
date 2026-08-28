@@ -187,6 +187,7 @@ type Parameter struct {
 	Name                 string
 	Type                 TypeRef
 	Default              Expression
+	Mutable              bool
 	NamedOnly            bool
 	Keyword              bool
 	Rest                 bool

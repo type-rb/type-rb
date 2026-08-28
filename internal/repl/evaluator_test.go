@@ -131,6 +131,26 @@ func TestEvaluateFirstClassFunctionClosure(t *testing.T) {
 	}
 }
 
+func TestBindRetainsParameterMutability(t *testing.T) {
+	integer := types.FromName("Integer")
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	callScope := &scope{values: map[string]Value{}}
+	parameters := []ir.Parameter{
+		{Name: "fixed", Type: integer},
+		{Name: "changeable", Type: integer, Mutable: true},
+	}
+	arguments := []evaluatedArgument{
+		{Value: Value{Type: integer, Data: int64(1)}},
+		{Value: Value{Type: integer, Data: int64(2)}},
+	}
+	if err := evaluator.bind(callScope, parameters, arguments, "repl"); err != nil {
+		t.Fatal(err)
+	}
+	if callScope.mutableBinding("fixed") || !callScope.mutableBinding("changeable") {
+		t.Fatalf("parameter mutability was not retained: %#v", callScope.mutable)
+	}
+}
+
 func TestEvaluateMarksOnlyDirectMutableBindingResults(t *testing.T) {
 	integer := types.FromName("Integer")
 	span := token.Span{}

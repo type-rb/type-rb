@@ -84,12 +84,20 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   positional order/type/presence and the unordered named-only
   label/type/presence set must match. Positional source names, named-only
   declaration order, and default expressions do not participate.
+- A `def` or `fn` parameter is an immutable binding by default. Prefix its
+  name with `mut`, such as `def advance(mut value: Integer)`, when the
+  implementation must reassign it or use it for a destructive operation.
+  Parameter mutability is local to the implementation: it is not `inout`, is
+  not part of a function type or call signature, and does not participate in
+  interface or override matching. Interfaces reject `mut` because they declare
+  no implementation binding.
 - Portable parameter rest forms and call splats are not supported. `fn`
   values and first-class function types remain required-positional only.
 - Payload enum variant declarations use the same
   `positional-only | * | named-only` regions. Every payload field is required,
   and variant construction follows the same positional and label binding and
-  source evaluation-order rules as an ordinary call.
+  source evaluation-order rules as an ordinary call. Payload fields are data
+  rather than implementation bindings and cannot be declared with `mut`.
 - Record construction labels are field labels and remain separate from method
   parameters.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
@@ -132,7 +140,8 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   continue to apply to captured values.
 - Function values take required positional parameters in the initial syntax;
   defaults, named-only parameters, rest parameters, call blocks, and generic
-  lambda parameters are not accepted.
+  lambda parameters are not accepted. Their parameter bindings are immutable
+  by default and may use the same `mut name: Type` spelling as `def`.
 - The compact spelling uses the ordinary statement separator rather than a
   second lambda syntax: `double := fn(value: Integer): Integer; return value *
   2; end`. `trb fmt` expands it to the canonical multiline form.
@@ -452,9 +461,12 @@ switches.
   records this widening explicitly and typed IR lowers it in initializers,
   assignments, arguments, record and enum payloads, defaults, and returns.
   `Float` does not narrow implicitly to `Integer`.
-- Method parameters and iterator block parameters are mutable bindings in the
-  current language. Class fields use their existing `readonly` modifier
-  instead of `mut`.
+- Function and method parameters are immutable bindings unless their
+  declaration uses `mut`. The marker controls the implementation binding only;
+  it does not write a reassigned value back to the caller. Iterator and call
+  block parameters retain their current mutable binding behavior until an
+  explicit block-pattern and ownership decision is made. Class fields use
+  their existing `readonly` modifier instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
 - The REPL appends ` [mut]` to the displayed value and type when a submission
   directly declares, assigns, or evaluates a mutable binding. The marker is

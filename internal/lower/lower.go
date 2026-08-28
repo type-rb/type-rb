@@ -635,7 +635,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			if parameter.Type.Empty() {
 				typ = types.Type{Kind: types.Any, Name: "Any"}
 			}
-			method.Parameters = append(method.Parameters, ir.Parameter{Name: parameter.Name, Type: typ, Default: l.expression(parameter.Default), NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest})
+			method.Parameters = append(method.Parameters, ir.Parameter{Name: parameter.Name, Type: typ, Default: l.expression(parameter.Default), Mutable: parameter.Mutable, NamedOnly: parameter.NamedOnly, Keyword: parameter.Keyword, Rest: parameter.Rest, KeywordRest: parameter.KeywordRest})
 		}
 		return method
 	case *ast.VariableStatement:
@@ -965,7 +965,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			result.ReturnType = lowerType(n.ReturnType)
 		}
 		for _, parameter := range n.Parameters {
-			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type)})
+			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type), Mutable: parameter.Mutable})
 		}
 		result.Body = l.statements(n.Body)
 		return result

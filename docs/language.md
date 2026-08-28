@@ -70,6 +70,21 @@ end
 connect(port: 8443, host: "example.com")
 ```
 
+Function and method parameters are immutable bindings by default. Add `mut`
+before a parameter name only when its implementation reassigns that binding or
+uses it for a destructive operation:
+
+```trb
+def advance(mut value: Integer, *, amount: Integer = 1): Integer
+	value += amount
+	return value
+end
+```
+
+`mut` here is not `inout`: assigning another value to `value` does not assign
+that value to the caller's binding. It is not part of the function's call
+signature, so callers, interfaces, and overrides do not repeat it.
+
 Parameters before `*` cannot be supplied by name, and positional arguments
 cannot follow a named argument. Positional defaults remain available for
 naturally ordered APIs. Explicit argument expressions run left to right;
@@ -97,8 +112,10 @@ end
 
 Each `fn` parameter has a type. A function value with no result omits its
 return annotation, just like `def`. Its `return` exits the function value, not
-the enclosing method. A function value that may return a recoverable error uses
-the same ordinary Result return in its declaration and type:
+the enclosing method. A parameter is immutable unless written with `mut`, for
+example `fn(mut value: Integer): Integer`. A function value that may return a
+recoverable error uses the same ordinary Result return in its declaration and
+type:
 
 ```trb
 loader: () -> Result<String, LoadError> := fn(): Result<String, LoadError>
@@ -180,6 +197,11 @@ names.push("Grace")
 
 An immutable reference cannot become mutable by assigning it to a new `mut`
 binding.
+
+The same default applies to `def` and `fn` parameters. Parameter `mut` changes
+only the binding inside that implementation and does not add caller-side
+writeback. Iterator and call-block bindings keep their current behavior while
+explicit mutable block patterns and element ownership remain under design.
 
 Compare a nullable binding with `nil` to narrow its non-`nil` path. A returning
 guard also narrows the statements that follow it:
