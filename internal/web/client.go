@@ -345,7 +345,7 @@ func (g *browserClientGenerator) writeQueryType(source *strings.Builder, moduleP
 		return
 	}
 	if typ.Kind == "named" {
-		identity := typeIdentity(definitionModule(modulePath, typ), typ.Name)
+		identity := typeIdentity(definitionModule(modulePath, typ), definitionName(typ))
 		if newtype, exists := g.schema.newtypes[identity]; exists {
 			if visiting[identity] {
 				return
@@ -378,7 +378,7 @@ func (g *browserClientGenerator) parameterTypeValue(modulePath string, typ packa
 	}
 	typ.Nullable = false
 	if typ.Kind == "named" {
-		identity := typeIdentity(definitionModule(modulePath, typ), typ.Name)
+		identity := typeIdentity(definitionModule(modulePath, typ), definitionName(typ))
 		if newtype, exists := g.schema.newtypes[identity]; exists && !visiting[identity] {
 			visiting[identity] = true
 			return g.parameterTypeValue(definitionModule(modulePath, typ), preferredType(newtype.Target), expression+".value()", visiting)

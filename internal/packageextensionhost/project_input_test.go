@@ -3,6 +3,7 @@ package packageextensionhost
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -69,7 +70,10 @@ end
 		t.Fatalf("modules are not deterministic: %#v", input.Modules)
 	}
 	module := input.Modules[1]
-	if len(input.Modules[0].Newtypes) != 1 || input.Modules[0].Newtypes[0].Name != "ReceiptID" || input.Modules[0].Newtypes[0].Target.Resolved.Kind != "int" {
+	if input.ProtocolVersion != 7 {
+		t.Fatalf("protocol version=%d, want 7", input.ProtocolVersion)
+	}
+	if len(input.Modules[0].Newtypes) != 1 || input.Modules[0].Newtypes[0].Name != "ReceiptID" || input.Modules[0].Newtypes[0].Identity != (packageextension.ProjectDeclarationIdentity{ModulePath: "contracts/ids", Name: "ReceiptID"}) || input.Modules[0].Newtypes[0].Target.Resolved.Kind != "int" {
 		t.Fatalf("newtype declaration facts are incomplete: %#v", input.Modules[0].Newtypes)
 	}
 	if len(input.Modules[0].Enums) != 1 || input.Modules[0].Enums[0].Members[0].RawValue == nil || input.Modules[0].Enums[0].Members[0].RawValue.Raw != `"pending"` || len(input.Modules[0].Enums[0].Members[0].Attributes) != 1 || input.Modules[0].Enums[0].Members[0].Attributes[0].Arguments[0].Value.Raw != `"delivery_state"` {
@@ -87,6 +91,9 @@ end
 	}
 	if len(module.Functions) != 1 || len(module.Functions[0].TypeParameters) != 1 || len(module.Functions[0].Parameters) != 2 || !module.Functions[0].Parameters[1].NamedOnly || !module.Functions[0].Parameters[1].Optional || module.Functions[0].Return == nil || module.Functions[0].Return.Authored.Name != "T" {
 		t.Fatalf("top-level function signature facts are incomplete: %#v", module.Functions)
+	}
+	if module.Functions[0].Identity == nil || *module.Functions[0].Identity != (packageextension.ProjectDeclarationIdentity{ModulePath: "jobs/send_receipt", Name: "endpoint"}) {
+		t.Fatalf("top-level function identity is incomplete: %#v", module.Functions[0])
 	}
 	class := module.Classes[0]
 	if class.Superclass == nil || class.Superclass.Authored.Name != "Job" || class.Superclass.Authored.Definition == nil || class.Superclass.Authored.Definition.ImportPath != "trb/jobs" {
@@ -114,7 +121,7 @@ end
 		t.Fatalf("generic directive type arguments are incomplete: %#v", serialized)
 	}
 	configured := class.Directives[3]
-	if configured.Arguments[0].Value.Kind != "symbol" || configured.Arguments[0].Value.Name != "mail" || configured.Arguments[1].Value.Reference == nil || configured.Arguments[1].Value.Reference.ModulePath != "contracts/ids" {
+	if configured.Arguments[0].Value.Kind != "symbol" || configured.Arguments[0].Value.Name != "mail" || configured.Arguments[1].Value.Reference == nil || configured.Arguments[1].Value.Reference.Identity != (packageextension.ProjectDeclarationIdentity{ModulePath: "contracts/ids", Name: "DeliveryState"}) {
 		t.Fatalf("declarative directive values are incomplete: %#v", configured)
 	}
 	if configured.Block == nil || len(configured.Block.Parameters) != 1 || configured.Block.StatementCount != 1 || !configured.Block.ResultExpression {
@@ -199,7 +206,7 @@ end
 	}
 }
 
-func TestExportProjectDeclarationInputIncludesNestedModuleMetadataWithQualifiedIdentity(t *testing.T) {
+func TestExportProjectDeclarationInputIncludesNestedModuleMetadataWithStructuredIdentity(t *testing.T) {
 	program := parseProjectInputTest(t, "commands", `module CLI
 	alias Count = Integer
 
@@ -242,39 +249,58 @@ end
 		t.Fatalf("nested records were not exported: %#v", module.Records)
 	}
 	if len(module.TypeAliases) != 0 || len(module.Classes) != 0 || len(module.Functions) != 0 {
-		t.Fatalf("nested declarations outside the v6 metadata contract leaked into provider discovery: %#v", module)
+		t.Fatalf("nested declarations outside the v7 metadata contract leaked into provider discovery: %#v", module)
 	}
 	byName := map[string]packageextension.ProjectRecord{}
 	for _, record := range module.Records {
-		byName[record.Name] = record
+		byName[record.Identity.Name] = record
 	}
 	options, ok := byName["CLI::Options"]
-	if !ok || byName["CLI::Payload"].Name == "" || byName["Admin::Options"].Name == "" {
+	if !ok || byName["CLI::Payload"].Name != "Payload" || byName["Admin::Options"].Name != "Options" {
 		t.Fatalf("nested record identities are incomplete: %#v", byName)
+	}
+	if options.Name != "Options" || options.Owner == nil || *options.Owner != (packageextension.ProjectDeclarationIdentity{ModulePath: "commands", Name: "CLI"}) {
+		t.Fatalf("nested record display name and owner are incomplete: %#v", options)
 	}
 	if len(options.Fields) != 2 || !options.Fields[1].HasDefault || len(options.Fields[1].Attributes) != 1 {
 		t.Fatalf("nested record default metadata is incomplete: %#v", options)
 	}
 	count := options.Fields[1].Type
-	if count.Resolved.Name != "Integer" || len(count.ResolutionPath) != 1 || count.ResolutionPath[0].Name != "CLI::Count" {
+	if count.Resolved.Name != "Integer" || len(count.ResolutionPath) != 1 || count.ResolutionPath[0].Identity.Name != "CLI::Count" {
 		t.Fatalf("hidden nested alias did not participate in type resolution: %#v", count)
 	}
 	payload := options.Fields[0].Type
-	if payload.Authored.Name != "Payload" || payload.Authored.Definition == nil || payload.Authored.Definition.ModulePath != "commands" || payload.Resolved.Name != "CLI::Payload" || len(payload.ResolutionPath) != 1 || payload.ResolutionPath[0].Name != "CLI::Payload" {
+	if payload.Authored.Name != "Payload" || payload.Authored.Definition == nil || payload.Authored.Definition.ModulePath != "commands" || payload.Authored.Definition.Name != "CLI::Payload" || payload.Resolved.Name != "Payload" || len(payload.ResolutionPath) != 1 || payload.ResolutionPath[0].Identity.Name != "CLI::Payload" {
 		t.Fatalf("nested record type identity is incomplete: %#v", payload)
 	}
-	if len(module.Enums) != 1 || module.Enums[0].Name != "CLI::Command" || len(module.Enums[0].Members[0].Attributes) != 1 {
+	if len(module.Enums) != 1 || module.Enums[0].Name != "Command" || module.Enums[0].Identity.Name != "CLI::Command" || module.Enums[0].Owner == nil || module.Enums[0].Owner.Name != "CLI" || len(module.Enums[0].Members[0].Attributes) != 1 {
 		t.Fatalf("nested enum metadata is incomplete: %#v", module.Enums)
 	}
 	parameter := module.Enums[0].Members[0].Parameters[0].Type
-	if parameter.Resolved.Name != "CLI::Options" || len(parameter.ResolutionPath) != 1 || parameter.ResolutionPath[0].Name != "CLI::Options" {
+	if parameter.Resolved.Name != "Options" || parameter.Resolved.Definition == nil || parameter.Resolved.Definition.Name != "CLI::Options" || len(parameter.ResolutionPath) != 1 || parameter.ResolutionPath[0].Identity.Name != "CLI::Options" {
 		t.Fatalf("nested enum payload identity is incomplete: %#v", parameter)
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) == "" || containsAny(string(encoded), "generatedName", "targetName", "backendName") {
+		t.Fatalf("PDI contains a generated identifier field: %s", encoded)
 	}
 }
 
-func containsProjectTypeReference(references []packageextension.ProjectTypeReference, name, importPath string) bool {
+func containsProjectTypeReference(references []packageextension.ProjectDeclarationReference, name, importPath string) bool {
 	for _, reference := range references {
-		if reference.Name == name && reference.ImportPath == importPath {
+		if reference.Identity.Name == name && reference.ImportPath == importPath {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
 			return true
 		}
 	}

@@ -52,9 +52,11 @@ Go flattened constructor names, Ruby constants, private-name mangling, and
 compiler-generated helper identifiers are not declaration identities.
 
 This decision does not change source syntax or the Project Declaration Input
-v6 exposure contract. Record-construction IR and a future PDI identity schema
-consume this identity in separate changes; they do not broaden nested class,
-function, Job, or provider visibility as part of this decision.
+exposure contract. Record-construction IR and PDI version 7 consume this
+identity in separate changes. PDI version 7 copies the canonical module and
+source-qualified name into an explicit identity and models nested record/enum
+owners structurally; it does not broaden nested class, function, Job, import,
+or provider visibility and does not expose generated identifiers.
 
 ## Consequences
 

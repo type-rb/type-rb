@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-const ProjectDeclarationInputProtocolVersion = 6
+const ProjectDeclarationInputProtocolVersion = 7
 
 // ProjectDeclarationInput is a versioned, read-only snapshot of source
 // declarations that a declaration provider may inspect. It intentionally
@@ -28,6 +28,14 @@ type ProjectModule struct {
 	Functions []ProjectMethod `json:"functions,omitempty"`
 }
 
+// ProjectDeclarationIdentity identifies a source declaration independently
+// from its display name and from any generated backend identifier. Name uses
+// :: for declarations nested in authored modules.
+type ProjectDeclarationIdentity struct {
+	ModulePath string `json:"modulePath"`
+	Name       string `json:"name"`
+}
+
 type ProjectImport struct {
 	Path       string     `json:"path"`
 	ModulePath string     `json:"modulePath"`
@@ -37,23 +45,27 @@ type ProjectImport struct {
 }
 
 type ProjectTypeAlias struct {
-	Name           string         `json:"name"`
-	TypeParameters []string       `json:"typeParameters,omitempty"`
-	Target         ProjectTypeUse `json:"target"`
-	Span           SourceSpan     `json:"span"`
+	Identity       ProjectDeclarationIdentity `json:"identity"`
+	Name           string                     `json:"name"`
+	TypeParameters []string                   `json:"typeParameters,omitempty"`
+	Target         ProjectTypeUse             `json:"target"`
+	Span           SourceSpan                 `json:"span"`
 }
 
 type ProjectNewtype struct {
-	Name   string         `json:"name"`
-	Target ProjectTypeUse `json:"target"`
-	Span   SourceSpan     `json:"span"`
+	Identity ProjectDeclarationIdentity `json:"identity"`
+	Name     string                     `json:"name"`
+	Target   ProjectTypeUse             `json:"target"`
+	Span     SourceSpan                 `json:"span"`
 }
 
 type ProjectRecord struct {
-	Name           string               `json:"name"`
-	TypeParameters []string             `json:"typeParameters,omitempty"`
-	Fields         []ProjectRecordField `json:"fields,omitempty"`
-	Span           SourceSpan           `json:"span"`
+	Identity       ProjectDeclarationIdentity  `json:"identity"`
+	Owner          *ProjectDeclarationIdentity `json:"owner,omitempty"`
+	Name           string                      `json:"name"`
+	TypeParameters []string                    `json:"typeParameters,omitempty"`
+	Fields         []ProjectRecordField        `json:"fields,omitempty"`
+	Span           SourceSpan                  `json:"span"`
 }
 
 type ProjectRecordField struct {
@@ -71,19 +83,22 @@ type ProjectAttribute struct {
 }
 
 type ProjectClass struct {
-	Name           string             `json:"name"`
-	TypeParameters []string           `json:"typeParameters,omitempty"`
-	Superclass     *ProjectTypeUse    `json:"superclass,omitempty"`
-	Methods        []ProjectMethod    `json:"methods,omitempty"`
-	Directives     []ProjectDirective `json:"directives,omitempty"`
-	Span           SourceSpan         `json:"span"`
+	Identity       ProjectDeclarationIdentity `json:"identity"`
+	Name           string                     `json:"name"`
+	TypeParameters []string                   `json:"typeParameters,omitempty"`
+	Superclass     *ProjectTypeUse            `json:"superclass,omitempty"`
+	Methods        []ProjectMethod            `json:"methods,omitempty"`
+	Directives     []ProjectDirective         `json:"directives,omitempty"`
+	Span           SourceSpan                 `json:"span"`
 }
 
 type ProjectEnum struct {
-	Name           string              `json:"name"`
-	TypeParameters []string            `json:"typeParameters,omitempty"`
-	Members        []ProjectEnumMember `json:"members,omitempty"`
-	Span           SourceSpan          `json:"span"`
+	Identity       ProjectDeclarationIdentity  `json:"identity"`
+	Owner          *ProjectDeclarationIdentity `json:"owner,omitempty"`
+	Name           string                      `json:"name"`
+	TypeParameters []string                    `json:"typeParameters,omitempty"`
+	Members        []ProjectEnumMember         `json:"members,omitempty"`
+	Span           SourceSpan                  `json:"span"`
 }
 
 type ProjectEnumMember struct {
@@ -95,12 +110,15 @@ type ProjectEnumMember struct {
 }
 
 type ProjectMethod struct {
-	Name           string             `json:"name"`
-	Class          bool               `json:"class,omitempty"`
-	TypeParameters []string           `json:"typeParameters,omitempty"`
-	Parameters     []ProjectParameter `json:"parameters,omitempty"`
-	Return         *ProjectTypeUse    `json:"return,omitempty"`
-	Span           SourceSpan         `json:"span"`
+	// Identity is present for a top-level function. Methods are identified by
+	// their owning class identity, source name, and Class discriminator.
+	Identity       *ProjectDeclarationIdentity `json:"identity,omitempty"`
+	Name           string                      `json:"name"`
+	Class          bool                        `json:"class,omitempty"`
+	TypeParameters []string                    `json:"typeParameters,omitempty"`
+	Parameters     []ProjectParameter          `json:"parameters,omitempty"`
+	Return         *ProjectTypeUse             `json:"return,omitempty"`
+	Span           SourceSpan                  `json:"span"`
 }
 
 type ProjectParameter struct {
@@ -133,10 +151,10 @@ type ProjectDirectiveArgument struct {
 }
 
 type ProjectValue struct {
-	Kind      string                `json:"kind"`
-	Raw       string                `json:"raw,omitempty"`
-	Name      string                `json:"name,omitempty"`
-	Reference *ProjectTypeReference `json:"reference,omitempty"`
+	Kind      string                       `json:"kind"`
+	Raw       string                       `json:"raw,omitempty"`
+	Name      string                       `json:"name,omitempty"`
+	Reference *ProjectDeclarationReference `json:"reference,omitempty"`
 }
 
 type ProjectDirectiveBlock struct {
@@ -150,17 +168,18 @@ type ProjectDirectiveBlock struct {
 // available before checking. ResolutionPath records namespace-stable type
 // identities traversed while resolving transparent aliases.
 type ProjectTypeUse struct {
-	Authored       Type                   `json:"authored"`
-	Resolved       Type                   `json:"resolved"`
-	Representation *Type                  `json:"representation,omitempty"`
-	ResolutionPath []ProjectTypeReference `json:"resolutionPath,omitempty"`
-	Span           SourceSpan             `json:"span"`
+	Authored       Type                          `json:"authored"`
+	Resolved       Type                          `json:"resolved"`
+	Representation *Type                         `json:"representation,omitempty"`
+	ResolutionPath []ProjectDeclarationReference `json:"resolutionPath,omitempty"`
+	Span           SourceSpan                    `json:"span"`
 }
 
-type ProjectTypeReference struct {
-	Name       string `json:"name"`
-	ModulePath string `json:"modulePath"`
-	ImportPath string `json:"importPath,omitempty"`
+// ProjectDeclarationReference keeps the canonical semantic identity separate
+// from the import path through which source reached it.
+type ProjectDeclarationReference struct {
+	Identity   ProjectDeclarationIdentity `json:"identity"`
+	ImportPath string                     `json:"importPath,omitempty"`
 }
 
 // SourceSpan is a half-open source range. An all-zero span means that source
@@ -209,6 +228,9 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 			if strings.TrimSpace(alias.Name) == "" {
 				return fmt.Errorf("project declaration input module %s contains an unnamed type alias", module.ModulePath)
 			}
+			if err := validateProjectDeclarationIdentity(module.ModulePath, alias.Name, alias.Identity, false); err != nil {
+				return fmt.Errorf("project declaration input type alias %s.%s: %w", module.ModulePath, alias.Name, err)
+			}
 			if err := validateProjectTypeParameters(alias.TypeParameters); err != nil {
 				return fmt.Errorf("project declaration input type alias %s.%s: %w", module.ModulePath, alias.Name, err)
 			}
@@ -222,6 +244,9 @@ func ValidateProjectDeclarationInput(input ProjectDeclarationInput) error {
 		for _, newtype := range module.Newtypes {
 			if strings.TrimSpace(newtype.Name) == "" {
 				return fmt.Errorf("project declaration input module %s contains an unnamed newtype", module.ModulePath)
+			}
+			if err := validateProjectDeclarationIdentity(module.ModulePath, newtype.Name, newtype.Identity, false); err != nil {
+				return fmt.Errorf("project declaration input newtype %s.%s: %w", module.ModulePath, newtype.Name, err)
 			}
 			if err := validateProjectTypeUse(newtype.Target); err != nil {
 				return fmt.Errorf("project declaration input newtype %s.%s target: %w", module.ModulePath, newtype.Name, err)
@@ -258,6 +283,12 @@ func validateProjectRecord(modulePath string, record ProjectRecord) error {
 	if strings.TrimSpace(record.Name) == "" {
 		return fmt.Errorf("project declaration input module %s contains an unnamed record", modulePath)
 	}
+	if err := validateProjectDeclarationIdentity(modulePath, record.Name, record.Identity, true); err != nil {
+		return fmt.Errorf("project declaration input record %s.%s: %w", modulePath, record.Name, err)
+	}
+	if err := validateProjectDeclarationOwner(record.Identity, record.Owner); err != nil {
+		return fmt.Errorf("project declaration input record %s.%s: %w", modulePath, record.Name, err)
+	}
 	if err := validateProjectTypeParameters(record.TypeParameters); err != nil {
 		return fmt.Errorf("project declaration input record %s.%s: %w", modulePath, record.Name, err)
 	}
@@ -285,6 +316,12 @@ func validateProjectRecord(modulePath string, record ProjectRecord) error {
 func validateProjectEnum(modulePath string, enum ProjectEnum) error {
 	if strings.TrimSpace(enum.Name) == "" {
 		return fmt.Errorf("project declaration input module %s contains an unnamed enum", modulePath)
+	}
+	if err := validateProjectDeclarationIdentity(modulePath, enum.Name, enum.Identity, true); err != nil {
+		return fmt.Errorf("project declaration input enum %s.%s: %w", modulePath, enum.Name, err)
+	}
+	if err := validateProjectDeclarationOwner(enum.Identity, enum.Owner); err != nil {
+		return fmt.Errorf("project declaration input enum %s.%s: %w", modulePath, enum.Name, err)
 	}
 	if err := validateProjectTypeParameters(enum.TypeParameters); err != nil {
 		return fmt.Errorf("project declaration input enum %s.%s: %w", modulePath, enum.Name, err)
@@ -346,6 +383,9 @@ func validateProjectAttributes(context string, attributes []ProjectAttribute) er
 func validateProjectClass(modulePath string, class ProjectClass) error {
 	if strings.TrimSpace(class.Name) == "" {
 		return fmt.Errorf("project declaration input module %s contains an unnamed class", modulePath)
+	}
+	if err := validateProjectDeclarationIdentity(modulePath, class.Name, class.Identity, false); err != nil {
+		return fmt.Errorf("project declaration input class %s.%s: %w", modulePath, class.Name, err)
 	}
 	if err := validateProjectTypeParameters(class.TypeParameters); err != nil {
 		return fmt.Errorf("project declaration input class %s.%s: %w", modulePath, class.Name, err)
@@ -417,6 +457,16 @@ func validateProjectMethod(modulePath, kind, owner string, method ProjectMethod)
 	if owner == "" && method.Class {
 		return fmt.Errorf("project declaration input function %s cannot be a class method", location)
 	}
+	if owner == "" {
+		if method.Identity == nil {
+			return fmt.Errorf("project declaration input function %s has no declaration identity", location)
+		}
+		if err := validateProjectDeclarationIdentity(modulePath, method.Name, *method.Identity, false); err != nil {
+			return fmt.Errorf("project declaration input function %s: %w", location, err)
+		}
+	} else if method.Identity != nil {
+		return fmt.Errorf("project declaration input method %s must not carry a top-level declaration identity", location)
+	}
 	if err := validateProjectTypeParameters(method.TypeParameters); err != nil {
 		return fmt.Errorf("project declaration input %s %s: %w", kind, location, err)
 	}
@@ -457,7 +507,7 @@ func validateProjectValue(value ProjectValue) error {
 			return fmt.Errorf("contains an empty reference")
 		}
 		if value.Reference != nil {
-			if value.Reference.Name != value.Name || strings.TrimSpace(value.Reference.ModulePath) == "" {
+			if err := validateProjectDeclarationReference(*value.Reference); err != nil {
 				return fmt.Errorf("contains an invalid resolved reference")
 			}
 		}
@@ -492,7 +542,7 @@ func validateProjectTypeUse(use ProjectTypeUse) error {
 		}
 	}
 	for _, reference := range use.ResolutionPath {
-		if strings.TrimSpace(reference.Name) == "" || strings.TrimSpace(reference.ModulePath) == "" {
+		if err := validateProjectDeclarationReference(reference); err != nil {
 			return fmt.Errorf("resolution path contains an invalid type reference")
 		}
 	}
@@ -508,8 +558,13 @@ func validateProjectInputType(typ Type) error {
 	default:
 		return fmt.Errorf("unsupported type kind %q", typ.Kind)
 	}
-	if typ.Definition != nil && strings.TrimSpace(typ.Definition.ModulePath) == "" {
-		return fmt.Errorf("source definition module path is missing")
+	if typ.Definition != nil {
+		if strings.TrimSpace(typ.Definition.ModulePath) == "" {
+			return fmt.Errorf("source definition module path is missing")
+		}
+		if strings.TrimSpace(typ.Definition.Name) == "" {
+			return fmt.Errorf("source definition name is missing")
+		}
 	}
 	if typ.Record != nil {
 		return fmt.Errorf("record inspection metadata is not valid in a project declaration type")
@@ -518,6 +573,52 @@ func validateProjectInputType(typ Type) error {
 		if err := validateProjectInputType(argument); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateProjectDeclarationIdentity(modulePath, displayName string, identity ProjectDeclarationIdentity, allowNested bool) error {
+	if strings.TrimSpace(identity.ModulePath) == "" || strings.TrimSpace(identity.Name) == "" {
+		return fmt.Errorf("declaration identity is missing")
+	}
+	if identity.ModulePath != modulePath {
+		return fmt.Errorf("declaration identity module %q does not match enclosing module %q", identity.ModulePath, modulePath)
+	}
+	parts := strings.Split(identity.Name, "::")
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			return fmt.Errorf("declaration identity name %q is malformed", identity.Name)
+		}
+	}
+	if !allowNested && len(parts) != 1 {
+		return fmt.Errorf("declaration identity %q must be top-level", identity.Name)
+	}
+	if parts[len(parts)-1] != displayName {
+		return fmt.Errorf("declaration identity %q does not match display name %q", identity.Name, displayName)
+	}
+	return nil
+}
+
+func validateProjectDeclarationOwner(identity ProjectDeclarationIdentity, owner *ProjectDeclarationIdentity) error {
+	separator := strings.LastIndex(identity.Name, "::")
+	if separator < 0 {
+		if owner != nil {
+			return fmt.Errorf("top-level declaration must not have an owner identity")
+		}
+		return nil
+	}
+	if owner == nil {
+		return fmt.Errorf("nested declaration has no owner identity")
+	}
+	if owner.ModulePath != identity.ModulePath || owner.Name != identity.Name[:separator] {
+		return fmt.Errorf("owner identity does not match declaration identity %q", identity.Name)
+	}
+	return nil
+}
+
+func validateProjectDeclarationReference(reference ProjectDeclarationReference) error {
+	if strings.TrimSpace(reference.Identity.ModulePath) == "" || strings.TrimSpace(reference.Identity.Name) == "" {
+		return fmt.Errorf("declaration reference identity is missing")
 	}
 	return nil
 }

@@ -268,7 +268,7 @@ func endpointHandler(module packageextension.ProjectModule, class packageextensi
 		return "", fmt.Sprintf("trb/web endpoint contract %s handles declaration must be handles(handler)", class.Name)
 	}
 	value := directive.Arguments[0].Value
-	if value.Kind != "reference" || value.Name == "" || value.Reference != nil && value.Reference.ModulePath != module.ModulePath {
+	if value.Kind != "reference" || value.Name == "" || value.Reference != nil && value.Reference.Identity.ModulePath != module.ModulePath {
 		return "", fmt.Sprintf("trb/web endpoint contract %s handles must reference a top-level function in the same module", class.Name)
 	}
 	for _, function := range module.Functions {
@@ -300,7 +300,7 @@ func isEndpointClass(class packageextension.ProjectClass) bool {
 		return false
 	}
 	for _, reference := range class.Superclass.ResolutionPath {
-		if reference.Name == "Endpoint" && reference.ImportPath == PackageName {
+		if reference.Identity.Name == "Endpoint" && reference.ImportPath == PackageName {
 			return true
 		}
 	}

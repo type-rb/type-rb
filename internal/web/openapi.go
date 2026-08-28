@@ -200,16 +200,16 @@ func newOpenAPIGenerator(input packageextension.ProjectDeclarationInput) *openAP
 	}
 	for _, module := range input.Modules {
 		for _, alias := range module.TypeAliases {
-			result.aliases[typeIdentity(module.ModulePath, alias.Name)] = alias
+			result.aliases[typeIdentity(alias.Identity.ModulePath, alias.Identity.Name)] = alias
 		}
 		for _, newtype := range module.Newtypes {
-			result.newtypes[typeIdentity(module.ModulePath, newtype.Name)] = newtype
+			result.newtypes[typeIdentity(newtype.Identity.ModulePath, newtype.Identity.Name)] = newtype
 		}
 		for _, record := range module.Records {
-			result.records[typeIdentity(module.ModulePath, record.Name)] = record
+			result.records[typeIdentity(record.Identity.ModulePath, record.Identity.Name)] = record
 		}
 		for _, enum := range module.Enums {
-			result.enums[typeIdentity(module.ModulePath, enum.Name)] = enum
+			result.enums[typeIdentity(enum.Identity.ModulePath, enum.Identity.Name)] = enum
 		}
 	}
 	return result
@@ -322,7 +322,7 @@ func (g *openAPIGenerator) recordForUse(modulePath string, use packageextension.
 		return modulePath, packageextension.ProjectRecord{}, false
 	}
 	definitionModule := definitionModule(modulePath, typ)
-	record, exists := g.records[typeIdentity(definitionModule, typ.Name)]
+	record, exists := g.records[typeIdentity(definitionModule, definitionName(typ))]
 	if !exists || len(record.TypeParameters) != 0 {
 		g.issue(modulePath, use.Span, fmt.Sprintf("OpenAPI %s type %s must be a non-generic record", label, displayProjectType(typ)))
 		return modulePath, packageextension.ProjectRecord{}, false
@@ -374,7 +374,7 @@ func (g *openAPIGenerator) parameterShape(modulePath string, typ packageextensio
 		if _, timeScalar := g.timeScalar(base); timeScalar {
 			return typ, true
 		}
-		identity := typeIdentity(definitionModule(modulePath, base), base.Name)
+		identity := typeIdentity(definitionModule(modulePath, base), definitionName(base))
 		if newtype, exists := g.newtypes[identity]; exists {
 			if visiting[identity] {
 				return typ, false
@@ -444,7 +444,7 @@ func (g *openAPIGenerator) schemaForTypeWithAliases(modulePath string, typ packa
 			schema = timeSchema
 			break
 		}
-		identity := typeIdentity(definitionModule(modulePath, base), base.Name)
+		identity := typeIdentity(definitionModule(modulePath, base), definitionName(base))
 		if len(base.Arguments) != 0 {
 			g.issue(modulePath, span, fmt.Sprintf("OpenAPI schema does not support generic type %s yet", displayProjectType(base)))
 			return OpenAPISchema{}, false
@@ -453,17 +453,17 @@ func (g *openAPIGenerator) schemaForTypeWithAliases(modulePath string, typ packa
 			if !g.ensureComponent(identity, span) {
 				return OpenAPISchema{}, false
 			}
-			schema.Ref = componentReference(base.Name)
+			schema.Ref = componentReference(definitionName(base))
 		} else if _, exists := g.records[identity]; exists {
 			if !g.ensureComponent(identity, span) {
 				return OpenAPISchema{}, false
 			}
-			schema.Ref = componentReference(base.Name)
+			schema.Ref = componentReference(definitionName(base))
 		} else if _, exists := g.enums[identity]; exists {
 			if !g.ensureComponent(identity, span) {
 				return OpenAPISchema{}, false
 			}
-			schema.Ref = componentReference(base.Name)
+			schema.Ref = componentReference(definitionName(base))
 		} else {
 			g.issue(modulePath, span, fmt.Sprintf("OpenAPI JSON schema type %s must be a record, raw-value enum, newtype, or JSON-compatible built-in type", displayProjectType(base)))
 			return OpenAPISchema{}, false
@@ -570,7 +570,7 @@ func (g *openAPIGenerator) expandAliases(modulePath string, typ packageextension
 		return modulePath, typ, true
 	}
 	definitionModule := definitionModule(modulePath, typ)
-	identity := typeIdentity(definitionModule, typ.Name)
+	identity := typeIdentity(definitionModule, definitionName(typ))
 	alias, exists := g.aliases[identity]
 	if !exists {
 		return definitionModule, typ, true
@@ -729,6 +729,13 @@ func definitionModule(fallback string, typ packageextension.Type) string {
 		return typ.Definition.ModulePath
 	}
 	return fallback
+}
+
+func definitionName(typ packageextension.Type) string {
+	if typ.Definition != nil && typ.Definition.Name != "" {
+		return typ.Definition.Name
+	}
+	return typ.Name
 }
 
 func typeIdentity(modulePath, name string) string {
