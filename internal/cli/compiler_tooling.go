@@ -33,12 +33,16 @@ func (c *CLI) runCompilerNativeSnapshot(args []string) error {
 	flags := flag.NewFlagSet("compiler native-snapshot", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	mode := flags.String("mode", "", "standalone mode; Gate 1 requires go")
+	mode := flags.String("mode", "", "standalone mode; native snapshots require go")
+	snapshotVersion := flags.Int("snapshot-version", nativesnapshot.Version, "bootstrap snapshot version: 2 or 3")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() > 1 {
 		return errors.New("compiler native-snapshot accepts at most one standalone .trb file")
+	}
+	if *snapshotVersion != nativesnapshot.Version && *snapshotVersion != nativesnapshot.Gate2Version {
+		return fmt.Errorf("compiler native-snapshot does not support snapshot version %d", *snapshotVersion)
 	}
 
 	filename := ""
@@ -60,7 +64,7 @@ func (c *CLI) runCompilerNativeSnapshot(args []string) error {
 		return err
 	}
 	if config.Mode != "go" {
-		return errors.New("compiler native-snapshot Gate 1 requires go mode")
+		return errors.New("compiler native-snapshot requires go mode")
 	}
 
 	var (
@@ -90,7 +94,12 @@ func (c *CLI) runCompilerNativeSnapshot(args []string) error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := nativesnapshot.Build(artifacts, options.SourceRoot)
+	var snapshot any
+	if *snapshotVersion == nativesnapshot.Gate2Version {
+		snapshot, err = nativesnapshot.BuildGate2(artifacts, options.SourceRoot)
+	} else {
+		snapshot, err = nativesnapshot.Build(artifacts, options.SourceRoot)
+	}
 	if err != nil {
 		return err
 	}

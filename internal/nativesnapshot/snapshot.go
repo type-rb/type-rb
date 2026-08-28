@@ -1,5 +1,5 @@
-// Package nativesnapshot implements the removable Gate 1 bootstrap bridge for
-// type-rb-native. It serializes a deliberately small, data-only subset of the
+// Package nativesnapshot implements the temporary bootstrap bridge for
+// type-rb-native. It serializes deliberately small, data-only subsets of the
 // checked TypeRB IR and exposes no compiler object across the process boundary.
 package nativesnapshot
 
@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	Format  = "type-rb-bootstrap-snapshot"
-	Version = 2
+	Format       = "type-rb-bootstrap-snapshot"
+	Version      = 2
+	Gate2Version = 3
 )
 
 type Snapshot struct {
@@ -26,6 +27,33 @@ type Snapshot struct {
 	EntryFunction string     `json:"entryFunction"`
 	Sources       []Source   `json:"sources"`
 	Functions     []Function `json:"functions"`
+}
+
+type Gate2Snapshot struct {
+	Format        string           `json:"format"`
+	Version       int              `json:"version"`
+	Module        string           `json:"module"`
+	EntryFunction string           `json:"entryFunction"`
+	Sources       []Source         `json:"sources"`
+	Types         []TypeDefinition `json:"types"`
+	Functions     []Function       `json:"functions"`
+}
+
+type TypeDefinition struct {
+	Kind     string     `json:"kind"`
+	ID       string     `json:"id"`
+	Fields   *[]Field   `json:"fields,omitempty"`
+	Variants *[]Variant `json:"variants,omitempty"`
+}
+
+type Field struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type Variant struct {
+	Name   string  `json:"name"`
+	Fields []Field `json:"fields"`
 }
 
 type Source struct {
@@ -102,6 +130,51 @@ type BooleanNot struct {
 	Origin Origin `json:"origin"`
 }
 
+type RecordConstruct struct {
+	Op        string   `json:"op"`
+	Result    string   `json:"result"`
+	Type      string   `json:"type"`
+	Arguments []string `json:"arguments"`
+	Origin    Origin   `json:"origin"`
+}
+
+type RecordProject struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Type   string `json:"type"`
+	Record string `json:"record"`
+	Field  string `json:"field"`
+	Origin Origin `json:"origin"`
+}
+
+type VariantConstruct struct {
+	Op        string   `json:"op"`
+	Result    string   `json:"result"`
+	Type      string   `json:"type"`
+	Variant   string   `json:"variant"`
+	Arguments []string `json:"arguments"`
+	Origin    Origin   `json:"origin"`
+}
+
+type VariantTest struct {
+	Op      string `json:"op"`
+	Result  string `json:"result"`
+	Type    string `json:"type"`
+	Value   string `json:"value"`
+	Variant string `json:"variant"`
+	Origin  Origin `json:"origin"`
+}
+
+type VariantProject struct {
+	Op      string `json:"op"`
+	Result  string `json:"result"`
+	Type    string `json:"type"`
+	Value   string `json:"value"`
+	Variant string `json:"variant"`
+	Field   string `json:"field"`
+	Origin  Origin `json:"origin"`
+}
+
 type Call struct {
 	Op        string   `json:"op"`
 	Result    *string  `json:"result"`
@@ -143,10 +216,15 @@ type UnsupportedError struct {
 	Path    string
 	Span    token.Span
 	Feature string
+	Version int
 }
 
 func (e *UnsupportedError) Error() string {
-	return fmt.Sprintf("%s:%d:%d: native snapshot v2 does not support %s", e.Path, e.Span.Start.Line, e.Span.Start.Column, e.Feature)
+	version := e.Version
+	if version == 0 {
+		version = Version
+	}
+	return fmt.Sprintf("%s:%d:%d: native snapshot v%d does not support %s", e.Path, e.Span.Start.Line, e.Span.Start.Column, version, e.Feature)
 }
 
 type methodInput struct {
@@ -154,9 +232,8 @@ type methodInput struct {
 	method  *ir.Method
 }
 
-// Build is the intentionally narrow and removable Gate 1 bridge used by
-// type-rb-native. Delete this package when the native frontend can produce the
-// same MIR itself, or if the native experiment is abandoned.
+// Build is the intentionally narrow Gate 1 bridge used by type-rb-native. This
+// package can be removed once the native frontend produces the same MIR itself.
 func Build(artifacts []*compiler.Artifact, sourceRoot string) (Snapshot, error) {
 	inputs := projectMethods(artifacts)
 	if len(inputs) == 0 {
