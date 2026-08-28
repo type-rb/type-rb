@@ -17,11 +17,15 @@ type v3ValueRef struct {
 }
 
 type v3FunctionLowerer struct {
+	version   int
 	program   *ir.Program
 	method    *ir.Method
 	sourceID  string
 	methodIDs map[string]string
 	registry  *aggregateRegistry
+	builder   *v4Builder
+	ownerID   string
+	captures  map[string]bool
 	blocks    []*Block
 	current   *Block
 	env       map[string]v3ValueRef
@@ -30,55 +34,83 @@ type v3FunctionLowerer struct {
 	nextBlock int
 }
 
+type v4CaptureInput struct {
+	name string
+	typ  types.Type
+	span token.Span
+}
+
 func lowerV3Function(program *ir.Program, method *ir.Method, sourceID string, methodIDs map[string]string, registry *aggregateRegistry) (Function, error) {
-	if len(method.TypeParameters) != 0 {
-		return Function{}, unsupportedV3(program, method.SourceSpan(), "generic function "+method.Name)
-	}
 	lowerer := &v3FunctionLowerer{
-		program: program, method: method, sourceID: sourceID, methodIDs: methodIDs,
-		registry: registry, env: map[string]v3ValueRef{},
+		version: Version3, program: program, method: method, sourceID: sourceID, methodIDs: methodIDs,
+		registry: registry, ownerID: functionID(program, method), env: map[string]v3ValueRef{}, captures: map[string]bool{},
 	}
-	resultType, err := lowerer.typeName(method.ReturnType, method.SourceSpan())
+	result, _, err := lowerer.lowerFunction(functionID(program, method), nil)
+	return result, err
+}
+
+func (l *v3FunctionLowerer) lowerFunction(id string, captureInputs []v4CaptureInput) (Function, []Parameter, error) {
+	program := l.program
+	method := l.method
+	if len(method.TypeParameters) != 0 {
+		return Function{}, nil, l.unsupported(method.SourceSpan(), "generic function "+method.Name)
+	}
+	resultType, err := l.typeName(method.ReturnType, method.SourceSpan())
 	if err != nil {
-		return Function{}, err
+		return Function{}, nil, err
+	}
+	captures := make([]Parameter, 0, len(captureInputs))
+	for _, item := range captureInputs {
+		captureType, typeErr := l.typeName(item.typ, item.span)
+		if typeErr != nil {
+			return Function{}, nil, typeErr
+		}
+		if captureType == "Void" {
+			return Function{}, nil, l.unsupported(item.span, "Void lexical capture "+item.name)
+		}
+		captureID := l.newValue()
+		captures = append(captures, Parameter{ID: captureID, Type: captureType, Origin: l.origin(item.span)})
+		l.env[item.name] = v3ValueRef{id: captureID, typ: item.typ}
+		l.locals = append(l.locals, item.name)
+		l.captures[item.name] = true
 	}
 	parameters := make([]Parameter, 0, len(method.Parameters))
 	for _, item := range method.Parameters {
-		parameterType, typeErr := lowerer.typeName(item.Type, method.SourceSpan())
+		parameterType, typeErr := l.typeName(item.Type, method.SourceSpan())
 		if typeErr != nil {
-			return Function{}, typeErr
+			return Function{}, nil, typeErr
 		}
 		if parameterType == "Void" || item.Default != nil || item.NamedOnly || item.Rest || item.KeywordRest {
-			return Function{}, unsupportedV3(program, method.SourceSpan(), "non-required-positional parameter "+item.Name)
+			return Function{}, nil, l.unsupported(method.SourceSpan(), "non-required-positional parameter "+item.Name)
 		}
-		id := lowerer.newValue()
-		parameters = append(parameters, Parameter{ID: id, Type: parameterType, Origin: lowerer.origin(method.SourceSpan())})
-		lowerer.env[item.Name] = v3ValueRef{id: id, typ: item.Type}
-		lowerer.locals = append(lowerer.locals, item.Name)
+		parameterID := l.newValue()
+		parameters = append(parameters, Parameter{ID: parameterID, Type: parameterType, Origin: l.origin(method.SourceSpan())})
+		l.env[item.Name] = v3ValueRef{id: parameterID, typ: item.Type}
+		l.locals = append(l.locals, item.Name)
 	}
-	entry := lowerer.newBlock(method.SourceSpan())
-	lowerer.current = entry
-	terminated, err := lowerer.lowerStatements(method.Body)
+	entry := l.newBlock(method.SourceSpan())
+	l.current = entry
+	terminated, err := l.lowerStatements(method.Body)
 	if err != nil {
-		return Function{}, err
+		return Function{}, nil, err
 	}
 	if !terminated {
 		if resultType != "Void" {
-			return Function{}, unsupportedV3(program, method.SourceSpan(), "fallthrough from a non-Void function")
+			return Function{}, nil, l.unsupported(method.SourceSpan(), "fallthrough from a non-Void function")
 		}
-		lowerer.current.Terminator = Return{Op: "return", Value: nil, Origin: lowerer.origin(method.SourceSpan())}
+		l.current.Terminator = Return{Op: "return", Value: nil, Origin: l.origin(method.SourceSpan())}
 	}
-	blocks := make([]Block, len(lowerer.blocks))
-	for index, block := range lowerer.blocks {
+	blocks := make([]Block, len(l.blocks))
+	for index, block := range l.blocks {
 		if block.Terminator == nil {
-			return Function{}, fmt.Errorf("%s: bootstrap snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
+			return Function{}, nil, fmt.Errorf("%s: bootstrap snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
 		}
 		blocks[index] = *block
 	}
 	return Function{
-		ID: functionID(program, method), Name: method.Name, Parameters: parameters,
-		Result: resultType, Entry: entry.ID, Origin: lowerer.origin(method.SourceSpan()), Blocks: blocks,
-	}, nil
+		ID: id, Name: method.Name, Parameters: parameters,
+		Result: resultType, Entry: entry.ID, Origin: l.origin(method.SourceSpan()), Blocks: blocks,
+	}, captures, nil
 }
 
 func (l *v3FunctionLowerer) typeName(typ types.Type, span token.Span) (string, error) {
@@ -90,6 +122,10 @@ func (l *v3FunctionLowerer) origin(span token.Span) Origin {
 		span = l.method.SourceSpan()
 	}
 	return origin(l.sourceID, span)
+}
+
+func (l *v3FunctionLowerer) unsupported(span token.Span, feature string) error {
+	return &UnsupportedError{Path: l.program.SourcePath, Span: span, Feature: feature, Version: l.version}
 }
 
 func (l *v3FunctionLowerer) lowerStatements(statements []ir.Statement) (bool, error) {
@@ -114,10 +150,10 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 		return false, nil
 	case *ir.Variable:
 		if node.Constant || node.Value == nil {
-			return false, unsupportedV3(l.program, node.SourceSpan(), "constant or uninitialized local binding")
+			return false, l.unsupported(node.SourceSpan(), "constant or uninitialized local binding")
 		}
 		if _, exists := l.env[node.Name]; exists {
-			return false, unsupportedV3(l.program, node.SourceSpan(), "shadowed local binding "+node.Name)
+			return false, l.unsupported(node.SourceSpan(), "shadowed local binding "+node.Name)
 		}
 		value, err := l.lowerExpression(node.Value)
 		if err != nil {
@@ -127,13 +163,22 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 		l.locals = append(l.locals, node.Name)
 		return false, nil
 	case *ir.Assignment:
+		if index, ok := node.Target.(*ir.Index); ok && l.version >= Version4 {
+			if node.Operator != "=" {
+				return false, l.unsupported(node.SourceSpan(), "indexed assignment operator "+node.Operator)
+			}
+			return false, l.lowerArraySet(index, node.Value, node.SourceSpan())
+		}
 		identifier, ok := node.Target.(*ir.Identifier)
 		if !ok || !identifier.Lexical {
-			return false, unsupportedV3(l.program, node.SourceSpan(), "non-local assignment")
+			return false, l.unsupported(node.SourceSpan(), "non-local assignment")
+		}
+		if l.captures[identifier.Name] {
+			return false, l.unsupported(node.SourceSpan(), "assignment to captured binding "+identifier.Name)
 		}
 		current, exists := l.env[identifier.Name]
 		if !exists {
-			return false, unsupportedV3(l.program, node.SourceSpan(), "assignment to an unavailable local")
+			return false, l.unsupported(node.SourceSpan(), "assignment to an unavailable local")
 		}
 		var next v3ValueRef
 		var err error
@@ -146,7 +191,7 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 			}
 			next, err = l.emitBinary(strings.TrimSuffix(node.Operator, "="), current, right, node.SourceSpan())
 		} else {
-			return false, unsupportedV3(l.program, node.SourceSpan(), "assignment operator "+node.Operator)
+			return false, l.unsupported(node.SourceSpan(), "assignment operator "+node.Operator)
 		}
 		if err != nil {
 			return false, err
@@ -178,17 +223,17 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 		_, terminated, err := l.lowerCase(node, false)
 		return terminated, err
 	case *ir.Break:
-		return false, unsupportedV3(l.program, node.SourceSpan(), "break")
+		return false, l.unsupported(node.SourceSpan(), "break")
 	case *ir.Next:
-		return false, unsupportedV3(l.program, node.SourceSpan(), "next")
+		return false, l.unsupported(node.SourceSpan(), "next")
 	default:
-		return false, unsupportedV3(l.program, statement.SourceSpan(), fmt.Sprintf("statement %T", statement))
+		return false, l.unsupported(statement.SourceSpan(), fmt.Sprintf("statement %T", statement))
 	}
 }
 
 func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	if len(node.ElseIf) != 0 || node.ThenResult != nil || node.ElseResult != nil {
-		return false, unsupportedV3(l.program, node.SourceSpan(), "elsif or value-producing if")
+		return false, l.unsupported(node.SourceSpan(), "elsif or value-producing if")
 	}
 	condition, err := l.lowerExpression(node.Condition)
 	if err != nil {
@@ -269,7 +314,7 @@ func (l *v3FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 		return false, err
 	}
 	if terminated {
-		return false, unsupportedV3(l.program, node.SourceSpan(), "control transfer from a while body")
+		return false, l.unsupported(node.SourceSpan(), "control transfer from a while body")
 	}
 	l.current.Terminator = Jump{
 		Op: "jump", Target: header.ID, Arguments: v3EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
@@ -282,10 +327,13 @@ func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRe
 	switch node := expression.(type) {
 	case *ir.Identifier:
 		value, ok := l.env[node.Name]
-		if !ok || !node.Lexical {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-local value "+node.Name)
+		if ok && node.Lexical {
+			return value, nil
 		}
-		return value, nil
+		if l.version >= Version4 && node.ExprType().Kind == types.Function {
+			return l.lowerFunctionValue(node)
+		}
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-local value "+node.Name)
 	case *ir.Literal:
 		return l.lowerLiteral(node)
 	case *ir.Unary:
@@ -300,6 +348,21 @@ func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRe
 			return v3ValueRef{}, err
 		}
 		return l.emitBinary(node.Operator, left, right, node.SourceSpan())
+	case *ir.Array:
+		if l.version >= Version4 {
+			return l.lowerArray(node)
+		}
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "Array literal expression")
+	case *ir.Index:
+		if l.version >= Version4 {
+			return l.lowerIndex(node)
+		}
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "index expression")
+	case *ir.Lambda:
+		if l.version >= Version4 {
+			return l.lowerLambda(node)
+		}
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "lambda expression")
 	case *ir.Call:
 		return l.lowerCall(node)
 	case *ir.RecordConstruct:
@@ -322,11 +385,11 @@ func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRe
 			value.typ = node.ExprType()
 			return value, nil
 		}
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "representation-changing conversion "+string(node.Kind))
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "representation-changing conversion "+string(node.Kind))
 	case *ir.If:
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "value-producing if")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "value-producing if")
 	default:
-		return v3ValueRef{}, unsupportedV3(l.program, expression.SourceSpan(), fmt.Sprintf("expression %T", expression))
+		return v3ValueRef{}, l.unsupported(expression.SourceSpan(), fmt.Sprintf("expression %T", expression))
 	}
 }
 
@@ -340,11 +403,11 @@ func (l *v3FunctionLowerer) lowerMember(node *ir.Member) (v3ValueRef, error) {
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-enum namespace member "+node.Name)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-enum namespace member "+node.Name)
 	}
 	variant, ok := v3Variant(definition, node.Name)
 	if !ok || len(variant.Fields) != 0 {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-nullary enum member "+node.Name)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-nullary enum member "+node.Name)
 	}
 	id := l.newValue()
 	l.emit(VariantConstruct{
@@ -361,12 +424,12 @@ func (l *v3FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (v3Va
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "record" || definition.Fields == nil {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record construction "+node.ExprType().String())
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-record construction "+node.ExprType().String())
 	}
 	values := make(map[string]v3ValueRef, len(node.Arguments))
 	for _, argument := range node.Arguments {
 		if argument.Splat != "" || argument.Name == "" {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "positional or splat record construction")
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "positional or splat record construction")
 		}
 		value, expressionErr := l.lowerExpression(argument.Value)
 		if expressionErr != nil {
@@ -378,13 +441,13 @@ func (l *v3FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (v3Va
 	for _, field := range *definition.Fields {
 		value, exists := values[field.Name]
 		if !exists {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "omitted record default for field "+field.Name)
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "omitted record default for field "+field.Name)
 		}
 		arguments = append(arguments, value.id)
 		delete(values, field.Name)
 	}
 	if len(values) != 0 {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown record construction field")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "unknown record construction field")
 	}
 	id := l.newValue()
 	l.emit(RecordConstruct{
@@ -396,7 +459,7 @@ func (l *v3FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (v3Va
 
 func (l *v3FunctionLowerer) lowerRecordProject(node *ir.Member) (v3ValueRef, error) {
 	if node.Namespace || node.Safe || node.Receiver == nil {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record member "+node.Name)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-record member "+node.Name)
 	}
 	record, err := l.lowerExpression(node.Receiver)
 	if err != nil {
@@ -404,11 +467,11 @@ func (l *v3FunctionLowerer) lowerRecordProject(node *ir.Member) (v3ValueRef, err
 	}
 	typeID, err := l.typeName(record.typ, node.SourceSpan())
 	if err != nil {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "member "+node.Name+" on "+record.typ.String())
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "member "+node.Name+" on "+record.typ.String())
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "record" || definition.Fields == nil || !v3HasField(*definition.Fields, node.Name) {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record field "+node.Name)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-record field "+node.Name)
 	}
 	id := l.newValue()
 	l.emit(RecordProject{
@@ -429,16 +492,16 @@ func (l *v3FunctionLowerer) lowerVariantConstruct(node *ir.EnumConstruct) (v3Val
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-tagged enum construction "+node.ExprType().String())
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "non-tagged enum construction "+node.ExprType().String())
 	}
 	variant, ok := v3Variant(definition, node.Member)
 	if !ok {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum member "+node.Member)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "unknown enum member "+node.Member)
 	}
 	values := make(map[string]v3ValueRef, len(node.Arguments))
 	for _, argument := range node.Arguments {
 		if argument.Splat != "" || argument.Field == "" {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unbound or splat enum payload argument")
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "unbound or splat enum payload argument")
 		}
 		value, expressionErr := l.lowerExpression(argument.Value)
 		if expressionErr != nil {
@@ -450,13 +513,13 @@ func (l *v3FunctionLowerer) lowerVariantConstruct(node *ir.EnumConstruct) (v3Val
 	for _, field := range variant.Fields {
 		value, exists := values[field.Name]
 		if !exists {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "missing enum payload field "+field.Name)
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "missing enum payload field "+field.Name)
 		}
 		arguments = append(arguments, value.id)
 		delete(values, field.Name)
 	}
 	if len(values) != 0 {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum payload field")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "unknown enum payload field")
 	}
 	id := l.newValue()
 	l.emit(VariantConstruct{
@@ -474,7 +537,7 @@ type v3CaseExit struct {
 
 func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef, bool, error) {
 	if node.TypeUnion || len(node.Branches) == 0 {
-		return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "union or empty case")
+		return v3ValueRef{}, false, l.unsupported(node.SourceSpan(), "union or empty case")
 	}
 	if terminated, err := l.lowerStatements(node.Leading); err != nil || terminated {
 		return v3ValueRef{}, terminated, err
@@ -489,11 +552,11 @@ func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case selector "+selector.typ.String())
+		return v3ValueRef{}, false, l.unsupported(node.SourceSpan(), "case selector "+selector.typ.String())
 	}
 	for _, branch := range node.Branches {
 		if _, found := v3Variant(definition, branch.Member); !found || len(branch.Alternatives) != 0 || branch.TypePattern {
-			return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "non-enum case pattern "+branch.Member)
+			return v3ValueRef{}, false, l.unsupported(branch.SourceSpan(), "non-enum case pattern "+branch.Member)
 		}
 	}
 
@@ -555,14 +618,14 @@ func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef
 				continue
 			}
 			if _, exists := l.env[binding.Name]; exists {
-				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "shadowed case binding "+binding.Name)
+				return v3ValueRef{}, false, l.unsupported(branch.SourceSpan(), "shadowed case binding "+binding.Name)
 			}
 			fieldType, typeErr := l.typeName(binding.Type, branch.SourceSpan())
 			if typeErr != nil || fieldType == "Void" {
 				if typeErr != nil {
 					return v3ValueRef{}, false, typeErr
 				}
-				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "Void enum binding "+binding.Name)
+				return v3ValueRef{}, false, l.unsupported(branch.SourceSpan(), "Void enum binding "+binding.Name)
 			}
 			id := l.newValue()
 			l.emit(VariantProject{
@@ -582,7 +645,7 @@ func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef
 		exit := v3CaseExit{block: l.current, env: cloneV3Env(l.env)}
 		if wantValue {
 			if branch.Result == nil {
-				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "case branch without a value")
+				return v3ValueRef{}, false, l.unsupported(branch.SourceSpan(), "case branch without a value")
 			}
 			exit.result, err = l.lowerExpression(branch.Result)
 			if err != nil {
@@ -603,7 +666,7 @@ func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef
 			exit := v3CaseExit{block: l.current, env: cloneV3Env(l.env)}
 			if wantValue {
 				if node.ElseResult == nil {
-					return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case else without a value")
+					return v3ValueRef{}, false, l.unsupported(node.SourceSpan(), "case else without a value")
 				}
 				exit.result, err = l.lowerExpression(node.ElseResult)
 				if err != nil {
@@ -629,7 +692,7 @@ func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef
 			if typeErr != nil {
 				return v3ValueRef{}, false, typeErr
 			}
-			return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "Void case expression")
+			return v3ValueRef{}, false, l.unsupported(node.SourceSpan(), "Void case expression")
 		}
 		result = v3ValueRef{id: l.newValue(), typ: node.ExprType()}
 		join.Parameters = append(join.Parameters, Parameter{ID: result.id, Type: resultType, Origin: caseOrigin})
@@ -694,17 +757,29 @@ func (l *v3FunctionLowerer) lowerLiteral(node *ir.Literal) (v3ValueRef, error) {
 	case "integer":
 		value, ok := types.ParsePortableIntegerLiteral(node.Raw)
 		if !ok {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Integer literal "+node.Raw)
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "Integer literal "+node.Raw)
 		}
 		l.emit(IntegerLiteral{Op: "integer_literal", Result: id, Value: value, Origin: at})
 	case "float":
 		value, ok := types.ParsePortableFloatLiteral(node.Raw)
 		if !ok {
-			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Float literal "+node.Raw)
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "Float literal "+node.Raw)
 		}
 		l.emit(FloatLiteral{Op: "float_literal", Result: id, Value: value, Origin: at})
+	case "string":
+		if l.version < Version4 {
+			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "string literal expression")
+		}
+		value, err := strconv.Unquote(node.Raw)
+		if err != nil {
+			return v3ValueRef{}, fmt.Errorf("%s: decode TypeRB String literal: %w", l.program.SourcePath, err)
+		}
+		if _, err := l.typeName(node.ExprType(), node.SourceSpan()); err != nil {
+			return v3ValueRef{}, err
+		}
+		l.emit(StringLiteral{Op: "string_literal", Result: id, Value: value, Origin: at})
 	default:
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), node.Kind+" literal expression")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), node.Kind+" literal expression")
 	}
 	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
@@ -732,7 +807,7 @@ func (l *v3FunctionLowerer) lowerUnary(node *ir.Unary) (v3ValueRef, error) {
 		}
 		return l.emitBinary("-", v3ValueRef{id: zeroID, typ: node.ExprType()}, operand, node.SourceSpan())
 	}
-	return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unary operator "+node.Operator)
+	return v3ValueRef{}, l.unsupported(node.SourceSpan(), "unary operator "+node.Operator)
 }
 
 func (l *v3FunctionLowerer) emitBinary(operator string, left, right v3ValueRef, span token.Span) (v3ValueRef, error) {
@@ -740,34 +815,55 @@ func (l *v3FunctionLowerer) emitBinary(operator string, left, right v3ValueRef, 
 	if operator == "==" || operator == "!=" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" {
 		resultType = types.FromName("Boolean")
 	}
-	typeName, supported := scalarTypeName(left.typ)
+	typeName, typeErr := l.typeName(left.typ, span)
+	supported := typeErr == nil
 	if !supported || typeName == "Void" {
-		return v3ValueRef{}, unsupportedV3(l.program, span, "binary operand type "+left.typ.String())
+		if typeErr != nil {
+			return v3ValueRef{}, typeErr
+		}
+		return v3ValueRef{}, l.unsupported(span, "binary operand type "+left.typ.String())
 	}
 	id := l.newValue()
 	at := l.origin(span)
+	if l.version >= Version4 && typeName == "String" {
+		switch operator {
+		case "+":
+			l.emit(StringBinary{Op: "string_concat", Result: id, Left: left.id, Right: right.id, Origin: at})
+			return v3ValueRef{id: id, typ: left.typ}, nil
+		case "==", "!=":
+			l.emit(StringBinary{Op: "string_equal", Result: id, Left: left.id, Right: right.id, Origin: at})
+			if operator == "!=" {
+				equalID := id
+				id = l.newValue()
+				l.emit(BooleanNot{Op: "boolean_not", Result: id, Value: equalID, Origin: at})
+			}
+			return v3ValueRef{id: id, typ: types.FromName("Boolean")}, nil
+		default:
+			return v3ValueRef{}, l.unsupported(span, "String operator "+operator)
+		}
+	}
 	if operatorName, ok := v3ComparisonOperator(operator); ok {
 		op := "integer_compare"
 		if typeName == "Float" {
 			op = "float_compare"
 		} else if typeName != "Integer" {
-			return v3ValueRef{}, unsupportedV3(l.program, span, "comparison of "+typeName)
+			return v3ValueRef{}, l.unsupported(span, "comparison of "+typeName)
 		}
 		l.emit(BinaryInstruction{Op: op, Result: id, Operator: operatorName, Left: left.id, Right: right.id, Origin: at})
 		return v3ValueRef{id: id, typ: resultType}, nil
 	}
 	operatorName, ok := v3ArithmeticOperator(operator)
 	if !ok {
-		return v3ValueRef{}, unsupportedV3(l.program, span, "binary operator "+operator)
+		return v3ValueRef{}, l.unsupported(span, "binary operator "+operator)
 	}
 	op := "integer_binary"
 	if typeName == "Float" {
 		if operator == "%" || operator == "**" {
-			return v3ValueRef{}, unsupportedV3(l.program, span, "Float operator "+operator)
+			return v3ValueRef{}, l.unsupported(span, "Float operator "+operator)
 		}
 		op = "float_binary"
 	} else if typeName != "Integer" {
-		return v3ValueRef{}, unsupportedV3(l.program, span, "arithmetic on "+typeName)
+		return v3ValueRef{}, l.unsupported(span, "arithmetic on "+typeName)
 	}
 	l.emit(BinaryInstruction{Op: op, Result: id, Operator: operatorName, Left: left.id, Right: right.id, Origin: at})
 	return v3ValueRef{id: id, typ: resultType}, nil
@@ -775,15 +871,23 @@ func (l *v3FunctionLowerer) emitBinary(operator string, left, right v3ValueRef, 
 
 func (l *v3FunctionLowerer) lowerCall(node *ir.Call) (v3ValueRef, error) {
 	if l.isPuts(node) {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "puts() in a value position")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "puts() in a value position")
+	}
+	if l.version >= Version4 {
+		if result, handled, err := l.lowerV4IntrinsicCall(node); handled || err != nil {
+			return result, err
+		}
+		if identifier, ok := node.Callee.(*ir.Identifier); !ok || identifier.Lexical || l.callFunctionID(identifier) == "" {
+			return l.lowerClosureCall(node)
+		}
 	}
 	callee, ok := node.Callee.(*ir.Identifier)
 	if !ok {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "indirect call")
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "indirect call")
 	}
 	function := l.callFunctionID(callee)
 	if function == "" {
-		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "call to "+callee.Name)
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "call to "+callee.Name)
 	}
 	arguments := make([]string, 0, len(node.Arguments))
 	for _, argument := range node.Arguments {
@@ -809,11 +913,26 @@ func (l *v3FunctionLowerer) lowerCall(node *ir.Call) (v3ValueRef, error) {
 
 func (l *v3FunctionLowerer) lowerPuts(node *ir.Call) error {
 	if len(node.Arguments) != 1 {
-		return unsupportedV3(l.program, node.SourceSpan(), "puts() arity")
+		return l.unsupported(node.SourceSpan(), "puts() arity")
+	}
+	if l.version >= Version4 {
+		value, err := l.lowerExpression(node.Arguments[0].Value)
+		if err != nil {
+			return err
+		}
+		name, err := l.typeName(value.typ, node.SourceSpan())
+		if err != nil {
+			return err
+		}
+		if name != "String" {
+			return l.unsupported(node.SourceSpan(), "puts() argument type "+name)
+		}
+		l.emit(WriteString{Op: "write_string", Value: value.id, Newline: true, Origin: l.origin(node.SourceSpan())})
+		return nil
 	}
 	literal, ok := node.Arguments[0].Value.(*ir.Literal)
 	if !ok || literal.Kind != "string" {
-		return unsupportedV3(l.program, node.SourceSpan(), "dynamic puts() output")
+		return l.unsupported(node.SourceSpan(), "dynamic puts() output")
 	}
 	value, err := strconv.Unquote(literal.Raw)
 	if err != nil {

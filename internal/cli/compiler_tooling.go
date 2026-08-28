@@ -34,14 +34,14 @@ func (c *CLI) runCompilerBootstrapSnapshot(args []string) error {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	mode := flags.String("mode", "", "standalone mode; bootstrap snapshots require go")
-	snapshotVersion := flags.Int("snapshot-version", bootstrapsnapshot.Version2, "bootstrap snapshot version: 2 or 3")
+	snapshotVersion := flags.Int("snapshot-version", bootstrapsnapshot.Version2, "bootstrap snapshot version: 2, 3, or 4")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() > 1 {
 		return errors.New("compiler bootstrap-snapshot accepts at most one standalone .trb file")
 	}
-	if *snapshotVersion != bootstrapsnapshot.Version2 && *snapshotVersion != bootstrapsnapshot.Version3 {
+	if *snapshotVersion != bootstrapsnapshot.Version2 && *snapshotVersion != bootstrapsnapshot.Version3 && *snapshotVersion != bootstrapsnapshot.Version4 {
 		return fmt.Errorf("compiler bootstrap-snapshot does not support snapshot version %d", *snapshotVersion)
 	}
 
@@ -95,7 +95,9 @@ func (c *CLI) runCompilerBootstrapSnapshot(args []string) error {
 		return err
 	}
 	var snapshot any
-	if *snapshotVersion == bootstrapsnapshot.Version3 {
+	if *snapshotVersion == bootstrapsnapshot.Version4 {
+		snapshot, err = bootstrapsnapshot.BuildV4(artifacts, options.SourceRoot)
+	} else if *snapshotVersion == bootstrapsnapshot.Version3 {
 		snapshot, err = bootstrapsnapshot.BuildV3(artifacts, options.SourceRoot)
 	} else {
 		snapshot, err = bootstrapsnapshot.BuildV2(artifacts, options.SourceRoot)

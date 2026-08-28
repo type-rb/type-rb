@@ -18,6 +18,7 @@ const (
 	Format   = "type-rb-bootstrap-snapshot"
 	Version2 = 2
 	Version3 = 3
+	Version4 = 4
 )
 
 type SnapshotV2 struct {
@@ -39,11 +40,24 @@ type SnapshotV3 struct {
 	Functions     []Function       `json:"functions"`
 }
 
+type SnapshotV4 struct {
+	Format        string           `json:"format"`
+	Version       int              `json:"version"`
+	Module        string           `json:"module"`
+	EntryFunction string           `json:"entryFunction"`
+	Sources       []Source         `json:"sources"`
+	Types         []TypeDefinition `json:"types"`
+	Functions     []FunctionV4     `json:"functions"`
+}
+
 type TypeDefinition struct {
-	Kind     string     `json:"kind"`
-	ID       string     `json:"id"`
-	Fields   *[]Field   `json:"fields,omitempty"`
-	Variants *[]Variant `json:"variants,omitempty"`
+	Kind       string     `json:"kind"`
+	ID         string     `json:"id"`
+	Element    *string    `json:"element,omitempty"`
+	Parameters *[]string  `json:"parameters,omitempty"`
+	Result     *string    `json:"result,omitempty"`
+	Fields     *[]Field   `json:"fields,omitempty"`
+	Variants   *[]Variant `json:"variants,omitempty"`
 }
 
 type Field struct {
@@ -78,6 +92,17 @@ type Parameter struct {
 type Function struct {
 	ID         string      `json:"id"`
 	Name       string      `json:"name"`
+	Parameters []Parameter `json:"parameters"`
+	Result     string      `json:"result"`
+	Entry      string      `json:"entry"`
+	Origin     Origin      `json:"origin"`
+	Blocks     []Block     `json:"blocks"`
+}
+
+type FunctionV4 struct {
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	Captures   []Parameter `json:"captures"`
 	Parameters []Parameter `json:"parameters"`
 	Result     string      `json:"result"`
 	Entry      string      `json:"entry"`
@@ -187,6 +212,103 @@ type WriteStatic struct {
 	Op     string `json:"op"`
 	Value  string `json:"value"`
 	Origin Origin `json:"origin"`
+}
+
+type StringLiteral struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Value  string `json:"value"`
+	Origin Origin `json:"origin"`
+}
+
+type StringBinary struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Left   string `json:"left"`
+	Right  string `json:"right"`
+	Origin Origin `json:"origin"`
+}
+
+type StringSize struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Value  string `json:"value"`
+	Origin Origin `json:"origin"`
+}
+
+type StringIndex struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Value  string `json:"value"`
+	Index  string `json:"index"`
+	Origin Origin `json:"origin"`
+}
+
+type WriteString struct {
+	Op      string `json:"op"`
+	Value   string `json:"value"`
+	Newline bool   `json:"newline"`
+	Origin  Origin `json:"origin"`
+}
+
+type ArrayConstruct struct {
+	Op        string   `json:"op"`
+	Result    string   `json:"result"`
+	Type      string   `json:"type"`
+	Arguments []string `json:"arguments"`
+	Origin    Origin   `json:"origin"`
+}
+
+type ArraySize struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Type   string `json:"type"`
+	Array  string `json:"array"`
+	Origin Origin `json:"origin"`
+}
+
+type ArrayGet struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Type   string `json:"type"`
+	Array  string `json:"array"`
+	Index  string `json:"index"`
+	Origin Origin `json:"origin"`
+}
+
+type ArraySet struct {
+	Op     string `json:"op"`
+	Type   string `json:"type"`
+	Array  string `json:"array"`
+	Index  string `json:"index"`
+	Value  string `json:"value"`
+	Origin Origin `json:"origin"`
+}
+
+type ArrayPush struct {
+	Op     string `json:"op"`
+	Type   string `json:"type"`
+	Array  string `json:"array"`
+	Value  string `json:"value"`
+	Origin Origin `json:"origin"`
+}
+
+type ClosureConstruct struct {
+	Op       string   `json:"op"`
+	Result   string   `json:"result"`
+	Type     string   `json:"type"`
+	Function string   `json:"function"`
+	Captures []string `json:"captures"`
+	Origin   Origin   `json:"origin"`
+}
+
+type ClosureCall struct {
+	Op        string   `json:"op"`
+	Result    *string  `json:"result"`
+	Type      string   `json:"type"`
+	Closure   string   `json:"closure"`
+	Arguments []string `json:"arguments"`
+	Origin    Origin   `json:"origin"`
 }
 
 type Jump struct {
