@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/project"
 )
 
 func TestMutableParameterReassignmentStaysLocalAcrossBackends(t *testing.T) {
@@ -56,6 +58,41 @@ end
 				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 			}
 			if stdout.String() != "4\n5\n3\n5\n3\n" || stderr.Len() != 0 {
+				t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestReplEvaluatesMutableParametersAcrossModes(t *testing.T) {
+	input := `def advance(mut value: Integer): Integer
+	value += 1
+	return value
+end
+advance(3)
+:quit
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-mutable-parameter"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if stdout.String() != "4 : Integer\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 		})
