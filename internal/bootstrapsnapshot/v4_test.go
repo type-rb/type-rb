@@ -139,6 +139,36 @@ func TestBuildV4RejectsUnsupportedArrayElements(t *testing.T) {
 	}
 }
 
+func TestBuildV4LowersNestedArrays(t *testing.T) {
+	source := `def main()
+	mut groups: Array<Array<Integer>> := [[1]]
+	groups[0].push(2)
+	if groups[0][1] == 2
+		puts("ok")
+	end
+	return
+end
+`
+	snapshot, err := BuildV4(analyzeV4Program(t, source), "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Array<Integer>", "Array<Array<Integer>>"} {
+		if !v3HasTypeDefinition(snapshot.Types, expected) {
+			t.Fatalf("snapshot is missing nested Array definition %q: %#v", expected, snapshot.Types)
+		}
+	}
+	outer := snapshot.Types[0]
+	for _, definition := range snapshot.Types {
+		if definition.ID == "Array<Array<Integer>>" {
+			outer = definition
+		}
+	}
+	if outer.Kind != "array" || outer.Element == nil || *outer.Element != "Array<Integer>" {
+		t.Fatalf("nested Array definition = %#v", outer)
+	}
+}
+
 func TestBuildV4RejectsAssignmentToCapturedBindings(t *testing.T) {
 	source := `def main()
 	mut count := 0
