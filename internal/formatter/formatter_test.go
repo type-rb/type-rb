@@ -486,6 +486,23 @@ func TestFormatPortableCollectionTransformations(t *testing.T) {
 	}
 }
 
+func TestFormatIterationBlockPostfixChains(t *testing.T) {
+	source := []byte("def total(ids:Array<Integer>):Integer\ncount:=ids.map do |id|\nid*2\nend.size()\nreturn ids.map{|id| id*2}.reduce(0) do |sum,value|\nsum+value\nend\nend\n")
+	want := "def total(ids: Array<Integer>): Integer\n\tcount := ids.map do |id|\n\t\tid * 2\n\tend.size()\n\treturn ids.map { |id| id * 2 }.reduce(0) do |sum, value|\n\t\tsum + value\n\tend\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected iteration chain formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("iteration chain formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
 	source := []byte("enum  State # enum\nOpen # open\nClosed\nend\ndef label(value:State):String\ncase value # select\nwhen State::Open # branch\nreturn \"open\" # result\nwhen State::Closed\nreturn \"closed\"\nend\nend\n")
 	formatted, diagnostics := Format(source)

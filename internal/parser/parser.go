@@ -621,10 +621,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 }
 
 func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Base) ast.Statement {
-	blockAt := topLevelIndex(line, "do")
-	if blockAt <= 0 {
-		blockAt = topLevelIndex(line, "{")
-	}
+	blockAt, _ := firstIterationBlock(line)
 	if blockAt <= 0 {
 		return nil
 	}
@@ -646,55 +643,89 @@ func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Ba
 	if !ok {
 		return nil
 	}
-	iteration = p.parseIterationBlock(line, next, base, iteration)
-	switch wrapper {
-	case "return":
-		return &ast.ReturnStatement{Base: iteration.Base, Value: iteration}
-	case "variable":
-		statement, ok := p.tryVariable(prefix, iteration.Base).(*ast.VariableStatement)
-		if !ok {
-			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-		}
-		statement.Value = iteration
-		return statement
-	case "assignment":
-		statement, ok := p.tryAssignment(prefix, iteration.Base).(*ast.AssignmentStatement)
-		if !ok {
-			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-		}
-		statement.Value = iteration
-		return statement
-	default:
-		return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-	}
+	expression := p.parseIterationChain(line, next, base, iteration)
+	base.SourceSpan.End = expression.Span().End
+	return p.wrapExpression(prefix, wrapper, base, expression)
 }
 
-func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) *ast.IterationExpression {
-	if doAt := topLevelIndex(line, "do"); doAt > 0 {
-		parameters, ok := p.blockParameters(line[doAt+1:])
+func firstIterationBlock(tokens []token.Token) (int, bool) {
+	doAt := topLevelIndex(tokens, "do")
+	braceAt := topLevelIndex(tokens, "{")
+	if braceAt > 0 && (doAt <= 0 || braceAt < doAt) {
+		return braceAt, true
+	}
+	if doAt > 0 {
+		return doAt, false
+	}
+	return -1, false
+}
+
+func (p *Parser) parseIterationChain(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) ast.Expression {
+	current, tail := p.parseIterationBlock(line, next, base, iteration)
+	for len(tail) > 0 {
+		blockAt, _ := firstIterationBlock(tail)
+		header := tail
+		if blockAt > 0 {
+			header = tail[:blockAt]
+		}
+		expression, ok := p.parseExpressionTail(current, header)
 		if !ok {
-			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |name, ...|")
+			p.errorAt(spanOf(tail), "invalid expression after iteration block")
+			return current
+		}
+		if blockAt <= 0 {
+			return expression
+		}
+
+		nextIteration, ok := p.iterationFromExpression(expression)
+		if !ok {
+			p.errorAt(spanOf(tail[:blockAt]), "iteration block must follow a portable collection operation")
+			return current
+		}
+		chainedBase := ast.Base{SourceSpan: token.Span{Start: current.Span().Start, End: tail[len(tail)-1].Span.End}}
+		current, tail = p.parseIterationBlock(tail, p.pos, chainedBase, nextIteration)
+	}
+	return current
+}
+
+func (p *Parser) parseExpressionTail(receiver ast.Expression, tail []token.Token) (ast.Expression, bool) {
+	if len(tail) == 0 {
+		return receiver, true
+	}
+	marker := token.Token{Kind: token.Identifier, Lexeme: "__iteration_result__", Span: receiver.Span()}
+	tokens := make([]token.Token, 0, len(tail)+1)
+	tokens = append(tokens, marker)
+	tokens = append(tokens, tail...)
+	return p.parseExpressionWithEmbedded(tokens, map[int]ast.Expression{marker.Span.Start.Offset: receiver})
+}
+
+func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) (*ast.IterationExpression, []token.Token) {
+	blockAt, brace := firstIterationBlock(line)
+	if blockAt <= 0 {
+		return iteration, nil
+	}
+	if !brace {
+		parameters, ok := p.blockParameters(line[blockAt+1:])
+		if !ok {
+			p.errorAt(spanOf(line[blockAt:]), "iteration block parameters must be written as |name, ...|")
 		}
 		p.pos = next
-		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[doAt:])}, Parameters: parameters}
+		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[blockAt:])}, Parameters: parameters}
 		block.Body = p.parseStatements(map[string]bool{"end": true})
-		_, closeSpan := p.consumeTerminator("end")
+		closeSpan, tail := p.consumeIterationTerminator()
 		block.SourceSpan.End = closeSpan.End
 		iteration.Base = base
 		iteration.SourceSpan.End = closeSpan.End
 		iteration.Block = block
-		return iteration
+		return iteration, tail
 	}
 
-	braceAt := topLevelIndex(line, "{")
-	if braceAt <= 0 {
-		return iteration
-	}
+	braceAt := blockAt
 	close := matchingIndex(line, braceAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[braceAt].Span, "unterminated iteration block; expected }")
 		p.pos = next
-		return iteration
+		return iteration, nil
 	}
 	parameterEnd := -1
 	for index := braceAt + 1; index < close; index++ {
@@ -736,9 +767,25 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 		}
 	}
 	iteration.Base = base
+	iteration.SourceSpan.End = line[close].Span.End
 	iteration.Block = block
 	p.pos = next
-	return iteration
+	return iteration, append([]token.Token(nil), line[close+1:]...)
+}
+
+func (p *Parser) consumeIterationTerminator() (token.Span, []token.Token) {
+	if p.atEOF() || p.current().Lexeme != "end" {
+		_, span := p.consumeTerminator("end")
+		return span, nil
+	}
+	start, end, next, _ := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	if len(line) == 0 {
+		_, span := p.consumeTerminator("end")
+		return span, nil
+	}
+	p.pos = next
+	return line[0].Span, append([]token.Token(nil), line[1:]...)
 }
 
 func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
@@ -791,6 +838,10 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 	if !ok {
 		return nil, false
 	}
+	return p.iterationFromExpression(expression)
+}
+
+func (p *Parser) iterationFromExpression(expression ast.Expression) (*ast.IterationExpression, bool) {
 	withIndex := false
 	if member, ok := expression.(*ast.MemberExpression); ok && member.Name == "with_index" {
 		withIndex = true
