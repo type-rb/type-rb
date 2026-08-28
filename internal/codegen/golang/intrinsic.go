@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if name == "trb.cli.run" {
+		return g.cliRun(call)
+	}
 	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
 		return generated
 	}

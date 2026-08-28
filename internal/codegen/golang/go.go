@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/type-rb/type-rb/internal/callsignature"
+	cliapp "github.com/type-rb/type-rb/internal/cliapp"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
@@ -60,6 +61,8 @@ type generator struct {
 	sourceLocations   map[int]sourcemap.Location
 	sourcePath        string
 	checkedInteger    bool
+	cli               *cliapp.Manifest
+	cliInvocations    map[int]bool
 }
 
 func Generate(program *ir.Program) string {
@@ -125,6 +128,8 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		recordSources:    true,
 		sourceLocations:  map[int]sourcemap.Location{},
 		sourcePath:       program.SourcePath,
+		cli:              cliapp.ManifestFrom(program.Extensions),
+		cliInvocations:   map[int]bool{},
 	}
 	for _, statement := range program.Statements {
 		switch n := statement.(type) {

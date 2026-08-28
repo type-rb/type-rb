@@ -30,6 +30,11 @@ func TestDescribeSeparatesSharedEffectsFromPackageSemantics(t *testing.T) {
 			operation: "trb.internal.auth.oidc.verify_bearer",
 			want:      Descriptor{MaySuspend: true},
 		},
+		{
+			name:      "synchronous integration forwarding cancellation scope",
+			operation: "trb.cli.run",
+			want:      Descriptor{PropagatesExecutionScope: true},
+		},
 		{name: "unknown operation", operation: "example.runtime.read"},
 	}
 
