@@ -2,6 +2,15 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.47 - 2026-08-28
+
+### Compiler
+
+- Go generation now retains the standard `Result` runtime when source type
+  annotations expand through imported aliases. This fixes undefined `Result`
+  build failures for nullable cross-module aliases and typed Result test
+  helpers. ([#591](https://github.com/type-rb/type-rb/pull/591))
+
 ## 0.3.46 - 2026-08-28
 
 ### Breaking changes
