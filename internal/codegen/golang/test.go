@@ -24,15 +24,39 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 			typeArgument = g.goType(result.Args[0])
 		}
 		return g.testAlias(call) + ".NewExpectation[" + typeArgument + "](" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")", true
+	case "trb.std.test.expect_ok", "trb.std.test.expect_err":
+		position := call.SourceSpan().Start
+		method := "Ok"
+		if name == "trb.std.test.expect_err" {
+			method = "Err"
+		}
+		return g.testAlias(call) + ".NewResultExpectation(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")." + method + "()", true
 	case "trb.std.test.finish":
 		return g.testAlias(call) + ".TrbTestFinish()", true
 	case "trb.internal.test.assert_equal", "trb.internal.test.assert_not_equal", "trb.internal.test.assert_true", "trb.internal.test.assert_false", "trb.internal.test.assert_nil":
 		return "trbTest" + goMethodName(strings.TrimPrefix(name, "trb.internal.test.")) + "(" + strings.Join(arguments, ", ") + ")", true
+	case "trb.internal.test.assert_result_ok", "trb.internal.test.assert_result_err":
+		resultAlias := g.typeAliases["Result"]
+		if resultAlias == "" {
+			resultAlias = "__trb_result"
+		}
+		tag, field, message := "ResultOkTag", "OkValue", "expected Ok, got Err(%#v)"
+		if name == "trb.internal.test.assert_result_err" {
+			tag, field, message = "ResultErrTag", "ErrError", "expected Err, got Ok(%#v)"
+		}
+		return "func() " + g.goType(call.ExprType()) + " { actual := " + arguments[0] + "; if actual.Kind != " + resultAlias + "." + tag + " { panic(trbTestFailure{" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", fmt.Sprintf(" + strconv.Quote(message) + ", actual." + oppositeResultField(field) + ")}) }; return actual." + field + " }()", true
 	case "trb.std.test.describe", "trb.std.test.test":
 		return "", true
 	default:
 		return "", false
 	}
+}
+
+func oppositeResultField(field string) string {
+	if field == "OkValue" {
+		return "ErrError"
+	}
+	return "OkValue"
 }
 
 func (g *generator) testCallBlock(call *ir.Call) bool {

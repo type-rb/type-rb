@@ -1295,8 +1295,9 @@ end
   and `trb test` validate them with the complete project. A config-free
   file-root closure excludes imported test modules, while a test file selected
   as the language-server entry is still analyzed.
-- The portable `trb/std/test` package exports `describe`, `test`, and `expect`.
-  Test DSL functions are available only through explicit named imports.
+- The portable `trb/std/test` package exports `describe`, `test`, `expect`,
+  `expect_ok`, and `expect_err`. Test DSL functions are available only through
+  explicit named imports.
 - A test file has one or more top-level `describe("literal") do ... end`
   declarations. A suite contains only nested `describe` and `test`
   declarations. A `test` must be nested inside a suite.
@@ -1304,9 +1305,11 @@ end
   nesting path is the stable full test name used by name patterns and tools.
   Duplicate full names in one file are an error.
 - Suite and test blocks take no parameters. Test bodies otherwise use ordinary
-  statements, helpers, Results, and imports. Expected errors are inspected with
-  exhaustive `case`; the test package does not add an implicit Result boundary,
-  change language scoping, or introduce implicit setup state.
+  statements, helpers, Results, and imports. Tests may compare a complete
+  Result with `expect`, extract its payload with `expect_ok` or `expect_err`, or
+  inspect branches with exhaustive `case`. The test package does not add an
+  implicit Result boundary, change language scoping, or introduce implicit
+  setup state.
 - `return`, `break`, and `next` cannot transfer control across a `describe()` or
   `test()` block boundary. A nested function still owns its own `return`, and
   a `while` or iteration inside a test body still owns its local `break` and
@@ -1314,6 +1317,10 @@ end
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.
+- `expect_ok<T, E>(actual: Result<T, E>)` returns the `Ok` payload and fails the
+  current case if `actual` is `Err`. `expect_err<T, E>(actual: Result<T, E>)`
+  returns the `Err` payload and fails if `actual` is `Ok`. Standard Result type
+  aliases are accepted. A failure records the helper call's `.trb` location.
 - `trb test` accepts zero or more `_test.trb` file and directory paths below
   the configured `sourceDir`. Directories select test files recursively,
   multiple paths form a union, and no paths select every project test. Shell
