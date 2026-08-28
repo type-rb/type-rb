@@ -1313,7 +1313,33 @@ end
 	}
 }
 
-func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
+func TestNullableAssignmentNarrowsToAssignedNonNullableValue(t *testing.T) {
+	source := []byte(`def display_name(mut name: String?): String
+	if name == nil
+		return "anonymous"
+	end
+	name = name.strip().downcase()
+	if name == ""
+		return "anonymous"
+	end
+	return name
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("nullable_assignment_narrowing.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected assignment-based nullable narrowing: %v", mode, err)
+		}
+		method := artifact.IR.Statements[0].(*ir.Method)
+		returned := method.Body[len(method.Body)-1].(*ir.Return).Value
+		conversion, ok := returned.(*ir.Conversion)
+		if !ok || conversion.Kind != ir.NullableToNonNullableConversion || conversion.ExprType().Nullable || !conversion.Value.ExprType().Nullable {
+			t.Fatalf("%s did not retain the assignment-based nullable unwrap in typed IR: %#v", mode, returned)
+		}
+	}
+}
+
+func TestNullableAssignmentUsesDeclaredTypeAndNarrowsToNil(t *testing.T) {
 	source := []byte(`def invalid(mut value: String?): Integer
 	if value == nil
 		return 0
@@ -1323,8 +1349,36 @@ func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
 end
 `)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
-			t.Fatalf("%s expected invalidated nullable narrowing diagnostic, got %v", mode, err)
+		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type Nil has no member size") {
+			t.Fatalf("%s expected assigned Nil flow-type diagnostic, got %v", mode, err)
+		}
+	}
+}
+
+func TestNullableAssignmentNarrowingStaysInsideItsControlFlowPath(t *testing.T) {
+	source := []byte(`def invalid(mut value: String?, ready: Boolean): Integer
+	if ready
+		value = "ready"
+		puts(value.size())
+	end
+	return value.size()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("branch_assignment_narrowing.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
+			t.Fatalf("%s expected the branch-local assignment fact to be unavailable after the branch, got %v", mode, err)
+		}
+	}
+}
+
+func TestNullableAssignmentRemainsCheckedAgainstDeclaredType(t *testing.T) {
+	source := []byte(`def invalid(mut value: String?)
+	value = 1
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("invalid_nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "cannot assign Integer to String?") {
+			t.Fatalf("%s expected assignment to remain checked against String?, got %v", mode, err)
 		}
 	}
 }

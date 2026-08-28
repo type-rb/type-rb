@@ -217,8 +217,22 @@ end
 
 The same narrowing is available in the matching branch of `name != nil`, in
 the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
-right side of a compatible short-circuit `&&` or `||`. Reassigning the binding
-invalidates the narrowed type.
+right side of a compatible short-circuit `&&` or `||`. A plain assignment is
+still checked against the binding's declared nullable type, but subsequent
+statements in that path use the assigned value's more precise type:
+
+```trb
+def normalized(mut name: String?): String
+	if name == nil
+		return "anonymous"
+	end
+	name = name.strip().downcase()
+	return name
+end
+```
+
+An assignment that occurs only inside a conditional, loop, or callback does
+not narrow the binding after that construct, because the path may not execute.
 
 A direct nullable record field or `readonly` class field follows the same
 rule when its receiver is a lexical binding:

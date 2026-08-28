@@ -359,18 +359,18 @@ func (s *scope) markUsed(name string) {
 	}
 }
 
-func (s *scope) resetNarrowing(name string) {
-	for current := s; current != nil; current = current.parent {
-		value, ok := current.values[name]
-		if !ok {
-			continue
-		}
-		if value.declared.Kind != "" {
-			value.typ = value.declared
-			current.values[name] = value
-		}
+func (s *scope) setAssignmentType(name string, declared, flow types.Type) {
+	value, _, ok := s.lookupOwner(name)
+	if !ok {
 		return
 	}
+	if value.declared.Kind == "" {
+		value.declared = declared
+	}
+	value.typ = flow
+	// Assignments inside a conditional or callback affect subsequent statements
+	// in that path without leaking an unproven flow type into the parent path.
+	s.values[name] = value
 }
 
 func (s *scope) nullableMember(key nullableMemberKey) (nullableMemberFact, bool) {
@@ -2173,7 +2173,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 						markConcurrentBorrowed(sc, identifier.Name, binding)
 					}
 				}
-				sc.resetNarrowing(identifier.Name)
+				flowType := leftType
+				if n.Operator == "=" {
+					flowType = c.assignmentFlowType(leftType, assignedType)
+				}
+				sc.setAssignmentType(identifier.Name, leftType, flowType)
 				if binding, exists := sc.lookup(identifier.Name); exists {
 					sc.resetNullableMembers(identifier.Name, binding.span.Start.Offset)
 				}
@@ -2252,6 +2256,30 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.emptyCollectionRegions = c.emptyCollectionRegions[:len(c.emptyCollectionRegions)-1]
 		}
 	}
+}
+
+func (c *Checker) assignmentFlowType(declared, assigned types.Type) types.Type {
+	if declared.Kind == types.Any || assigned.Kind == types.Invalid {
+		return declared
+	}
+	if assigned.Kind == types.Nil && declared.Nullable {
+		return assigned
+	}
+	if !declared.Nullable || assigned.Nullable {
+		return declared
+	}
+
+	base := declared
+	base.Nullable = false
+	expandedBase := c.expandAlias(base, map[string]bool{})
+	expandedAssigned := c.expandAlias(assigned, map[string]bool{})
+	if types.Equivalent(expandedBase, expandedAssigned) {
+		return assigned
+	}
+	if expandedBase.Kind == types.Float && expandedAssigned.Kind == types.Int && !expandedAssigned.Nullable {
+		return base
+	}
+	return declared
 }
 
 func scopeConstantOwner(sc *scope) string {
@@ -8513,7 +8541,7 @@ func unresolvedLibraryTypeParameters(symbol stdlib.Symbol, typ types.Type) []str
 
 func portableReceiverKind(kind types.Kind) bool {
 	switch kind {
-	case types.Bool, types.Int, types.Float, types.String, types.Bytes, types.StringBuilder, types.Array, types.Range, types.Hash:
+	case types.Nil, types.Bool, types.Int, types.Float, types.String, types.Bytes, types.StringBuilder, types.Array, types.Range, types.Hash:
 		return true
 	default:
 		return false

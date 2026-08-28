@@ -56,6 +56,27 @@ func TestSemanticHoverUsesCheckedSymbolsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestSemanticHoverUsesAssignmentNarrowedNullableType(t *testing.T) {
+	const source = `def display_name(mut name: String?): String
+	if name == nil
+		return "anonymous"
+	end
+	name = name.strip().downcase()
+	return name
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact := compile(t, mode, source)
+		service := languageservice.New(mode)
+		service.Update([]*ir.Program{artifact.IR}, "repl")
+		start := strings.LastIndex(source, "name")
+		hover, ok := service.Hover(source, start+len("na"))
+		if !ok || hover.Detail != "name: String" {
+			t.Fatalf("%s assignment-narrowed hover=(%#v, %v), want name: String", mode, hover, ok)
+		}
+	}
+}
+
 func TestSemanticSignatureHelpTracksPositionalAndKeywordArguments(t *testing.T) {
 	artifact := compile(t, "go", semanticProgram)
 	service := languageservice.New("go")

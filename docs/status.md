@@ -510,10 +510,12 @@ target code, and browser tools.
 
 Nullable lexical bindings narrow through direct `nil` comparisons in
 conditional branches, loops, compatible short-circuit expressions, and
-returning guards. Direct record fields and `readonly` class fields narrow when
-their receiver is a stable lexical binding. Reassignment invalidates the flow
-fact, while typed IR keeps the required unwrap explicit for every backend and
-the REPL.
+returning guards. A plain assignment remains checked against the binding's
+declared nullable type and gives subsequent statements in that path the
+assigned value's precise flow type. Direct record fields and `readonly` class
+fields narrow when their receiver is a stable lexical binding. Reassigning a
+receiver invalidates its field facts, while typed IR keeps every required
+unwrap explicit for all backends and the REPL.
 
 Compiler artifacts carry a versioned, backend-independent mapping from
 generated statement ranges to original `.trb` paths and spans. Go mappings are
