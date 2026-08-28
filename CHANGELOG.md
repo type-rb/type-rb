@@ -2,6 +2,35 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.46 - 2026-08-28
+
+### Breaking changes
+
+- `trb test` now accepts one or more `_test.trb` files or directories as
+  positional paths. Directories are searched recursively, multiple paths form
+  a union, and shell-expanded globs work as separate paths. Replace `--file`
+  with a positional path and replace `--filter` with `-t` or
+  `--test-name-pattern`, which matches full test names with a Go regular
+  expression. Focused runs compile all production files and only the selected
+  test files. ([#584](https://github.com/type-rb/type-rb/pull/584))
+
+### Standard library
+
+- `trb/std/test` adds typed `expect_ok(Result<T, E>) -> T` and
+  `expect_err(Result<T, E>) -> E` assertions. They accept standard Result type
+  aliases, return the expected payload, and report the helper call site when
+  the opposite variant is returned. Complete Result values remain directly
+  comparable with `expect(...).to_equal(...)`.
+  ([#586](https://github.com/type-rb/type-rb/pull/586))
+
+### Compiler tooling
+
+- `trb compiler native-snapshot --snapshot-version 3` can emit Gate 2
+  bootstrap snapshots for heap-free records and tagged values, including
+  aggregate calls, block arguments, exhaustive cases, and Result propagation.
+  Snapshot version 2 remains the default for reproducible Gate 1 measurements.
+  ([#585](https://github.com/type-rb/type-rb/pull/585))
+
 ## 0.3.45 - 2026-08-28
 
 ### Breaking changes
