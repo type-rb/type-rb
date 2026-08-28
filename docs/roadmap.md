@@ -27,8 +27,9 @@ than detailed syntax.
   newtypes, record extensions, and ordinary Result-returning factories as
   alternatives rather than assuming one declaration should serve every shape.
   Evaluate generic newtype declarations separately.
-- Define mutation effects for methods and parameters so immutable values remain
-  safe across calls, not only assignments and known collection operations.
+- Define mutation effects for methods and shared reference parameters so
+  immutable values remain safe across calls, beyond the implemented
+  immutable-by-default parameter bindings and known collection operations.
 - Complete the portable class model with explicit superclass construction and
   `super` semantics, initialization order, override rules, and a backend-safe
   decision for field/method name collisions.

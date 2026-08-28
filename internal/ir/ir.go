@@ -257,6 +257,7 @@ type Parameter struct {
 	Name                 string
 	Type                 types.Type
 	Default              Expression
+	Mutable              bool
 	NamedOnly            bool
 	Keyword              bool
 	Rest                 bool

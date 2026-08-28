@@ -1435,12 +1435,36 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 		}
 		param := ast.Parameter{Base: ast.Base{SourceSpan: spanOf(part)}, NamedOnly: namedOnly}
 		i := 0
+		if part[i].Lexeme == "mut" {
+			param.Mutable = true
+			i++
+			if i >= len(part) {
+				p.errorAt(part[0].Span, "mut parameter requires a name")
+				continue
+			}
+			if part[i].Lexeme == "mut" {
+				p.errorAt(part[i].Span, "parameter may declare mut only once")
+				for i < len(part) && part[i].Lexeme == "mut" {
+					i++
+				}
+				if i >= len(part) {
+					continue
+				}
+			}
+		}
 		if part[i].Lexeme == "*" || part[i].Lexeme == "**" {
 			param.Rest = part[i].Lexeme == "*"
 			param.KeywordRest = part[i].Lexeme == "**"
 			i++
 		}
 		if i >= len(part) {
+			if param.Mutable {
+				p.errorAt(param.Span(), "mut parameter requires a name")
+			}
+			continue
+		}
+		if part[i].Kind != token.Identifier {
+			p.errorAt(part[i].Span, "parameter name must be an identifier")
 			continue
 		}
 		param.Name = part[i].Lexeme

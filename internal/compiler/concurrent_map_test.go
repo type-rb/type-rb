@@ -830,7 +830,7 @@ end`,
 			name: "string builder through helper",
 			source: `import trb/std/string_builder
 
-def mutate(builder: StringBuilder): String
+def mutate(mut builder: StringBuilder): String
 	builder.append("x")
 	return builder.to_s()
 end

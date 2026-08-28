@@ -1280,7 +1280,7 @@ def elsif_branch(value: String?): String
 	end
 end
 
-def consume(mut_value: String?)
+def consume(mut mut_value: String?)
 	while mut_value != nil
 		puts(mut_value.size())
 		mut_value = nil
@@ -1314,7 +1314,7 @@ end
 }
 
 func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
-	source := []byte(`def invalid(value: String?): Integer
+	source := []byte(`def invalid(mut value: String?): Integer
 	if value == nil
 		return 0
 	end
@@ -1415,7 +1415,7 @@ end
 	nickname: String?
 end
 
-def invalid(profile: Profile): Integer
+def invalid(mut profile: Profile): Integer
 	if profile.nickname == nil
 		return 0
 	end

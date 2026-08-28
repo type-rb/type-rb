@@ -99,7 +99,8 @@ and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, positional-only and
-bare-`*` named-only parameters with callee-owned defaults, and classes, modules
+bare-`*` named-only parameters with callee-owned defaults, immutable parameter
+bindings with explicit implementation-local `mut`, and classes, modules
 and generic interfaces, records with per-construction field defaults, ordinary
 and raw-value enums, payload enums as sum types with positional and named-only
 fields in constructors and patterns, enum instance methods, transparent
@@ -107,8 +108,8 @@ fields in constructors and patterns, enum instance methods, transparent
 `newtype` declarations over concrete non-nullable representations, explicit
 generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
-and mutable bindings, first-constraint inference for fresh empty mutable Arrays
-and Hashes, typed collections and iteration, exhaustive pattern
+and mutable local bindings, first-constraint inference for fresh empty mutable
+Arrays and Hashes, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit Result
 propagation and recovery with prefix `try` and postfix `catch`. See the
 [language guide](language.md) and [specification](specification.md) for the

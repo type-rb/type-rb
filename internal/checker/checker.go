@@ -1761,6 +1761,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					if parameter.Name == "" || parameter.Type.Empty() {
 						c.error(parameter.Span(), fmt.Sprintf("enum payload %s requires a name and type", parameter.Name))
 					}
+					if parameter.Mutable {
+						c.error(parameter.Span(), "enum payload fields cannot be declared with mut")
+					}
 					if parameter.Default != nil || parameter.Keyword || parameter.Rest || parameter.KeywordRest {
 						c.error(parameter.Span(), "enum payload fields must be required positional or named-only values")
 					}
@@ -4753,6 +4756,9 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if c.interfaceDepth > 0 && parameter.Default != nil {
 			c.error(parameter.Span(), "interface parameters cannot have defaults")
 		}
+		if c.interfaceDepth > 0 && parameter.Mutable {
+			c.error(parameter.Span(), "interface parameters cannot be declared with mut")
+		}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
 			actual = c.contextualizeCollectionLiteral(parameter.Default, typ, actual)
@@ -4760,9 +4766,13 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
 			}
 		}
+		bindingType := typ
+		if !parameter.Mutable && isReferenceType(bindingType) {
+			bindingType.Readonly = true
+		}
 		methodScope.values[parameter.Name] = symbol{
-			typ:                typ,
-			mutable:            true,
+			typ:                bindingType,
+			mutable:            parameter.Mutable,
 			span:               parameter.Span(),
 			concurrentBorrowed: c.concurrentFunctions[method] && c.concurrentBorrowedType(typ),
 		}
@@ -5840,7 +5850,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(parameter.Span(), fmt.Sprintf("fn parameter %s is duplicated", parameter.Name))
 				continue
 			}
-			declared := symbol{typ: parameterType, mutable: true, span: parameter.Span()}
+			bindingType := parameterType
+			if !parameter.Mutable && isReferenceType(bindingType) {
+				bindingType.Readonly = true
+			}
+			declared := symbol{typ: bindingType, mutable: parameter.Mutable, span: parameter.Span()}
 			if tracksUnusedBinding(parameter.Name) {
 				used := false
 				declared.used = &used
