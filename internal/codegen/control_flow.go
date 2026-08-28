@@ -692,6 +692,23 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy.Start = start
 		copy.End = end
 		return prefix, &copy
+	case *ir.RecordConstruct:
+		prefix, target := n.expression(node.Target)
+		if target == nil {
+			return prefix, nil
+		}
+		copy := *node
+		copy.Target = target
+		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
+		for index := range copy.Arguments {
+			argumentPrefix, value := n.expression(copy.Arguments[index].Value)
+			prefix = append(prefix, argumentPrefix...)
+			if value == nil {
+				return prefix, nil
+			}
+			copy.Arguments[index].Value = value
+		}
+		return prefix, &copy
 	case *ir.Call:
 		prefix, callee := n.expression(node.Callee)
 		if callee == nil {

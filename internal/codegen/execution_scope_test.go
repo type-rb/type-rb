@@ -109,14 +109,10 @@ func effectfulRecordProgram(mode string) *ir.Program {
 	record := &ir.Record{Name: "Config", Body: []ir.Statement{
 		&ir.RecordField{Name: "value", Type: stringType, Default: load},
 	}}
-	constructor := &ir.Call{
+	constructor := &ir.RecordConstruct{
 		ExprBase: ir.NewExprBase(token.Span{}, recordType),
-		Callee: &ir.Member{
-			ExprBase: ir.NewExprBase(token.Span{}, functionType),
-			Receiver: &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, recordType), Name: "Config"},
-			Name:     "new",
-		},
-		RecordFields: []ir.RecordFieldContract{{Name: "value", Type: stringType, HasDefault: true}},
+		Target:   &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, recordType), Name: "Config"},
+		Fields:   []ir.RecordFieldContract{{Name: "value", Type: stringType, HasDefault: true}},
 	}
 	return &ir.Program{
 		Mode: mode, ModulePath: "main", Package: "main", GoModule: "example.com/application",

@@ -1414,6 +1414,13 @@ func (g *generator) awaitCall(call *ir.Call, value string) string {
 	return value
 }
 
+func (g *generator) awaitRecordConstruct(construction *ir.RecordConstruct, value string) string {
+	if g.suspension != nil && g.suspension.RecordConstructDefaults[construction] {
+		return "(await " + value + ")"
+	}
+	return value
+}
+
 func (g *generator) identifierName(identifier *ir.Identifier) string {
 	if identifier == nil {
 		return ""
@@ -1620,6 +1627,17 @@ func (g *generator) expr(expression ir.Expression) string {
 			return receiver + op + "__trb_" + n.Name
 		}
 		return receiver + op + tsMethodName(n.Name)
+	case *ir.RecordConstruct:
+		target, record := g.typescriptRecordTarget(n.Target)
+		if !record {
+			return ""
+		}
+		target.typeArguments = append([]types.Type(nil), n.TypeArguments...)
+		if tsRecordContractHasDefaults(n.Fields) {
+			return g.awaitRecordConstruct(n, g.recordDefaultTargetCall(n, target, n.Arguments))
+		}
+		identity := g.expressionTypeIdentity(n.ExprType(), n)
+		return g.recordTargetLiteral(target, n.Arguments, identity)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -1645,31 +1663,6 @@ func (g *generator) expr(expression ir.Expression) string {
 				return "(await " + generated + ")"
 			}
 			return g.awaitCall(n, generated)
-		}
-		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
-			if n.RecordTarget != nil {
-				if target, record := g.typescriptRecordTarget(n.RecordTarget); record {
-					identity := g.expressionTypeIdentity(n.ExprType(), n)
-					if tsRecordContractHasDefaults(n.RecordFields) {
-						return g.awaitCall(n, g.recordDefaultTargetCall(n, target, n.Arguments))
-					}
-					return g.awaitCall(n, g.recordTargetLiteral(target, n.Arguments, identity))
-				}
-			}
-			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
-				if identifier, named := application.Receiver.(*ir.Identifier); named {
-					if tsRecordContractHasDefaults(n.RecordFields) {
-						return g.awaitCall(n, g.recordDefaultCall(n, identifier, application.Arguments, n.Arguments))
-					}
-					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
-				}
-			}
-			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
-				if tsRecordContractHasDefaults(n.RecordFields) {
-					return g.awaitCall(n, g.recordDefaultCall(n, identifier, nil, n.Arguments))
-				}
-				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
-			}
 		}
 		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.CallParameterDefaults[n])
 		parts = g.executionArguments(n, parts)
@@ -2849,26 +2842,26 @@ func (g *generator) expressionTypeIdentity(expected types.Type, expression ir.Ex
 		if typeScriptTypeIdentityPresent(result) {
 			return result
 		}
-	case *ir.Call:
-		if node.RecordTarget != nil {
-			if target, ok := g.typescriptRecordTarget(node.RecordTarget); ok {
-				result := &typescriptTypeIdentity{name: target.typeName, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
-				fields := make(map[string]ir.RecordFieldContract, len(node.RecordFields))
-				for _, field := range node.RecordFields {
-					fields[field.Name] = field
-				}
-				for _, argument := range node.Arguments {
-					field, ok := fields[argument.Name]
-					if !ok {
-						continue
-					}
-					identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
-					fieldIdentity := projectTypeScriptTypeIdentity(field.Type, argument.Value.ExprType(), identity)
-					mergeUniqueGenericArgumentIdentities(result, expected, field.Type, fieldIdentity)
-				}
-				return result
+	case *ir.RecordConstruct:
+		if target, ok := g.typescriptRecordTarget(node.Target); ok {
+			result := &typescriptTypeIdentity{name: target.typeName, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+			fields := make(map[string]ir.RecordFieldContract, len(node.Fields))
+			for _, field := range node.Fields {
+				fields[field.Name] = field
 			}
+			for _, argument := range node.Arguments {
+				field, ok := fields[argument.Name]
+				if !ok {
+					continue
+				}
+				identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
+				fieldIdentity := projectTypeScriptTypeIdentity(field.Type, argument.Value.ExprType(), identity)
+				mergeUniqueGenericArgumentIdentities(result, expected, field.Type, fieldIdentity)
+			}
+			return result
 		}
+		return nil
+	case *ir.Call:
 		reference := expressionReference(node.Callee)
 		if reference != nil && reference.Intrinsic != "" {
 			return g.intrinsicCallTypeIdentity(expected, node, reference.Intrinsic)
@@ -3035,17 +3028,6 @@ func (g *generator) recordTargetLiteral(target typescriptRecordConstructionTarge
 	return "({" + strings.Join(fields, ", ") + "} satisfies " + typeName + ")"
 }
 
-func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgument) string {
-	target, _ := g.typescriptRecordTarget(record)
-	return g.recordTargetLiteral(target, arguments, nil)
-}
-
-func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
-	target, _ := g.typescriptRecordTarget(record)
-	target.typeArguments = append([]types.Type(nil), typeArguments...)
-	return g.recordTargetLiteral(target, arguments, nil)
-}
-
 func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
 	g.emitRecordDefaultConstructor(record, fields, tsRecordConstructorName(record.Name), false)
 	if g.suspension != nil && g.suspension.RecordDefaultFor(record) {
@@ -3139,19 +3121,13 @@ func tsRecordSyncConstructorName(name string) string {
 	return tsRecordConstructorName(name) + "Sync"
 }
 
-func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
-	target, _ := g.typescriptRecordTarget(record)
-	target.typeArguments = append([]types.Type(nil), typeArguments...)
-	return g.recordDefaultTargetCall(call, target, arguments)
-}
-
-func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
+func (g *generator) recordDefaultTargetCall(construction *ir.RecordConstruct, target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
 	name := target.helperName
-	if g.suspension != nil && g.suspension.RecordCallSync[call] {
+	if g.suspension != nil && g.suspension.RecordConstructSync[construction] {
 		name += "Sync"
 	}
 	if len(target.typeArguments) > 0 {
-		identity := g.expressionTypeIdentity(call.ExprType(), call)
+		identity := g.expressionTypeIdentity(construction.ExprType(), construction)
 		items := make([]string, len(target.typeArguments))
 		for index, argument := range target.typeArguments {
 			items[index] = g.tsTypeWithIdentity(argument, identityArgument(identity, index))
@@ -3166,7 +3142,7 @@ func (g *generator) recordDefaultTargetCall(call *ir.Call, target typescriptReco
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
 	values := []string{"{ " + strings.Join(fields, ", ") + " }"}
-	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
+	if g.execution != nil && (g.execution.RecordConstructDefaults[construction] || g.execution.RecordConstructSync[construction]) {
 		values = append([]string{g.executionScopeArgument()}, values...)
 	}
 	return name + "(" + strings.Join(values, ", ") + ")"

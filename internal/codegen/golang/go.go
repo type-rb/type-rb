@@ -1647,6 +1647,18 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.memberReceiver(n.Receiver) + "." + goFieldName(n.Name)
 		}
 		return g.memberReceiver(n.Receiver) + "." + goMethodName(n.Name)
+	case *ir.RecordConstruct:
+		identifier, _, record := goRecordTarget(n.Target)
+		if !record {
+			return ""
+		}
+		if recordContractHasDefaults(n.Fields) {
+			return g.recordDefaultCall(n, identifier, n.TypeArguments, n.Arguments, n.Fields)
+		}
+		if len(n.TypeArguments) > 0 {
+			return g.recordLiteralApplied(identifier, n.TypeArguments, n.Arguments)
+		}
+		return g.recordLiteral(identifier, n.Arguments)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -1688,26 +1700,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
-			if n.RecordTarget != nil {
-				if identifier, typeArguments, record := goRecordTarget(n.RecordTarget); record {
-					if recordContractHasDefaults(n.RecordFields) {
-						return g.recordDefaultCall(n, identifier, typeArguments, n.Arguments, n.RecordFields)
-					}
-					if len(typeArguments) > 0 {
-						return g.recordLiteralApplied(identifier, typeArguments, n.Arguments)
-					}
-					return g.recordLiteral(identifier, n.Arguments)
-				}
-			}
-			if application, generic := member.Receiver.(*ir.TypeApply); generic && (application.Kind == "class" || application.Kind == "record") {
+			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "class" {
 				identifier, named := application.Receiver.(*ir.Identifier)
 				if named {
-					if application.Kind == "record" {
-						if recordContractHasDefaults(n.RecordFields) {
-							return g.recordDefaultCall(n, identifier, application.Arguments, n.Arguments, n.RecordFields)
-						}
-						return g.recordLiteralApplied(identifier, application.Arguments, n.Arguments)
-					}
 					name := "New" + goIdentifier(identifier.Name, true)
 					if alias := g.referenceAlias(identifier.Reference); alias != "" {
 						name = alias + "." + name
@@ -1720,12 +1715,6 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
-				if g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record" {
-					if recordContractHasDefaults(n.RecordFields) {
-						return g.recordDefaultCall(n, identifier, nil, n.Arguments, n.RecordFields)
-					}
-					return g.recordLiteral(identifier, n.Arguments)
-				}
 				if alias := g.referenceAlias(identifier.Reference); alias != "" {
 					return alias + ".New" + goIdentifier(identifier.Name, true) + "(" + args + ")"
 				}
@@ -2462,7 +2451,7 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 	return name + "[" + strings.Join(items, ", ") + "]{" + strings.Join(fields, ", ") + "}"
 }
 
-func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
+func (g *generator) recordDefaultCall(construction *ir.RecordConstruct, record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument, fields []ir.RecordFieldContract) string {
 	typeName := goIdentifier(record.Name, true)
 	helper := goRecordConstructorName(record.Name)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
@@ -2490,7 +2479,7 @@ func (g *generator) recordDefaultCall(call *ir.Call, record *ir.Identifier, type
 		explicit[argument.Name] = name
 	}
 	values := make([]string, 0, len(fields)*2)
-	if g.execution != nil && (g.execution.RecordCallDefaults[call] || g.execution.RecordCallSync[call]) {
+	if g.execution != nil && (g.execution.RecordConstructDefaults[construction] || g.execution.RecordConstructSync[construction]) {
 		values = append(values, g.executionScopeArgument())
 	}
 	for _, field := range fields {
@@ -3360,6 +3349,15 @@ func expressionUsesInterpolation(expression ir.Expression) bool {
 		return expressionUsesInterpolation(n.Left) || expressionUsesInterpolation(n.Right)
 	case *ir.Range:
 		return expressionUsesInterpolation(n.Start) || expressionUsesInterpolation(n.End)
+	case *ir.RecordConstruct:
+		if expressionUsesInterpolation(n.Target) {
+			return true
+		}
+		for _, argument := range n.Arguments {
+			if expressionUsesInterpolation(argument.Value) {
+				return true
+			}
+		}
 	case *ir.Call:
 		if expressionUsesInterpolation(n.Callee) {
 			return true

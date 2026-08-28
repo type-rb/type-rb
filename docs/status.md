@@ -19,6 +19,12 @@ class/instance dispatch. Portable display names and backend-generated names
 remain separate, so effect propagation and qualified type generation do not
 depend on reconstructing a declaration from its leaf name.
 
+Checked record construction is a dedicated typed-IR expression rather than an
+ordinary call with optional record metadata. It retains canonical declaration
+identity, generic arguments, authored argument order, and declaration-order
+field contracts, so every backend and the REPL share the same construction and
+omitted-default semantics.
+
 Short two-value choices use the typed conditional expression
 `condition ? value : alternative`. Simple early exits use conditional
 control-transfer statements such as `return value if condition`, `next if

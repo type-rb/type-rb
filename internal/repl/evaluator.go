@@ -1047,6 +1047,42 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{Type: node.ExprType(), Data: nil}, nil
 		}
 		return e.member(receiver, node.Name, module)
+	case *ir.RecordConstruct:
+		arguments := make([]evaluatedArgument, len(node.Arguments))
+		for index, argument := range node.Arguments {
+			value, err := e.expression(argument.Value, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			arguments[index] = evaluatedArgument{Name: argument.Name, Value: value}
+		}
+		var definition *recordDefinition
+		if !node.Declaration.Empty() {
+			for _, candidate := range e.definitions {
+				record, ok := candidate.(*recordDefinition)
+				if ok && record.Node.Declaration == node.Declaration {
+					definition = record
+					break
+				}
+			}
+		}
+		if definition == nil {
+			target, err := e.expression(node.Target, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			typeDefinition, ok := target.Data.(*typeValue)
+			if !ok || typeDefinition.Record == nil {
+				return Value{}, fmt.Errorf("%s is not a record", Inspect(target))
+			}
+			definition = typeDefinition.Record
+		}
+		value, err := e.constructRecord(definition, arguments)
+		if err != nil {
+			return Value{}, err
+		}
+		value.Type = node.ExprType()
+		return value, nil
 	case *ir.Call:
 		reference := expressionReference(node.Callee)
 		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
