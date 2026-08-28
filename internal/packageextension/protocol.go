@@ -12,6 +12,9 @@ const ProtocolVersion = 2
 
 type Definition struct {
 	ModulePath string `json:"modulePath,omitempty"`
+	// Name is the source-qualified semantic declaration name. Type.Name remains
+	// the authored or display spelling and must not be used as an identity.
+	Name       string `json:"name,omitempty"`
 	ImportPath string `json:"importPath,omitempty"`
 }
 

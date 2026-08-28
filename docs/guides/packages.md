@@ -676,14 +676,18 @@ nominal source newtypes. The compiler host validates and copies that data into
 its private semantic representation.
 
 These bundled providers also receive versioned, validated Project Declaration
-Input snapshots. Version 6 adds record-default presence
-and enum-member attributes. Nested records and enums use qualified names, such
-as `CLI::Options`, so same-leaf declarations remain distinct; other
-declaration categories and imports remain top-level-only in this protocol
-version. Version 5 added record declarations and their
-declarative field attributes, top-level function signatures, and resolved type
-arguments on direct class-body calls. Version 4 added named-only parameter
-identity. The snapshot also contains canonical module and import
+Input snapshots. Version 7 separates each declaration's semantic `identity`
+from its source/display `name`. An identity contains the canonical module path
+and source-qualified declaration name. Nested records and enums additionally
+carry a structured `owner` identity, so `CLI::Options` can remain distinct
+while its display name stays `Options`. Generated Go, Ruby, and TypeScript
+identifiers are not part of this boundary. The exposed declaration categories
+are unchanged: nested records and enums are visible, while other declaration
+categories and imports remain top-level-only. Version 6 added record-default
+presence and enum-member attributes. Version 5 added record declarations and
+their declarative field attributes, top-level function signatures, and
+resolved type arguments on direct class-body calls. Version 4 added named-only
+parameter identity. The snapshot also contains canonical module and import
 identity, transparent type aliases, nominal newtypes with concrete
 representations, enum and class declarations, method signatures, authored,
 resolved, and boundary representation types, declarative class-body call

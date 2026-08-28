@@ -465,15 +465,19 @@ Retry policy, SQL worker lifecycle, and the SQL adapter's final native
 persistence primitives remain a separate bundled runtime boundary. Jobs and
 ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
-Version 6 contains canonical module/import identity, aliases, newtypes and
+Version 7 separates canonical declaration identity from source/display names
+and gives nested records and enums structured owner identities without
+exposing generated backend identifiers or additional nested declaration
+categories. It contains canonical module/import identity, aliases, newtypes and
 their concrete boundary representations, record declarations and field
 attributes, record-default presence, enum declarations and member attributes,
 class declarations, top-level function and class method
 signatures, authored and resolved types, resolved generic directive arguments,
 declarative call values, structural block summaries, and source spans. The ORM
-host combines that project snapshot with a separate versioned ORM schema snapshot containing
-only the adapter and table, column, foreign-key, and unique-constraint facts
-needed to derive its catalog. Database credentials, parser nodes, function,
+host combines that project snapshot with a separate versioned ORM schema
+snapshot containing only the adapter and table, column, foreign-key, and
+unique-constraint facts needed to derive its catalog. Database credentials,
+parser nodes, function,
 method, and block bodies, default expressions, resolver/checker state,
 filesystem access, and backend objects do
 not cross the declaration-provider input boundary. The ORM runtime manifest

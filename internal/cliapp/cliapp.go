@@ -148,13 +148,13 @@ func Analyze(input packageextension.ProjectDeclarationInput, requests []Invocati
 	}
 	for _, module := range input.Modules {
 		for _, alias := range module.TypeAliases {
-			catalog.aliases[TypeReference{ModulePath: module.ModulePath, Name: alias.Name}] = alias
+			catalog.aliases[typeReferenceFromIdentity(alias.Identity)] = alias
 		}
 		for _, record := range module.Records {
-			catalog.records[TypeReference{ModulePath: module.ModulePath, Name: record.Name}] = record
+			catalog.records[typeReferenceFromIdentity(record.Identity)] = record
 		}
 		for _, enum := range module.Enums {
-			catalog.enums[TypeReference{ModulePath: module.ModulePath, Name: enum.Name}] = enum
+			catalog.enums[typeReferenceFromIdentity(enum.Identity)] = enum
 		}
 	}
 	manifest := &Manifest{}
@@ -188,7 +188,7 @@ func (c catalog) schema(rootReference TypeReference) (Schema, []Issue) {
 	if !ok {
 		return Schema{}, []Issue{{Message: fmt.Sprintf("trb/cli run root %s must be a record", rootReference.Name)}}
 	}
-	schema := Schema{Root: Record{ModulePath: resolvedRoot.ModulePath, Name: root.Name}}
+	schema := Schema{Root: Record{ModulePath: resolvedRoot.ModulePath, Name: root.Identity.Name}}
 	var issues []Issue
 	for index, field := range root.Fields {
 		metadata, metadataIssues := cliMetadata(field.Attributes, field.Span)
@@ -254,11 +254,11 @@ func (c catalog) resolveRecord(reference TypeReference) (TypeReference, packagee
 		}
 		alias, ok := c.aliases[reference]
 		if !ok {
-			qualified, found := c.uniqueRecordReference(reference)
+			canonical, found := c.uniqueRecordReference(reference)
 			if !found {
 				break
 			}
-			reference = qualified
+			reference = canonical
 			continue
 		}
 		if len(alias.TypeParameters) > 0 {
@@ -274,15 +274,15 @@ func (c catalog) resolveRecord(reference TypeReference) (TypeReference, packagee
 }
 
 func (c catalog) uniqueRecordReference(reference TypeReference) (TypeReference, bool) {
-	// Project Declaration Input v6 qualifies nested records while the authored
-	// generic argument still carries its leaf spelling. Recover that identity
-	// only when the declaration is unique; ambiguous names must not be guessed.
+	// Type syntax currently retains a leaf spelling for an unqualified nested
+	// declaration. Convert it to the PDI v7 semantic identity only when the
+	// source name has one unambiguous record declaration in this module.
 	if strings.Contains(reference.Name, "::") {
 		return TypeReference{}, false
 	}
 	result := TypeReference{}
 	for candidate := range c.records {
-		if candidate.ModulePath != reference.ModulePath || declarationLeaf(candidate.Name) != reference.Name {
+		if candidate.ModulePath != reference.ModulePath || declarationIdentityLeaf(candidate.Name) != reference.Name {
 			continue
 		}
 		if result != (TypeReference{}) && result != candidate {
@@ -293,7 +293,7 @@ func (c catalog) uniqueRecordReference(reference TypeReference) (TypeReference, 
 	return result, result != (TypeReference{})
 }
 
-func declarationLeaf(name string) string {
+func declarationIdentityLeaf(name string) string {
 	if index := strings.LastIndex(name, "::"); index >= 0 {
 		return name[index+2:]
 	}
@@ -339,7 +339,7 @@ func (c catalog) commands(reference TypeReference, enum packageextension.Project
 				issues = append(issues, Issue{Message: fmt.Sprintf("trb/cli subcommand %s payload must be one record", member.Name), Span: member.Span})
 				break
 			}
-			payload := &Record{ModulePath: payloadReference.ModulePath, Name: record.Name}
+			payload := &Record{ModulePath: payloadReference.ModulePath, Name: record.Identity.Name}
 			for index, field := range record.Fields {
 				fieldMetadata, fieldMetadataIssues := cliMetadata(field.Attributes, field.Span)
 				issues = append(issues, issuesInModule(fieldMetadataIssues, payloadReference.ModulePath)...)
@@ -555,10 +555,14 @@ func validateFields(fields []Field) []Issue {
 
 func typeReference(use packageextension.ProjectTypeUse) (TypeReference, bool) {
 	typ := use.Resolved
-	if typ.Definition == nil || typ.Definition.ModulePath == "" || typ.Name == "" || typ.Nullable || len(typ.Arguments) > 0 {
+	if typ.Definition == nil || typ.Definition.ModulePath == "" || typ.Definition.Name == "" || typ.Nullable || len(typ.Arguments) > 0 {
 		return TypeReference{}, false
 	}
-	return TypeReference{ModulePath: typ.Definition.ModulePath, Name: typ.Name}, true
+	return TypeReference{ModulePath: typ.Definition.ModulePath, Name: typ.Definition.Name}, true
+}
+
+func typeReferenceFromIdentity(identity packageextension.ProjectDeclarationIdentity) TypeReference {
+	return TypeReference{ModulePath: identity.ModulePath, Name: identity.Name}
 }
 
 func staticString(value packageextension.ProjectValue) (string, bool) {

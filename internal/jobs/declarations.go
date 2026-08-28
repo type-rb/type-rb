@@ -149,7 +149,7 @@ func canonicalProjectJobResult(use packageextension.ProjectTypeUse) bool {
 		return false
 	}
 	for _, reference := range use.ResolutionPath {
-		if reference.Name == "JobResult" && (canonicalJobsPath(reference.ModulePath) || canonicalJobsPath(reference.ImportPath)) {
+		if reference.Identity.Name == "JobResult" && (canonicalJobsPath(reference.Identity.ModulePath) || canonicalJobsPath(reference.ImportPath)) {
 			return true
 		}
 	}
