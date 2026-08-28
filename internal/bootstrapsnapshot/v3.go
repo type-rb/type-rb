@@ -18,11 +18,19 @@ type aggregateDeclaration struct {
 	enum        *ir.Enum
 }
 
+type aliasDeclaration struct {
+	declaration identity.Declaration
+	alias       *ir.TypeAlias
+}
+
 type aggregateRegistry struct {
-	declarations map[string]aggregateDeclaration
-	byName       map[string][]aggregateDeclaration
-	definitions  map[string]TypeDefinition
-	building     map[string]bool
+	version       int
+	declarations  map[string]aggregateDeclaration
+	byName        map[string][]aggregateDeclaration
+	aliases       map[string]aliasDeclaration
+	aliasesByName map[string][]aliasDeclaration
+	definitions   map[string]TypeDefinition
+	building      map[string]bool
 }
 
 // BuildV3 encodes the aggregate-capable version 3 bootstrap snapshot.
@@ -56,7 +64,7 @@ func BuildV3(artifacts []*compiler.Artifact, sourceRoot string) (SnapshotV3, err
 	}
 
 	sources, sourceIDs := projectSources(inputs, sourceRoot)
-	registry := newAggregateRegistry(artifacts)
+	registry := newAggregateRegistry(artifacts, Version3)
 	functions := make([]Function, 0, len(inputs))
 	for _, input := range inputs {
 		lowered, err := lowerV3Function(input.program, input.method, sourceIDs[input.program.SourcePath], methodIDs, registry)
@@ -77,12 +85,15 @@ func BuildV3(artifacts []*compiler.Artifact, sourceRoot string) (SnapshotV3, err
 	}, nil
 }
 
-func newAggregateRegistry(artifacts []*compiler.Artifact) *aggregateRegistry {
+func newAggregateRegistry(artifacts []*compiler.Artifact, version int) *aggregateRegistry {
 	result := &aggregateRegistry{
-		declarations: map[string]aggregateDeclaration{},
-		byName:       map[string][]aggregateDeclaration{},
-		definitions:  map[string]TypeDefinition{},
-		building:     map[string]bool{},
+		version:       version,
+		declarations:  map[string]aggregateDeclaration{},
+		byName:        map[string][]aggregateDeclaration{},
+		aliases:       map[string]aliasDeclaration{},
+		aliasesByName: map[string][]aliasDeclaration{},
+		definitions:   map[string]TypeDefinition{},
+		building:      map[string]bool{},
 	}
 	for _, artifact := range artifacts {
 		if artifact == nil || artifact.IR == nil || artifact.ExternalPackage {
@@ -100,9 +111,24 @@ func (r *aggregateRegistry) collectStatements(statements []ir.Statement) {
 			r.add(aggregateDeclaration{declaration: node.Declaration, record: node})
 		case *ir.Enum:
 			r.add(aggregateDeclaration{declaration: node.Declaration, enum: node})
+		case *ir.TypeAlias:
+			r.addAlias(node)
 		case *ir.Module:
 			r.collectStatements(node.Body)
 		}
+	}
+}
+
+func (r *aggregateRegistry) addAlias(alias *ir.TypeAlias) {
+	if alias == nil || alias.Declaration.Empty() {
+		return
+	}
+	item := aliasDeclaration{declaration: alias.Declaration, alias: alias}
+	r.aliases[alias.Declaration.Key()] = item
+	r.aliasesByName[alias.Declaration.Name] = append(r.aliasesByName[alias.Declaration.Name], item)
+	leaf := alias.Declaration.LeafName()
+	if leaf != alias.Declaration.Name {
+		r.aliasesByName[leaf] = append(r.aliasesByName[leaf], item)
 	}
 }
 
@@ -119,17 +145,112 @@ func (r *aggregateRegistry) add(item aggregateDeclaration) {
 }
 
 func (r *aggregateRegistry) typeName(program *ir.Program, typ types.Type, span token.Span) (string, error) {
+	typ = r.expandAliases(typ, map[string]bool{})
 	if name, ok := scalarTypeName(typ); ok {
 		return name, nil
 	}
+	if r.version >= Version4 {
+		if base, ok := types.LiteralBase(typ); ok {
+			typ = base
+		}
+		switch typ.Kind {
+		case types.String:
+			if typ.Nullable {
+				return "", r.unsupported(program, span, "nullable value type "+typ.String())
+			}
+			r.definitions["String"] = TypeDefinition{Kind: "string", ID: "String"}
+			return "String", nil
+		case types.Array:
+			return r.registerArray(program, typ, span)
+		case types.Function:
+			return r.registerFunction(program, typ, span)
+		}
+	}
 	if typ.Nullable || typ.Kind != types.Named {
-		return "", unsupportedV3(program, span, "value type "+typ.String())
+		return "", r.unsupported(program, span, "value type "+typ.String())
 	}
 	declaration, ok := r.resolve(typ)
 	if !ok {
-		return "", unsupportedV3(program, span, "aggregate type "+typ.String()+" without a unique declaration")
+		return "", r.unsupported(program, span, "aggregate type "+typ.String()+" without a unique declaration")
 	}
 	return r.register(program, typ, declaration, span)
+}
+
+func (r *aggregateRegistry) expandAliases(typ types.Type, visiting map[string]bool) types.Type {
+	result := typ
+	result.Args = make([]types.Type, len(typ.Args))
+	for index, argument := range typ.Args {
+		result.Args[index] = r.expandAliases(argument, visiting)
+	}
+	var item aliasDeclaration
+	var ok bool
+	if key := typ.Declaration.Key(); key != "" {
+		item, ok = r.aliases[key]
+	}
+	if !ok {
+		items := r.aliasesByName[typ.Name]
+		if len(items) == 1 {
+			item, ok = items[0], true
+		}
+	}
+	if !ok || item.alias == nil || len(item.alias.TypeParameters) != len(result.Args) {
+		return result
+	}
+	key := item.declaration.Key()
+	if visiting[key] {
+		return result
+	}
+	visiting[key] = true
+	expanded := v3SubstituteType(item.alias.Target, v3TypeSubstitutions(item.alias.TypeParameters, result.Args))
+	expanded.Nullable = expanded.Nullable || result.Nullable
+	expanded.Readonly = expanded.Readonly || result.Readonly
+	expanded = r.expandAliases(expanded, visiting)
+	delete(visiting, key)
+	return expanded
+}
+
+func (r *aggregateRegistry) registerArray(program *ir.Program, typ types.Type, span token.Span) (string, error) {
+	if typ.Nullable || len(typ.Args) != 1 {
+		return "", r.unsupported(program, span, "value type "+typ.String())
+	}
+	element, err := r.typeName(program, typ.Args[0], span)
+	if err != nil {
+		return "", err
+	}
+	definition, defined := r.definitions[element]
+	if element != "Integer" && (!defined || definition.Kind != "string" && definition.Kind != "function") {
+		return "", r.unsupported(program, span, "Array element type "+typ.Args[0].String())
+	}
+	id := "Array<" + element + ">"
+	r.definitions[id] = TypeDefinition{Kind: "array", ID: id, Element: &element}
+	return id, nil
+}
+
+func (r *aggregateRegistry) registerFunction(program *ir.Program, typ types.Type, span token.Span) (string, error) {
+	parameters, result, ok := types.FunctionSignature(typ)
+	if typ.Nullable || !ok {
+		return "", r.unsupported(program, span, "value type "+typ.String())
+	}
+	parameterNames := make([]string, len(parameters))
+	for index, parameter := range parameters {
+		name, err := r.typeName(program, parameter, span)
+		if err != nil || name == "Void" {
+			if err != nil {
+				return "", err
+			}
+			return "", r.unsupported(program, span, "Void function parameter")
+		}
+		parameterNames[index] = name
+	}
+	resultName, err := r.typeName(program, result, span)
+	if err != nil {
+		return "", err
+	}
+	id := "(" + strings.Join(parameterNames, ", ") + ") -> " + resultName
+	r.definitions[id] = TypeDefinition{
+		Kind: "function", ID: id, Parameters: &parameterNames, Result: &resultName,
+	}
+	return id, nil
 }
 
 func (r *aggregateRegistry) typeNameWithDeclaration(program *ir.Program, typ types.Type, declaration identity.Declaration, span token.Span) (string, error) {
@@ -154,10 +275,10 @@ func (r *aggregateRegistry) resolve(typ types.Type) (aggregateDeclaration, bool)
 func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item aggregateDeclaration, span token.Span) (string, error) {
 	id, err := r.aggregateTypeID(typ, item)
 	if err != nil {
-		return "", unsupportedV3(program, span, err.Error())
+		return "", r.unsupported(program, span, err.Error())
 	}
 	if len(id) > 256 {
-		return "", unsupportedV3(program, span, "aggregate type identifier longer than 256 bytes")
+		return "", r.unsupported(program, span, "aggregate type identifier longer than 256 bytes")
 	}
 	if _, ok := r.definitions[id]; ok || r.building[id] {
 		return id, nil
@@ -167,7 +288,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 
 	if item.record != nil {
 		if len(item.record.TypeParameters) != len(typ.Args) {
-			return "", unsupportedV3(program, span, "aggregate type argument arity for "+typ.String())
+			return "", r.unsupported(program, span, "aggregate type argument arity for "+typ.String())
 		}
 		substitutions := v3TypeSubstitutions(item.record.TypeParameters, typ.Args)
 		fields := []Field{}
@@ -183,7 +304,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 				return "", err
 			}
 			if name == "Void" {
-				return "", unsupportedV3(program, field.SourceSpan(), "Void record field "+field.Name)
+				return "", r.unsupported(program, field.SourceSpan(), "Void record field "+field.Name)
 			}
 			fields = append(fields, Field{Name: field.Name, Type: name})
 		}
@@ -192,10 +313,10 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 	}
 	if item.enum != nil {
 		if item.enum.RawType.Kind != "" && item.enum.RawType.Kind != types.Invalid {
-			return "", unsupportedV3(program, span, "raw enum "+typ.String())
+			return "", r.unsupported(program, span, "raw enum "+typ.String())
 		}
 		if len(item.enum.TypeParameters) != len(typ.Args) {
-			return "", unsupportedV3(program, span, "aggregate type argument arity for "+typ.String())
+			return "", r.unsupported(program, span, "aggregate type argument arity for "+typ.String())
 		}
 		substitutions := v3TypeSubstitutions(item.enum.TypeParameters, typ.Args)
 		variants := []Variant{}
@@ -213,7 +334,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 					return "", err
 				}
 				if name == "Void" {
-					return "", unsupportedV3(program, member.SourceSpan(), "Void enum field "+field.Name)
+					return "", r.unsupported(program, member.SourceSpan(), "Void enum field "+field.Name)
 				}
 				variant.Fields = append(variant.Fields, Field{Name: field.Name, Type: name})
 			}
@@ -222,7 +343,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 		r.definitions[id] = definition
 		return id, nil
 	}
-	return "", unsupportedV3(program, span, "aggregate declaration "+typ.String())
+	return "", r.unsupported(program, span, "aggregate declaration "+typ.String())
 }
 
 func (r *aggregateRegistry) definition(id string) (TypeDefinition, bool) {
@@ -280,4 +401,8 @@ func v3SubstituteType(typ types.Type, substitutions map[string]types.Type) types
 
 func unsupportedV3(program *ir.Program, span token.Span, feature string) error {
 	return &UnsupportedError{Path: program.SourcePath, Span: span, Feature: feature, Version: Version3}
+}
+
+func (r *aggregateRegistry) unsupported(program *ir.Program, span token.Span, feature string) error {
+	return &UnsupportedError{Path: program.SourcePath, Span: span, Feature: feature, Version: r.version}
 }

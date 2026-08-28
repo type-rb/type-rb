@@ -82,13 +82,48 @@ end
 	}
 }
 
+func TestCompilerBootstrapSnapshotSelectsTheV4ManagedValueBoundary(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "main.trb")
+	source := `def main()
+	suffix := "!"
+	decorate := fn(value: String): String
+		return value + suffix
+	end
+	puts(decorate("ok"))
+	return
+end
+`
+	if err := os.WriteFile(entry, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--mode", "go", "--snapshot-version", "4", entry}); status != 0 {
+		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("bootstrap snapshot wrote to stderr: %s", stderr.String())
+	}
+	var snapshot bootstrapsnapshot.SnapshotV4
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("invalid bootstrap snapshot v4 JSON: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Format != bootstrapsnapshot.Format || snapshot.Version != bootstrapsnapshot.Version4 || snapshot.EntryFunction != "main#main" {
+		t.Fatalf("unexpected bootstrap snapshot: %#v", snapshot)
+	}
+	if len(snapshot.Functions) != 2 || len(snapshot.Functions[0].Captures) != 0 || len(snapshot.Functions[1].Captures) != 1 {
+		t.Fatalf("unexpected bootstrap snapshot v4 functions: %#v", snapshot.Functions)
+	}
+}
+
 func TestCompilerBootstrapSnapshotRejectsAnUnknownBoundaryVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--snapshot-version", "4"}); status != 1 {
+	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--snapshot-version", "5"}); status != 1 {
 		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "does not support snapshot version 4") {
+	if !strings.Contains(stderr.String(), "does not support snapshot version 5") {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 }
