@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/type-rb/type-rb/internal/nativesnapshot"
+	"github.com/type-rb/type-rb/internal/bootstrapsnapshot"
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/toolingprotocol"
 )
 
-func TestCompilerNativeSnapshotEmitsTheExperimentalGate1Boundary(t *testing.T) {
+func TestCompilerBootstrapSnapshotEmitsTheExperimentalV2Boundary(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "main.trb")
 	if err := os.WriteFile(entry, []byte("def main()\n\tputs(\"ok\")\n\treturn\nend\n"), 0o644); err != nil {
@@ -22,25 +22,25 @@ func TestCompilerNativeSnapshotEmitsTheExperimentalGate1Boundary(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"compiler", "native-snapshot", "--mode", "go", entry}); status != 0 {
+	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--mode", "go", entry}); status != 0 {
 		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("native snapshot wrote to stderr: %s", stderr.String())
+		t.Fatalf("bootstrap snapshot wrote to stderr: %s", stderr.String())
 	}
-	var snapshot nativesnapshot.Snapshot
+	var snapshot bootstrapsnapshot.SnapshotV2
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
-		t.Fatalf("invalid native snapshot JSON: %v\n%s", err, stdout.String())
+		t.Fatalf("invalid bootstrap snapshot JSON: %v\n%s", err, stdout.String())
 	}
-	if snapshot.Format != nativesnapshot.Format || snapshot.Version != nativesnapshot.Version || snapshot.EntryFunction != "main#main" {
-		t.Fatalf("unexpected native snapshot: %#v", snapshot)
+	if snapshot.Format != bootstrapsnapshot.Format || snapshot.Version != bootstrapsnapshot.Version2 || snapshot.EntryFunction != "main#main" {
+		t.Fatalf("unexpected bootstrap snapshot: %#v", snapshot)
 	}
 	if len(snapshot.Functions) != 1 || len(snapshot.Functions[0].Blocks) != 1 {
-		t.Fatalf("unexpected native snapshot functions: %#v", snapshot.Functions)
+		t.Fatalf("unexpected bootstrap snapshot functions: %#v", snapshot.Functions)
 	}
 }
 
-func TestCompilerNativeSnapshotSelectsTheGate2AggregateBoundary(t *testing.T) {
+func TestCompilerBootstrapSnapshotSelectsTheV3AggregateBoundary(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "main.trb")
 	source := `record Pair
@@ -64,28 +64,28 @@ end
 	}
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"compiler", "native-snapshot", "--mode", "go", "--snapshot-version", "3", entry}); status != 0 {
+	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--mode", "go", "--snapshot-version", "3", entry}); status != 0 {
 		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if stderr.Len() != 0 {
-		t.Fatalf("native snapshot wrote to stderr: %s", stderr.String())
+		t.Fatalf("bootstrap snapshot wrote to stderr: %s", stderr.String())
 	}
-	var snapshot nativesnapshot.Gate2Snapshot
+	var snapshot bootstrapsnapshot.SnapshotV3
 	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
-		t.Fatalf("invalid Gate 2 native snapshot JSON: %v\n%s", err, stdout.String())
+		t.Fatalf("invalid bootstrap snapshot v3 JSON: %v\n%s", err, stdout.String())
 	}
-	if snapshot.Format != nativesnapshot.Format || snapshot.Version != nativesnapshot.Gate2Version || snapshot.EntryFunction != "main#main" {
-		t.Fatalf("unexpected native snapshot: %#v", snapshot)
+	if snapshot.Format != bootstrapsnapshot.Format || snapshot.Version != bootstrapsnapshot.Version3 || snapshot.EntryFunction != "main#main" {
+		t.Fatalf("unexpected bootstrap snapshot: %#v", snapshot)
 	}
 	if len(snapshot.Types) != 1 || snapshot.Types[0].Kind != "record" || snapshot.Types[0].ID != "main#Pair" {
-		t.Fatalf("unexpected Gate 2 types: %#v", snapshot.Types)
+		t.Fatalf("unexpected bootstrap snapshot v3 types: %#v", snapshot.Types)
 	}
 }
 
-func TestCompilerNativeSnapshotRejectsAnUnknownBoundaryVersion(t *testing.T) {
+func TestCompilerBootstrapSnapshotRejectsAnUnknownBoundaryVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"compiler", "native-snapshot", "--snapshot-version", "4"}); status != 1 {
+	if status := command.Run([]string{"compiler", "bootstrap-snapshot", "--snapshot-version", "4"}); status != 1 {
 		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "does not support snapshot version 4") {

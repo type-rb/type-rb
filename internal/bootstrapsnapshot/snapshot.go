@@ -1,7 +1,7 @@
-// Package nativesnapshot implements the temporary bootstrap bridge for
-// type-rb-native. It serializes deliberately small, data-only subsets of the
-// checked TypeRB IR and exposes no compiler object across the process boundary.
-package nativesnapshot
+// Package bootstrapsnapshot serializes deliberately small, data-only subsets
+// of the checked TypeRB IR for temporary compiler bootstrapping. It exposes no
+// compiler object across the process boundary and is not a stable protocol.
+package bootstrapsnapshot
 
 import (
 	"fmt"
@@ -15,12 +15,12 @@ import (
 )
 
 const (
-	Format       = "type-rb-bootstrap-snapshot"
-	Version      = 2
-	Gate2Version = 3
+	Format   = "type-rb-bootstrap-snapshot"
+	Version2 = 2
+	Version3 = 3
 )
 
-type Snapshot struct {
+type SnapshotV2 struct {
 	Format        string     `json:"format"`
 	Version       int        `json:"version"`
 	Module        string     `json:"module"`
@@ -29,7 +29,7 @@ type Snapshot struct {
 	Functions     []Function `json:"functions"`
 }
 
-type Gate2Snapshot struct {
+type SnapshotV3 struct {
 	Format        string           `json:"format"`
 	Version       int              `json:"version"`
 	Module        string           `json:"module"`
@@ -222,9 +222,9 @@ type UnsupportedError struct {
 func (e *UnsupportedError) Error() string {
 	version := e.Version
 	if version == 0 {
-		version = Version
+		version = Version2
 	}
-	return fmt.Sprintf("%s:%d:%d: native snapshot v%d does not support %s", e.Path, e.Span.Start.Line, e.Span.Start.Column, version, e.Feature)
+	return fmt.Sprintf("%s:%d:%d: bootstrap snapshot v%d does not support %s", e.Path, e.Span.Start.Line, e.Span.Start.Column, version, e.Feature)
 }
 
 type methodInput struct {
@@ -232,12 +232,11 @@ type methodInput struct {
 	method  *ir.Method
 }
 
-// Build is the intentionally narrow Gate 1 bridge used by type-rb-native. This
-// package can be removed once the native frontend produces the same MIR itself.
-func Build(artifacts []*compiler.Artifact, sourceRoot string) (Snapshot, error) {
+// BuildV2 encodes the scalar-only version 2 bootstrap snapshot.
+func BuildV2(artifacts []*compiler.Artifact, sourceRoot string) (SnapshotV2, error) {
 	inputs := projectMethods(artifacts)
 	if len(inputs) == 0 {
-		return Snapshot{}, fmt.Errorf("native snapshot v2 found no project functions")
+		return SnapshotV2{}, fmt.Errorf("bootstrap snapshot v2 found no project functions")
 	}
 	methodIDs := make(map[string]string, len(inputs))
 	for _, input := range inputs {
@@ -254,13 +253,13 @@ func Build(artifacts []*compiler.Artifact, sourceRoot string) (Snapshot, error) 
 			continue
 		}
 		if entry != "" {
-			return Snapshot{}, fmt.Errorf("native snapshot v2 requires exactly one top-level main function")
+			return SnapshotV2{}, fmt.Errorf("bootstrap snapshot v2 requires exactly one top-level main function")
 		}
 		entry = functionID(input.program, input.method)
 		module = input.program.ModulePath
 	}
 	if entry == "" {
-		return Snapshot{}, fmt.Errorf("native snapshot v2 requires one top-level def main()")
+		return SnapshotV2{}, fmt.Errorf("bootstrap snapshot v2 requires one top-level def main()")
 	}
 
 	sources, sourceIDs := projectSources(inputs, sourceRoot)
@@ -268,13 +267,13 @@ func Build(artifacts []*compiler.Artifact, sourceRoot string) (Snapshot, error) 
 	for _, input := range inputs {
 		lowered, err := lowerFunction(input.program, input.method, sourceIDs[input.program.SourcePath], methodIDs)
 		if err != nil {
-			return Snapshot{}, err
+			return SnapshotV2{}, err
 		}
 		functions = append(functions, lowered)
 	}
 	sort.Slice(functions, func(i, j int) bool { return functions[i].ID < functions[j].ID })
-	return Snapshot{
-		Format: Format, Version: Version, Module: module, EntryFunction: entry,
+	return SnapshotV2{
+		Format: Format, Version: Version2, Module: module, EntryFunction: entry,
 		Sources: sources, Functions: functions,
 	}, nil
 }
