@@ -9,9 +9,36 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/nativesnapshot"
 	"github.com/type-rb/type-rb/internal/project"
 	"github.com/type-rb/type-rb/internal/toolingprotocol"
 )
+
+func TestCompilerNativeSnapshotEmitsTheExperimentalGate1Boundary(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "main.trb")
+	if err := os.WriteFile(entry, []byte("def main()\n\tputs(\"ok\")\n\treturn\nend\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"compiler", "native-snapshot", "--mode", "go", entry}); status != 0 {
+		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("native snapshot wrote to stderr: %s", stderr.String())
+	}
+	var snapshot nativesnapshot.Snapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("invalid native snapshot JSON: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Format != nativesnapshot.Format || snapshot.Version != nativesnapshot.Version || snapshot.EntryFunction != "main#main" {
+		t.Fatalf("unexpected native snapshot: %#v", snapshot)
+	}
+	if len(snapshot.Functions) != 1 || len(snapshot.Functions[0].Blocks) != 1 {
+		t.Fatalf("unexpected native snapshot functions: %#v", snapshot.Functions)
+	}
+}
 
 func TestCompilerInspectEmitsTheSameTypedSnapshotAcrossModes(t *testing.T) {
 	var baseline []toolingprotocol.Declaration
