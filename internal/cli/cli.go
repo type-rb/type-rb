@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -425,17 +426,16 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	flags := flag.NewFlagSet("test", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	filter := flags.String("filter", "", "run tests whose full name contains this text")
-	testFile := flags.String("file", "", "run tests declared in this project file")
+	namePattern := ""
+	flags.StringVar(&namePattern, "t", "", "run tests whose full name matches this regular expression")
+	flags.StringVar(&namePattern, "test-name-pattern", "", "run tests whose full name matches this regular expression")
 	reporter := flags.String("reporter", "human", "test output: human or json")
 	compile := flags.Bool("compile", false, "produce a test executable with the target toolchain")
 	debug := flags.Bool("debug", false, "include source-level debugger information in a test executable")
 	outfile := flags.String("outfile", "", "test executable output path relative to the project root")
-	if err := flags.Parse(args); err != nil {
+	paths, err := parseInterspersedFlags(flags, args)
+	if err != nil {
 		return err
-	}
-	if flags.NArg() != 0 {
-		return errors.New("test does not accept source paths; it discovers *_test.trb files in the configured project")
 	}
 	if *reporter != "human" && *reporter != "json" {
 		return fmt.Errorf("--reporter must be human or json; got %q", *reporter)
@@ -446,8 +446,15 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	if *outfile != "" && !*compile {
 		return errors.New("--outfile requires --compile")
 	}
-	if *compile && (*filter != "" || *testFile != "" || *reporter != "human") {
-		return errors.New("--filter, --file, and --reporter select a test execution and cannot be combined with --compile")
+	if *compile && (namePattern != "" || len(paths) != 0 || *reporter != "human") {
+		return errors.New("test paths, --test-name-pattern, and --reporter select a test execution and cannot be combined with --compile")
+	}
+	var compiledNamePattern *regexp.Regexp
+	if namePattern != "" {
+		compiledNamePattern, err = regexp.Compile(namePattern)
+		if err != nil {
+			return fmt.Errorf("invalid --test-name-pattern %q: %w", namePattern, err)
+		}
 	}
 	config, err := loadConfig(*configPath, ".")
 	if err != nil {
@@ -456,47 +463,29 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	if *compile && config.Mode != "go" {
 		return fmt.Errorf("test --compile is supported only for mode go; project mode is %s", config.Mode)
 	}
-	selectedFile := ""
-	if *testFile != "" {
-		selectedFile = *testFile
-		if !filepath.IsAbs(selectedFile) {
-			selectedFile = filepath.Join(config.Root, selectedFile)
-		}
-		selectedFile, err = filepath.Abs(selectedFile)
-		if err != nil {
-			return err
-		}
-	}
 	if config.Mode == "typescript" && config.TypeScript != nil && config.TypeScript.Runtime == project.TypeScriptRuntimeBrowser {
 		return errors.New("trb test requires typescript.runtime bun or node; browser test execution is not available yet")
 	}
-	files, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+	projectFiles, err := collectTRB([]string{config.SourcePath()}, config.OutputPath())
 	if err != nil {
 		return err
 	}
-	var testFiles []string
-	for _, filename := range files {
+	var projectTestFiles []string
+	for _, filename := range projectFiles {
 		if testsuite.IsTestFile(filename) {
-			testFiles = append(testFiles, filename)
+			projectTestFiles = append(projectTestFiles, filename)
 		}
 	}
-	if len(testFiles) == 0 {
+	if len(projectTestFiles) == 0 {
 		return errors.New("no *_test.trb files found")
 	}
-	if selectedFile != "" {
-		found := false
-		for _, filename := range testFiles {
-			absolute, absoluteErr := filepath.Abs(filename)
-			if absoluteErr == nil && filepath.Clean(absolute) == filepath.Clean(selectedFile) {
-				selectedFile = absolute
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("test file %s was not found in the configured project", *testFile)
-		}
+	selectedTestFiles, err := selectProjectTestFiles(config, projectTestFiles, paths)
+	if err != nil {
+		return err
 	}
+	files := append(productionTRBFiles(projectFiles), selectedTestFiles...)
+	sort.Strings(files)
+	files = unique(files)
 	if config.ManagesPackages() {
 		if _, err := syncProjectPackages(config, files); err != nil {
 			return err
@@ -538,6 +527,18 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	artifacts, err := compiler.CompileProject(units, options)
 	if err != nil {
 		return err
+	}
+	selectedNames := ""
+	if compiledNamePattern != nil {
+		names, matchErr := matchingTestNames(selectedTestFiles, compiledNamePattern)
+		if matchErr != nil {
+			return matchErr
+		}
+		encoded, encodeErr := json.Marshal(names)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		selectedNames = string(encoded)
 	}
 	compiled := make(map[string]*compiler.Artifact, len(artifacts))
 	for _, artifact := range artifacts {
@@ -600,7 +601,7 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	command.Stdin = c.Stdin
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
-	command.Env = append(os.Environ(), "TRB_TEST_REPORTER="+*reporter, "TRB_TEST_FILTER="+*filter, "TRB_TEST_FILE="+selectedFile)
+	command.Env = append(os.Environ(), "TRB_TEST_REPORTER="+*reporter, "TRB_TEST_NAMES="+selectedNames)
 	if config.Mode == "go" && config.Go.Sqldef != nil {
 		command.Env = append(command.Env, "TRB_DATABASE="+filepath.Join(config.Root, config.Go.Sqldef.Database))
 	}
@@ -608,6 +609,125 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 		return &reportedError{cause: err}
 	}
 	return nil
+}
+
+func parseInterspersedFlags(flags *flag.FlagSet, args []string) ([]string, error) {
+	var flagArgs []string
+	var paths []string
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			paths = append(paths, args[index+1:]...)
+			break
+		}
+		if argument == "-" || !strings.HasPrefix(argument, "-") {
+			paths = append(paths, argument)
+			continue
+		}
+		flagArgs = append(flagArgs, argument)
+		name := strings.TrimLeft(argument, "-")
+		hasValue := strings.Contains(name, "=")
+		if hasValue {
+			name = strings.SplitN(name, "=", 2)[0]
+		}
+		defined := flags.Lookup(name)
+		if defined == nil || hasValue {
+			continue
+		}
+		if boolean, ok := defined.Value.(interface{ IsBoolFlag() bool }); ok && boolean.IsBoolFlag() {
+			continue
+		}
+		if index+1 < len(args) {
+			index++
+			flagArgs = append(flagArgs, args[index])
+		}
+	}
+	if err := flags.Parse(flagArgs); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
+func selectProjectTestFiles(config *project.Config, projectTestFiles, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return append([]string(nil), projectTestFiles...), nil
+	}
+	known := make(map[string]string, len(projectTestFiles))
+	for _, filename := range projectTestFiles {
+		absolute, err := filepath.Abs(filename)
+		if err != nil {
+			return nil, err
+		}
+		known[filepath.Clean(absolute)] = filename
+	}
+	selected := map[string]bool{}
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		absolute = filepath.Clean(absolute)
+		if !pathBelow(config.SourcePath(), absolute) {
+			return nil, fmt.Errorf("test path %s is outside configured sourceDir %s", path, config.SourceDir)
+		}
+		info, err := os.Stat(absolute)
+		if err != nil {
+			return nil, fmt.Errorf("test path %s: %w", path, err)
+		}
+		if !info.IsDir() {
+			if !testsuite.IsTestFile(absolute) {
+				return nil, fmt.Errorf("test path %s is not a *_test.trb file", path)
+			}
+			filename, exists := known[absolute]
+			if !exists {
+				return nil, fmt.Errorf("test file %s was not found in the configured project", path)
+			}
+			selected[filename] = true
+			continue
+		}
+		matched := false
+		for _, filename := range projectTestFiles {
+			if pathBelow(absolute, filename) {
+				selected[filename] = true
+				matched = true
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("no *_test.trb files found under %s", path)
+		}
+	}
+	result := make([]string, 0, len(selected))
+	for filename := range selected {
+		result = append(result, filename)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func matchingTestNames(testFiles []string, pattern *regexp.Regexp) ([]string, error) {
+	selected := map[string]bool{}
+	for _, filename := range testFiles {
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		program, _ := parser.Parse(source)
+		items, _ := testsuite.Prepare(program, filename, "")
+		for _, item := range items {
+			if item.Kind == testsuite.Case && pattern.MatchString(item.FullName) {
+				selected[item.FullName] = true
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("no tests matched --test-name-pattern %q", pattern.String())
+	}
+	result := make([]string, 0, len(selected))
+	for name := range selected {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 func (c *CLI) buildGoTestExecutable(config *project.Config, compiled map[string]*compiler.Artifact, runnerFilename, outfile string, debug bool) error {
@@ -2910,7 +3030,7 @@ func (c *CLI) usage() {
 	fmt.Fprintln(c.Stdout, "  trb check [--diagnostic-format human|json] [--mode MODE] FILE.trb")
 	fmt.Fprintln(c.Stdout, "  trb lint [--fix] [--deny-warnings] [--diagnostic-format human|json] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb lint [--fix] [--deny-warnings] [--diagnostic-format human|json] [--mode MODE] FILE.trb")
-	fmt.Fprintln(c.Stdout, "  trb test [--filter TEXT] [--file FILE] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
+	fmt.Fprintln(c.Stdout, "  trb test [FILE_OR_DIRECTORY ...] [-t REGEXP|--test-name-pattern REGEXP] [--reporter human|json] [--compile [--debug] [--outfile FILE]] [--config trbconfig.jsonc]")
 	fmt.Fprintln(c.Stdout, "  trb build [paths...]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE]")
 	fmt.Fprintln(c.Stdout, "  trb build --compile [--debug] [--outfile FILE] [--mode go] FILE.trb")
