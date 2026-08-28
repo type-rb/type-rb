@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.6 - 2026-08-28
+
+- Require TypeRB 0.3.46 and run or debug Test Explorer selections with
+  positional test paths and exact full-name patterns.
+- Stop highlighting the removed `and`, `or`, and `not` word-form logical
+  operators.
+
 ## 0.3.5 - 2026-08-23
 
 - Require TypeRB 0.3.18 and support its explicit `alias` declarations and

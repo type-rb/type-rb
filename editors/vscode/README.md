@@ -46,8 +46,8 @@ sibling files are not compiled, and Go is the default target mode.
 
 Use Visual Studio Code 1.130 or newer.
 
-Use TypeRB 0.3.18 or newer. Earlier compilers do not provide the complete
-language-server contract expected by this extension release.
+Use TypeRB 0.3.46 or newer. Earlier compilers do not provide the complete
+language-server and test-runner contracts expected by this extension release.
 
 Install the TypeRB compiler and make `trb` available on `PATH`:
 
