@@ -1,4 +1,4 @@
-package nativesnapshot
+package bootstrapsnapshot
 
 import (
 	"fmt"
@@ -63,7 +63,7 @@ func lowerFunction(program *ir.Program, method *ir.Method, sourceID string, meth
 	blocks := make([]Block, len(lowerer.blocks))
 	for index, block := range lowerer.blocks {
 		if block.Terminator == nil {
-			return Function{}, fmt.Errorf("%s: native snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
+			return Function{}, fmt.Errorf("%s: bootstrap snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
 		}
 		blocks[index] = *block
 	}
@@ -247,7 +247,7 @@ func (l *functionLowerer) lowerWhile(node *ir.While) (bool, error) {
 		return false, err
 	}
 	if terminated {
-		return false, unsupported(l.program, node.SourceSpan(), "control transfer from a Gate 1 while body")
+		return false, unsupported(l.program, node.SourceSpan(), "control transfer from a while body")
 	}
 	l.current.Terminator = Jump{
 		Op: "jump", Target: header.ID, Arguments: environmentArguments(baseLocals, l.env), Origin: loopOrigin,
@@ -371,7 +371,7 @@ func (l *functionLowerer) emitBinary(operator string, left, right valueRef, span
 	op := "integer_binary"
 	if typeName == "Float" {
 		if operator == "%" || operator == "**" {
-			return valueRef{}, unsupported(l.program, span, "Gate 1 Float operator "+operator)
+			return valueRef{}, unsupported(l.program, span, "Float operator "+operator)
 		}
 		op = "float_binary"
 	} else if typeName != "Integer" {

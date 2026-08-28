@@ -1,4 +1,4 @@
-package nativesnapshot
+package bootstrapsnapshot
 
 import (
 	"fmt"
@@ -25,12 +25,11 @@ type aggregateRegistry struct {
 	building     map[string]bool
 }
 
-// BuildGate2 emits the incompatible version 3 boundary used by Gate 2. Version
-// 2 remains the default so the completed Gate 1 measurements stay reproducible.
-func BuildGate2(artifacts []*compiler.Artifact, sourceRoot string) (Gate2Snapshot, error) {
+// BuildV3 encodes the aggregate-capable version 3 bootstrap snapshot.
+func BuildV3(artifacts []*compiler.Artifact, sourceRoot string) (SnapshotV3, error) {
 	inputs := projectMethods(artifacts)
 	if len(inputs) == 0 {
-		return Gate2Snapshot{}, fmt.Errorf("native snapshot v3 found no project functions")
+		return SnapshotV3{}, fmt.Errorf("bootstrap snapshot v3 found no project functions")
 	}
 	methodIDs := make(map[string]string, len(inputs))
 	for _, input := range inputs {
@@ -47,22 +46,22 @@ func BuildGate2(artifacts []*compiler.Artifact, sourceRoot string) (Gate2Snapsho
 			continue
 		}
 		if entry != "" {
-			return Gate2Snapshot{}, fmt.Errorf("native snapshot v3 requires exactly one top-level main function")
+			return SnapshotV3{}, fmt.Errorf("bootstrap snapshot v3 requires exactly one top-level main function")
 		}
 		entry = functionID(input.program, input.method)
 		module = input.program.ModulePath
 	}
 	if entry == "" {
-		return Gate2Snapshot{}, fmt.Errorf("native snapshot v3 requires one top-level def main()")
+		return SnapshotV3{}, fmt.Errorf("bootstrap snapshot v3 requires one top-level def main()")
 	}
 
 	sources, sourceIDs := projectSources(inputs, sourceRoot)
 	registry := newAggregateRegistry(artifacts)
 	functions := make([]Function, 0, len(inputs))
 	for _, input := range inputs {
-		lowered, err := lowerGate2Function(input.program, input.method, sourceIDs[input.program.SourcePath], methodIDs, registry)
+		lowered, err := lowerV3Function(input.program, input.method, sourceIDs[input.program.SourcePath], methodIDs, registry)
 		if err != nil {
-			return Gate2Snapshot{}, err
+			return SnapshotV3{}, err
 		}
 		functions = append(functions, lowered)
 	}
@@ -72,8 +71,8 @@ func BuildGate2(artifacts []*compiler.Artifact, sourceRoot string) (Gate2Snapsho
 		definitions = append(definitions, definition)
 	}
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].ID < definitions[j].ID })
-	return Gate2Snapshot{
-		Format: Format, Version: Gate2Version, Module: module, EntryFunction: entry,
+	return SnapshotV3{
+		Format: Format, Version: Version3, Module: module, EntryFunction: entry,
 		Sources: sources, Types: definitions, Functions: functions,
 	}, nil
 }
@@ -170,7 +169,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 		if len(item.record.TypeParameters) != len(typ.Args) {
 			return "", unsupportedV3(program, span, "aggregate type argument arity for "+typ.String())
 		}
-		substitutions := gate2TypeSubstitutions(item.record.TypeParameters, typ.Args)
+		substitutions := v3TypeSubstitutions(item.record.TypeParameters, typ.Args)
 		fields := []Field{}
 		definition := TypeDefinition{Kind: "record", ID: id, Fields: &fields}
 		for _, statement := range item.record.Body {
@@ -178,7 +177,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 			if !ok {
 				continue
 			}
-			fieldType := gate2SubstituteType(field.Type, substitutions)
+			fieldType := v3SubstituteType(field.Type, substitutions)
 			name, err := r.typeName(program, fieldType, field.SourceSpan())
 			if err != nil {
 				return "", err
@@ -198,7 +197,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 		if len(item.enum.TypeParameters) != len(typ.Args) {
 			return "", unsupportedV3(program, span, "aggregate type argument arity for "+typ.String())
 		}
-		substitutions := gate2TypeSubstitutions(item.enum.TypeParameters, typ.Args)
+		substitutions := v3TypeSubstitutions(item.enum.TypeParameters, typ.Args)
 		variants := []Variant{}
 		definition := TypeDefinition{Kind: "tagged", ID: id, Variants: &variants}
 		for _, statement := range item.enum.Body {
@@ -208,7 +207,7 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 			}
 			variant := Variant{Name: member.Name, Fields: []Field{}}
 			for _, field := range member.Fields {
-				fieldType := gate2SubstituteType(field.Type, substitutions)
+				fieldType := v3SubstituteType(field.Type, substitutions)
 				name, err := r.typeName(program, fieldType, member.SourceSpan())
 				if err != nil {
 					return "", err
@@ -255,7 +254,7 @@ func (r *aggregateRegistry) aggregateTypeID(typ types.Type, declaration aggregat
 	return id + "<" + strings.Join(items, ",") + ">", nil
 }
 
-func gate2TypeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
+func v3TypeSubstitutions(parameters []string, arguments []types.Type) map[string]types.Type {
 	result := map[string]types.Type{}
 	for index, parameter := range parameters {
 		if index < len(arguments) {
@@ -265,7 +264,7 @@ func gate2TypeSubstitutions(parameters []string, arguments []types.Type) map[str
 	return result
 }
 
-func gate2SubstituteType(typ types.Type, substitutions map[string]types.Type) types.Type {
+func v3SubstituteType(typ types.Type, substitutions map[string]types.Type) types.Type {
 	if replacement, ok := substitutions[typ.Name]; ok && typ.Kind == types.Named && len(typ.Args) == 0 {
 		replacement.Nullable = replacement.Nullable || typ.Nullable
 		replacement.Readonly = replacement.Readonly || typ.Readonly
@@ -274,11 +273,11 @@ func gate2SubstituteType(typ types.Type, substitutions map[string]types.Type) ty
 	result := typ
 	result.Args = make([]types.Type, len(typ.Args))
 	for index, argument := range typ.Args {
-		result.Args[index] = gate2SubstituteType(argument, substitutions)
+		result.Args[index] = v3SubstituteType(argument, substitutions)
 	}
 	return result
 }
 
 func unsupportedV3(program *ir.Program, span token.Span, feature string) error {
-	return &UnsupportedError{Path: program.SourcePath, Span: span, Feature: feature, Version: Gate2Version}
+	return &UnsupportedError{Path: program.SourcePath, Span: span, Feature: feature, Version: Version3}
 }

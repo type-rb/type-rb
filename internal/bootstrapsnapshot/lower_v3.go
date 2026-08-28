@@ -1,4 +1,4 @@
-package nativesnapshot
+package bootstrapsnapshot
 
 import (
 	"fmt"
@@ -11,12 +11,12 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-type gate2ValueRef struct {
+type v3ValueRef struct {
 	id  string
 	typ types.Type
 }
 
-type gate2FunctionLowerer struct {
+type v3FunctionLowerer struct {
 	program   *ir.Program
 	method    *ir.Method
 	sourceID  string
@@ -24,19 +24,19 @@ type gate2FunctionLowerer struct {
 	registry  *aggregateRegistry
 	blocks    []*Block
 	current   *Block
-	env       map[string]gate2ValueRef
+	env       map[string]v3ValueRef
 	locals    []string
 	nextValue int
 	nextBlock int
 }
 
-func lowerGate2Function(program *ir.Program, method *ir.Method, sourceID string, methodIDs map[string]string, registry *aggregateRegistry) (Function, error) {
+func lowerV3Function(program *ir.Program, method *ir.Method, sourceID string, methodIDs map[string]string, registry *aggregateRegistry) (Function, error) {
 	if len(method.TypeParameters) != 0 {
 		return Function{}, unsupportedV3(program, method.SourceSpan(), "generic function "+method.Name)
 	}
-	lowerer := &gate2FunctionLowerer{
+	lowerer := &v3FunctionLowerer{
 		program: program, method: method, sourceID: sourceID, methodIDs: methodIDs,
-		registry: registry, env: map[string]gate2ValueRef{},
+		registry: registry, env: map[string]v3ValueRef{},
 	}
 	resultType, err := lowerer.typeName(method.ReturnType, method.SourceSpan())
 	if err != nil {
@@ -53,7 +53,7 @@ func lowerGate2Function(program *ir.Program, method *ir.Method, sourceID string,
 		}
 		id := lowerer.newValue()
 		parameters = append(parameters, Parameter{ID: id, Type: parameterType, Origin: lowerer.origin(method.SourceSpan())})
-		lowerer.env[item.Name] = gate2ValueRef{id: id, typ: item.Type}
+		lowerer.env[item.Name] = v3ValueRef{id: id, typ: item.Type}
 		lowerer.locals = append(lowerer.locals, item.Name)
 	}
 	entry := lowerer.newBlock(method.SourceSpan())
@@ -71,7 +71,7 @@ func lowerGate2Function(program *ir.Program, method *ir.Method, sourceID string,
 	blocks := make([]Block, len(lowerer.blocks))
 	for index, block := range lowerer.blocks {
 		if block.Terminator == nil {
-			return Function{}, fmt.Errorf("%s: native snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
+			return Function{}, fmt.Errorf("%s: bootstrap snapshot lowering left block %s unterminated", program.SourcePath, block.ID)
 		}
 		blocks[index] = *block
 	}
@@ -81,18 +81,18 @@ func lowerGate2Function(program *ir.Program, method *ir.Method, sourceID string,
 	}, nil
 }
 
-func (l *gate2FunctionLowerer) typeName(typ types.Type, span token.Span) (string, error) {
+func (l *v3FunctionLowerer) typeName(typ types.Type, span token.Span) (string, error) {
 	return l.registry.typeName(l.program, typ, span)
 }
 
-func (l *gate2FunctionLowerer) origin(span token.Span) Origin {
+func (l *v3FunctionLowerer) origin(span token.Span) Origin {
 	if span.Start.Line < 1 || span.Start.Column < 1 || span.End.Line < 1 || span.End.Column < 1 {
 		span = l.method.SourceSpan()
 	}
 	return origin(l.sourceID, span)
 }
 
-func (l *gate2FunctionLowerer) lowerStatements(statements []ir.Statement) (bool, error) {
+func (l *v3FunctionLowerer) lowerStatements(statements []ir.Statement) (bool, error) {
 	for _, statement := range statements {
 		if l.current.Terminator != nil {
 			return true, nil
@@ -108,7 +108,7 @@ func (l *gate2FunctionLowerer) lowerStatements(statements []ir.Statement) (bool,
 	return l.current.Terminator != nil, nil
 }
 
-func (l *gate2FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error) {
+func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error) {
 	switch node := statement.(type) {
 	case *ir.Comment:
 		return false, nil
@@ -135,7 +135,7 @@ func (l *gate2FunctionLowerer) lowerStatement(statement ir.Statement) (bool, err
 		if !exists {
 			return false, unsupportedV3(l.program, node.SourceSpan(), "assignment to an unavailable local")
 		}
-		var next gate2ValueRef
+		var next v3ValueRef
 		var err error
 		if node.Operator == "=" {
 			next, err = l.lowerExpression(node.Value)
@@ -186,7 +186,7 @@ func (l *gate2FunctionLowerer) lowerStatement(statement ir.Statement) (bool, err
 	}
 }
 
-func (l *gate2FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
+func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	if len(node.ElseIf) != 0 || node.ThenResult != nil || node.ElseResult != nil {
 		return false, unsupportedV3(l.program, node.SourceSpan(), "elsif or value-producing if")
 	}
@@ -194,15 +194,15 @@ func (l *gate2FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	baseEnv := cloneGate2Env(l.env)
+	baseEnv := cloneV3Env(l.env)
 	baseLocals := append([]string(nil), l.locals...)
 	branchOrigin := l.origin(node.SourceSpan())
 	thenBlock, thenEnv := l.newBlockWithLocals(node.SourceSpan(), baseLocals, baseEnv)
 	elseBlock, elseEnv := l.newBlockWithLocals(node.SourceSpan(), baseLocals, baseEnv)
 	l.current.Terminator = Branch{
 		Op: "branch", Condition: condition.id,
-		WhenTrue: thenBlock.ID, TrueArguments: gate2EnvironmentArguments(baseLocals, baseEnv),
-		WhenFalse: elseBlock.ID, FalseArguments: gate2EnvironmentArguments(baseLocals, baseEnv), Origin: branchOrigin,
+		WhenTrue: thenBlock.ID, TrueArguments: v3EnvironmentArguments(baseLocals, baseEnv),
+		WhenFalse: elseBlock.ID, FalseArguments: v3EnvironmentArguments(baseLocals, baseEnv), Origin: branchOrigin,
 	}
 
 	l.current, l.env, l.locals = thenBlock, thenEnv, append([]string(nil), baseLocals...)
@@ -210,7 +210,7 @@ func (l *gate2FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	thenEnd, thenFinal := l.current, cloneGate2Env(l.env)
+	thenEnd, thenFinal := l.current, cloneV3Env(l.env)
 
 	l.current, l.env, l.locals = elseBlock, elseEnv, append([]string(nil), baseLocals...)
 	elseTerminated := false
@@ -220,7 +220,7 @@ func (l *gate2FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 			return false, err
 		}
 	}
-	elseEnd, elseFinal := l.current, cloneGate2Env(l.env)
+	elseEnd, elseFinal := l.current, cloneV3Env(l.env)
 	if thenTerminated && elseTerminated {
 		l.env, l.locals = baseEnv, baseLocals
 		return true, nil
@@ -228,20 +228,20 @@ func (l *gate2FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	join, joinEnv := l.newBlockWithLocals(node.SourceSpan(), baseLocals, baseEnv)
 	if !thenTerminated {
 		thenEnd.Terminator = Jump{
-			Op: "jump", Target: join.ID, Arguments: gate2EnvironmentArguments(baseLocals, thenFinal), Origin: branchOrigin,
+			Op: "jump", Target: join.ID, Arguments: v3EnvironmentArguments(baseLocals, thenFinal), Origin: branchOrigin,
 		}
 	}
 	if !elseTerminated {
 		elseEnd.Terminator = Jump{
-			Op: "jump", Target: join.ID, Arguments: gate2EnvironmentArguments(baseLocals, elseFinal), Origin: branchOrigin,
+			Op: "jump", Target: join.ID, Arguments: v3EnvironmentArguments(baseLocals, elseFinal), Origin: branchOrigin,
 		}
 	}
 	l.current, l.env, l.locals = join, joinEnv, baseLocals
 	return false, nil
 }
 
-func (l *gate2FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
-	baseEnv := cloneGate2Env(l.env)
+func (l *v3FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
+	baseEnv := cloneV3Env(l.env)
 	baseLocals := append([]string(nil), l.locals...)
 	loopOrigin := l.origin(node.SourceSpan())
 	previous := l.current
@@ -249,7 +249,7 @@ func (l *gate2FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 	body, bodyEnv := l.newBlockWithLocals(node.SourceSpan(), baseLocals, baseEnv)
 	done, doneEnv := l.newBlockWithLocals(node.SourceSpan(), baseLocals, baseEnv)
 	previous.Terminator = Jump{
-		Op: "jump", Target: header.ID, Arguments: gate2EnvironmentArguments(baseLocals, baseEnv), Origin: loopOrigin,
+		Op: "jump", Target: header.ID, Arguments: v3EnvironmentArguments(baseLocals, baseEnv), Origin: loopOrigin,
 	}
 
 	l.current, l.env, l.locals = header, headerEnv, append([]string(nil), baseLocals...)
@@ -259,8 +259,8 @@ func (l *gate2FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 	}
 	header.Terminator = Branch{
 		Op: "branch", Condition: condition.id,
-		WhenTrue: body.ID, TrueArguments: gate2EnvironmentArguments(baseLocals, headerEnv),
-		WhenFalse: done.ID, FalseArguments: gate2EnvironmentArguments(baseLocals, headerEnv), Origin: loopOrigin,
+		WhenTrue: body.ID, TrueArguments: v3EnvironmentArguments(baseLocals, headerEnv),
+		WhenFalse: done.ID, FalseArguments: v3EnvironmentArguments(baseLocals, headerEnv), Origin: loopOrigin,
 	}
 
 	l.current, l.env, l.locals = body, bodyEnv, append([]string(nil), baseLocals...)
@@ -269,21 +269,21 @@ func (l *gate2FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 		return false, err
 	}
 	if terminated {
-		return false, unsupportedV3(l.program, node.SourceSpan(), "control transfer from a Gate 2 while body")
+		return false, unsupportedV3(l.program, node.SourceSpan(), "control transfer from a while body")
 	}
 	l.current.Terminator = Jump{
-		Op: "jump", Target: header.ID, Arguments: gate2EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
+		Op: "jump", Target: header.ID, Arguments: v3EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
 	}
 	l.current, l.env, l.locals = done, doneEnv, baseLocals
 	return false, nil
 }
 
-func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRef, error) {
 	switch node := expression.(type) {
 	case *ir.Identifier:
 		value, ok := l.env[node.Name]
 		if !ok || !node.Lexical {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-local value "+node.Name)
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-local value "+node.Name)
 		}
 		return value, nil
 	case *ir.Literal:
@@ -293,11 +293,11 @@ func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2V
 	case *ir.Binary:
 		left, err := l.lowerExpression(node.Left)
 		if err != nil {
-			return gate2ValueRef{}, err
+			return v3ValueRef{}, err
 		}
 		right, err := l.lowerExpression(node.Right)
 		if err != nil {
-			return gate2ValueRef{}, err
+			return v3ValueRef{}, err
 		}
 		return l.emitBinary(node.Operator, left, right, node.SourceSpan())
 	case *ir.Call:
@@ -314,7 +314,7 @@ func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2V
 	case *ir.Conversion:
 		value, err := l.lowerExpression(node.Value)
 		if err != nil {
-			return gate2ValueRef{}, err
+			return v3ValueRef{}, err
 		}
 		sourceType, sourceErr := l.typeName(value.typ, node.SourceSpan())
 		targetType, targetErr := l.typeName(node.ExprType(), node.SourceSpan())
@@ -322,55 +322,55 @@ func (l *gate2FunctionLowerer) lowerExpression(expression ir.Expression) (gate2V
 			value.typ = node.ExprType()
 			return value, nil
 		}
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "representation-changing conversion "+string(node.Kind))
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "representation-changing conversion "+string(node.Kind))
 	case *ir.If:
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "value-producing if")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "value-producing if")
 	default:
-		return gate2ValueRef{}, unsupportedV3(l.program, expression.SourceSpan(), fmt.Sprintf("expression %T", expression))
+		return v3ValueRef{}, unsupportedV3(l.program, expression.SourceSpan(), fmt.Sprintf("expression %T", expression))
 	}
 }
 
-func (l *gate2FunctionLowerer) lowerMember(node *ir.Member) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerMember(node *ir.Member) (v3ValueRef, error) {
 	if !node.Namespace {
 		return l.lowerRecordProject(node)
 	}
 	typeID, err := l.typeName(node.ExprType(), node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-enum namespace member "+node.Name)
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-enum namespace member "+node.Name)
 	}
-	variant, ok := gate2Variant(definition, node.Name)
+	variant, ok := v3Variant(definition, node.Name)
 	if !ok || len(variant.Fields) != 0 {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-nullary enum member "+node.Name)
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-nullary enum member "+node.Name)
 	}
 	id := l.newValue()
 	l.emit(VariantConstruct{
 		Op: "variant_construct", Result: id, Type: typeID, Variant: node.Name, Arguments: []string{},
 		Origin: l.origin(node.SourceSpan()),
 	})
-	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
-func (l *gate2FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (v3ValueRef, error) {
 	typeID, err := l.registry.typeNameWithDeclaration(l.program, node.ExprType(), node.Declaration, node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "record" || definition.Fields == nil {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record construction "+node.ExprType().String())
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record construction "+node.ExprType().String())
 	}
-	values := make(map[string]gate2ValueRef, len(node.Arguments))
+	values := make(map[string]v3ValueRef, len(node.Arguments))
 	for _, argument := range node.Arguments {
 		if argument.Splat != "" || argument.Name == "" {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "positional or splat record construction")
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "positional or splat record construction")
 		}
 		value, expressionErr := l.lowerExpression(argument.Value)
 		if expressionErr != nil {
-			return gate2ValueRef{}, expressionErr
+			return v3ValueRef{}, expressionErr
 		}
 		values[argument.Name] = value
 	}
@@ -378,71 +378,71 @@ func (l *gate2FunctionLowerer) lowerRecordConstruct(node *ir.RecordConstruct) (g
 	for _, field := range *definition.Fields {
 		value, exists := values[field.Name]
 		if !exists {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "omitted record default for field "+field.Name)
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "omitted record default for field "+field.Name)
 		}
 		arguments = append(arguments, value.id)
 		delete(values, field.Name)
 	}
 	if len(values) != 0 {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown record construction field")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown record construction field")
 	}
 	id := l.newValue()
 	l.emit(RecordConstruct{
 		Op: "record_construct", Result: id, Type: typeID, Arguments: arguments,
 		Origin: l.origin(node.SourceSpan()),
 	})
-	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
-func (l *gate2FunctionLowerer) lowerRecordProject(node *ir.Member) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerRecordProject(node *ir.Member) (v3ValueRef, error) {
 	if node.Namespace || node.Safe || node.Receiver == nil {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record member "+node.Name)
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record member "+node.Name)
 	}
 	record, err := l.lowerExpression(node.Receiver)
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	typeID, err := l.typeName(record.typ, node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "member "+node.Name+" on "+record.typ.String())
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "member "+node.Name+" on "+record.typ.String())
 	}
 	definition, ok := l.registry.definition(typeID)
-	if !ok || definition.Kind != "record" || definition.Fields == nil || !gate2HasField(*definition.Fields, node.Name) {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record field "+node.Name)
+	if !ok || definition.Kind != "record" || definition.Fields == nil || !v3HasField(*definition.Fields, node.Name) {
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-record field "+node.Name)
 	}
 	id := l.newValue()
 	l.emit(RecordProject{
 		Op: "record_project", Result: id, Type: typeID, Record: record.id, Field: node.Name,
 		Origin: l.origin(node.SourceSpan()),
 	})
-	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
-func (l *gate2FunctionLowerer) lowerVariantConstruct(node *ir.EnumConstruct) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerVariantConstruct(node *ir.EnumConstruct) (v3ValueRef, error) {
 	declaration := node.Declaration
 	if declaration.Empty() && node.Reference != nil {
 		declaration = identityDeclarationForEnumReference(node.Reference.Package, node.EnumName)
 	}
 	typeID, err := l.registry.typeNameWithDeclaration(l.program, node.ExprType(), declaration, node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-tagged enum construction "+node.ExprType().String())
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "non-tagged enum construction "+node.ExprType().String())
 	}
-	variant, ok := gate2Variant(definition, node.Member)
+	variant, ok := v3Variant(definition, node.Member)
 	if !ok {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum member "+node.Member)
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum member "+node.Member)
 	}
-	values := make(map[string]gate2ValueRef, len(node.Arguments))
+	values := make(map[string]v3ValueRef, len(node.Arguments))
 	for _, argument := range node.Arguments {
 		if argument.Splat != "" || argument.Field == "" {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unbound or splat enum payload argument")
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unbound or splat enum payload argument")
 		}
 		value, expressionErr := l.lowerExpression(argument.Value)
 		if expressionErr != nil {
-			return gate2ValueRef{}, expressionErr
+			return v3ValueRef{}, expressionErr
 		}
 		values[argument.Field] = value
 	}
@@ -450,66 +450,66 @@ func (l *gate2FunctionLowerer) lowerVariantConstruct(node *ir.EnumConstruct) (ga
 	for _, field := range variant.Fields {
 		value, exists := values[field.Name]
 		if !exists {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "missing enum payload field "+field.Name)
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "missing enum payload field "+field.Name)
 		}
 		arguments = append(arguments, value.id)
 		delete(values, field.Name)
 	}
 	if len(values) != 0 {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum payload field")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unknown enum payload field")
 	}
 	id := l.newValue()
 	l.emit(VariantConstruct{
 		Op: "variant_construct", Result: id, Type: typeID, Variant: node.Member, Arguments: arguments,
 		Origin: l.origin(node.SourceSpan()),
 	})
-	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
-type gate2CaseExit struct {
+type v3CaseExit struct {
 	block  *Block
-	env    map[string]gate2ValueRef
-	result gate2ValueRef
+	env    map[string]v3ValueRef
+	result v3ValueRef
 }
 
-func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2ValueRef, bool, error) {
+func (l *v3FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (v3ValueRef, bool, error) {
 	if node.TypeUnion || len(node.Branches) == 0 {
-		return gate2ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "union or empty case")
+		return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "union or empty case")
 	}
 	if terminated, err := l.lowerStatements(node.Leading); err != nil || terminated {
-		return gate2ValueRef{}, terminated, err
+		return v3ValueRef{}, terminated, err
 	}
 	selector, err := l.lowerExpression(node.Value)
 	if err != nil {
-		return gate2ValueRef{}, false, err
+		return v3ValueRef{}, false, err
 	}
 	typeID, err := l.typeName(selector.typ, node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, false, err
+		return v3ValueRef{}, false, err
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "tagged" {
-		return gate2ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case selector "+selector.typ.String())
+		return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case selector "+selector.typ.String())
 	}
 	for _, branch := range node.Branches {
-		if _, found := gate2Variant(definition, branch.Member); !found || len(branch.Alternatives) != 0 || branch.TypePattern {
-			return gate2ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "non-enum case pattern "+branch.Member)
+		if _, found := v3Variant(definition, branch.Member); !found || len(branch.Alternatives) != 0 || branch.TypePattern {
+			return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "non-enum case pattern "+branch.Member)
 		}
 	}
 
-	baseEnv := cloneGate2Env(l.env)
+	baseEnv := cloneV3Env(l.env)
 	baseLocals := append([]string(nil), l.locals...)
 	selectorName := fmt.Sprintf("\x00case-selector-%d", l.nextBlock)
-	caseEnv := cloneGate2Env(baseEnv)
+	caseEnv := cloneV3Env(baseEnv)
 	caseEnv[selectorName] = selector
 	caseLocals := append(append([]string(nil), baseLocals...), selectorName)
 	branchBlocks := make([]*Block, len(node.Branches))
-	branchEnvs := make([]map[string]gate2ValueRef, len(node.Branches))
+	branchEnvs := make([]map[string]v3ValueRef, len(node.Branches))
 	for index, branch := range node.Branches {
 		branchBlocks[index], branchEnvs[index] = l.newBlockWithLocals(branch.SourceSpan(), caseLocals, caseEnv)
 	}
 	var elseBlock *Block
-	var elseEnv map[string]gate2ValueRef
+	var elseEnv map[string]v3ValueRef
 	if node.HasElse {
 		elseBlock, elseEnv = l.newBlockWithLocals(node.SourceSpan(), caseLocals, caseEnv)
 	}
@@ -522,7 +522,7 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 		if last && !node.HasElse {
 			dispatch.Terminator = Jump{
 				Op: "jump", Target: branchBlocks[index].ID,
-				Arguments: gate2EnvironmentArguments(caseLocals, dispatchEnv), Origin: caseOrigin,
+				Arguments: v3EnvironmentArguments(caseLocals, dispatchEnv), Origin: caseOrigin,
 			}
 			break
 		}
@@ -533,7 +533,7 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 			Origin: l.origin(branch.SourceSpan()),
 		})
 		var falseBlock *Block
-		var falseEnv map[string]gate2ValueRef
+		var falseEnv map[string]v3ValueRef
 		if last {
 			falseBlock, falseEnv = elseBlock, elseEnv
 		} else {
@@ -541,13 +541,13 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 		}
 		dispatch.Terminator = Branch{
 			Op: "branch", Condition: testID,
-			WhenTrue: branchBlocks[index].ID, TrueArguments: gate2EnvironmentArguments(caseLocals, dispatchEnv),
-			WhenFalse: falseBlock.ID, FalseArguments: gate2EnvironmentArguments(caseLocals, dispatchEnv), Origin: caseOrigin,
+			WhenTrue: branchBlocks[index].ID, TrueArguments: v3EnvironmentArguments(caseLocals, dispatchEnv),
+			WhenFalse: falseBlock.ID, FalseArguments: v3EnvironmentArguments(caseLocals, dispatchEnv), Origin: caseOrigin,
 		}
 		dispatch, dispatchEnv = falseBlock, falseEnv
 	}
 
-	exits := []gate2CaseExit{}
+	exits := []v3CaseExit{}
 	for index, branch := range node.Branches {
 		l.current, l.env, l.locals = branchBlocks[index], branchEnvs[index], append([]string(nil), caseLocals...)
 		for _, binding := range branch.Bindings {
@@ -555,41 +555,41 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 				continue
 			}
 			if _, exists := l.env[binding.Name]; exists {
-				return gate2ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "shadowed case binding "+binding.Name)
+				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "shadowed case binding "+binding.Name)
 			}
 			fieldType, typeErr := l.typeName(binding.Type, branch.SourceSpan())
 			if typeErr != nil || fieldType == "Void" {
 				if typeErr != nil {
-					return gate2ValueRef{}, false, typeErr
+					return v3ValueRef{}, false, typeErr
 				}
-				return gate2ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "Void enum binding "+binding.Name)
+				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "Void enum binding "+binding.Name)
 			}
 			id := l.newValue()
 			l.emit(VariantProject{
 				Op: "variant_project", Result: id, Type: typeID, Value: l.env[selectorName].id,
 				Variant: branch.Member, Field: binding.Field, Origin: l.origin(branch.SourceSpan()),
 			})
-			l.env[binding.Name] = gate2ValueRef{id: id, typ: binding.Type}
+			l.env[binding.Name] = v3ValueRef{id: id, typ: binding.Type}
 			l.locals = append(l.locals, binding.Name)
 		}
 		terminated, bodyErr := l.lowerStatements(branch.Body)
 		if bodyErr != nil {
-			return gate2ValueRef{}, false, bodyErr
+			return v3ValueRef{}, false, bodyErr
 		}
 		if terminated {
 			continue
 		}
-		exit := gate2CaseExit{block: l.current, env: cloneGate2Env(l.env)}
+		exit := v3CaseExit{block: l.current, env: cloneV3Env(l.env)}
 		if wantValue {
 			if branch.Result == nil {
-				return gate2ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "case branch without a value")
+				return v3ValueRef{}, false, unsupportedV3(l.program, branch.SourceSpan(), "case branch without a value")
 			}
 			exit.result, err = l.lowerExpression(branch.Result)
 			if err != nil {
-				return gate2ValueRef{}, false, err
+				return v3ValueRef{}, false, err
 			}
 			exit.block = l.current
-			exit.env = cloneGate2Env(l.env)
+			exit.env = cloneV3Env(l.env)
 		}
 		exits = append(exits, exit)
 	}
@@ -597,41 +597,41 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 		l.current, l.env, l.locals = elseBlock, elseEnv, append([]string(nil), caseLocals...)
 		terminated, bodyErr := l.lowerStatements(node.Else)
 		if bodyErr != nil {
-			return gate2ValueRef{}, false, bodyErr
+			return v3ValueRef{}, false, bodyErr
 		}
 		if !terminated {
-			exit := gate2CaseExit{block: l.current, env: cloneGate2Env(l.env)}
+			exit := v3CaseExit{block: l.current, env: cloneV3Env(l.env)}
 			if wantValue {
 				if node.ElseResult == nil {
-					return gate2ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case else without a value")
+					return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "case else without a value")
 				}
 				exit.result, err = l.lowerExpression(node.ElseResult)
 				if err != nil {
-					return gate2ValueRef{}, false, err
+					return v3ValueRef{}, false, err
 				}
 				exit.block = l.current
-				exit.env = cloneGate2Env(l.env)
+				exit.env = cloneV3Env(l.env)
 			}
 			exits = append(exits, exit)
 		}
 	}
 	if len(exits) == 0 {
 		l.env, l.locals = baseEnv, baseLocals
-		return gate2ValueRef{}, true, nil
+		return v3ValueRef{}, true, nil
 	}
 
 	join := l.newBlock(node.SourceSpan())
-	joinEnv := cloneGate2Env(baseEnv)
-	result := gate2ValueRef{}
+	joinEnv := cloneV3Env(baseEnv)
+	result := v3ValueRef{}
 	if wantValue {
 		resultType, typeErr := l.typeName(node.ExprType(), node.SourceSpan())
 		if typeErr != nil || resultType == "Void" {
 			if typeErr != nil {
-				return gate2ValueRef{}, false, typeErr
+				return v3ValueRef{}, false, typeErr
 			}
-			return gate2ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "Void case expression")
+			return v3ValueRef{}, false, unsupportedV3(l.program, node.SourceSpan(), "Void case expression")
 		}
-		result = gate2ValueRef{id: l.newValue(), typ: node.ExprType()}
+		result = v3ValueRef{id: l.newValue(), typ: node.ExprType()}
 		join.Parameters = append(join.Parameters, Parameter{ID: result.id, Type: resultType, Origin: caseOrigin})
 	}
 	for _, name := range baseLocals {
@@ -642,21 +642,21 @@ func (l *gate2FunctionLowerer) lowerCase(node *ir.Case, wantValue bool) (gate2Va
 		}
 		id := l.newValue()
 		join.Parameters = append(join.Parameters, Parameter{ID: id, Type: typeName, Origin: caseOrigin})
-		joinEnv[name] = gate2ValueRef{id: id, typ: value.typ}
+		joinEnv[name] = v3ValueRef{id: id, typ: value.typ}
 	}
 	for _, exit := range exits {
 		arguments := []string{}
 		if wantValue {
 			arguments = append(arguments, exit.result.id)
 		}
-		arguments = append(arguments, gate2EnvironmentArguments(baseLocals, exit.env)...)
+		arguments = append(arguments, v3EnvironmentArguments(baseLocals, exit.env)...)
 		exit.block.Terminator = Jump{Op: "jump", Target: join.ID, Arguments: arguments, Origin: caseOrigin}
 	}
 	l.current, l.env, l.locals = join, joinEnv, baseLocals
 	return result, false, nil
 }
 
-func gate2HasField(fields []Field, name string) bool {
+func v3HasField(fields []Field, name string) bool {
 	for _, field := range fields {
 		if field.Name == name {
 			return true
@@ -665,7 +665,7 @@ func gate2HasField(fields []Field, name string) bool {
 	return false
 }
 
-func gate2Variant(definition TypeDefinition, name string) (Variant, bool) {
+func v3Variant(definition TypeDefinition, name string) (Variant, bool) {
 	if definition.Variants == nil {
 		return Variant{}, false
 	}
@@ -681,38 +681,38 @@ func identityDeclarationForEnumReference(module, name string) identity.Declarati
 	return identity.Declaration{Module: module, Name: name, Kind: identity.Enum}
 }
 
-func (l *gate2FunctionLowerer) lowerLiteral(node *ir.Literal) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerLiteral(node *ir.Literal) (v3ValueRef, error) {
 	id := l.newValue()
 	at := l.origin(node.SourceSpan())
 	switch node.Kind {
 	case "boolean":
 		value, err := strconv.ParseBool(node.Raw)
 		if err != nil {
-			return gate2ValueRef{}, err
+			return v3ValueRef{}, err
 		}
 		l.emit(BooleanLiteral{Op: "boolean_literal", Result: id, Value: value, Origin: at})
 	case "integer":
 		value, ok := types.ParsePortableIntegerLiteral(node.Raw)
 		if !ok {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Integer literal "+node.Raw)
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Integer literal "+node.Raw)
 		}
 		l.emit(IntegerLiteral{Op: "integer_literal", Result: id, Value: value, Origin: at})
 	case "float":
 		value, ok := types.ParsePortableFloatLiteral(node.Raw)
 		if !ok {
-			return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Float literal "+node.Raw)
+			return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "Float literal "+node.Raw)
 		}
 		l.emit(FloatLiteral{Op: "float_literal", Result: id, Value: value, Origin: at})
 	default:
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), node.Kind+" literal expression")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), node.Kind+" literal expression")
 	}
-	return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
-func (l *gate2FunctionLowerer) lowerUnary(node *ir.Unary) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerUnary(node *ir.Unary) (v3ValueRef, error) {
 	operand, err := l.lowerExpression(node.Operand)
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	if node.Operator == "+" {
 		return operand, nil
@@ -720,7 +720,7 @@ func (l *gate2FunctionLowerer) lowerUnary(node *ir.Unary) (gate2ValueRef, error)
 	if node.Operator == "!" && node.ExprType().Kind == types.Bool {
 		id := l.newValue()
 		l.emit(BooleanNot{Op: "boolean_not", Result: id, Value: operand.id, Origin: l.origin(node.SourceSpan())})
-		return gate2ValueRef{id: id, typ: node.ExprType()}, nil
+		return v3ValueRef{id: id, typ: node.ExprType()}, nil
 	}
 	if node.Operator == "-" && (node.ExprType().Kind == types.Int || node.ExprType().Kind == types.Float) {
 		zeroID := l.newValue()
@@ -730,75 +730,75 @@ func (l *gate2FunctionLowerer) lowerUnary(node *ir.Unary) (gate2ValueRef, error)
 		} else {
 			l.emit(FloatLiteral{Op: "float_literal", Result: zeroID, Value: 0, Origin: at})
 		}
-		return l.emitBinary("-", gate2ValueRef{id: zeroID, typ: node.ExprType()}, operand, node.SourceSpan())
+		return l.emitBinary("-", v3ValueRef{id: zeroID, typ: node.ExprType()}, operand, node.SourceSpan())
 	}
-	return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unary operator "+node.Operator)
+	return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "unary operator "+node.Operator)
 }
 
-func (l *gate2FunctionLowerer) emitBinary(operator string, left, right gate2ValueRef, span token.Span) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) emitBinary(operator string, left, right v3ValueRef, span token.Span) (v3ValueRef, error) {
 	resultType := left.typ
 	if operator == "==" || operator == "!=" || operator == "<" || operator == "<=" || operator == ">" || operator == ">=" {
 		resultType = types.FromName("Boolean")
 	}
 	typeName, supported := scalarTypeName(left.typ)
 	if !supported || typeName == "Void" {
-		return gate2ValueRef{}, unsupportedV3(l.program, span, "binary operand type "+left.typ.String())
+		return v3ValueRef{}, unsupportedV3(l.program, span, "binary operand type "+left.typ.String())
 	}
 	id := l.newValue()
 	at := l.origin(span)
-	if operatorName, ok := gate2ComparisonOperator(operator); ok {
+	if operatorName, ok := v3ComparisonOperator(operator); ok {
 		op := "integer_compare"
 		if typeName == "Float" {
 			op = "float_compare"
 		} else if typeName != "Integer" {
-			return gate2ValueRef{}, unsupportedV3(l.program, span, "comparison of "+typeName)
+			return v3ValueRef{}, unsupportedV3(l.program, span, "comparison of "+typeName)
 		}
 		l.emit(BinaryInstruction{Op: op, Result: id, Operator: operatorName, Left: left.id, Right: right.id, Origin: at})
-		return gate2ValueRef{id: id, typ: resultType}, nil
+		return v3ValueRef{id: id, typ: resultType}, nil
 	}
-	operatorName, ok := gate2ArithmeticOperator(operator)
+	operatorName, ok := v3ArithmeticOperator(operator)
 	if !ok {
-		return gate2ValueRef{}, unsupportedV3(l.program, span, "binary operator "+operator)
+		return v3ValueRef{}, unsupportedV3(l.program, span, "binary operator "+operator)
 	}
 	op := "integer_binary"
 	if typeName == "Float" {
 		if operator == "%" || operator == "**" {
-			return gate2ValueRef{}, unsupportedV3(l.program, span, "Gate 2 Float operator "+operator)
+			return v3ValueRef{}, unsupportedV3(l.program, span, "Float operator "+operator)
 		}
 		op = "float_binary"
 	} else if typeName != "Integer" {
-		return gate2ValueRef{}, unsupportedV3(l.program, span, "arithmetic on "+typeName)
+		return v3ValueRef{}, unsupportedV3(l.program, span, "arithmetic on "+typeName)
 	}
 	l.emit(BinaryInstruction{Op: op, Result: id, Operator: operatorName, Left: left.id, Right: right.id, Origin: at})
-	return gate2ValueRef{id: id, typ: resultType}, nil
+	return v3ValueRef{id: id, typ: resultType}, nil
 }
 
-func (l *gate2FunctionLowerer) lowerCall(node *ir.Call) (gate2ValueRef, error) {
+func (l *v3FunctionLowerer) lowerCall(node *ir.Call) (v3ValueRef, error) {
 	if l.isPuts(node) {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "puts() in a value position")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "puts() in a value position")
 	}
 	callee, ok := node.Callee.(*ir.Identifier)
 	if !ok {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "indirect call")
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "indirect call")
 	}
 	function := l.callFunctionID(callee)
 	if function == "" {
-		return gate2ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "call to "+callee.Name)
+		return v3ValueRef{}, unsupportedV3(l.program, node.SourceSpan(), "call to "+callee.Name)
 	}
 	arguments := make([]string, 0, len(node.Arguments))
 	for _, argument := range node.Arguments {
 		value, err := l.lowerExpression(argument.Value)
 		if err != nil {
-			return gate2ValueRef{}, err
+			return v3ValueRef{}, err
 		}
 		arguments = append(arguments, value.id)
 	}
 	resultType, err := l.typeName(node.ExprType(), node.SourceSpan())
 	if err != nil {
-		return gate2ValueRef{}, err
+		return v3ValueRef{}, err
 	}
 	var result *string
-	ref := gate2ValueRef{typ: node.ExprType()}
+	ref := v3ValueRef{typ: node.ExprType()}
 	if resultType != "Void" {
 		ref.id = l.newValue()
 		result = &ref.id
@@ -807,7 +807,7 @@ func (l *gate2FunctionLowerer) lowerCall(node *ir.Call) (gate2ValueRef, error) {
 	return ref, nil
 }
 
-func (l *gate2FunctionLowerer) lowerPuts(node *ir.Call) error {
+func (l *v3FunctionLowerer) lowerPuts(node *ir.Call) error {
 	if len(node.Arguments) != 1 {
 		return unsupportedV3(l.program, node.SourceSpan(), "puts() arity")
 	}
@@ -823,7 +823,7 @@ func (l *gate2FunctionLowerer) lowerPuts(node *ir.Call) error {
 	return nil
 }
 
-func (l *gate2FunctionLowerer) isPuts(node *ir.Call) bool {
+func (l *v3FunctionLowerer) isPuts(node *ir.Call) bool {
 	identifier, ok := node.Callee.(*ir.Identifier)
 	if !ok {
 		return false
@@ -834,7 +834,7 @@ func (l *gate2FunctionLowerer) isPuts(node *ir.Call) bool {
 	return identifier.Name == "puts" && identifier.Reference != nil && identifier.Reference.Intrinsic != ""
 }
 
-func (l *gate2FunctionLowerer) callFunctionID(identifier *ir.Identifier) string {
+func (l *v3FunctionLowerer) callFunctionID(identifier *ir.Identifier) string {
 	if id := l.methodIDs[identifier.Declaration.Key()]; id != "" {
 		return id
 	}
@@ -846,7 +846,7 @@ func (l *gate2FunctionLowerer) callFunctionID(identifier *ir.Identifier) string 
 	return l.methodIDs["name:"+l.program.ModulePath+"#"+identifier.Name]
 }
 
-func (l *gate2FunctionLowerer) newBlock(span token.Span) *Block {
+func (l *v3FunctionLowerer) newBlock(span token.Span) *Block {
 	block := &Block{
 		ID: fmt.Sprintf("b%d", l.nextBlock), Parameters: []Parameter{},
 		Origin: l.origin(span), Instructions: []any{},
@@ -856,9 +856,9 @@ func (l *gate2FunctionLowerer) newBlock(span token.Span) *Block {
 	return block
 }
 
-func (l *gate2FunctionLowerer) newBlockWithLocals(span token.Span, names []string, template map[string]gate2ValueRef) (*Block, map[string]gate2ValueRef) {
+func (l *v3FunctionLowerer) newBlockWithLocals(span token.Span, names []string, template map[string]v3ValueRef) (*Block, map[string]v3ValueRef) {
 	block := l.newBlock(span)
-	environment := cloneGate2Env(template)
+	environment := cloneV3Env(template)
 	for _, name := range names {
 		value := template[name]
 		typeName, err := l.typeName(value.typ, span)
@@ -869,30 +869,30 @@ func (l *gate2FunctionLowerer) newBlockWithLocals(span token.Span, names []strin
 		}
 		id := l.newValue()
 		block.Parameters = append(block.Parameters, Parameter{ID: id, Type: typeName, Origin: l.origin(span)})
-		environment[name] = gate2ValueRef{id: id, typ: value.typ}
+		environment[name] = v3ValueRef{id: id, typ: value.typ}
 	}
 	return block, environment
 }
 
-func (l *gate2FunctionLowerer) newValue() string {
+func (l *v3FunctionLowerer) newValue() string {
 	id := fmt.Sprintf("v%d", l.nextValue)
 	l.nextValue++
 	return id
 }
 
-func (l *gate2FunctionLowerer) emit(instruction any) {
+func (l *v3FunctionLowerer) emit(instruction any) {
 	l.current.Instructions = append(l.current.Instructions, instruction)
 }
 
-func cloneGate2Env(source map[string]gate2ValueRef) map[string]gate2ValueRef {
-	result := make(map[string]gate2ValueRef, len(source))
+func cloneV3Env(source map[string]v3ValueRef) map[string]v3ValueRef {
+	result := make(map[string]v3ValueRef, len(source))
 	for name, value := range source {
 		result[name] = value
 	}
 	return result
 }
 
-func gate2EnvironmentArguments(names []string, environment map[string]gate2ValueRef) []string {
+func v3EnvironmentArguments(names []string, environment map[string]v3ValueRef) []string {
 	result := make([]string, 0, len(names))
 	for _, name := range names {
 		result = append(result, environment[name].id)
@@ -900,7 +900,7 @@ func gate2EnvironmentArguments(names []string, environment map[string]gate2Value
 	return result
 }
 
-func gate2ArithmeticOperator(operator string) (string, bool) {
+func v3ArithmeticOperator(operator string) (string, bool) {
 	switch operator {
 	case "+":
 		return "add", true
@@ -919,7 +919,7 @@ func gate2ArithmeticOperator(operator string) (string, bool) {
 	}
 }
 
-func gate2ComparisonOperator(operator string) (string, bool) {
+func v3ComparisonOperator(operator string) (string, bool) {
 	switch operator {
 	case "==":
 		return "equal", true

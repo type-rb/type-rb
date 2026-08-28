@@ -23,14 +23,6 @@ This file records user-visible changes in stable TypeRB releases.
   comparable with `expect(...).to_equal(...)`.
   ([#586](https://github.com/type-rb/type-rb/pull/586))
 
-### Compiler tooling
-
-- `trb compiler native-snapshot --snapshot-version 3` can emit Gate 2
-  bootstrap snapshots for heap-free records and tagged values, including
-  aggregate calls, block arguments, exhaustive cases, and Result propagation.
-  Snapshot version 2 remains the default for reproducible Gate 1 measurements.
-  ([#585](https://github.com/type-rb/type-rb/pull/585))
-
 ## 0.3.45 - 2026-08-28
 
 ### Breaking changes
