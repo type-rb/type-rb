@@ -2,6 +2,61 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.44 - 2026-08-28
+
+### Breaking changes
+
+- Function and method parameters are now immutable bindings by default. Add
+  `mut` before a parameter that its implementation reassigns or uses for a
+  destructive operation. This marker does not change calls, interfaces,
+  overrides, or caller bindings. ([#572](https://github.com/type-rb/type-rb/pull/572))
+- Portable logical expressions now use only `&&`, `||`, and `!`. Replace the
+  removed `and`, `or`, and prefix `not` spellings with their symbolic forms.
+  ([#569](https://github.com/type-rb/type-rb/pull/569))
+- String interpolation now requires each embedded expression to already be a
+  non-nullable `String`. Convert numbers, Booleans, nullable values, and other
+  types explicitly, for example with `value.to_s()`.
+  ([#570](https://github.com/type-rb/type-rb/pull/570))
+- The `trb/web` `ParameterError::Missing`, `Duplicate`, and `Invalid` payloads
+  now use named-only fields. Add labels such as `source:` and `name:` when
+  constructing or matching these variants.
+  ([#571](https://github.com/type-rb/type-rb/pull/571))
+- Project Declaration Input advances from version 5 to 6. Strict consumers
+  must accept version 6; record fields now expose `hasDefault`, enum members
+  expose attributes, and nested records and enums retain qualified identities.
+  ([#567](https://github.com/type-rb/type-rb/pull/567))
+
+### Language and compiler
+
+- Record fields can declare per-construction defaults with
+  `field: Type = expression`. Defaults may reference earlier fields, distinguish
+  omission from explicit `nil`, and behave consistently across Go, Ruby,
+  TypeScript, imports, and the REPL. JSON, ORM, and web decoding continue to
+  apply their own missing-field policies.
+  ([#567](https://github.com/type-rb/type-rb/pull/567))
+- Payload enum variants can place a bare `*` between positional and named-only
+  fields. Constructors and exhaustive patterns bind named-only payload fields
+  by label across every backend.
+  ([#571](https://github.com/type-rb/type-rb/pull/571))
+- Nested, imported, aliased, and same-leaf declarations now retain canonical
+  identity through checking and generation, preventing unrelated declarations
+  from sharing effect behavior and preserving qualified TypeScript types.
+  ([#573](https://github.com/type-rb/type-rb/pull/573))
+- TypeScript generation no longer lets compiler temporaries shadow source
+  bindings named `value` in Float conversions, Array removal operations, or
+  raw-value enum lookup.
+  ([#568](https://github.com/type-rb/type-rb/pull/568))
+
+### CLI
+
+- Go projects can build typed command-line applications as one native binary
+  with `trb/platform/go/cli`. Records define positional arguments and options,
+  payload enums define subcommands, and static `@cli` metadata controls names
+  and help. The generated standard-library parser supports defaults, nullable
+  scalar fields, aliases, Unicode option names, help, version output, and
+  source-located schema diagnostics without runtime reflection.
+  ([#575](https://github.com/type-rb/type-rb/pull/575))
+
 ## 0.3.43 - 2026-08-26
 
 ### Web
