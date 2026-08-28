@@ -85,22 +85,35 @@ func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
 					"\treturn " + resultName + "::Err(" + errorName + "::Invalid(message))\n" +
 					"end\n"
 			}
+			resultSourcePath := filepath.Join(config.SourcePath(), "domain")
+			if err := os.MkdirAll(resultSourcePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
 			for name, source := range map[string]string{
 				"alpha.trb": failureSource("AlphaResult", "AlphaError", "alpha_failure", "alpha"),
 				"beta.trb":  failureSource("BetaResult", "BetaError", "beta_failure", "beta"),
 			} {
-				if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(resultSourcePath, name), []byte(source), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
-			testSource := `import { AlphaError, AlphaResult, alpha_failure } from alpha
-import { BetaError, BetaResult, beta_failure } from beta
+			testSource := `import { AlphaError, AlphaResult, alpha_failure } from domain/alpha
+import { BetaError, BetaResult, beta_failure } from domain/beta
 import { add } from calculator
 import { describe, expect, expect_err, expect_ok, test } from trb/std/test
 
 record Point
 	x: Integer
 	y: Integer
+end
+
+def expect_optional_alpha_failure(result: AlphaResult?)
+	if result == nil
+		expect(false).to_be_true()
+	else
+		expect(result).to_equal(AlphaResult::Err(AlphaError::Invalid("alpha")))
+	end
+	return
 end
 
 describe("Calculator") do
@@ -131,6 +144,7 @@ describe("Calculator") do
 	end
 
 	test("keeps private helpers isolated by source module") do
+		expect_optional_alpha_failure(alpha_failure())
 		alpha_error := expect_err(alpha_failure())
 		expect(alpha_error).to_equal(AlphaError::Invalid("alpha"))
 		expect(expect_err(beta_failure())).to_equal(BetaError::Invalid("beta"))

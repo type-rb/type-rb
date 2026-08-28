@@ -1402,7 +1402,9 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 	if ref.Empty() {
 		return
 	}
-	defer c.typeFromRefWithParameters(ref, typeParameters)
+	defer func() {
+		c.requireStandardResultRuntimeForSourceType(c.typeFromRefWithParameters(ref, typeParameters))
+	}()
 	if len(ref.Union) > 0 {
 		for _, alternative := range ref.Union {
 			c.validateTypeReferenceInScope(alternative, typeParameters)
@@ -7453,6 +7455,17 @@ func (c *Checker) requireRuntimeType(typ types.Type) {
 		if definition != nil && definition.ModulePath != c.result.Program.ModulePath {
 			c.result.RuntimeDependencies[definition.Path] = definition
 		}
+	}
+}
+
+func (c *Checker) requireStandardResultRuntimeForSourceType(typ types.Type) {
+	if typ.Name == "Result" && c.standardResultAvailable() {
+		if definition, _, ok := stdlib.LookupRuntimeExport("Result"); ok && definition.ModulePath != c.result.Program.ModulePath {
+			c.result.RuntimeDependencies[definition.Path] = definition
+		}
+	}
+	for _, argument := range typ.Args {
+		c.requireStandardResultRuntimeForSourceType(argument)
 	}
 }
 
