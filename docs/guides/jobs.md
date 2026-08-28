@@ -20,7 +20,6 @@ class SendReceiptJob < Job
 
 	def perform(order_id: Integer, destination: String)
 		puts("sending order " + order_id.to_s() + " to " + destination)
-		return
 	end
 end
 ```

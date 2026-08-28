@@ -63,7 +63,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   Known TypeRB expressions do not gain implicit return behavior from that
   import.
 - No explicit `void` type notation (Go-like). Methods with no return value omit
-  the return type and may fall through or use a bare `return`.
+  the return type and may fall through or use a bare `return`. Fallthrough is
+  the recommended terminal style; `trb/omit-terminal-void-return` reports and
+  safely removes a redundant final bare `return` without changing language
+  validity or formatter output.
 - Parameters have the two regions `positional-only | * | named-only`. A bare
   `*` begins the named-only region. Named argument syntax binds only that
   region; it cannot name an ordinary positional parameter.
@@ -1200,7 +1203,6 @@ class Box<T>
 
 	def initialize(value: T)
 		@value = value
-		return
 	end
 
 	def pair<U>(other: U): Pair<T, U>

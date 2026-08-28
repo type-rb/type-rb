@@ -77,7 +77,6 @@ def main()
 	when Command::Version
 		puts("extended version details")
 	end
-	return
 end
 ```
 

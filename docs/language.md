@@ -14,18 +14,17 @@ A runnable project contains exactly one top-level `main()` function:
 ```trb
 def main()
 	puts("Hello from TypeRB")
-	return
 end
 ```
 
 Functions and methods use `def` and `end`. Calls include parentheses. A
 function that returns no value omits the return annotation and may either fall
-through or use a bare `return`:
+through or use a bare `return`. The recommended terminal style is fallthrough;
+`trb lint --fix` removes a redundant final bare `return`:
 
 ```trb
 def print_name(name: String)
 	puts(name)
-	return
 end
 ```
 
@@ -413,7 +412,6 @@ class User implements Named
 	def initialize(id: Integer, name: String)
 		@id = id
 		@_name = name
-		return
 	end
 
 	def name(): String
@@ -561,7 +559,6 @@ class Box<T>
 
 	def initialize(value: T)
 		@value = value
-		return
 	end
 
 	def echo<U>(value: U): U

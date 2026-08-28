@@ -5,7 +5,6 @@ def RouterPage(): ReactNode
 	router := useRouter()
 	open_todo := fn(_event: MouseEvent)
 		router.navigate(NavigateOptions.new(to: "/todos/42"))
-		return
 	end
 	return <main>
 		<button type="button" onClick={open_todo}>Open todo</button>

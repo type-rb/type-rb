@@ -624,6 +624,34 @@ func TestLintReportsFixesAndVersionsDiagnostics(t *testing.T) {
 	}
 }
 
+func TestLintFixRemovesTerminalVoidReturn(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/lint-terminal-return"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "main.trb")
+	source := "def log_value(value: String)\n\tputs(value)\n\treturn\nend\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"lint", "--config", config.Path, "--fix"}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	fixed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "def log_value(value: String)\n\tputs(value)\nend\n"
+	if string(fixed) != want || !strings.Contains(stdout.String(), "fixed 1 issue(s) in 1 file(s)") {
+		t.Fatalf("fixed source=%s\nstdout=%s", fixed, stdout.String())
+	}
+}
+
 func TestLintConfigurationCanDisableRecommendedRules(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
