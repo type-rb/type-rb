@@ -40,6 +40,59 @@ func TestCompilerNativeSnapshotEmitsTheExperimentalGate1Boundary(t *testing.T) {
 	}
 }
 
+func TestCompilerNativeSnapshotSelectsTheGate2AggregateBoundary(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "main.trb")
+	source := `record Pair
+	left: Integer
+	right: Integer
+end
+
+def total(pair: Pair): Integer
+	return pair.left + pair.right
+end
+
+def main()
+	if total(Pair.new(left: 20, right: 22)) == 42
+		puts("ok")
+	end
+	return
+end
+`
+	if err := os.WriteFile(entry, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"compiler", "native-snapshot", "--mode", "go", "--snapshot-version", "3", entry}); status != 0 {
+		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("native snapshot wrote to stderr: %s", stderr.String())
+	}
+	var snapshot nativesnapshot.Gate2Snapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatalf("invalid Gate 2 native snapshot JSON: %v\n%s", err, stdout.String())
+	}
+	if snapshot.Format != nativesnapshot.Format || snapshot.Version != nativesnapshot.Gate2Version || snapshot.EntryFunction != "main#main" {
+		t.Fatalf("unexpected native snapshot: %#v", snapshot)
+	}
+	if len(snapshot.Types) != 1 || snapshot.Types[0].Kind != "record" || snapshot.Types[0].ID != "main#Pair" {
+		t.Fatalf("unexpected Gate 2 types: %#v", snapshot.Types)
+	}
+}
+
+func TestCompilerNativeSnapshotRejectsAnUnknownBoundaryVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"compiler", "native-snapshot", "--snapshot-version", "4"}); status != 1 {
+		t.Fatalf("status=%d; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "does not support snapshot version 4") {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
+
 func TestCompilerInspectEmitsTheSameTypedSnapshotAcrossModes(t *testing.T) {
 	var baseline []toolingprotocol.Declaration
 	for _, mode := range []string{"go", "ruby", "typescript"} {
