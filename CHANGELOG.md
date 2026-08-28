@@ -2,6 +2,30 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.48 - 2026-08-28
+
+### Language and compiler
+
+- Mutable nullable bindings now retain the precise flow type of their latest
+  assignment while all later assignments continue to be checked against the
+  binding's declared nullable type. Editor hover information reflects the
+  narrowed flow type. ([#595](https://github.com/type-rb/type-rb/pull/595))
+- Postfix calls and portable iteration blocks chained after `do...end` or
+  brace collection blocks are now parsed, type-checked, formatted, and
+  compiled instead of being silently discarded or diagnosed against the
+  wrong receiver. ([#598](https://github.com/type-rb/type-rb/pull/598))
+
+### Tooling
+
+- The recommended `trb/omit-terminal-void-return` lint rule now reports and
+  safely removes redundant final bare `return` statements from Void functions.
+  The language and formatter continue to accept and preserve this syntax.
+  ([#597](https://github.com/type-rb/type-rb/pull/597))
+- `trb compiler bootstrap-snapshot --snapshot-version 4` now represents
+  strings, supported arrays, first-class functions, lexical captures, and
+  managed record and tagged fields while retaining the version 2 and 3
+  envelopes. ([#594](https://github.com/type-rb/type-rb/pull/594))
+
 ## 0.3.47 - 2026-08-28
 
 ### Compiler
