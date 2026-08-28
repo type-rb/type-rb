@@ -16,6 +16,7 @@ import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -163,6 +164,64 @@ type Binding struct {
 	Export  *Export
 	Member  *Member
 	Library *stdlib.Symbol
+}
+
+// DeclarationIdentity returns the declaration that owns this resolved
+// binding. Member bindings return their exact type owner; DispatchIdentity
+// carries the member name and class/instance namespace separately.
+func (b Binding) DeclarationIdentity() identity.Declaration {
+	if b.Import == nil {
+		return identity.Declaration{}
+	}
+	name := b.Name
+	kind := identity.Value
+	if b.Library != nil {
+		kind = identity.Function
+	}
+	if b.Export != nil {
+		name = b.Export.Name
+		kind = identityKind(b.Export.Kind)
+	}
+	if name == "" {
+		return identity.Declaration{}
+	}
+	return identity.Declaration{Module: b.Import.RuntimePath(), Name: name, Kind: kind}
+}
+
+// DispatchIdentity returns an exact imported member target. Top-level
+// functions and values have no dispatch identity.
+func (b Binding) DispatchIdentity() identity.Dispatch {
+	if b.Member == nil {
+		return identity.Dispatch{}
+	}
+	return identity.Dispatch{
+		Owner: b.DeclarationIdentity(),
+		Name:  b.Member.Name,
+		Class: b.Member.Class,
+	}
+}
+
+func identityKind(kind ExportKind) identity.Kind {
+	switch kind {
+	case ClassExport:
+		return identity.Class
+	case RecordExport:
+		return identity.Record
+	case EnumExport:
+		return identity.Enum
+	case TypeAliasExport:
+		return identity.TypeAlias
+	case NewtypeExport:
+		return identity.Newtype
+	case ModuleExport:
+		return identity.Module
+	case InterfaceExport:
+		return identity.Interface
+	case FunctionExport:
+		return identity.Function
+	default:
+		return identity.Value
+	}
 }
 
 func (b Binding) Type() types.Type {

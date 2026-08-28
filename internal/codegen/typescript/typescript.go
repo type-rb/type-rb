@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
@@ -1702,10 +1703,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.rawEnumFromValue(n, parts[0])
 		default:
 			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.EnumCallDefaults[n])
-			owner := g.runtimeName(n.EnumName)
-			if n.Reference == nil && n.Owner != "" {
-				owner = strings.ReplaceAll(n.Owner, "::", ".")
-			}
+			owner := g.enumCallOwner(n)
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
@@ -1722,10 +1720,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[index] = g.expr(argument.Value)
 		}
 		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, false)
-		owner := g.runtimeName(n.EnumName)
-		if n.Reference == nil && n.Owner != "" {
-			owner = strings.ReplaceAll(n.Owner, "::", ".")
-		}
+		owner := g.enumConstructOwner(n)
 		name := owner + "." + n.Member
 		if len(n.TypeArguments) > 0 {
 			identity := g.expressionTypeIdentity(n.ExprType(), n)
@@ -1921,10 +1916,35 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 
 func (g *generator) enumCallOwner(call *ir.EnumCall) string {
 	owner := g.runtimeName(call.EnumName)
-	if call.Reference == nil && call.Owner != "" {
-		owner = strings.ReplaceAll(call.Owner, "::", ".")
+	if call.Reference == nil {
+		if semantic := g.localDeclarationName(call.OwnerIdentity); semantic != "" {
+			return semantic
+		}
+		if call.Owner != "" {
+			owner = strings.ReplaceAll(call.Owner, "::", ".")
+		}
 	}
 	return owner
+}
+
+func (g *generator) enumConstructOwner(node *ir.EnumConstruct) string {
+	owner := g.runtimeName(node.EnumName)
+	if node.Reference == nil {
+		if semantic := g.localDeclarationName(node.Declaration); semantic != "" {
+			return semantic
+		}
+		if node.Owner != "" {
+			owner = strings.ReplaceAll(node.Owner, "::", ".")
+		}
+	}
+	return owner
+}
+
+func (g *generator) localDeclarationName(declaration identity.Declaration) string {
+	if declaration.Empty() || declaration.Module != g.modulePath {
+		return ""
+	}
+	return strings.ReplaceAll(declaration.Name, "::", ".")
 }
 
 func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
@@ -2566,7 +2586,7 @@ func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeI
 	case types.Function:
 		parameters, returned, ok := types.FunctionSignature(typ)
 		if !ok {
-			result = g.tsType(typ)
+			result = g.tsTypeWithoutSemanticIdentity(typ)
 			break
 		}
 		parts := make([]string, len(parameters))
@@ -2581,7 +2601,7 @@ func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeI
 		result = "(" + strings.Join(parts, ", ") + ") => " + resultType
 	case types.Named:
 		if typ.Name == "Callback" && identity.name == "" {
-			result = g.tsType(typ)
+			result = g.tsTypeWithoutSemanticIdentity(typ)
 			break
 		}
 		result = identity.name
@@ -2598,7 +2618,7 @@ func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeI
 			result += "<" + strings.Join(parts, ", ") + ">"
 		}
 	default:
-		result = g.tsType(typ)
+		result = g.tsTypeWithoutSemanticIdentity(typ)
 	}
 	if nullable && result != "null" {
 		result += " | null"
@@ -2623,6 +2643,9 @@ func typeScriptTypeIdentityPresent(identity *typescriptTypeIdentity) bool {
 
 func typeScriptTypeShapeEqual(left, right types.Type) bool {
 	if left.Kind != right.Kind || left.Name != right.Name || len(left.Args) != len(right.Args) {
+		return false
+	}
+	if !left.Declaration.Empty() && !right.Declaration.Empty() && left.Declaration != right.Declaration {
 		return false
 	}
 	for index := range left.Args {
@@ -2859,10 +2882,7 @@ func (g *generator) expressionTypeIdentity(expected types.Type, expression ir.Ex
 		}
 		return mergeObserved(nil, node.Receiver)
 	case *ir.EnumConstruct:
-		owner := g.runtimeName(node.EnumName)
-		if node.Reference == nil && node.Owner != "" {
-			owner = strings.ReplaceAll(node.Owner, "::", ".")
-		}
+		owner := g.enumConstructOwner(node)
 		result := &typescriptTypeIdentity{name: owner, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
 		for _, argument := range node.Arguments {
 			identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
@@ -2955,11 +2975,7 @@ func identityArgument(identity *typescriptTypeIdentity, index int) *typescriptTy
 }
 
 func (g *generator) enumConstructType(node *ir.EnumConstruct) string {
-	owner := g.runtimeName(node.EnumName)
-	if node.Reference == nil && node.Owner != "" {
-		owner = strings.ReplaceAll(node.Owner, "::", ".")
-	}
-	return g.qualifiedNamedType(owner, node.TypeArguments, node.ExprType().Nullable)
+	return g.qualifiedNamedType(g.enumConstructOwner(node), node.TypeArguments, node.ExprType().Nullable)
 }
 
 func (g *generator) qualifiedNamedType(name string, arguments []types.Type, nullable bool) string {
@@ -3225,11 +3241,14 @@ func (g *generator) tsCodecRuntimeTypeName(schema *ir.CodecSchema) string {
 }
 
 func (g *generator) jsonCodecBuilder(jsonAlias string) *tsJSONCodecBuilder {
-	return &tsJSONCodecBuilder{jsonAlias: jsonAlias, typeName: g.tsType, localTypeOwners: g.localTypeOwners}
+	return &tsJSONCodecBuilder{
+		jsonAlias: jsonAlias, modulePath: g.modulePath, typeName: g.tsType, localTypeOwners: g.localTypeOwners,
+	}
 }
 
 type tsJSONCodecBuilder struct {
 	jsonAlias       string
+	modulePath      string
 	typeName        func(types.Type) string
 	localTypeOwners map[string]string
 	source          strings.Builder
@@ -3271,6 +3290,9 @@ func (b *tsJSONCodecBuilder) runtimeTypeName(schema *ir.CodecSchema) string {
 			return schema.Reference.Alias + "." + name
 		}
 		return name
+	}
+	if declaration := schema.Type.Declaration; declaration.Kind.IsType() && declaration.Module == b.modulePath {
+		return strings.ReplaceAll(declaration.Name, "::", ".")
 	}
 	if owner := b.localTypeOwners[name]; owner != "" {
 		return owner
@@ -3560,6 +3582,13 @@ func tsType(t types.Type) string {
 }
 
 func (g *generator) tsType(t types.Type) string {
+	if semantic := g.semanticTypeIdentity(t); typeScriptTypeIdentityPresent(semantic) {
+		return g.tsTypeWithIdentity(t, semantic)
+	}
+	return g.tsTypeWithoutSemanticIdentity(t)
+}
+
+func (g *generator) tsTypeWithoutSemanticIdentity(t types.Type) string {
 	mappings := g.typeNameMappings()
 	if g.orm == nil || g.modulePath == "trb/orm/index" {
 		return tsTypeWithMappings(t, g.typeAliases, mappings, g.standardResult)
@@ -3574,6 +3603,20 @@ func (g *generator) tsType(t types.Type) string {
 		}
 	}
 	return tsTypeWithMappings(t, aliases, mappings, g.standardResult)
+}
+
+func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity {
+	result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(typ.Args))}
+	for index, argument := range typ.Args {
+		result.arguments[index] = g.semanticTypeIdentity(argument)
+	}
+	if typ.Kind == types.Named && typ.Declaration.Kind.IsType() && typ.Declaration.Module == g.modulePath {
+		result.name = strings.ReplaceAll(typ.Declaration.Name, "::", ".")
+	}
+	if !typeScriptTypeIdentityPresent(result) {
+		return nil
+	}
+	return result
 }
 
 func (g *generator) typeNameMappings() map[string]string {

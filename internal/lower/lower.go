@@ -526,12 +526,12 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.ClassStatement:
-		result := &ir.Class{Base: base(n.Base), Name: n.Name, Superclass: l.expression(n.Superclass), Body: l.statements(n.Body)}
+		result := &ir.Class{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Superclass: l.expression(n.Superclass), Body: l.statements(n.Body)}
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
 		for index, implemented := range n.Implements {
-			typ := lowerType(implemented)
+			typ := l.resolvedType(implemented)
 			var authoredReference *ir.Reference
 			if binding, ok := l.checked.Resolution.ImportedType(implemented.Name); ok {
 				authoredReference = referenceFromBinding(&binding)
@@ -548,7 +548,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.RecordStatement:
-		result := &ir.Record{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		result := &ir.Record{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Body: l.statements(n.Body)}
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
@@ -562,9 +562,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			}
 			attributes[index] = ir.Attribute{Name: attribute.Name, Arguments: arguments}
 		}
-		return &ir.RecordField{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Default: l.expression(n.Default), Attributes: attributes}
+		return &ir.RecordField{Base: base(n.Base), Name: n.Name, Type: l.resolvedType(n.Type), Default: l.expression(n.Default), Attributes: attributes}
 	case *ast.EnumStatement:
-		result := &ir.Enum{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		result := &ir.Enum{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Body: l.statements(n.Body)}
 		if raw, ok := l.checked.RawEnums[n]; ok {
 			result.RawType = raw.Type
 		}
@@ -576,7 +576,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		member := &ir.EnumMember{Base: base(n.Base), Name: n.Name}
 		member.RawValue = l.expression(n.RawValue)
 		for _, field := range n.Parameters {
-			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: lowerType(field.Type), NamedOnly: field.NamedOnly})
+			member.Fields = append(member.Fields, ir.Parameter{Name: field.Name, Type: l.resolvedType(field.Type), NamedOnly: field.NamedOnly})
 		}
 		for _, attribute := range n.Attributes {
 			lowered := ir.Attribute{Name: attribute.Name}
@@ -588,7 +588,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return member
 	case *ast.TypeAliasStatement:
 		semantic := l.checked.TypeAliases[n]
-		result := &ir.TypeAlias{Base: base(n.Base), Name: n.Name, AuthoredTarget: lowerType(n.Target), Target: semantic.Target}
+		result := &ir.TypeAlias{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, AuthoredTarget: l.resolvedType(n.Target), Target: semantic.Target}
 		result.AuthoredTargetReference = referenceFromBinding(semantic.AuthoredTargetBinding)
 		result.TargetReference = referenceFromBinding(semantic.TargetBinding)
 		for _, parameter := range n.TypeParameters {
@@ -604,11 +604,11 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return result
 	case *ast.NewtypeStatement:
 		semantic := l.checked.Newtypes[n]
-		return &ir.Newtype{Base: base(n.Base), Name: n.Name, Target: semantic.Target}
+		return &ir.Newtype{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Target: semantic.Target}
 	case *ast.ModuleStatement:
-		return &ir.Module{Base: base(n.Base), Name: n.Name, Body: l.statements(n.Body)}
+		return &ir.Module{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
-		result := &ir.Interface{Base: base(n.Base), Name: n.Name}
+		result := &ir.Interface{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name}
 		for _, parameter := range n.TypeParameters {
 			result.TypeParameters = append(result.TypeParameters, parameter.Name)
 		}
@@ -619,19 +619,19 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		}
 		return result
 	case *ast.FieldStatement:
-		return &ir.Field{Base: base(n.Base), Name: n.Name, Type: lowerType(n.Type), Value: l.expression(n.Value), ReadOnly: n.ReadOnly}
+		return &ir.Field{Base: base(n.Base), Name: n.Name, Type: l.resolvedType(n.Type), Value: l.expression(n.Value), ReadOnly: n.ReadOnly}
 	case *ast.MethodStatement:
-		returnType := lowerType(n.ReturnType)
+		returnType := l.resolvedType(n.ReturnType)
 		if n.ReturnType.Empty() {
 			returnType = types.Type{Kind: types.Void, Name: "Void"}
 		}
-		method := &ir.Method{Base: base(n.Base), Name: n.Name, ReturnType: returnType, Class: n.Class}
+		method := &ir.Method{Base: base(n.Base), Declaration: l.checked.Declarations[n], Dispatch: l.checked.MethodDispatches[n], Name: n.Name, ReturnType: returnType, Class: n.Class}
 		for _, parameter := range n.TypeParameters {
 			method.TypeParameters = append(method.TypeParameters, parameter.Name)
 		}
 		method.Body = l.statements(n.Body)
 		for _, parameter := range n.Parameters {
-			typ := lowerType(parameter.Type)
+			typ := l.resolvedType(parameter.Type)
 			if parameter.Type.Empty() {
 				typ = types.Type{Kind: types.Any, Name: "Any"}
 			}
@@ -904,7 +904,11 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	case *ast.CaseStatement:
 		return l.caseNode(n, true)
 	case *ast.Identifier:
-		return &ir.Identifier{ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n], Lexical: l.checked.LexicalBindings[n], Reference: l.reference(n)}
+		return &ir.Identifier{
+			ExprBase: base, Name: n.Name, Owner: l.checked.Constants[n],
+			Declaration: l.checked.ExpressionDeclarations[n], Dispatch: l.checked.ExpressionDispatches[n],
+			Lexical: l.checked.LexicalBindings[n], Reference: l.reference(n),
+		}
 	case *ast.Literal:
 		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: n.Raw}
 	case *ast.InterpolatedString:
@@ -962,10 +966,10 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 	case *ast.LambdaExpression:
 		result := &ir.Lambda{ExprBase: base, ReturnType: types.FromName("Void")}
 		if !n.ReturnType.Empty() {
-			result.ReturnType = lowerType(n.ReturnType)
+			result.ReturnType = l.resolvedType(n.ReturnType)
 		}
 		for _, parameter := range n.Parameters {
-			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: lowerType(parameter.Type), Mutable: parameter.Mutable})
+			result.Parameters = append(result.Parameters, ir.Parameter{Name: parameter.Name, Type: l.resolvedType(parameter.Type), Mutable: parameter.Mutable})
 		}
 		result.Body = l.statements(n.Body)
 		return result
@@ -1033,6 +1037,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				ExprBase:      base,
 				EnumName:      semantic.EnumName,
 				Owner:         semantic.Owner,
+				OwnerIdentity: semantic.OwnerIdentity,
 				Method:        semantic.Method,
 				CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 				Reference:     l.reference(n.Callee),
@@ -1060,7 +1065,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		if variant, ok := l.checked.EnumConstructors[n]; ok {
 			result := &ir.EnumConstruct{
-				ExprBase: base, EnumName: variant.EnumName, Owner: variant.Owner, Member: variant.Name,
+				ExprBase: base, EnumName: variant.EnumName, Owner: variant.Owner, Declaration: variant.Declaration, Member: variant.Name,
 				TypeArguments: append([]types.Type(nil), variant.TypeArguments...),
 				CallSignature: append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 				Reference:     l.reference(n.Callee),
@@ -1101,6 +1106,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 		if construction, ok := l.checked.RecordConstructions[n]; ok {
 			result.RecordTarget = l.expression(construction.Target)
+			result.RecordDeclaration = construction.Declaration
 			for _, field := range construction.Fields {
 				result.RecordFields = append(result.RecordFields, ir.RecordFieldContract{Name: field.Name, Type: field.Type, HasDefault: field.HasDefault})
 			}
@@ -1125,7 +1131,11 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				name = association.Name
 			}
 		}
-		member := &ir.Member{ExprBase: base, Receiver: l.expression(receiver), Name: name, Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference}
+		member := &ir.Member{
+			ExprBase: base, Receiver: l.expression(receiver), Name: name,
+			Declaration: l.checked.ExpressionDeclarations[n], Dispatch: l.checked.ExpressionDispatches[n],
+			Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference,
+		}
 		for _, alternative := range l.checked.UnionMemberAccesses[n] {
 			member.UnionAlternatives = append(member.UnionAlternatives, ir.UnionMemberAlternative{Type: alternative.Alternative, MemberType: alternative.Member})
 		}
@@ -1135,9 +1145,13 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		return member
 	case *ast.GenericExpression:
 		application := l.checked.GenericApplications[n]
-		result := &ir.TypeApply{ExprBase: base, Receiver: l.expression(n.Receiver), Owner: application.Owner, OwnerArguments: append([]types.Type(nil), application.OwnerArguments...), Kind: application.Kind}
+		result := &ir.TypeApply{
+			ExprBase: base, Receiver: l.expression(n.Receiver), Declaration: application.Declaration,
+			Dispatch: application.Dispatch, Owner: application.Owner,
+			OwnerArguments: append([]types.Type(nil), application.OwnerArguments...), Kind: application.Kind,
+		}
 		for _, argument := range n.Arguments {
-			result.Arguments = append(result.Arguments, lowerType(argument))
+			result.Arguments = append(result.Arguments, l.resolvedType(argument))
 		}
 		return result
 	case *ast.IndexExpression:
@@ -1279,7 +1293,11 @@ func (l *lowerer) lowerCodecSchema(schema checker.CodecSchema) *ir.CodecSchema {
 		result.RawValues = append(result.RawValues, ir.EnumRawValue{Member: value.Member, Raw: value.Raw})
 	}
 	if schema.Reference != nil {
-		result.Reference = &ir.Reference{Package: schema.Reference.Import.RuntimePath(), Alias: schema.Reference.Import.Alias, Symbol: schema.Reference.Name, ExportKind: string(schema.Reference.Export.Kind)}
+		result.Reference = &ir.Reference{
+			Package: schema.Reference.Import.RuntimePath(), Alias: schema.Reference.Import.Alias,
+			Symbol: schema.Reference.Name, ExportKind: string(schema.Reference.Export.Kind),
+			Declaration: schema.Reference.DeclarationIdentity(), Dispatch: schema.Reference.DispatchIdentity(),
+		}
 	}
 	if schema.Element != nil {
 		result.Element = l.lowerCodecSchema(*schema.Element)
@@ -1307,7 +1325,10 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 		receiver = receiver && !member.Class
 		return &ir.Reference{Intrinsic: member.Intrinsic, Symbol: member.Name, ExportKind: string(member.Kind), ReceiverMethod: receiver}
 	}
-	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
+	result := &ir.Reference{
+		Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name,
+		Declaration: binding.DeclarationIdentity(), Dispatch: binding.DispatchIdentity(),
+	}
 	if binding.Library != nil {
 		result.Intrinsic = binding.Library.Intrinsic
 		result.ReceiverMethod = binding.Library.HasReceiver()
@@ -1333,7 +1354,10 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	if binding == nil || binding.Import == nil {
 		return nil
 	}
-	result := &ir.Reference{Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name}
+	result := &ir.Reference{
+		Package: binding.Import.RuntimePath(), Alias: binding.Import.Alias, Symbol: binding.Name,
+		Declaration: binding.DeclarationIdentity(), Dispatch: binding.DispatchIdentity(),
+	}
 	if binding.Library != nil {
 		result.Intrinsic = binding.Library.Intrinsic
 		result.ReceiverMethod = binding.Library.HasReceiver()
@@ -1571,6 +1595,13 @@ func (l *lowerer) unitValue(span token.Span) ir.Expression {
 	receiver := &ir.Identifier{ExprBase: ir.NewExprBase(span, typ), Name: "Unit", Reference: reference}
 	callee := &ir.Member{ExprBase: ir.NewExprBase(span, typ), Receiver: receiver, Name: "new", Reference: reference}
 	return &ir.Call{ExprBase: ir.NewExprBase(span, typ), Callee: callee}
+}
+
+func (l *lowerer) resolvedType(ref ast.TypeRef) types.Type {
+	if typ, ok := l.checked.ResolvedTypes[ref.Span()]; ok {
+		return typ
+	}
+	return lowerType(ref)
 }
 
 func lowerType(ref ast.TypeRef) types.Type {
