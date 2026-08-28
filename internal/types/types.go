@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/type-rb/type-rb/internal/identity"
 )
 
 type Kind string
@@ -42,11 +44,12 @@ const (
 )
 
 type Type struct {
-	Kind     Kind
-	Name     string
-	Args     []Type
-	Nullable bool
-	Readonly bool
+	Kind        Kind
+	Name        string
+	Args        []Type
+	Nullable    bool
+	Readonly    bool
+	Declaration identity.Declaration
 }
 
 func (t Type) String() string {
@@ -307,7 +310,10 @@ func UnionOf(input ...Type) Type {
 		alternatives = filtered
 	}
 	slices.SortFunc(alternatives, func(left, right Type) int {
-		return strings.Compare(left.String(), right.String())
+		if compared := strings.Compare(left.String(), right.String()); compared != 0 {
+			return compared
+		}
+		return strings.Compare(left.Declaration.Key(), right.Declaration.Key())
 	})
 	if len(alternatives) == 0 {
 		if sawNever {
@@ -437,6 +443,9 @@ func Assignable(target, value Type) bool {
 // state. Mutable generic containers use it to avoid unsound argument widening.
 func Equivalent(left, right Type) bool {
 	if left.Kind != right.Kind || left.Name != right.Name || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
+		return false
+	}
+	if !left.Declaration.Empty() && !right.Declaration.Empty() && left.Declaration != right.Declaration {
 		return false
 	}
 	for index := range left.Args {

@@ -6,6 +6,7 @@ package ir
 import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -139,6 +140,7 @@ type RuntimeBinding struct {
 
 type Class struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	External       bool
@@ -159,6 +161,7 @@ func (*Class) irStatement() {}
 
 type Record struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Body           []Statement
@@ -183,6 +186,7 @@ func (*RecordField) irStatement() {}
 
 type Enum struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Body           []Statement
@@ -203,6 +207,7 @@ func (*EnumMember) irStatement() {}
 
 type TypeAlias struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	AuthoredTarget types.Type
@@ -220,22 +225,25 @@ func (*TypeAlias) irStatement() {}
 
 type Newtype struct {
 	Base
-	Name   string
-	Target types.Type
+	Declaration identity.Declaration
+	Name        string
+	Target      types.Type
 }
 
 func (*Newtype) irStatement() {}
 
 type Module struct {
 	Base
-	Name string
-	Body []Statement
+	Declaration identity.Declaration
+	Name        string
+	Body        []Statement
 }
 
 func (*Module) irStatement() {}
 
 type Interface struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Methods        []*Method
@@ -275,6 +283,8 @@ type MethodSignature struct {
 
 type Method struct {
 	Base
+	Declaration    identity.Declaration
+	Dispatch       identity.Dispatch
 	Name           string
 	External       bool
 	TargetName     string
@@ -524,11 +534,13 @@ func (e ExprBase) ExprType() types.Type { return e.Type }
 
 type Identifier struct {
 	ExprBase
-	Name      string
-	Owner     string
-	Lexical   bool // Resolved to a lexical binding rather than a same-named member.
-	Generated bool // Compiler-owned name that must bypass source identifier rewriting.
-	Reference *Reference
+	Name        string
+	Owner       string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
+	Lexical     bool // Resolved to a lexical binding rather than a same-named member.
+	Generated   bool // Compiler-owned name that must bypass source identifier rewriting.
+	Reference   *Reference
 }
 
 func (*Identifier) irExpression() {}
@@ -668,14 +680,15 @@ type CallArgument struct {
 }
 type Call struct {
 	ExprBase
-	Callee          Expression
-	Arguments       []CallArgument
-	CallSignature   []callsignature.Parameter
-	Block           *Block
-	Codec           *CodecSchema
-	RecordTarget    Expression
-	RecordFields    []RecordFieldContract
-	DeclarationOnly bool
+	Callee            Expression
+	Arguments         []CallArgument
+	CallSignature     []callsignature.Parameter
+	Block             *Block
+	Codec             *CodecSchema
+	RecordTarget      Expression
+	RecordDeclaration identity.Declaration
+	RecordFields      []RecordFieldContract
+	DeclarationOnly   bool
 }
 
 func (*Call) irExpression() {}
@@ -724,6 +737,7 @@ type EnumConstruct struct {
 	ExprBase
 	EnumName      string
 	Owner         string
+	Declaration   identity.Declaration
 	Member        string
 	TypeArguments []types.Type
 	Arguments     []CallArgument
@@ -741,6 +755,7 @@ type EnumCall struct {
 	ExprBase
 	EnumName      string
 	Owner         string
+	OwnerIdentity identity.Declaration
 	Method        string
 	Receiver      Expression
 	Arguments     []CallArgument
@@ -760,6 +775,8 @@ func (*EnumCall) irExpression() {}
 type TypeApply struct {
 	ExprBase
 	Receiver       Expression
+	Declaration    identity.Declaration
+	Dispatch       identity.Dispatch
 	Arguments      []types.Type
 	Owner          string
 	OwnerArguments []types.Type
@@ -770,10 +787,12 @@ func (*TypeApply) irExpression() {}
 
 type Member struct {
 	ExprBase
-	Receiver  Expression
-	Name      string
-	Safe      bool
-	Namespace bool
+	Receiver    Expression
+	Name        string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
+	Safe        bool
+	Namespace   bool
 	// ClassField distinguishes storage-backed class properties from methods and
 	// record fields so backends can preserve both `value.name` and `value.name()`.
 	ClassField bool
@@ -823,9 +842,11 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 // project references use Package, Alias, Symbol, and ExportKind for
 // target-specific qualification.
 type Reference struct {
-	Package string
-	Alias   string
-	Symbol  string
+	Package     string
+	Alias       string
+	Symbol      string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
 	// Owner and ClassMember distinguish imported type-member dispatch from a
 	// package function and preserve the source class/instance member kind.
 	Owner          string

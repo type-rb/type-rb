@@ -5,6 +5,7 @@ package effectplan
 import (
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/runtimeoperation"
 	"github.com/type-rb/type-rb/internal/types"
@@ -139,6 +140,7 @@ type analyzer struct {
 type declarationIdentity struct {
 	module string
 	name   string
+	kind   identity.Kind
 }
 
 func (i declarationIdentity) empty() bool { return i.name == "" }
@@ -285,14 +287,14 @@ func (a *analyzer) collect(module, namespace string, owner declarationIdentity, 
 			class := a.addClass(module, namespace, node)
 			a.collect(module, class.identity.name, class.identity, node.Body)
 		case *ir.Enum:
-			identity := declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, node.Name)}
+			identity := effectDeclarationIdentity(node.Declaration, module, qualifiedDeclarationName(namespace, node.Name))
 			a.declarations[identity] = true
 			a.typeDeclarations[identity] = true
 			a.collect(module, identity.name, identity, node.Body)
 		case *ir.Record:
 			record := recordContext{
 				module: module, namespace: namespace,
-				identity: declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, node.Name)}, record: node,
+				identity: effectDeclarationIdentity(node.Declaration, module, qualifiedDeclarationName(namespace, node.Name)), record: node,
 			}
 			a.addRecord(record)
 			a.collect(module, record.identity.name, record.identity, node.Body)
@@ -304,7 +306,7 @@ func (a *analyzer) collect(module, namespace string, owner declarationIdentity, 
 		case *ir.TypeAlias:
 			a.addAlias(module, namespace, node)
 		case *ir.Module:
-			identity := declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, node.Name)}
+			identity := effectDeclarationIdentity(node.Declaration, module, qualifiedDeclarationName(namespace, node.Name))
 			a.declarations[identity] = true
 			a.moduleDeclarations[identity] = true
 			a.collect(module, identity.name, identity, node.Body)
@@ -316,7 +318,7 @@ func (a *analyzer) collect(module, namespace string, owner declarationIdentity, 
 
 func (a *analyzer) addClass(module, namespace string, class *ir.Class) *classContext {
 	context := &classContext{
-		identity:   declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, class.Name)},
+		identity:   effectDeclarationIdentity(class.Declaration, module, qualifiedDeclarationName(namespace, class.Name)),
 		namespace:  namespace,
 		class:      class,
 		superclass: referencedDeclarationIdentity(class.Superclass, module),
@@ -350,7 +352,7 @@ func (a *analyzer) addClass(module, namespace string, class *ir.Class) *classCon
 
 func (a *analyzer) addInterface(module, namespace string, declaration *ir.Interface) *interfaceContext {
 	context := &interfaceContext{
-		identity: declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, declaration.Name)},
+		identity: effectDeclarationIdentity(declaration.Declaration, module, qualifiedDeclarationName(namespace, declaration.Name)),
 		methods:  append([]*ir.Method(nil), declaration.Methods...),
 	}
 	a.interfaceDefinitions[context.identity] = context
@@ -367,7 +369,7 @@ func (a *analyzer) addRecord(record recordContext) {
 }
 
 func (a *analyzer) addAlias(module, namespace string, alias *ir.TypeAlias) {
-	identity := declarationIdentity{module: module, name: qualifiedDeclarationName(namespace, alias.Name)}
+	identity := effectDeclarationIdentity(alias.Declaration, module, qualifiedDeclarationName(namespace, alias.Name))
 	a.declarations[identity] = true
 	a.typeDeclarations[identity] = true
 	if alias.Target.Kind == types.Named && alias.Target.Name != "" {
@@ -394,11 +396,24 @@ func qualifiedDeclarationName(namespace, name string) string {
 	return namespace + "::" + name
 }
 
+func effectDeclarationIdentity(declaration identity.Declaration, fallbackModule, fallbackName string) declarationIdentity {
+	if declaration.Empty() {
+		return declarationIdentity{module: fallbackModule, name: fallbackName}
+	}
+	return declarationIdentity{module: declaration.Module, name: declaration.Name, kind: declaration.Kind}
+}
+
 func (a *analyzer) resolveAliasDefinitions() {
 	for _, context := range a.aliases {
 		if context.alias.TargetReference != nil && context.alias.TargetReference.Package != "" {
 			a.aliasDefinitions[context.identity] = referencedTypeIdentity(
 				context.alias.Target, context.alias.TargetReference, context.module,
+			)
+			continue
+		}
+		if !context.alias.Target.Declaration.Empty() {
+			a.aliasDefinitions[context.identity] = effectDeclarationIdentity(
+				context.alias.Target.Declaration, context.module, context.alias.Target.Name,
 			)
 			continue
 		}
@@ -467,7 +482,7 @@ func (a *analyzer) knownDeclarationIdentity(identity declarationIdentity) declar
 	}
 	var match declarationIdentity
 	for candidate := range a.typeDeclarations {
-		if candidate.module != identity.module || !strings.HasSuffix(candidate.name, "::"+identity.name) {
+		if candidate.module != identity.module || identity.kind != "" && candidate.kind != identity.kind || !strings.HasSuffix(candidate.name, "::"+identity.name) {
 			continue
 		}
 		if !match.empty() {
@@ -490,7 +505,7 @@ func (a *analyzer) knownTypeDeclarationIdentity(identity declarationIdentity) de
 	}
 	var match declarationIdentity
 	for candidate := range a.typeDeclarations {
-		if candidate.module != identity.module || !strings.HasSuffix(candidate.name, "::"+identity.name) {
+		if candidate.module != identity.module || identity.kind != "" && candidate.kind != identity.kind || !strings.HasSuffix(candidate.name, "::"+identity.name) {
 			continue
 		}
 		if !match.empty() {
@@ -512,6 +527,9 @@ func (a *analyzer) declarationIdentityInNamespace(module, namespace, name string
 }
 
 func (a *analyzer) runtimeDeclarationIdentityInNamespace(module, namespace, name string) declarationIdentity {
+	if identity, ok := localIdentityInNamespace(a.moduleDeclarations, module, namespace, name); ok {
+		return identity
+	}
 	if identity, ok := a.localDeclarationIdentity(module, namespace, name); ok {
 		if a.moduleDeclarations[identity] {
 			return identity
@@ -535,8 +553,7 @@ func localIdentityInNamespace(candidates map[declarationIdentity]bool, module, n
 		if current != "" {
 			candidateName = current + "::" + name
 		}
-		candidate := declarationIdentity{module: module, name: candidateName}
-		if candidates[candidate] {
+		if candidate, ok := declarationIdentityNamed(candidates, module, candidateName); ok {
 			return candidate, true
 		}
 		separator := strings.LastIndex(current, "::")
@@ -550,6 +567,24 @@ func localIdentityInNamespace(candidates map[declarationIdentity]bool, module, n
 		}
 	}
 	return declarationIdentity{}, false
+}
+
+func declarationIdentityNamed(candidates map[declarationIdentity]bool, module, name string) (declarationIdentity, bool) {
+	legacy := declarationIdentity{module: module, name: name}
+	if candidates[legacy] {
+		return legacy, true
+	}
+	var match declarationIdentity
+	for candidate := range candidates {
+		if candidate.module != module || candidate.name != name {
+			continue
+		}
+		if !match.empty() {
+			return declarationIdentity{}, false
+		}
+		match = candidate
+	}
+	return match, !match.empty()
 }
 
 func (a *analyzer) propagateDispatchEffects() bool {
@@ -676,6 +711,12 @@ func (a *analyzer) inheritedMemberMethods(owner declarationIdentity, name string
 func referencedDeclarationIdentity(expression ir.Expression, currentModule string) declarationIdentity {
 	switch node := expression.(type) {
 	case *ir.Identifier:
+		if !node.Declaration.Empty() {
+			return effectDeclarationIdentity(node.Declaration, currentModule, node.Name)
+		}
+		if node.Reference != nil && !node.Reference.Declaration.Empty() {
+			return effectDeclarationIdentity(node.Reference.Declaration, currentModule, node.Name)
+		}
 		if node.Reference != nil && (node.Reference.Package != "" || node.Reference.Owner != "") {
 			name := node.Name
 			if node.Reference.Symbol != "" {
@@ -692,8 +733,17 @@ func referencedDeclarationIdentity(expression ir.Expression, currentModule strin
 		}
 		return declarationIdentity{module: currentModule, name: node.Name}
 	case *ir.TypeApply:
+		if !node.Declaration.Empty() {
+			return effectDeclarationIdentity(node.Declaration, currentModule, "")
+		}
 		return referencedDeclarationIdentity(node.Receiver, currentModule)
 	case *ir.Member:
+		if !node.Declaration.Empty() {
+			return effectDeclarationIdentity(node.Declaration, currentModule, node.Name)
+		}
+		if node.Reference != nil && !node.Reference.Declaration.Empty() {
+			return effectDeclarationIdentity(node.Reference.Declaration, currentModule, node.Name)
+		}
 		if node.Reference != nil && (node.Reference.Package != "" || node.Reference.Owner != "") {
 			name := node.Name
 			if node.Reference.Symbol != "" {
@@ -716,6 +766,12 @@ func referencedDeclarationIdentity(expression ir.Expression, currentModule strin
 }
 
 func referencedTypeIdentity(typ types.Type, reference *ir.Reference, currentModule string) declarationIdentity {
+	if reference != nil && !reference.Declaration.Empty() {
+		return effectDeclarationIdentity(reference.Declaration, currentModule, typ.Name)
+	}
+	if !typ.Declaration.Empty() {
+		return effectDeclarationIdentity(typ.Declaration, currentModule, typ.Name)
+	}
 	identity := declarationIdentity{module: currentModule, name: typ.Name}
 	if reference == nil || reference.Package == "" {
 		return identity
@@ -840,12 +896,15 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			identity := a.canonicalDeclarationIdentity(declarationIdentity{module: context.module, name: qualifiedDeclarationName(context.namespace, node.Name)})
+			identity := a.canonicalDeclarationIdentity(effectDeclarationIdentity(
+				node.Declaration, context.module, qualifiedDeclarationName(context.namespace, node.Name),
+			))
 			classContext := methodContext{module: context.module, namespace: identity.name, owner: identity}
 			suspends = a.statementsReach(node.Body, classContext, record) || suspends
 		case *ir.Module:
+			identity := effectDeclarationIdentity(node.Declaration, context.module, qualifiedDeclarationName(context.namespace, node.Name))
 			moduleContext := context
-			moduleContext.namespace = qualifiedDeclarationName(context.namespace, node.Name)
+			moduleContext.namespace = identity.name
 			suspends = a.statementsReach(node.Body, moduleContext, record) || suspends
 		case *ir.Field:
 			suspends = a.expressionReaches(node.Value, context, record) || suspends
@@ -1008,13 +1067,26 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		for _, argument := range node.Arguments {
 			suspends = a.expressionReaches(argument.Value, context, record) || suspends
 		}
-		ownerName := node.Owner
-		if ownerName == "" {
-			ownerName = node.EnumName
-		}
-		owner := declarationIdentity{module: context.module, name: ownerName}
 		classMember := false
-		if node.Reference != nil && (node.Reference.Package != "" || node.Reference.Owner != "") {
+		owner := effectDeclarationIdentity(node.OwnerIdentity, context.module, "")
+		exactOwner := !node.OwnerIdentity.Empty()
+		if node.Reference != nil && !node.Reference.Dispatch.Empty() {
+			owner = effectDeclarationIdentity(node.Reference.Dispatch.Owner, context.module, "")
+			classMember = node.Reference.Dispatch.Class
+			exactOwner = true
+		} else if node.Reference != nil && !node.Reference.Declaration.Empty() {
+			owner = effectDeclarationIdentity(node.Reference.Declaration, context.module, "")
+			classMember = node.Reference.ClassMember
+			exactOwner = true
+		}
+		if !exactOwner {
+			ownerName := node.Owner
+			if ownerName == "" {
+				ownerName = node.EnumName
+			}
+			owner = declarationIdentity{module: context.module, name: ownerName}
+		}
+		if !exactOwner && node.Reference != nil && (node.Reference.Package != "" || node.Reference.Owner != "") {
 			if node.Reference.Package != "" {
 				owner.module = node.Reference.Package
 			}
@@ -1022,7 +1094,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 				owner.name = node.Reference.Owner
 			}
 			classMember = node.Reference.ClassMember
-		} else if node.Owner == "" {
+		} else if !exactOwner && node.Owner == "" {
 			owner = a.declarationIdentityInNamespace(context.module, context.namespace, node.EnumName)
 		}
 		owner = a.canonicalDeclarationIdentity(owner)
@@ -1056,6 +1128,18 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, context methodContext, record bool) bool {
+	if !call.RecordDeclaration.Empty() {
+		identity := a.canonicalDeclarationIdentity(effectDeclarationIdentity(call.RecordDeclaration, context.module, ""))
+		omittedDefaultsReach, targetHasEffects := a.recordCallDefaultsReach(call, a.recordDefinitions[identity])
+		if record {
+			if omittedDefaultsReach {
+				a.plan.RecordCallDefaults[call] = true
+			} else if targetHasEffects {
+				a.plan.RecordCallSync[call] = true
+			}
+		}
+		return omittedDefaultsReach
+	}
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		if class := a.classDefinitions[identity]; class != nil {
 			return a.plan.ClassConstructors[class.class]
@@ -1098,6 +1182,17 @@ func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, contex
 	case *ir.TypeApply:
 		return a.callTargetReaches(call, node.Receiver, context, record)
 	case *ir.Identifier:
+		if !node.Dispatch.Empty() {
+			owner := effectDeclarationIdentity(node.Dispatch.Owner, context.module, "")
+			return anyReached(a.plan.Methods, a.memberMethodsFor(owner, node.Dispatch.Name, node.Dispatch.Class))
+		}
+		if !node.Declaration.Empty() && node.Declaration.Kind == identity.Function {
+			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Declaration.Module, node.Declaration.Name)])
+		}
+		if node.Reference != nil && !node.Reference.Declaration.Empty() && node.Reference.Declaration.Kind == identity.Function {
+			declaration := node.Reference.Declaration
+			return anyReached(a.plan.Methods, a.topMethods[callableKey(declaration.Module, declaration.Name)])
+		}
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.Methods, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
@@ -1137,6 +1232,17 @@ func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context met
 	case *ir.TypeApply:
 		return a.callTargetParameterDefaults(node.Receiver, context)
 	case *ir.Identifier:
+		if !node.Dispatch.Empty() {
+			owner := effectDeclarationIdentity(node.Dispatch.Owner, context.module, "")
+			return anyReached(a.plan.ParameterDefaults, a.memberMethodsFor(owner, node.Dispatch.Name, node.Dispatch.Class))
+		}
+		if !node.Declaration.Empty() && node.Declaration.Kind == identity.Function {
+			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Declaration.Module, node.Declaration.Name)])
+		}
+		if node.Reference != nil && !node.Reference.Declaration.Empty() && node.Reference.Declaration.Kind == identity.Function {
+			declaration := node.Reference.Declaration
+			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(declaration.Module, declaration.Name)])
+		}
 		if node.Reference != nil && node.Reference.Package != "" {
 			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
@@ -1171,6 +1277,14 @@ func (a *analyzer) memberMethodsFor(owner declarationIdentity, name string, clas
 }
 
 func (a *analyzer) memberTargetIdentity(member *ir.Member, context methodContext) (declarationIdentity, bool, bool) {
+	if !member.Dispatch.Empty() {
+		owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(member.Dispatch.Owner, context.module, ""))
+		return owner, member.Dispatch.Class, true
+	}
+	if member.Reference != nil && !member.Reference.Dispatch.Empty() {
+		owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(member.Reference.Dispatch.Owner, context.module, ""))
+		return owner, member.Reference.Dispatch.Class, true
+	}
 	if member.Reference != nil && member.Reference.Owner != "" {
 		module := context.module
 		if member.Reference.Package != "" {
@@ -1185,12 +1299,36 @@ func (a *analyzer) memberTargetIdentity(member *ir.Member, context methodContext
 func (a *analyzer) expressionDeclarationIdentity(expression ir.Expression, context methodContext) (declarationIdentity, bool, bool) {
 	switch node := expression.(type) {
 	case *ir.TypeApply:
+		if !node.Dispatch.Empty() {
+			owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Dispatch.Owner, context.module, ""))
+			return owner, node.Dispatch.Class, true
+		}
+		if !node.Declaration.Empty() {
+			declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Declaration, context.module, ""))
+			return declaration, true, true
+		}
 		return a.expressionDeclarationIdentity(node.Receiver, context)
 	case *ir.Identifier:
 		if node.Name == "self" && !context.owner.empty() {
 			return context.owner, context.method != nil && context.method.Class, true
 		}
+		if !node.Dispatch.Empty() {
+			owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Dispatch.Owner, context.module, ""))
+			return owner, node.Dispatch.Class, true
+		}
+		if !node.Declaration.Empty() {
+			declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Declaration, context.module, node.Name))
+			return declaration, true, true
+		}
 		if node.Reference != nil {
+			if !node.Reference.Dispatch.Empty() {
+				owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Reference.Dispatch.Owner, context.module, ""))
+				return owner, node.Reference.Dispatch.Class, true
+			}
+			if !node.Reference.Declaration.Empty() {
+				declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Reference.Declaration, context.module, node.Name))
+				return declaration, true, true
+			}
 			if node.Reference.Owner != "" {
 				module := context.module
 				if node.Reference.Package != "" {
@@ -1217,6 +1355,22 @@ func (a *analyzer) expressionDeclarationIdentity(expression ir.Expression, conte
 			}
 		}
 	case *ir.Member:
+		if !node.Dispatch.Empty() {
+			owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Dispatch.Owner, context.module, ""))
+			return owner, node.Dispatch.Class, true
+		}
+		if !node.Declaration.Empty() {
+			declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Declaration, context.module, node.Name))
+			return declaration, true, true
+		}
+		if node.Reference != nil && !node.Reference.Dispatch.Empty() {
+			owner := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Reference.Dispatch.Owner, context.module, ""))
+			return owner, node.Reference.Dispatch.Class, true
+		}
+		if node.Reference != nil && !node.Reference.Declaration.Empty() {
+			declaration := a.canonicalDeclarationIdentity(effectDeclarationIdentity(node.Reference.Declaration, context.module, node.Name))
+			return declaration, true, true
+		}
 		if node.Reference != nil && node.Reference.Owner != "" {
 			module := context.module
 			if node.Reference.Package != "" {
@@ -1248,6 +1402,12 @@ func (a *analyzer) expressionDeclarationIdentity(expression ir.Expression, conte
 	}
 	if expression == nil || expression.ExprType().Name == "" {
 		return declarationIdentity{}, false, false
+	}
+	if !expression.ExprType().Declaration.Empty() {
+		identity := a.canonicalDeclarationIdentity(effectDeclarationIdentity(expression.ExprType().Declaration, context.module, expression.ExprType().Name))
+		if a.declarations[identity] {
+			return identity, false, true
+		}
 	}
 	identity := a.declarationIdentityInNamespace(context.module, context.namespace, expression.ExprType().Name)
 	if !a.declarations[identity] {
