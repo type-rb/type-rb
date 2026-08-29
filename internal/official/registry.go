@@ -189,6 +189,7 @@ func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 				Targets:      manifestTargets(descriptor.Targets),
 				TypeProvider: descriptor.TypeProvider,
 				JSX:          semanticJSX(descriptor.SemanticProvider),
+				Capability:   descriptor.ProjectProvider != "",
 				Symbols:      semanticSymbols(descriptor.SemanticProvider),
 			},
 		}

@@ -79,6 +79,7 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 		orm:          ormintegration.ManifestFrom(program.Extensions), execution: execution,
 		sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath,
 	}
+	g.nativeSyntax = program.NativeSyntax
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -874,6 +875,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Reference != nil && n.Reference.PackageRoot {
+			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
+		}
 		if receiver, ok := n.Receiver.(*ir.Identifier); ok && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.Alias != "" && receiver.Name == n.Reference.Alias && n.Reference.ExportKind == "function" {
 			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 		}
@@ -1194,6 +1198,9 @@ func rubyTimeRuntimeClass(name string) string {
 }
 
 func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
+	if reference != nil && reference.Package != "" && reference.Symbol != "" {
+		name = reference.Symbol
+	}
 	if g.modulePath == "trb/std/time/index" || reference != nil && reference.Package == "trb/std/time/index" {
 		return rubyTimeRuntimeClass(name)
 	}

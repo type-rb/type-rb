@@ -15,11 +15,12 @@ import (
 )
 
 type Parser struct {
-	source        []byte
-	tokens        []token.Token
-	pos           int
-	diags         []diagnostic.Diagnostic
-	nativeIslands []ast.NativeIsland
+	source         []byte
+	tokens         []token.Token
+	pos            int
+	statementDepth int
+	diags          []diagnostic.Diagnostic
+	nativeIslands  []ast.NativeIsland
 }
 
 func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
@@ -49,6 +50,8 @@ func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
 }
 
 func (p *Parser) parseStatements(stop map[string]bool) []ast.Statement {
+	p.statementDepth++
+	defer func() { p.statementDepth-- }()
 	var statements []ast.Statement
 	for !p.atEOF() {
 		p.skipSeparators()
@@ -116,6 +119,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseLoopControl(word)
 	case "import":
 		return p.parseImport()
+	case "activate":
+		if p.statementDepth == 1 {
+			start, end, _, _ := p.logicalLine(p.pos)
+			line := p.codeTokens(start, end)
+			if len(line) > 1 && (line[1].Kind == token.Identifier || line[1].Kind == token.String) {
+				return p.parseActivate()
+			}
+		}
 	}
 
 	start, end, next, comment := p.logicalLine(p.pos)
@@ -1875,20 +1886,40 @@ func (p *Parser) parseLoopControl(keyword string) ast.Statement {
 func (p *Parser) parseImport() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
-	n := &ast.ImportStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	n := &ast.ImportStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}, SymbolAliases: map[string]string{}}
 	if len(line) > 1 && line[1].Lexeme == "{" {
 		close := matchingIndex(line, 1, "{", "}")
 		if close > 1 {
 			for _, part := range splitTopLevel(line[2:close], ",") {
-				if len(part) > 0 {
-					n.Symbols = append(n.Symbols, part[0].Lexeme)
+				if len(part) == 0 {
+					continue
 				}
+				if part[0].Kind != token.Identifier {
+					p.errorAt(spanOf(part), "imported declaration name must be an identifier")
+					continue
+				}
+				name := part[0].Lexeme
+				n.Symbols = append(n.Symbols, name)
+				switch {
+				case len(part) == 1:
+				case len(part) == 3 && part[1].Lexeme == "as" && part[2].Kind == token.Identifier:
+					n.SymbolAliases[name] = part[2].Lexeme
+				default:
+					p.errorAt(spanOf(part), "named import must be a declaration name or name as alias")
+				}
+			}
+			if len(n.Symbols) == 0 {
+				p.errorAt(n.SourceSpan, "named import requires at least one declaration")
 			}
 			if close+2 < len(line) && line[close+1].Lexeme == "from" {
 				pathTokens := line[close+2:]
 				n.Path = importPath(pathTokens)
 				n.PathSpan = spanOf(pathTokens)
+			} else {
+				p.errorAt(n.SourceSpan, "named import requires from followed by a path")
 			}
+		} else {
+			p.errorAt(n.SourceSpan, "named import requires at least one declaration")
 		}
 	} else if len(line) > 1 {
 		aliasAt := -1
@@ -1911,6 +1942,22 @@ func (p *Parser) parseImport() ast.Statement {
 	}
 	if n.Path == "" {
 		p.errorAt(n.SourceSpan, "invalid import declaration")
+	}
+	p.pos = next
+	return n
+}
+
+func (p *Parser) parseActivate() ast.Statement {
+	start, end, next, comment := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	n := &ast.ActivateStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	if len(line) > 1 {
+		pathTokens := line[1:]
+		n.Path = importPath(pathTokens)
+		n.PathSpan = spanOf(pathTokens)
+	}
+	if n.Path == "" {
+		p.errorAt(n.SourceSpan, "invalid activation declaration")
 	}
 	p.pos = next
 	return n

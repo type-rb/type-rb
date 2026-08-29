@@ -738,6 +738,8 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 		switch imported.SymbolKinds[name] {
 		case "class", "record", "enum", "type_alias", "newtype", "enum_alias", "interface":
 			kind = CompletionType
+		case "module":
+			kind = CompletionModule
 		}
 		typ := imported.SymbolTypes[name]
 		if typ.Kind == "" {
@@ -816,7 +818,12 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 
 	for _, name := range imported.Symbols {
 		if symbol, exists := byName[name]; exists {
-			visible[name] = symbol
+			localName := name
+			if alias := imported.SymbolAliases[name]; alias != "" {
+				localName = alias
+				symbol.Name = alias
+			}
+			visible[localName] = symbol
 		}
 	}
 }

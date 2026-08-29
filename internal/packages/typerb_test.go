@@ -114,7 +114,7 @@ func TestResolveTypeRBPackageExposesFixedRubyDeclarationProvider(t *testing.T) {
 		Name: "github.com/acme/pagy", Version: "0.1.0", Modes: []string{"ruby"},
 		NativeDependencies:   map[string]map[string]string{"ruby": {"pagy": "43.6.1"}},
 		DeclarationProviders: map[string]string{"ruby": "declarations.json"},
-	}, "import trb/platform/ruby/native\n\nrequire \"pagy\"\n")
+	}, "activate trb/platform/ruby/native\n\nrequire \"pagy\"\n")
 	providerPath := filepath.Join(packageRoot, "declarations.json")
 	if err := os.WriteFile(providerPath, []byte(`{"protocolVersion":3,"provider":"github.com/acme/pagy"}`), 0o644); err != nil {
 		t.Fatal(err)

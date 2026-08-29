@@ -115,6 +115,7 @@ func (a *Analyzer) parseUnit(unit SourceUnit, options Options, initial bool) (*a
 
 	program, diagnostics := parse(sourceUnitContents(unit))
 	configureProgram(program, options, unit.ModulePath, unit.Package)
+	program.CompilerGeneratedStart = compilerGeneratedStart(unit)
 	normalizeRubyNativeParameterSyntax(program, options.Mode, aliases)
 	if initial {
 		if unit.MainReplacement != "" {

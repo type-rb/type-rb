@@ -79,8 +79,12 @@ func register(name string, implementation provider) {
 
 func Analyze(context Context) (Analysis, []Issue, error) {
 	activeModules := map[string]bool{}
-	for _, source := range context.Sources {
-		activeModules[source.ModulePath] = true
+	for _, resolution := range context.Resolutions {
+		for _, imported := range resolution.Capabilities {
+			if imported != nil {
+				activeModules[imported.RuntimePath()] = true
+			}
+		}
 	}
 
 	packageNames := official.Names()

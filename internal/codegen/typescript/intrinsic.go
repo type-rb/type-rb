@@ -1,6 +1,7 @@
 package typescript
 
 import (
+	pathpkg "path"
 	"strconv"
 	"strings"
 
@@ -42,7 +43,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	unicodeAlias := "unicode"
 	pathAlias := "path"
 	reference := expressionReference(call.Callee)
-	if reference != nil && reference.Alias != "" {
+	compilerRootRuntime := reference != nil && (reference.Package == "trb/std/path/index" || reference.Package == "trb/std/unicode/index")
+	if compilerRootRuntime {
+		pathAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
+		unicodeAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
+	}
+	if reference != nil && reference.Alias != "" && !compilerRootRuntime {
 		unicodeAlias = reference.Alias
 		pathAlias = reference.Alias
 	}

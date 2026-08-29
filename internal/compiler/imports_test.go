@@ -21,9 +21,9 @@ const portableMain = `import trb/std/io
 import trb/std/strings
 
 def main()
-  message := strings.uppercase("Hello, TypeRB")
+  message := Strings.uppercase("Hello, TypeRB")
   puts(1 + 2)
-  io.puts(message)
+  IO.puts(message)
   return
 end
 `
@@ -93,7 +93,7 @@ def receiver_text(): String
 end
 
 def package_text(): String
-	return numbers.to_string(123)
+	return Numbers.to_string(123)
 end
 
 def float_text(): String
@@ -101,7 +101,7 @@ def float_text(): String
 end
 
 def package_float_text(): String
-	return numbers.float_to_string(0.25)
+	return Numbers.float_to_string(0.25)
 end
 
 def integer_as_float(): Float
@@ -181,7 +181,7 @@ def integer_absolute(): Integer
 end
 
 def package_integer_absolute(): Integer
-	return numbers.absolute(-4)
+	return Numbers.absolute(-4)
 end
 
 def integer_bounds(): Integer
@@ -209,7 +209,7 @@ def boolean_text(): String
 end
 
 def package_boolean_text(): String
-	return booleans.to_string(false)
+	return Booleans.to_string(false)
 end
 `)
 	wants := map[string][]string{
@@ -291,7 +291,7 @@ func TestPortableMathPackageLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/math
 
 def calculate(): Float
-	return math.sqrt(9) + math.exp(0.0) + math.log(1.0) + math.log2(8.0) + math.log10(100.0)
+	return Math.sqrt(9) + Math.exp(0.0) + Math.log(1.0) + Math.log2(8.0) + Math.log10(100.0)
 end
 `)
 	wants := map[string][]string{
@@ -315,7 +315,7 @@ end
 		source string
 		want   string
 	}{
-		{source: "import trb/std/math\n\ndef bad(): Float\n\treturn math.sqrt(\"nine\")\nend\n", want: "argument 1 to sqrt() has type String, expected Float"},
+		{source: "import trb/std/math\n\ndef bad(): Float\n\treturn Math.sqrt(\"nine\")\nend\n", want: "argument 1 to sqrt() has type String, expected Float"},
 		{source: "def bad(): Integer\n\treturn 1.5.clamp(0, 1)\nend\n", want: "type Float has no member clamp"},
 	}
 	for _, test := range invalid {
@@ -508,7 +508,7 @@ func TestPortableStringTrimmingLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/strings
 
 def package_strip(value: String): String
-	return strings.strip(value)
+	return Strings.strip(value)
 end
 
 def receiver_strip(value: String): String
@@ -549,7 +549,7 @@ func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
 	}{
 		{
 			name:   "package argument type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn strings.strip(1)\nend\n",
+			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.strip(1)\nend\n",
 			want:   "argument 1 to strip() has type Integer, expected String",
 		},
 		{
@@ -571,7 +571,7 @@ func TestPortableStringReplacementLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/strings
 
 def package_replace(value: String, pattern: String, replacement: String): String
-	return strings.replace_all(value, pattern, replacement)
+	return Strings.replace_all(value, pattern, replacement)
 end
 
 def receiver_replace(value: String, pattern: String, replacement: String): String
@@ -604,7 +604,7 @@ func TestPortableStringReplacementDiagnosticsAreModeIndependent(t *testing.T) {
 	}{
 		{
 			name:   "package replacement type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn strings.replace_all(\"value\", \"v\", 1)\nend\n",
+			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.replace_all(\"value\", \"v\", 1)\nend\n",
 			want:   "argument 3 to replace_all() has type Integer, expected String",
 		},
 		{
@@ -626,7 +626,7 @@ func TestPortableBytesPackageAndReceiverMethodsLowerAcrossBackends(t *testing.T)
 	source := []byte(`import trb/std/bytes
 
 def joined(): Bytes
-	return bytes.concat(bytes.from_string("A"), "😀".to_bytes())
+	return Bytes.concat(Bytes.from_string("A"), "😀".to_bytes())
 end
 
 def byte_length(): Integer
@@ -698,7 +698,7 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
-		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn bytes.at(bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
+		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn Bytes.at(Bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
 		{source: "def bad(): Bytes\n\treturn \"A\"\nend\n", want: "return type is String, expected Bytes"},
 		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().missing()\nend\n", want: "type Bytes has no member missing"},
 		{source: "def bad(): Bytes\n\treturn Bytes.new([])\nend\n", want: "type Bytes has no member new"},
@@ -718,14 +718,14 @@ func TestPortableHexPackageLowersAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { HexDecodeError, decode, encode } from trb/std/encoding/hex
+import { Hex, HexDecodeError } from trb/std/encoding/hex
 
 def encoded(value: Bytes): String
-	return encode(value)
+	return Hex.encode(value)
 end
 
 def decoded(value: String): Result<Bytes, HexDecodeError>
-	return decode(value)
+	return Hex.decode(value)
 end
 `),
 	}
@@ -791,7 +791,7 @@ end
 
 func TestPortableHexDiagnosticsAreModeIndependent(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { encode } from trb/std/encoding/hex\ndef bad(): String\n\treturn encode(\"41\")\nend\n"), mode)
+		_, err := Compile("bad.trb", []byte("import { Hex } from trb/std/encoding/hex\ndef bad(): String\n\treturn Hex.encode(\"41\")\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to encode() has type String, expected Bytes") {
 			t.Fatalf("%s: expected portable hex argument diagnostic, got %v", mode, err)
 		}
@@ -806,7 +806,7 @@ func TestCompilerOwnedIntrinsicOnlyNamespaceImportOmitsUnusedRuntimeImport(t *te
 		Source: []byte(`import trb/std/encoding/hex
 
 def encoded(value: Bytes): String
-	return hex.encode(value)
+	return Hex.encode(value)
 end
 `),
 	}
@@ -839,16 +839,16 @@ func TestCompilerOwnedNamespaceImportsRetainRequiredRuntimeAcrossBackends(t *tes
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import trb/std/encoding/hex
-import trb/std/filesystem
+		Source: []byte(`import { Hex, HexDecodeError } from trb/std/encoding/hex
+import { FileError, FileSystem } from trb/std/filesystem
 import { Result } from trb/std/result
 
 def decoded(value: String): Result<Bytes, HexDecodeError>
-	return hex.decode(value)
+	return Hex.decode(value)
 end
 
 def loaded(path: String): Result<String, FileError>
-	return filesystem.read_text(path)
+	return FileSystem.read_text(path)
 end
 `),
 	}
@@ -866,11 +866,11 @@ end
 			`read_text(path)`,
 		},
 		"typescript": {
-			`import * as hex from "./trb/std/encoding/hex/index.ts";`,
-			`import * as filesystem from "./trb/std/filesystem/index.ts";`,
-			`hex.HexDecodeError`,
-			`hex.HexDecodeErrorKind.InvalidCharacter`,
-			`filesystem.read_text(path)`,
+			`import * as __trb_hex from "./trb/std/encoding/hex/index.ts";`,
+			`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`,
+			`HexDecodeError`,
+			`HexDecodeErrorKind.InvalidCharacter`,
+			`__trb_filesystem.read_text(path)`,
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -907,10 +907,10 @@ func TestRubyNamespaceImportedFunctionThatCollidesWithKernelStaysCallable(t *tes
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import trb/std/hash
+		Source: []byte(`import trb/std/digest
 
 def digest(value: Bytes): Bytes
-	return hash.sha512(value)
+	return Digest.sha512(value)
 end
 `),
 	}}, Options{Mode: "ruby", RubyLoader: "require_relative"})
@@ -1111,18 +1111,18 @@ func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { Base64DecodeError, decode, encode, url_decode, url_encode } from trb/std/encoding/base64
+import { Base64, Base64DecodeError } from trb/std/encoding/base64
 
 def encoded(value: Bytes): String
-	return encode(value) + url_encode(value)
+	return Base64.encode(value) + Base64.url_encode(value)
 end
 
 def decoded(value: String): Result<Bytes, Base64DecodeError>
-	return decode(value)
+	return Base64.decode(value)
 end
 
 def url_decoded(value: String): Result<Bytes, Base64DecodeError>
-	return url_decode(value)
+	return Base64.url_decode(value)
 end
 `),
 	}
@@ -1192,7 +1192,7 @@ end
 
 func TestPortableBase64DiagnosticsAreModeIndependent(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { encode } from trb/std/encoding/base64\ndef bad(): String\n\treturn encode(\"QQ==\")\nend\n"), mode)
+		_, err := Compile("bad.trb", []byte("import { Base64 } from trb/std/encoding/base64\ndef bad(): String\n\treturn Base64.encode(\"QQ==\")\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to encode() has type String, expected Bytes") {
 			t.Fatalf("%s: expected portable base64 argument diagnostic, got %v", mode, err)
 		}
@@ -1204,22 +1204,22 @@ func TestPortableHashPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { md5, sha1, sha256, sha512 } from trb/std/hash
+		Source: []byte(`import trb/std/digest
 
 def digest_md5(value: Bytes): Bytes
-	return md5(value)
+	return Digest.md5(value)
 end
 
 def digest_sha1(value: Bytes): Bytes
-	return sha1(value)
+	return Digest.sha1(value)
 end
 
 def digest256(value: Bytes): Bytes
-	return sha256(value)
+	return Digest.sha256(value)
 end
 
 def digest512(value: Bytes): Bytes
-	return sha512(value)
+	return Digest.sha512(value)
 end
 `),
 	}
@@ -1255,7 +1255,7 @@ end
 			switch artifact.IR.ModulePath {
 			case "main":
 				consumer = artifact
-			case "trb/std/hash/index":
+			case "trb/std/digest/index":
 				hashRuntime = artifact
 			}
 		}
@@ -1273,7 +1273,7 @@ end
 func TestPortableHashDiagnosticsAreModeIndependent(t *testing.T) {
 	for _, name := range []string{"md5", "sha1", "sha256", "sha512"} {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
-			source := "import { " + name + " } from trb/std/hash\ndef bad(): Bytes\n\treturn " + name + "(\"abc\")\nend\n"
+			source := "import trb/std/digest\ndef bad(): Bytes\n\treturn Digest." + name + "(\"abc\")\nend\n"
 			_, err := Compile("bad.trb", []byte(source), mode)
 			want := "argument 1 to " + name + "() has type String, expected Bytes"
 			if err == nil || !strings.Contains(err.Error(), want) {
@@ -1288,18 +1288,18 @@ func TestPortableHMACPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { equal, sha256, sha512 } from trb/std/hmac
+		Source: []byte(`import { HMAC } from trb/std/hmac
 
 def digest256(key: Bytes, message: Bytes): Bytes
-	return sha256(key, message)
+	return HMAC.sha256(key, message)
 end
 
 def digest512(key: Bytes, message: Bytes): Bytes
-	return sha512(key, message)
+	return HMAC.sha512(key, message)
 end
 
 def matches(left: Bytes, right: Bytes): Boolean
-	return equal(left, right)
+	return HMAC.equal(left, right)
 end
 `),
 	}
@@ -1347,7 +1347,7 @@ end
 
 func TestPortableHMACDiagnosticsAreModeIndependent(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { sha256 } from trb/std/hmac\ndef bad(): Bytes\n\treturn sha256(\"key\", \"message\".to_bytes())\nend\n"), mode)
+		_, err := Compile("bad.trb", []byte("import { HMAC } from trb/std/hmac\ndef bad(): Bytes\n\treturn HMAC.sha256(\"key\", \"message\".to_bytes())\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to sha256() has type String, expected Bytes") {
 			t.Fatalf("%s: expected portable hmac argument diagnostic, got %v", mode, err)
 		}
@@ -1359,10 +1359,10 @@ func TestPortableSecureComparePackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { equal } from trb/std/secure_compare
+		Source: []byte(`import { SecureCompare } from trb/std/secure_compare
 
 def matches(left: Bytes, right: Bytes): Boolean
-	return equal(left, right)
+	return SecureCompare.equal(left, right)
 end
 `),
 	}
@@ -1390,7 +1390,7 @@ end
 
 func TestPortableSecureCompareDiagnosticsAreModeIndependent(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { equal } from trb/std/secure_compare\ndef bad(): Boolean\n\treturn equal(\"left\", \"right\".to_bytes())\nend\n"), mode)
+		_, err := Compile("bad.trb", []byte("import { SecureCompare } from trb/std/secure_compare\ndef bad(): Boolean\n\treturn SecureCompare.equal(\"left\", \"right\".to_bytes())\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to equal() has type String, expected Bytes") {
 			t.Fatalf("%s: expected portable secure comparison diagnostic, got %v", mode, err)
 		}
@@ -1406,15 +1406,15 @@ func TestPortableRandomPackagesLowerAcrossBackends(t *testing.T) {
 import trb/std/secure_random
 
 def fraction(): Float
-	return random.float()
+	return Random.float()
 end
 
 def index(upper: Integer): Integer
-	return random.integer(upper)
+	return Random.integer(upper)
 end
 
 def token(length: Integer): Bytes
-	return secure_random.bytes(length)
+	return SecureRandom.bytes(length)
 end
 `),
 	}
@@ -1456,11 +1456,11 @@ end
 
 func TestPortableRandomDiagnosticsAreModeIndependent(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		_, err := Compile("bad.trb", []byte("import { integer } from trb/std/random\ndef bad(): Integer\n\treturn integer(1.5)\nend\n"), mode)
+		_, err := Compile("bad.trb", []byte("import { Random } from trb/std/random\ndef bad(): Integer\n\treturn Random.integer(1.5)\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to integer() has type Float, expected Integer") {
 			t.Fatalf("%s: expected portable random argument diagnostic, got %v", mode, err)
 		}
-		_, err = Compile("bad.trb", []byte("import { bytes } from trb/std/secure_random\ndef bad(): Bytes\n\treturn bytes(1.5)\nend\n"), mode)
+		_, err = Compile("bad.trb", []byte("import { SecureRandom } from trb/std/secure_random\ndef bad(): Bytes\n\treturn SecureRandom.bytes(1.5)\nend\n"), mode)
 		if err == nil || !strings.Contains(err.Error(), "argument 1 to bytes() has type Float, expected Integer") {
 			t.Fatalf("%s: expected portable secure random argument diagnostic, got %v", mode, err)
 		}
@@ -1471,28 +1471,28 @@ func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 	source := []byte(`import trb/std/string_builder
 
 def render(): String
-	mut builder := string_builder.new()
+	mut builder := StringBuilder.new()
 	builder.append("A")
-	string_builder.append_codepoint(builder, 128512)
+	StringBuilder.append_codepoint(builder, 128512)
 	builder.append_codepoint(33)
 	return builder.to_s()
 end
 
 def measured(): Integer
-	mut builder := string_builder.from_string("A😀")
+	mut builder := StringBuilder.from_string("A😀")
 	return builder.size()
 end
 
 def blank(): Boolean
-	builder := string_builder.new()
+	builder := StringBuilder.new()
 	return builder.empty?()
 end
 
 def reset(): String
-	mut builder := string_builder.from_string("old")
+	mut builder := StringBuilder.from_string("old")
 	builder.clear()
 	builder.append("new")
-	return string_builder.to_string(builder)
+	return StringBuilder.to_string(builder)
 end
 `)
 	wants := map[string][]string{
@@ -1556,17 +1556,17 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 	}{
 		{
 			name:   "receiver requires mut",
-			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := string_builder.new()\n\tbuilder.append(\"x\")\n\treturn\nend\n",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tbuilder.append(\"x\")\n\treturn\nend\n",
 			want:   "builder is immutable; declare it with mut to use append()",
 		},
 		{
 			name:   "package requires mut",
-			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := string_builder.new()\n\tstring_builder.clear(builder)\n\treturn\nend\n",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tStringBuilder.clear(builder)\n\treturn\nend\n",
 			want:   "builder is immutable; declare it with mut to use clear()",
 		},
 		{
 			name:   "append type",
-			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := string_builder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
+			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
 			want:   "argument 1 to append() has type Integer, expected String",
 		},
 	}
@@ -1874,7 +1874,7 @@ func TestGoStringWhitespaceImportDoesNotConflictWithUnicodePackage(t *testing.T)
 		Source: []byte(`import trb/std/unicode
 
 def blank?(value: String): Boolean
-	return value.strip().empty?() || unicode.whitespace(32)
+	return value.strip().empty?() || Unicode.whitespace(32)
 end
 `),
 	}}, Options{Mode: "go", GoModule: "example.com/unicode-import"})
@@ -2012,19 +2012,19 @@ func TestCompilerOwnedPortablePathPackageLowersAcrossBackends(t *testing.T) {
 		Source: []byte(`import trb/std/path
 
 def normalized(): String
-	return path.clean("a/./b/../c")
+	return Path.clean("a/./b/../c")
 end
 
 def joined(): String
-	return path.join("/srv/app", "../data")
+	return Path.join("/srv/app", "../data")
 end
 
 def inspected(): Boolean
-	return path.absolute("/srv/app") && path.base("/srv/app/main.trb") == "main.trb" && path.directory("/srv/app/main.trb") == "/srv/app"
+	return Path.absolute("/srv/app") && Path.base("/srv/app/main.trb") == "main.trb" && Path.directory("/srv/app/main.trb") == "/srv/app"
 end
 
 def parts(): Array<String>
-	return path.components("/srv/app/main.trb")
+	return Path.components("/srv/app/main.trb")
 end
 `),
 	}
@@ -2057,9 +2057,9 @@ end
 				`Path.components("/srv/app/main.trb")`,
 			},
 			"typescript": {
-				`import * as path from "./trb/std/path/index.ts";`,
-				`path.clean("a/./b/../c")`,
-				`path.components("/srv/app/main.trb")`,
+				`import * as __trb_path from "./trb/std/path/index.ts";`,
+				`__trb_path.clean("a/./b/../c")`,
+				`__trb_path.components("/srv/app/main.trb")`,
 			},
 		}[mode]
 		for _, want := range consumerWants {
@@ -2091,7 +2091,7 @@ end
 }
 
 func TestPortablePathDiagnosticsAreModeIndependent(t *testing.T) {
-	source := []byte("import trb/std/path\ndef bad(): String\n\treturn path.clean(1)\nend\n")
+	source := []byte("import trb/std/path\ndef bad(): String\n\treturn Path.clean(1)\nend\n")
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if _, err := Compile("bad.trb", source, mode); err == nil || !strings.Contains(err.Error(), "argument 1 to clean() has type Integer, expected String") {
 			t.Fatalf("%s did not reject invalid path argument: %v", mode, err)
@@ -2105,14 +2105,15 @@ func TestPortableURLComponentsLowerAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { PercentDecodeError, decode_component, encode_component } from trb/std/url
+import trb/std/url
+import { PercentDecodeError } from trb/std/url
 
 def encoded(value: String): String
-	return encode_component(value)
+	return URL.encode_component(value)
 end
 
 def decoded(value: String): Result<String, PercentDecodeError>
-	return decode_component(value)
+	return URL.decode_component(value)
 end
 `),
 	}
@@ -2178,8 +2179,8 @@ func TestPortableURLComponentDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
-		{source: "import { encode_component } from trb/std/url\ndef bad(): String\n\treturn encode_component(1)\nend\n", want: "argument 1 to encode_component() has type Integer, expected String"},
-		{source: "import { decode_component } from trb/std/url\ndef bad()\n\tdecode_component(1)\n\treturn\nend\n", want: "argument 1 to decode_component() has type Integer, expected String"},
+		{source: "import trb/std/url\ndef bad(): String\n\treturn URL.encode_component(1)\nend\n", want: "argument 1 to encode_component() has type Integer, expected String"},
+		{source: "import trb/std/url\ndef bad()\n\tURL.decode_component(1)\n\treturn\nend\n", want: "argument 1 to decode_component() has type Integer, expected String"},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
@@ -2196,14 +2197,15 @@ func TestPortableURLQueryCompilesFromSharedSourceAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { PercentDecodeError, QueryParameter, build_query, parse_query } from trb/std/url
+import trb/std/url
+import { PercentDecodeError, QueryParameter } from trb/std/url
 
 def parsed(value: String): Result<Array<QueryParameter>, PercentDecodeError>
-	return parse_query(value)
+	return URL.parse_query(value)
 end
 
 def built(parameters: Array<QueryParameter>): String
-	return build_query(parameters)
+	return URL.build_query(parameters)
 end
 `),
 	}
@@ -2257,8 +2259,8 @@ func TestPortableURLQueryDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
-		{source: "import { parse_query } from trb/std/url\ndef bad()\n\tparse_query(1)\n\treturn\nend\n", want: "argument 1 to parse_query() has type Integer, expected String"},
-		{source: "import { build_query } from trb/std/url\ndef bad(): String\n\treturn build_query([1])\nend\n", want: "argument 1 to build_query() has type Array<Integer>, expected Array<QueryParameter>"},
+		{source: "import trb/std/url\ndef bad()\n\tURL.parse_query(1)\n\treturn\nend\n", want: "argument 1 to parse_query() has type Integer, expected String"},
+		{source: "import trb/std/url\ndef bad(): String\n\treturn URL.build_query([1])\nend\n", want: "argument 1 to build_query() has type Array<Integer>, expected Array<QueryParameter>"},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
@@ -2277,15 +2279,15 @@ func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T)
 		Source: []byte(`import trb/std/unicode
 
 def classified(): Boolean
-	return unicode.letter(65) && unicode.letter(12354) && unicode.digit(1632) && unicode.uppercase(65) && unicode.lowercase(97) && unicode.whitespace(12288)
+	return Unicode.letter(65) && Unicode.letter(12354) && Unicode.digit(1632) && Unicode.uppercase(65) && Unicode.lowercase(97) && Unicode.whitespace(12288)
 end
 
 def identifiers(): Boolean
-	return unicode.identifier_start(64) && unicode.identifier_start(12354) && unicode.identifier_part(1632)
+	return Unicode.identifier_start(64) && Unicode.identifier_start(12354) && Unicode.identifier_part(1632)
 end
 
 def scalar(): String
-	return unicode.from_codepoint(128512)
+	return Unicode.from_codepoint(128512)
 end
 
 def string_methods(): Boolean
@@ -2324,9 +2326,9 @@ end
 				`"A😀".codepoints`,
 			},
 			"typescript": {
-				`import * as unicode from "./trb/std/unicode/index.ts";`,
-				`unicode.Unicode.letter(65)`,
-				`unicode.Unicode.from_codepoint(128512)`,
+				`import * as __trb_unicode from "./trb/std/unicode/index.ts";`,
+				`__trb_unicode.Unicode.letter(65)`,
+				`__trb_unicode.Unicode.from_codepoint(128512)`,
 				`Array.from("A😀", (value): number => value.codePointAt(0)!)`,
 			},
 		}[mode]
@@ -2349,7 +2351,7 @@ end
 }
 
 func TestUnicodePackageDiagnosticsAreModeIndependent(t *testing.T) {
-	wrongType := []byte("import trb/std/unicode\ndef bad(): Boolean\n\treturn unicode.letter(\"A\")\nend\n")
+	wrongType := []byte("import trb/std/unicode\ndef bad(): Boolean\n\treturn Unicode.letter(\"A\")\nend\n")
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if _, err := Compile("bad.trb", wrongType, mode); err == nil || !strings.Contains(err.Error(), "argument 1 to letter() has type String, expected Integer") {
 			t.Fatalf("%s: expected Unicode argument diagnostic, got %v", mode, err)
@@ -2362,21 +2364,21 @@ func TestCompilerOwnedUnicodeSupportsNamedImportsAcrossBackends(t *testing.T) {
 		Filename:   "/project/named.trb",
 		ModulePath: "named",
 		Package:    "named",
-		Source: []byte(`import { letter, from_codepoint } from trb/std/unicode
+		Source: []byte(`import { Unicode } from trb/std/unicode
 
 def accepted(): Boolean
-	return letter(12354)
+	return Unicode.letter(12354)
 end
 
 def character(): String
-	return from_codepoint(128512)
+	return Unicode.from_codepoint(128512)
 end
 `),
 	}
 	wants := map[string][]string{
-		"go":         {`import "example.com/unicode-named/trb/std/unicode"`, `return unicode.Letter(12354)`, `return unicode.FromCodepoint(128512)`},
-		"ruby":       {`require_relative "./trb/std/unicode/index"`, `return letter(12354)`, `return from_codepoint(128512)`},
-		"typescript": {`import { from_codepoint, letter } from "./trb/std/unicode/index.ts";`, `return letter(12354);`, `return from_codepoint(128512);`},
+		"go":         {`import "example.com/unicode-named/trb/std/unicode"`, `return unicode.UnicodeLetter(12354)`, `return unicode.UnicodeFromCodepoint(128512)`},
+		"ruby":       {`require_relative "./trb/std/unicode/index"`, `return Unicode.letter(12354)`, `return Unicode.from_codepoint(128512)`},
+		"typescript": {`import * as __trb_unicode from "./trb/std/unicode/index.ts";`, `return __trb_unicode.Unicode.letter(12354);`, `return __trb_unicode.Unicode.from_codepoint(128512);`},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/unicode-named", RubyLoader: "require_relative"})
@@ -2535,7 +2537,7 @@ def parsed(value: String): Result<Integer, NumberParseError>
 end
 
 def package_parsed(value: String): Result<Integer, NumberParseError>
-	return numbers.try_parse_integer(value)
+	return Numbers.try_parse_integer(value)
 end
 
 def parsed_float(value: String): Result<Float, NumberParseError>
@@ -2543,7 +2545,7 @@ def parsed_float(value: String): Result<Float, NumberParseError>
 end
 
 def package_parsed_float(value: String): Result<Float, NumberParseError>
-	return numbers.try_parse_float(value)
+	return Numbers.try_parse_float(value)
 end
 
 def float_value(value: String): Float
@@ -2551,7 +2553,7 @@ def float_value(value: String): Float
 end
 
 def package_float_value(value: String): Float
-	return numbers.parse_float(value)
+	return Numbers.parse_float(value)
 end
 
 def string_value(value: String, index: Integer): Result<String, IndexLookupError>
@@ -2559,7 +2561,7 @@ def string_value(value: String, index: Integer): Result<String, IndexLookupError
 end
 
 def package_string_value(value: String, index: Integer): Result<String, IndexLookupError>
-	return strings.try_fetch(value, index)
+	return Strings.try_fetch(value, index)
 end
 
 def characters(value: String): Array<String>
@@ -2567,7 +2569,7 @@ def characters(value: String): Array<String>
 end
 
 def package_characters(value: String): Array<String>
-	return strings.characters(value)
+	return Strings.characters(value)
 end
 
 def reversed(value: String): String
@@ -2575,7 +2577,7 @@ def reversed(value: String): String
 end
 
 def package_reversed(value: String): String
-	return strings.reverse(value)
+	return Strings.reverse(value)
 end
 
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
@@ -2921,6 +2923,34 @@ end
 	}
 }
 
+func TestTypeScriptDeduplicatesRootRuntimeAcrossImportsFromSamePackage(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/filesystem
+import { FileError } from trb/std/filesystem
+import { Result } from trb/std/result
+
+def load(path: String): Result<String, FileError>
+	return FileSystem.read_text(path)
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript"})
+	if err != nil {
+		t.Fatalf("compile root and support type imports: %v", err)
+	}
+	consumer := findArtifactByModule(artifacts, "main")
+	if consumer == nil {
+		t.Fatal("missing consumer artifact")
+	}
+	const runtimeImport = `import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`
+	if count := strings.Count(string(consumer.Output), runtimeImport); count != 1 {
+		t.Fatalf("filesystem runtime import count = %d, want 1:\n%s", count, consumer.Output)
+	}
+}
+
 func TestStructuredErrorTypeNamesStillRequireExplicitImports(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
@@ -2941,11 +2971,11 @@ func TestPortableFilesystemPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { FileError, read_text } from trb/std/filesystem
+		Source: []byte(`import { FileSystem, FileError } from trb/std/filesystem
 import { Result } from trb/std/result
 
 def load(path: String): Result<String, FileError>
-	return read_text(path)
+	return FileSystem.read_text(path)
 end
 `),
 	}
@@ -2974,7 +3004,7 @@ end
 		consumerWants := map[string][]string{
 			"go":         {`"example.com/filesystem-app/trb/std/filesystem"`, "filesystem.ReadText(path)"},
 			"ruby":       {`require_relative "./trb/std/filesystem/index"`, "read_text(path)"},
-			"typescript": {`import { read_text } from "./trb/std/filesystem/index.ts";`, `import type { FileError } from "./trb/std/filesystem/index.ts";`, "read_text(path)"},
+			"typescript": {`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`, `import type { FileError } from "./trb/std/filesystem/index.ts";`, "__trb_filesystem.read_text(path)"},
 		}[mode]
 		for _, want := range consumerWants {
 			if output := string(consumer.Output); !strings.Contains(output, want) {
@@ -3003,12 +3033,12 @@ func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
 	}{
 		{
 			name:   "read path",
-			source: "import { read_text } from trb/std/filesystem\nvalue := read_text(1)\n",
+			source: "import { FileSystem } from trb/std/filesystem\nvalue := FileSystem.read_text(1)\n",
 			want:   "argument 1 to read_text() has type Integer, expected String",
 		},
 		{
 			name:   "write bytes value",
-			source: "import { write_bytes } from trb/std/filesystem\nvalue := write_bytes(\"output.bin\", \"not bytes\")\n",
+			source: "import { FileSystem } from trb/std/filesystem\nvalue := FileSystem.write_bytes(\"output.bin\", \"not bytes\")\n",
 			want:   "argument 2 to write_bytes() has type String, expected Bytes",
 		},
 		{
@@ -3044,11 +3074,11 @@ func TestPortableProcessPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { ProcessError, ProcessResult, run } from trb/std/process
+		Source: []byte(`import { Process, ProcessError, ProcessResult } from trb/std/process
 import { Result } from trb/std/result
 
 def execute(command: String, args: Array<String>): Result<ProcessResult, ProcessError>
-	return run(command, args)
+	return Process.run(command, args)
 end
 `),
 	}
@@ -3103,11 +3133,11 @@ func TestPortableProcessPackageDiagnosticsAcrossBackends(t *testing.T) {
 		want       string
 	}{
 		{
-			source: "import { run } from trb/std/process\nvalue := run(\"tool\", [1])\n",
+			source: "import { Process } from trb/std/process\nvalue := Process.run(\"tool\", [1])\n",
 			want:   "argument 2 to run() has type Array<Integer>, expected Array<String>",
 		},
 		{
-			source:     "import trb/internal/process\nvalue := process.argv()\n",
+			source:     "import trb/internal/process\nvalue := Process.argv()\n",
 			modulePath: "trb/std/user_source_cannot_import_internal_process",
 			want:       "package trb/internal/process is internal to the TypeRB standard library",
 		},
@@ -3136,16 +3166,16 @@ func TestPortableJSONPackagesCompileAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { JsonError, JsonValue, parse } from trb/std/json
+		Source: []byte(`import { JSON, JsonError, JsonValue } from trb/std/json
 import trb/std/jsonc
 import { Result } from trb/std/result
 
 def strict(source: String): Result<JsonValue, JsonError>
-	return parse(source)
+	return JSON.parse(source)
 end
 
 def comments(source: String): Result<JsonValue, JsonError>
-	return jsonc.parse(source)
+	return JSONC.parse(source)
 end
 `),
 	}
@@ -3155,12 +3185,23 @@ end
 			t.Fatalf("%s rejected the JSON packages: %v", mode, err)
 		}
 		modules := map[string]bool{}
+		var consumerOutput string
 		for _, artifact := range artifacts {
 			modules[artifact.IR.ModulePath] = true
+			if artifact.IR.ModulePath == "main" {
+				consumerOutput = string(artifact.Output)
+			}
 		}
 		for _, module := range []string{"main", "trb/std/json/index", "trb/std/jsonc/index", "trb/std/result/index"} {
 			if !modules[module] {
 				t.Fatalf("%s omitted compiler-owned module %s: %#v", mode, module, artifacts)
+			}
+		}
+		if mode == "typescript" {
+			for _, want := range []string{"__trb_json.parse(source)", "__trb_jsonc.parse(source)"} {
+				if !strings.Contains(consumerOutput, want) {
+					t.Fatalf("TypeScript JSON root call is missing %q:\n%s", want, consumerOutput)
+				}
 			}
 		}
 	}
@@ -3175,12 +3216,12 @@ func TestPortableJSONPackagesReportDiagnosticsAcrossBackends(t *testing.T) {
 	}{
 		{
 			name:   "parse source",
-			source: "import { parse } from trb/std/json\nvalue := parse(1)\n",
+			source: "import { JSON } from trb/std/json\nvalue := JSON.parse(1)\n",
 			want:   "argument 1 to parse() has type Integer, expected String",
 		},
 		{
 			name:   "stringify value",
-			source: "import { stringify } from trb/std/json\nvalue := stringify(\"not JSON\")\n",
+			source: "import { JSON } from trb/std/json\nvalue := JSON.stringify(\"not JSON\")\n",
 			want:   "argument 1 to stringify() has type String, expected JsonValue",
 		},
 		{
@@ -3243,15 +3284,15 @@ end
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { User } from contracts/user
-import { JsonError, decode, encode } from trb/std/json
+import { JSON, JsonError } from trb/std/json
 import { Result } from trb/std/result
 
 def decode_user(source: String): Result<User, JsonError>
-	return decode<User>(source)
+	return JSON.decode<User>(source)
 end
 
 def encode_user(user: User): Result<String, JsonError>
-	return encode(user)
+	return JSON.encode(user)
 end
 `),
 	}
@@ -3488,22 +3529,22 @@ func TestTypedJSONRecordCodecsReportDiagnosticsAcrossBackends(t *testing.T) {
 	}{
 		{
 			name:   "decode requires a type",
-			source: "import { decode } from trb/std/json\nvalue := decode(\"{}\")\n",
+			source: "import { JSON } from trb/std/json\nvalue := JSON.decode(\"{}\")\n",
 			want:   "cannot infer T for decode()",
 		},
 		{
 			name:   "class is not a record codec",
-			source: "import { decode } from trb/std/json\nclass User; end\nvalue := decode<User>(\"{}\")\n",
+			source: "import { JSON } from trb/std/json\nclass User; end\nvalue := JSON.decode<User>(\"{}\")\n",
 			want:   "JSON codec type User must be a record or JSON-compatible built-in type",
 		},
 		{
 			name:   "unsupported record field",
-			source: "import { decode } from trb/std/json\nrecord Document; payload: Bytes; end\nvalue := decode<Document>(\"{}\")\n",
+			source: "import { JSON } from trb/std/json\nrecord Document; payload: Bytes; end\nvalue := JSON.decode<Document>(\"{}\")\n",
 			want:   "JSON codec type Bytes is not supported",
 		},
 		{
 			name:   "recursive record",
-			source: "import { decode } from trb/std/json\nrecord Node; child: Node?; end\nvalue := decode<Node>(\"{}\")\n",
+			source: "import { JSON } from trb/std/json\nrecord Node; child: Node?; end\nvalue := JSON.decode<Node>(\"{}\")\n",
 			want:   "recursive JSON codec record Node is not supported yet",
 		},
 	}
@@ -3555,7 +3596,7 @@ func TestGoPutsDereferencesNullableValues(t *testing.T) {
 }
 
 func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
-	source := []byte("import trb/std/strings\n\ndef count(): Integer\n  return strings.length(\"😀a\")\nend\n")
+	source := []byte("import trb/std/strings\n\ndef count(): Integer\n  return Strings.length(\"😀a\")\nend\n")
 	tests := []struct {
 		mode string
 		want string
@@ -3576,7 +3617,7 @@ func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
 }
 
 func TestPlatformPackageIsModeChecked(t *testing.T) {
-	source := []byte("import trb/platform/go/context\n\ndef main()\n  context.background()\n  return\nend\n")
+	source := []byte("import trb/platform/go/context\n\ndef main()\n  Context.background()\n  return\nend\n")
 	if _, err := Compile("main.trb", source, "typescript"); err == nil || !strings.Contains(err.Error(), "does not support mode typescript") {
 		t.Fatalf("expected platform mode diagnostic, got %v", err)
 	}
@@ -3590,11 +3631,11 @@ func TestPlatformPackageIsModeChecked(t *testing.T) {
 }
 
 func TestStandardPackageSignaturesAndReservedPathsAreChecked(t *testing.T) {
-	anyType := []byte("import trb/std/io\n\ndef main()\n  io.puts(1)\n  io.puts([1, 2])\n  return\nend\n")
+	anyType := []byte("import trb/std/io\n\ndef main()\n  IO.puts(1)\n  IO.puts([1, 2])\n  return\nend\n")
 	if _, err := Compile("main.trb", anyType, "go"); err != nil {
 		t.Fatalf("puts should accept any TypeRB value: %v", err)
 	}
-	wrongArity := []byte("import trb/std/io\n\ndef main()\n  io.puts()\n  return\nend\n")
+	wrongArity := []byte("import trb/std/io\n\ndef main()\n  IO.puts()\n  return\nend\n")
 	if _, err := Compile("main.trb", wrongArity, "go"); err == nil || !strings.Contains(err.Error(), "expects 1..1 arguments") {
 		t.Fatalf("expected standard signature diagnostic, got %v", err)
 	}
@@ -3629,10 +3670,10 @@ func TestPortableArrayOutputUsesOneLineAcrossBackends(t *testing.T) {
 
 func TestRubyNativeSyntaxRequiresExplicitPlatformImport(t *testing.T) {
 	source := []byte("class Post < ApplicationRecord\n  belongs_to :author\nend\n")
-	if _, err := Compile("post.trb", source, "ruby"); err == nil || !strings.Contains(err.Error(), "requires import trb/platform/ruby") {
+	if _, err := Compile("post.trb", source, "ruby"); err == nil || !strings.Contains(err.Error(), "requires activate trb/platform/ruby") {
 		t.Fatalf("expected explicit Ruby platform import diagnostic, got %v", err)
 	}
-	withImport := append([]byte("import trb/platform/ruby/rails\n\n"), source...)
+	withImport := append([]byte("activate trb/platform/ruby/rails\n\n"), source...)
 	if _, err := Compile("post.trb", withImport, "ruby"); err != nil {
 		t.Fatal(err)
 	}
@@ -3897,13 +3938,13 @@ end
 	}
 
 	aliased := consumer
-	aliased.Source = []byte("import contracts/state as states\n\ndef label(): String\n\tvalue := states::State::Open\n\tcase value\n\twhen states::State::Open\n\t\treturn \"open\"\n\twhen states::State::Closed\n\t\treturn \"closed\"\n\tend\nend\n")
+	aliased.Source = []byte("import { State as WorkflowState } from contracts/state\n\ndef label(): String\n\tvalue := WorkflowState::Open\n\tcase value\n\twhen WorkflowState::Open\n\t\treturn \"open\"\n\twhen WorkflowState::Closed\n\t\treturn \"closed\"\n\tend\nend\n")
 	aliasedArtifacts, err := CompileProject([]SourceUnit{aliased, contract}, Options{Mode: "go", GoModule: "example.com/project"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, artifact := range aliasedArtifacts {
-		if artifact.Filename == aliased.Filename && !strings.Contains(string(artifact.Output), "states.StateOpen") {
+		if artifact.Filename == aliased.Filename && !strings.Contains(string(artifact.Output), "contracts.StateOpen") {
 			t.Fatalf("aliased enum member was not qualified correctly:\n%s", artifact.Output)
 		}
 	}
@@ -3931,7 +3972,7 @@ alias CreateResponse = CreatedResponse | InvalidResponse
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import contracts/responses
+		Source: []byte(`import { CreateResponse, CreatedResponse, InvalidResponse } from contracts/responses
 
 def render(response: CreateResponse): String
 	case response.status
@@ -4045,7 +4086,7 @@ end
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import contracts/result
+		Source: []byte(`import { Result, identity } from contracts/result
 
 def sample(): Result<Integer, String>
 	value := identity<Integer>(1)
@@ -4509,10 +4550,10 @@ end
 	}
 }
 
-func TestProjectCatalogRejectsDuplicateExportedTypes(t *testing.T) {
+func TestProjectCatalogAllowsDuplicateExportedTypesAcrossModules(t *testing.T) {
 	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("class User\nend\n")}
 	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("class User\nend\n")}
-	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript"}); err == nil || !strings.Contains(err.Error(), "exported type User is already declared") {
-		t.Fatalf("expected duplicate exported type diagnostic, got %v", err)
+	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript"}); err != nil {
+		t.Fatalf("duplicate declarations in separate modules should remain importable by exact identity: %v", err)
 	}
 }

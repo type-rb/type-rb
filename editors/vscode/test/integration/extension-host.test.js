@@ -364,10 +364,10 @@ end
 		const commands = await vscode.commands.getCommands(true);
 		assert.ok(commands.includes("workbench.debug.panel.action.clearReplAction"), "the supported VS Code host should expose Debug Console clearing");
 		const marker = path.join(workspaceRoot, "extension-host-run.txt");
-		const runSource = `import { write_text } from trb/std/filesystem
+		const runSource = `import trb/std/filesystem
 
 def main()
-\twrite_text(${JSON.stringify(marker)}, "extension-host-ok") catch |_error|
+\tFileSystem.write_text(${JSON.stringify(marker)}, "extension-host-ok") catch |_error|
 \t\treturn
 \tend
 \treturn

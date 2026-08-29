@@ -21,6 +21,17 @@ type Options struct {
 	// for one parsed import. Project-aware callers may use their shared module
 	// resolver; source-only callers leave it nil and preserve import paths.
 	CanonicalImportPath func(string) string
+	// ResolveImport supplies project-aware declaration-root information. The
+	// formatter uses it only for transformations whose declaration identity and
+	// root stability are proven by the current project snapshot.
+	ResolveImport func(*ast.ImportStatement) ImportMetadata
+}
+
+type ImportMetadata struct {
+	CanonicalPath string
+	Root          string
+	RootStable    bool
+	Resolved      bool
 }
 
 func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
@@ -32,8 +43,157 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 	if hasErrors(diagnostics) {
 		return nil, diagnostics
 	}
+	if options.ResolveImport != nil {
+		canonical := canonicalImportSource(source, program, options.ResolveImport)
+		if string(canonical) != string(source) {
+			source = canonical
+			program, diagnostics = parser.Parse(source)
+			if hasErrors(diagnostics) {
+				return nil, diagnostics
+			}
+		}
+	}
 	tokens := opaqueNativeTokens(source, canonicalImportTokens(program, options.CanonicalImportPath), program.NativeIslands)
 	return formatTokens(tokens), nil
+}
+
+type canonicalImport struct {
+	node     *ast.ImportStatement
+	metadata ImportMetadata
+}
+
+func canonicalImportSource(source []byte, program *ast.Program, resolve func(*ast.ImportStatement) ImportMetadata) []byte {
+	var imports []canonicalImport
+	for _, statement := range program.Statements {
+		node, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		metadata := resolve(node)
+		if metadata.CanonicalPath == "" {
+			metadata.CanonicalPath = node.Path
+		}
+		imports = append(imports, canonicalImport{node: node, metadata: metadata})
+	}
+	if len(imports) == 0 {
+		return source
+	}
+	type replacement struct {
+		start int
+		end   int
+		text  string
+	}
+	var replacements []replacement
+	for start := 0; start < len(imports); {
+		end := start + 1
+		for end < len(imports) && mergeableImportPair(source, imports[end-1], imports[end]) {
+			end++
+		}
+		group := imports[start:end]
+		if text, ok := canonicalImportGroup(group); ok {
+			first := group[0].node.Span()
+			last := group[len(group)-1].node.Span()
+			replacements = append(replacements, replacement{start: first.Start.Offset, end: last.End.Offset, text: text})
+		}
+		start = end
+	}
+	if len(replacements) == 0 {
+		return source
+	}
+	var result strings.Builder
+	position := 0
+	for _, item := range replacements {
+		if item.start < position || item.start < 0 || item.end > len(source) {
+			continue
+		}
+		result.Write(source[position:item.start])
+		result.WriteString(item.text)
+		position = item.end
+	}
+	result.Write(source[position:])
+	return []byte(result.String())
+}
+
+func mergeableImportPair(source []byte, left, right canonicalImport) bool {
+	if left.node.TrailingComment != "" || right.node.TrailingComment != "" {
+		return false
+	}
+	if left.metadata.CanonicalPath != right.metadata.CanonicalPath {
+		return false
+	}
+	between := source[left.node.Span().End.Offset:right.node.Span().Start.Offset]
+	return strings.Count(string(between), "\n") == 1 && !strings.Contains(string(between), "#")
+}
+
+type canonicalSpecifier struct {
+	name  string
+	alias string
+}
+
+func canonicalImportGroup(group []canonicalImport) (string, bool) {
+	if len(group) == 0 {
+		return "", false
+	}
+	path := group[0].metadata.CanonicalPath
+	root := group[0].metadata.Root
+	rootStable := group[0].metadata.Resolved && group[0].metadata.RootStable && root != ""
+	allNamed := true
+	var specifiers []canonicalSpecifier
+	for _, imported := range group {
+		if len(imported.node.Symbols) == 0 {
+			allNamed = false
+			if !rootStable {
+				if len(group) == 1 {
+					return canonicalBareImport(imported.node, path), true
+				}
+				return "", false
+			}
+			specifiers = append(specifiers, canonicalSpecifier{name: root, alias: imported.node.Alias})
+			continue
+		}
+		for _, name := range imported.node.Symbols {
+			specifiers = append(specifiers, canonicalSpecifier{name: name, alias: imported.node.SymbolAliases[name]})
+		}
+	}
+	if len(group) == 1 && allNamed && len(specifiers) == 1 && rootStable && specifiers[0].name == root {
+		return canonicalBareImportWithAlias(path, specifiers[0].alias), true
+	}
+	if !allNamed && len(group) == 1 {
+		return canonicalBareImport(group[0].node, path), true
+	}
+	sort.SliceStable(specifiers, func(left, right int) bool {
+		if specifiers[left].name != specifiers[right].name {
+			return specifiers[left].name < specifiers[right].name
+		}
+		return specifiers[left].alias < specifiers[right].alias
+	})
+	unique := specifiers[:0]
+	for _, item := range specifiers {
+		if len(unique) > 0 && unique[len(unique)-1] == item {
+			continue
+		}
+		unique = append(unique, item)
+	}
+	parts := make([]string, len(unique))
+	for index, item := range unique {
+		parts[index] = item.name
+		if item.alias != "" && item.alias != item.name {
+			parts[index] += " as " + item.alias
+		}
+	}
+	return "import { " + strings.Join(parts, ", ") + " } from " + path, true
+}
+
+func canonicalBareImport(node *ast.ImportStatement, path string) string {
+	return canonicalBareImportWithAlias(path, node.Alias)
+}
+
+func canonicalBareImportWithAlias(path, alias string) string {
+	result := "import " + path
+	if alias != "" {
+		result += " as " + alias
+	}
+	return result
 }
 
 func opaqueNativeTokens(source []byte, tokens []token.Token, islands []ast.NativeIsland) []token.Token {
@@ -253,16 +413,27 @@ func canonicalImportTokens(program *ast.Program, canonicalize func(string) strin
 	}
 	replacements := map[int]importTokenReplacement{}
 	for _, statement := range program.Statements {
-		imported, ok := statement.(*ast.ImportStatement)
-		if !ok || imported.Path == "" {
+		var path string
+		var span token.Span
+		switch node := statement.(type) {
+		case *ast.ImportStatement:
+			path = node.Path
+			span = node.PathSpan
+		case *ast.ActivateStatement:
+			path = node.Path
+			span = node.PathSpan
+		default:
 			continue
 		}
-		canonical := canonicalize(imported.Path)
-		if canonical == "" || canonical == imported.Path {
+		if path == "" {
 			continue
 		}
-		replacements[imported.PathSpan.Start.Offset] = importTokenReplacement{
-			end: imported.PathSpan.End.Offset, lexeme: canonical,
+		canonical := canonicalize(path)
+		if canonical == "" || canonical == path {
+			continue
+		}
+		replacements[span.Start.Offset] = importTokenReplacement{
+			end: span.End.Offset, lexeme: canonical,
 		}
 	}
 	if len(replacements) == 0 {

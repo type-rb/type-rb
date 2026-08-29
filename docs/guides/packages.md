@@ -140,7 +140,7 @@ The package manifest selects one Declaration Protocol catalog for Ruby mode:
 `src/index.trb` is required and owns ordinary runtime loading:
 
 ```trb
-import trb/platform/ruby/native
+activate trb/platform/ruby/native
 
 require "pagy"
 ```
@@ -151,7 +151,7 @@ fixed declarations and keeps the package root in generated Ruby:
 
 ```trb
 import github.com/acme/pagy
-import trb/platform/ruby/native
+activate trb/platform/ruby/native
 
 class ProductsController
 	include Pagy::Method

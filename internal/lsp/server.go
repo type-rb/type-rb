@@ -16,6 +16,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
@@ -1263,9 +1264,23 @@ func (s *Server) format(request message) error {
 	if document.unit.PackageAliases != nil {
 		aliases = document.unit.PackageAliases
 	}
+	formatCatalog := s.formatCatalog()
 	formatted, diagnostics := formatter.FormatWithOptions(document.source, formatter.Options{
 		CanonicalImportPath: func(importPath string) string {
 			return resolver.CanonicalProjectImportPath(importPath, modulePaths, aliases)
+		},
+		ResolveImport: func(node *ast.ImportStatement) formatter.ImportMetadata {
+			canonicalPath := resolver.CanonicalProjectImportPath(node.Path, modulePaths, aliases)
+			program := &ast.Program{Statements: []ast.Statement{node}}
+			resolved, items := resolver.Resolve(program, resolver.Options{
+				Mode: s.mode, SourceRoot: s.sourceRoot, Filename: path, PackageAliases: aliases, Catalog: formatCatalog,
+			})
+			if len(items) != 0 {
+				return formatter.ImportMetadata{CanonicalPath: canonicalPath}
+			}
+			imported := resolved.Imports[node]
+			root, _ := resolver.RootDeclaration(imported)
+			return formatter.ImportMetadata{CanonicalPath: canonicalPath, Root: root, RootStable: imported != nil && imported.RootStable, Resolved: imported != nil}
 		},
 	})
 	if hasErrors(diagnostics) || string(formatted) == string(document.source) {
@@ -1273,6 +1288,33 @@ func (s *Server) format(request message) error {
 	}
 	edit := textEdit{Range: offsetRange(document.source, 0, len(document.source)), NewText: string(formatted)}
 	return s.stream.write(success(request.ID, []textEdit{edit}))
+}
+
+func (s *Server) formatCatalog() *resolver.Catalog {
+	units := map[string]compiler.SourceUnit{}
+	for _, unit := range s.base {
+		units[unit.ModulePath] = unit
+	}
+	for _, document := range s.documents {
+		units[document.unit.ModulePath] = document.unit
+	}
+	modules := make([]resolver.Module, 0, len(units))
+	for _, unit := range units {
+		source := unit.Source
+		if document, open := s.documents[cleanPath(unit.Filename)]; open {
+			source = document.source
+		}
+		program, diagnostics := parser.Parse(source)
+		if len(diagnostics) != 0 {
+			continue
+		}
+		modules = append(modules, resolver.Module{
+			Path: unit.ModulePath, Filename: unit.Filename, Program: program,
+			CompilerOwned: unit.CompilerOwned, Official: unit.Official, DeclarationProvider: unit.DeclarationProvider,
+		})
+	}
+	catalog, _ := resolver.NewCatalog(modules)
+	return catalog
 }
 
 func (s *Server) codeActions(request message) error {

@@ -32,7 +32,7 @@ func TestRunOfficialWebResponseCompressionAcrossAvailableBackends(t *testing.T) 
 			mainSource := `import { Header, Headers, HttpMethod, Body } from trb/http
 import { Request, Response } from trb/web
 import { dispatch } from trb/web/testing
-import { encode } from trb/std/encoding/base64
+import trb/std/encoding/base64
 
 def request(path: String, accept_encoding: String): Request
 	return Request.new(
@@ -55,7 +55,7 @@ def main()
 	puts("gzip-vary=" + header(compressed, "vary"))
 	puts("gzip-length=" + header(compressed, "content-length"))
 	puts("gzip-etag=" + header(compressed, "etag"))
-	puts("gzip-body=" + encode(compressed.body.bytes()))
+	puts("gzip-body=" + Base64.encode(compressed.body.bytes()))
 
 	rejected := dispatch(request("/large", "gzip; q=0, identity"))
 	puts("rejected-encoding=" + header(rejected, "content-encoding"))
@@ -82,7 +82,7 @@ import { CompressionOptions } from trb/web/middleware/compression
 OPTIONS := CompressionOptions.new(minimum_size_bytes: 10)
 
 def call(context: Context, next_handler: Next): Response
-	return compression.call(context, next_handler, OPTIONS)
+	return Compression.call(context, next_handler, OPTIONS)
 end
 `
 			routes := map[string]string{

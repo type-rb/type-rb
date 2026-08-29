@@ -58,15 +58,15 @@ func TestCompileProjectGeneratesTypedGoJobEnqueueRuntime(t *testing.T) {
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-			Source: []byte(`import { puts } from trb/std/io
+			Source: []byte(`import { IO } from trb/std/io
 import { SendReceiptJob } from jobs/send_receipt_job
 
 def main()
 	reference := SendReceiptJob.perform_later(42, "ada@example.test") catch |error|
-		puts(error.message)
+		IO.puts(error.message)
 		return
 	end
-	puts(reference.id)
+	IO.puts(reference.id)
 	return
 end
 `),

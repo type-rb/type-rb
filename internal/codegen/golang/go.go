@@ -43,6 +43,8 @@ type generator struct {
 	bindingSources    map[string]bool
 	lexicalNames      map[string]string
 	modulePath        string
+	moduleName        string
+	moduleMethods     map[string]bool
 	goModule          string
 	temporary         int
 	breakTarget       string
@@ -284,8 +286,15 @@ func (g *generator) importStatement(imported *ir.Import) {
 	}
 	alias = g.requireSourceImport(importPath, alias)
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
-		g.typeAliases[symbol] = goImportAlias(alias)
-		g.typeKinds[symbol] = imported.SymbolKinds[symbol]
+		if symbol == imported.QualifiedRoot {
+			continue
+		}
+		local := imported.SymbolAliases[symbol]
+		if local == "" {
+			local = symbol
+		}
+		g.typeAliases[local] = goImportAlias(alias)
+		g.typeKinds[local] = imported.SymbolKinds[symbol]
 	}
 	if strings.TrimSuffix(imported.Path, "/index") == "trb/http" && g.typeAliases["Headers"] != "" && g.typeAliases["Header"] == "" {
 		// Headers.new accepts Array<Header>, so an inferred empty array can
@@ -366,9 +375,20 @@ func (g *generator) statement(statement ir.Statement) {
 		g.b.WriteByte('\n')
 	case *ir.Module:
 		g.line("// module " + n.Name)
+		previousModule := g.moduleName
+		previousModuleMethods := g.moduleMethods
+		g.moduleName = n.Name
+		g.moduleMethods = map[string]bool{}
+		for _, member := range n.Body {
+			if method, ok := member.(*ir.Method); ok {
+				g.moduleMethods[method.Name] = true
+			}
+		}
 		for _, member := range n.Body {
 			g.statement(member)
 		}
+		g.moduleName = previousModule
+		g.moduleMethods = previousModuleMethods
 	case *ir.Interface:
 		g.line("type " + goIdentifier(n.Name, true) + goTypeParameterDeclarations(n.TypeParameters) + " interface {")
 		g.indent++
@@ -1634,6 +1654,19 @@ func (g *generator) expr(expression ir.Expression) string {
 		if len(n.UnionAlternatives) > 0 {
 			return g.unionMemberExpression(n)
 		}
+		moduleFunction := false
+		if receiver, ok := n.Receiver.(*ir.Identifier); ok && g.moduleName != "" && receiver.Name == g.moduleName && g.moduleMethods[n.Name] {
+			moduleFunction = true
+		}
+		if n.Reference != nil && (n.Reference.PackageRoot || n.Reference.Declaration.Kind == "module" && n.Reference.ClassMember && n.Reference.ExportKind == "function") || moduleFunction {
+			if n.Reference != nil {
+				if alias := g.referenceAlias(n.Reference); alias != "" {
+					return alias + "." + goMethodName(n.Reference.Symbol)
+				}
+				return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
+			}
+			return g.projectFunctionName(g.modulePath, n.Name)
+		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
 			return g.memberReceiver(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
@@ -1957,6 +1990,8 @@ func (g *generator) ifExpression(node *ir.If) string {
 		bindingNames:    g.bindingNames,
 		bindingSources:  g.bindingSources,
 		modulePath:      g.modulePath,
+		moduleName:      g.moduleName,
+		moduleMethods:   g.moduleMethods,
 		goModule:        g.goModule,
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,
@@ -2016,6 +2051,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		bindingNames:    g.bindingNames,
 		bindingSources:  g.bindingSources,
 		modulePath:      g.modulePath,
+		moduleName:      g.moduleName,
+		moduleMethods:   g.moduleMethods,
 		goModule:        g.goModule,
 		temporary:       g.temporary,
 		breakTarget:     g.breakTarget,

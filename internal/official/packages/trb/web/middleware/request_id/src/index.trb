@@ -9,10 +9,6 @@ record RequestIDOptions
 	limit_length: Integer
 end
 
-def default_options(): RequestIDOptions
-	return RequestIDOptions.new(header_name: "x-request-id", limit_length: 255)
-end
-
 class RequestIDMiddleware implements Middleware
 	@options: RequestIDOptions
 
@@ -26,12 +22,18 @@ class RequestIDMiddleware implements Middleware
 	end
 end
 
-def middleware(options: RequestIDOptions = default_options()): Middleware
-	return RequestIDMiddleware.new(options)
-end
+module RequestID
+	def self.default_options(): RequestIDOptions
+		return RequestIDOptions.new(header_name: "x-request-id", limit_length: 255)
+	end
 
-def call(context: Context, next_handler: Next, options: RequestIDOptions = default_options()): Response
-	return _invoke(context, next_handler, options)
+	def self.middleware(options: RequestIDOptions = RequestID.default_options()): Middleware
+		return RequestIDMiddleware.new(options)
+	end
+
+	def self.call(context: Context, next_handler: Next, options: RequestIDOptions = RequestID.default_options()): Response
+		return _invoke(context, next_handler, options)
+	end
 end
 
 def _invoke(context: Context, next_handler: Next, options: RequestIDOptions): Response
@@ -50,7 +52,7 @@ def _invoke(context: Context, next_handler: Next, options: RequestIDOptions): Re
 end
 
 def _generate(): String
-	return hex.encode(secure_random.bytes(16))
+	return Hex.encode(SecureRandom.bytes(16))
 end
 
 def _valid?(value: String, limit_length: Integer): Boolean

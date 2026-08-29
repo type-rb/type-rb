@@ -54,7 +54,7 @@ import { TimeoutOptions } from trb/web/middleware/timeout
 OPTIONS := TimeoutOptions.new(milliseconds: 5)
 
 def call(context: Context, next_handler: Next): Response
-	return timeout.call(context, next_handler, OPTIONS)
+	return Timeout.call(context, next_handler, OPTIONS)
 end
 `
 			routes := map[string]string{

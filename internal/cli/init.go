@@ -50,8 +50,8 @@ import trb/web/middleware/logger
 import trb/web/middleware/request_id
 
 MIDDLEWARES: Array<Middleware> := [
-	request_id.middleware(),
-	logger.middleware(),
+	RequestID.middleware(),
+	Logger.middleware(),
 ]
 
 def call(context: Context, next_handler: Next): Response

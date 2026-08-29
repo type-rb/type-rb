@@ -46,12 +46,12 @@ func TestPortableTimeAcrossAvailableBackendsAndREPL(t *testing.T) {
 			stdout.Reset()
 			stderr.Reset()
 			input := "import { Date, DateTime, Duration, Instant, TimeZone } from trb/std/time\n" +
-				"import { decode, encode } from trb/std/json\n" +
+				"import trb/std/json\n" +
 				"Date.parse(\"2024-02-29\").add_days(1).to_s()\n" +
 				"Instant.parse(\"2026-08-11T10:00:00+09:00\").to_datetime(TimeZone.utc()).to_s()\n" +
 				"Duration.milliseconds(-1500).to_s()\n" +
-				"decode<Date>(\"\\\"2026-08-11\\\"\")\n" +
-				"encode(Duration.parse(\"PT1.25S\"))\n" +
+				"JSON.decode<Date>(\"\\\"2026-08-11\\\"\")\n" +
+				"JSON.encode(Duration.parse(\"PT1.25S\"))\n" +
 				":quit\n"
 			command = &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -70,7 +70,7 @@ func TestPortableTimeAcrossAvailableBackendsAndREPL(t *testing.T) {
 }
 
 const timeConformanceSource = `import { Date, DateTime, DateTimeErrorKind, Duration, Instant, TimeOfDay, TimeZone } from trb/std/time
-import { decode, encode } from trb/std/json
+import trb/std/json
 import { Result } from trb/std/result
 
 record TemporalPayload
@@ -119,9 +119,9 @@ def main()
 		duration: Duration.parse("PT90.5S"),
 		zone: TimeZone.get("Asia/Tokyo")
 	)
-	case encode(payload)
+	case JSON.encode(payload)
 	when Result::Ok(encoded)
-		case decode<TemporalPayload>(encoded)
+		case JSON.decode<TemporalPayload>(encoded)
 		when Result::Ok(copy)
 			puts(copy.date.to_s())
 			puts(copy.clock.to_s())
@@ -135,7 +135,7 @@ def main()
 	when Result::Err(error)
 		puts(error.path)
 	end
-	case decode<TemporalPayload>("{\"date\":\"bad\",\"clock\":\"09:30:00\",\"local\":\"2026-08-11T09:30:00\",\"instant\":\"2026-08-11T00:30:00Z\",\"duration\":\"PT1S\",\"zone\":\"UTC\"}")
+	case JSON.decode<TemporalPayload>("{\"date\":\"bad\",\"clock\":\"09:30:00\",\"local\":\"2026-08-11T09:30:00\",\"instant\":\"2026-08-11T00:30:00Z\",\"duration\":\"PT1S\",\"zone\":\"UTC\"}")
 	when Result::Ok(_copy)
 		puts("unexpected")
 	when Result::Err(error)

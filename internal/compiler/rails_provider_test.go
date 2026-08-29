@@ -9,7 +9,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
-const railsInsurersController = `import trb/platform/ruby/rails
+const railsInsurersController = `activate trb/platform/ruby/rails
 
 module Api
   module V1

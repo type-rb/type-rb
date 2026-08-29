@@ -561,11 +561,11 @@ end
 
 def stack(): Array<Middleware>
 	return [
-		request_id.middleware(),
-		logger.middleware(),
-		compression.middleware(),
-		secure_headers.middleware(),
-		cors.middleware(),
+		RequestID.middleware(),
+		Logger.middleware(),
+		Compression.middleware(),
+		SecureHeaders.middleware(),
+		CORS.middleware(),
 	]
 end
 
@@ -582,6 +582,22 @@ end
 			}
 			if artifactForModule(artifacts, "trb/web/middleware/index") == nil {
 				t.Fatal("middleware runtime artifact was not generated")
+			}
+			if mode == "go" {
+				for _, artifact := range artifacts {
+					if artifact.IR.ModulePath == "trb/web/middleware/logger/index" {
+						if strings.Contains(string(artifact.Output), "Logger.DefaultOptions") {
+							t.Fatalf("Go module self-call retained a source namespace:\n%s", artifact.Output)
+						}
+					}
+				}
+			}
+			if mode == "typescript" {
+				for _, artifact := range artifacts {
+					if artifact.IR.ModulePath == "trb/web/middleware/logger/index" && strings.Contains(string(artifact.Output), "namespace Logger") {
+						t.Fatalf("TypeScript function-only module used a namespace declaration:\n%s", artifact.Output)
+					}
+				}
 			}
 		})
 	}

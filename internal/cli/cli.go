@@ -879,6 +879,7 @@ func (c *CLI) runFmt(args []string) error {
 		}
 		formatted, diagnostics := formatter.FormatWithOptions(source, formatter.Options{
 			CanonicalImportPath: importContexts.canonicalizer(name),
+			ResolveImport:       importContexts.resolver(name),
 		})
 		if len(diagnostics) > 0 {
 			return fmt.Errorf("%s:%s", name, diagnostics[0])
@@ -1559,18 +1560,29 @@ func standardReplExportNames(definition *stdlib.Package) []string {
 		return nil
 	}
 	names := map[string]bool{}
-	for name, symbol := range definition.Symbols {
-		if !symbol.CompilerOnly {
-			names[name] = true
+	if definition.Root == "" {
+		for name, symbol := range definition.Symbols {
+			if !symbol.CompilerOnly {
+				names[name] = true
+			}
 		}
 	}
 	for _, exported := range definition.RuntimeExports {
+		if exported.Name == definition.Root {
+			continue
+		}
 		names[exported.Name] = true
 	}
 	if definition.Source != "" {
 		program, diagnostics := parser.Parse([]byte(definition.Source))
 		if !hasDiagnosticErrors(diagnostics) {
-			for name := range resolver.CollectExports(program.Statements) {
+			for name, exported := range resolver.CollectExports(program.Statements) {
+				if name == definition.Root {
+					continue
+				}
+				if definition.Root != "" && exported.Kind == resolver.FunctionExport {
+					continue
+				}
 				names[name] = true
 			}
 		}
@@ -1673,7 +1685,7 @@ func replStandardCandidates(config *project.Config, sessionPackage string) (lang
 	type packageCandidates struct {
 		path            string
 		modulePath      string
-		alias           string
+		root            string
 		names           []string
 		directModule    string
 		namespaceModule string
@@ -1683,13 +1695,13 @@ func replStandardCandidates(config *project.Config, sessionPackage string) (lang
 	packages := make([]packageCandidates, 0, len(definitions))
 	for index, definition := range definitions {
 		names := standardReplExportNames(definition)
-		if len(names) == 0 {
+		if len(names) == 0 && definition.Root == "" {
 			continue
 		}
 		candidate := packageCandidates{
 			path:            definition.Path,
 			modulePath:      definition.ModulePath,
-			alias:           definition.DefaultAlias(),
+			root:            definition.Root,
 			names:           names,
 			directModule:    fmt.Sprintf("__trb_repl_standard_direct_%d__", index),
 			namespaceModule: fmt.Sprintf("__trb_repl_standard_namespace_%d__", index),
@@ -1698,20 +1710,22 @@ func replStandardCandidates(config *project.Config, sessionPackage string) (lang
 			candidate.modulePath = candidate.path
 		}
 		packages = append(packages, candidate)
-		units = append(units,
-			compiler.SourceUnit{
+		if len(names) > 0 {
+			units = append(units, compiler.SourceUnit{
 				Filename:   filepath.Join(config.SourcePath(), fmt.Sprintf(".trb-repl-standard-direct-%d.trb", index)),
 				Source:     []byte(fmt.Sprintf("import { %s } from %s\n", strings.Join(names, ", "), definition.Path)),
 				ModulePath: candidate.directModule,
 				Package:    sessionPackage,
-			},
-			compiler.SourceUnit{
+			})
+		}
+		if definition.Root != "" {
+			units = append(units, compiler.SourceUnit{
 				Filename:   filepath.Join(config.SourcePath(), fmt.Sprintf(".trb-repl-standard-namespace-%d.trb", index)),
 				Source:     []byte(fmt.Sprintf("import %s\n", definition.Path)),
 				ModulePath: candidate.namespaceModule,
 				Package:    sessionPackage,
-			},
-		)
+			})
+		}
 	}
 	if len(units) == 0 {
 		return languageservice.Context{}, nil
@@ -1731,18 +1745,23 @@ func replStandardCandidates(config *project.Config, sessionPackage string) (lang
 	}
 	result := languageservice.Context{}
 	for _, candidate := range packages {
-		direct := languageservice.BuildContext(programs, candidate.directModule)
-		for _, name := range candidate.names {
-			if symbol, ok := replCandidateSymbol(direct.Symbols, name); ok {
-				imported := languageservice.Import{Path: candidate.path, ModulePath: candidate.modulePath, Symbol: name}
-				symbol = withReplCandidateImport(symbol, imported)
-				symbol.Detail = replCandidateDetail(symbol.Detail, candidate.path)
-				result.Symbols = append(result.Symbols, symbol)
+		if len(candidate.names) > 0 {
+			direct := languageservice.BuildContext(programs, candidate.directModule)
+			for _, name := range candidate.names {
+				if symbol, ok := replCandidateSymbol(direct.Symbols, name); ok {
+					imported := languageservice.Import{Path: candidate.path, ModulePath: candidate.modulePath, Symbol: name}
+					symbol = withReplCandidateImport(symbol, imported)
+					symbol.Detail = replCandidateDetail(symbol.Detail, candidate.path)
+					result.Symbols = append(result.Symbols, symbol)
+				}
 			}
 		}
 
+		if candidate.root == "" {
+			continue
+		}
 		namespace := languageservice.BuildContext(programs, candidate.namespaceModule)
-		if symbol, ok := replCandidateSymbol(namespace.Symbols, candidate.alias); ok {
+		if symbol, ok := replCandidateSymbol(namespace.Symbols, candidate.root); ok {
 			imported := languageservice.Import{Path: candidate.path, ModulePath: candidate.modulePath}
 			symbol = withReplCandidateImport(symbol, imported)
 			symbol.Detail = candidate.path

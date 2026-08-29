@@ -22,15 +22,19 @@ func (b Base) Span() token.Span { return b.SourceSpan }
 
 type Program struct {
 	Base
-	Mode              string
-	Package           string
-	ModulePath        string
-	GoModule          string
-	RubyLoader        string
-	TypeScriptRuntime string
-	Statements        []Statement
-	Tokens            []token.Token
-	NativeIslands     []NativeIsland
+	Mode       string
+	Package    string
+	ModulePath string
+	// CompilerGeneratedStart is the first byte offset owned by appended
+	// compiler-generated source. A zero value means the complete program is
+	// authored source.
+	CompilerGeneratedStart int
+	GoModule               string
+	RubyLoader             string
+	TypeScriptRuntime      string
+	Statements             []Statement
+	Tokens                 []token.Token
+	NativeIslands          []NativeIsland
 }
 
 // NativeIsland identifies source text owned by a target-language interop node.
@@ -64,13 +68,24 @@ func (*BlankStatement) statementNode() {}
 
 type ImportStatement struct {
 	Base
-	Path     string
-	PathSpan token.Span
-	Symbols  []string
-	Alias    string
+	Path          string
+	PathSpan      token.Span
+	Symbols       []string
+	SymbolAliases map[string]string
+	Alias         string
 }
 
 func (*ImportStatement) statementNode() {}
+
+// ActivateStatement enables compiler-owned capabilities attached to one
+// resolved target without introducing a source binding.
+type ActivateStatement struct {
+	Base
+	Path     string
+	PathSpan token.Span
+}
+
+func (*ActivateStatement) statementNode() {}
 
 type ClassStatement struct {
 	Base

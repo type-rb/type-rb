@@ -131,21 +131,8 @@ func applyCallSpecializations(units []SourceUnit, programs map[string]*ast.Progr
 	return updated, diagnostics, changed, nil
 }
 
-func generatedImportsSource(program *ast.Program, resolution resolver.Result, unit SourceUnit, required map[string]map[string]bool, excluded func(string) bool) string {
+func generatedImportsSource(_ *ast.Program, _ resolver.Result, unit SourceUnit, required map[string]map[string]bool, excluded func(string) bool) string {
 	visible := map[string]map[string]bool{}
-	if program != nil {
-		for _, statement := range program.Statements {
-			imported, ok := statement.(*ast.ImportStatement)
-			if !ok || imported.Alias != "" || compilerGeneratedStart(unit) > 0 && imported.Span().Start.Offset >= compilerGeneratedStart(unit) {
-				continue
-			}
-			path := imported.Path
-			if resolved := resolution.Imports[imported]; resolved != nil {
-				path = resolved.Path
-			}
-			addVisibleImport(visible, path, imported.Symbols)
-		}
-	}
 	for _, generated := range unit.CompilerGeneratedSources {
 		if excluded != nil && excluded(generated.ID) {
 			continue

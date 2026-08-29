@@ -139,6 +139,7 @@ func CompileWithOptions(filename string, source []byte, options Options) (*Artif
 func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 	program, parseDiagnostics := parser.Parse(sourceUnitContents(unit))
 	configureProgram(program, options, options.ModulePath, options.Package)
+	program.CompilerGeneratedStart = compilerGeneratedStart(unit)
 	normalizeRubyNativeParameterSyntax(program, options.Mode, packageAliasesForSource(unit, options.PackageAliases))
 	if options.Mode == "" {
 		parseDiagnostics = append(parseDiagnostics, diagnostic.Diagnostic{
@@ -534,11 +535,19 @@ func normalizeRubyNativeParameterSyntax(program *ast.Program, mode string, alias
 		return
 	}
 	for _, statement := range program.Statements {
-		imported, ok := statement.(*ast.ImportStatement)
-		if !ok {
+		var importPath string
+		switch node := statement.(type) {
+		case *ast.ImportStatement:
+			if program.CompilerGeneratedStart > 0 && node.Span().Start.Offset >= program.CompilerGeneratedStart {
+				continue
+			}
+			importPath = node.Path
+		case *ast.ActivateStatement:
+			importPath = node.Path
+		default:
 			continue
 		}
-		path := resolver.CanonicalPackageImport(imported.Path, aliases)
+		path := resolver.CanonicalPackageImport(importPath, aliases)
 		definition, exists := stdlib.Lookup(path)
 		if exists && definition.NativeSyntax && definition.Supports(mode) {
 			parser.NormalizeRubyNativeParameters(program.Statements)
@@ -552,17 +561,22 @@ func dependencySourceUnits(programs map[string]*ast.Program, options Options) []
 	officialDefinitions := map[string]*official.Package{}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
-			imported, ok := statement.(*ast.ImportStatement)
-			if !ok {
+			var importPath string
+			switch imported := statement.(type) {
+			case *ast.ImportStatement:
+				importPath = imported.Path
+			case *ast.ActivateStatement:
+				importPath = imported.Path
+			default:
 				continue
 			}
-			if definition, exists := stdlib.Lookup(imported.Path); exists && definition.Source != "" && definition.ModulePath != "" {
+			if definition, exists := stdlib.Lookup(importPath); exists && definition.Source != "" && definition.ModulePath != "" {
 				if _, alreadyLoaded := programs[definition.ModulePath]; !alreadyLoaded {
 					definitions[definition.ModulePath] = definition
 				}
 				continue
 			}
-			bundled, exists := official.Lookup(imported.Path)
+			bundled, exists := official.Lookup(importPath)
 			if !exists || bundled.Definition.Source == "" || bundled.Definition.ModulePath == "" {
 				continue
 			}

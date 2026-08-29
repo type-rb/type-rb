@@ -31,7 +31,7 @@ func TestFixedDeclarationProviderActivatesOnlyThroughRootPackageImport(t *testin
 		t.Fatal("root package import did not activate its fixed declarations")
 	}
 
-	unrelated := parseProviderProgram(t, "controllers/unrelated", "import trb/platform/ruby/native\n")
+	unrelated := parseProviderProgram(t, "controllers/unrelated", "activate trb/platform/ruby/native\n")
 	catalog, err = Load([]*ast.Program{unrelated}, Context{DeclarationProviders: []declarationproviderhost.Source{source}})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestFixedDeclarationProviderFileParticipatesInIncrementalInputs(t *testing.
 
 func TestFixedDeclarationProviderRejectsFrameworkDeclarationConflicts(t *testing.T) {
 	path := writeExternalDeclarationProvider(t, "ActionController::API")
-	program := parseProviderProgram(t, "controller", "import trb/platform/ruby/rails\nimport github.com/acme/pagy\n")
+	program := parseProviderProgram(t, "controller", "activate trb/platform/ruby/rails\nimport github.com/acme/pagy\n")
 	_, err := Load([]*ast.Program{program}, Context{DeclarationProviders: []declarationproviderhost.Source{{
 		Package: "github.com/acme/pagy", Mode: "ruby", Module: "github.com/acme/pagy", Path: path,
 	}}})

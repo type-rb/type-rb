@@ -69,11 +69,11 @@ func TestGeneratedNativeRuntimeAdapterCallsPackageShimAcrossBackends(t *testing.
 	}
 }
 
-func TestGeneratedNativeRuntimeAdapterSupportsNamespaceImports(t *testing.T) {
+func TestGeneratedNativeRuntimeAdapterSupportsNamedImportAliases(t *testing.T) {
 	source := strings.Replace(nativeRuntimeAdapterSource,
 		"import { invoke } from github.com/acme/runtime/native",
-		"import github.com/acme/runtime/native as native_runtime", 1)
-	source = strings.Replace(source, "return invoke(input)", "return native_runtime.invoke(input)", 1)
+		"import { invoke as native_invoke } from github.com/acme/runtime/native", 1)
+	source = strings.Replace(source, "return invoke(input)", "return native_invoke(input)", 1)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			options := Options{Mode: mode, ModulePath: "main", NativePackages: nativeRuntimeCompilerCatalog(mode)}
@@ -88,7 +88,7 @@ func TestGeneratedNativeRuntimeAdapterSupportsNamespaceImports(t *testing.T) {
 			generated := string(artifacts[0].Output)
 			for _, expected := range nativeRuntimeGeneratedMarkers(mode) {
 				if !strings.Contains(generated, expected) {
-					t.Fatalf("generated %s namespace runtime adapter is missing %q:\n%s", mode, expected, generated)
+					t.Fatalf("generated %s aliased runtime adapter is missing %q:\n%s", mode, expected, generated)
 				}
 			}
 		})

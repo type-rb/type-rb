@@ -2,7 +2,9 @@ package typescript
 
 import (
 	"fmt"
+	"maps"
 	pathpkg "path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +42,7 @@ type generator struct {
 	lexicalNames     map[string]string
 	exactTypes       map[string]*typescriptTypeIdentity
 	runtimeImports   map[string]bool
+	emittedImports   map[string]bool
 	standardResult   bool
 	browserRuntime   string
 	httpRuntime      bool
@@ -167,7 +170,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -181,7 +184,8 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		}
 	}
 	g.integrationImports(program.Extensions)
-	for i, statement := range program.Statements {
+	statements := mergeTypeScriptImports(program.Statements)
+	for i, statement := range statements {
 		if i > 0 {
 			g.b.WriteByte('\n')
 		}
@@ -217,6 +221,92 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
 	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
+}
+
+func mergeTypeScriptImports(statements []ir.Statement) []ir.Statement {
+	result := make([]ir.Statement, 0, len(statements))
+	byKey := map[string]int{}
+	for _, statement := range statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok {
+			result = append(result, statement)
+			continue
+		}
+		key := imported.Path + "\x00" + imported.QualifiedRoot + "\x00" + strconv.FormatBool(imported.Namespace) + "\x00" + imported.Alias
+		if index, exists := byKey[key]; exists {
+			mergeTypeScriptImport(result[index].(*ir.Import), imported)
+			continue
+		}
+		clone := *imported
+		clone.Symbols = slices.Clone(imported.Symbols)
+		clone.UsedSymbols = slices.Clone(imported.UsedSymbols)
+		clone.GeneratedTypeSymbols = slices.Clone(imported.GeneratedTypeSymbols)
+		clone.SymbolAliases = maps.Clone(imported.SymbolAliases)
+		clone.IntrinsicSymbols = maps.Clone(imported.IntrinsicSymbols)
+		clone.RuntimeIndependentSymbols = maps.Clone(imported.RuntimeIndependentSymbols)
+		clone.SymbolKinds = maps.Clone(imported.SymbolKinds)
+		clone.SymbolTypes = maps.Clone(imported.SymbolTypes)
+		clone.SymbolParameters = maps.Clone(imported.SymbolParameters)
+		clone.SymbolTypeParameters = maps.Clone(imported.SymbolTypeParameters)
+		clone.RecordDefaults = maps.Clone(imported.RecordDefaults)
+		clone.TypeContracts = maps.Clone(imported.TypeContracts)
+		clone.RuntimeSymbols = maps.Clone(imported.RuntimeSymbols)
+		byKey[key] = len(result)
+		result = append(result, &clone)
+	}
+	return result
+}
+
+func mergeTypeScriptImport(target, source *ir.Import) {
+	target.Symbols = mergeImportNames(target.Symbols, source.Symbols)
+	target.UsedSymbols = mergeImportNames(target.UsedSymbols, source.UsedSymbols)
+	target.GeneratedTypeSymbols = mergeImportNames(target.GeneratedTypeSymbols, source.GeneratedTypeSymbols)
+	copyImportMap(&target.SymbolAliases, source.SymbolAliases)
+	copyImportMap(&target.IntrinsicSymbols, source.IntrinsicSymbols)
+	copyImportMap(&target.RuntimeIndependentSymbols, source.RuntimeIndependentSymbols)
+	copyImportMap(&target.SymbolKinds, source.SymbolKinds)
+	copyImportMap(&target.SymbolTypes, source.SymbolTypes)
+	copyImportMap(&target.SymbolParameters, source.SymbolParameters)
+	copyImportMap(&target.SymbolTypeParameters, source.SymbolTypeParameters)
+	copyImportMap(&target.RecordDefaults, source.RecordDefaults)
+	copyImportMap(&target.TypeContracts, source.TypeContracts)
+	copyImportMap(&target.RuntimeSymbols, source.RuntimeSymbols)
+	target.Runtime = target.Runtime || source.Runtime
+	target.RuntimeRequired = target.RuntimeRequired || source.RuntimeRequired
+	target.Standard = target.Standard || source.Standard
+	target.Official = target.Official || source.Official
+	target.Platform = target.Platform || source.Platform
+	target.Native = target.Native || source.Native
+	target.Implicit = target.Implicit && source.Implicit
+	if target.QualifiedRoot == "" {
+		target.QualifiedRoot = source.QualifiedRoot
+	}
+}
+
+func mergeImportNames(left, right []string) []string {
+	seen := make(map[string]bool, len(left)+len(right))
+	result := make([]string, 0, len(left)+len(right))
+	for _, names := range [][]string{left, right} {
+		for _, name := range names {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func copyImportMap[K comparable, V any](target *map[K]V, source map[K]V) {
+	if len(source) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[K]V, len(source))
+	}
+	maps.Copy(*target, source)
 }
 
 func localNestedTypeOwners(statements []ir.Statement) map[string]string {
@@ -501,7 +591,16 @@ func (g *generator) statement(statement ir.Statement) {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
 			intrinsicRuntime := false
+			for _, symbol := range n.UsedSymbols {
+				if n.IntrinsicSymbols[symbol] && !n.RuntimeIndependentSymbols[symbol] {
+					intrinsicRuntime = true
+				}
+			}
 			for _, symbol := range n.Symbols {
+				if symbol == n.QualifiedRoot {
+					continue
+				}
+				local := n.SymbolAliases[symbol]
 				if n.IntrinsicSymbols[symbol] {
 					if !n.RuntimeIndependentSymbols[symbol] {
 						intrinsicRuntime = true
@@ -510,17 +609,27 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface", "type_alias", "newtype":
-					types = append(types, symbol)
+					types = append(types, tsImportSpecifier(symbol, local))
 					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
-						values = append(values, tsRecordConstructorName(symbol))
+						constructor := tsRecordConstructorName(symbol)
+						localConstructor := ""
+						if local != "" {
+							localConstructor = tsRecordConstructorName(local)
+						}
+						values = append(values, tsImportSpecifier(constructor, localConstructor))
 						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
-							values = append(values, tsRecordSyncConstructorName(symbol))
+							syncConstructor := tsRecordSyncConstructorName(symbol)
+							localSyncConstructor := ""
+							if local != "" {
+								localSyncConstructor = tsRecordSyncConstructorName(local)
+							}
+							values = append(values, tsImportSpecifier(syncConstructor, localSyncConstructor))
 						}
 					}
 				case "function":
-					values = append(values, tsCallableName(symbol))
+					values = append(values, tsImportSpecifier(tsCallableName(symbol), tsCallableName(local)))
 				default:
-					values = append(values, symbol)
+					values = append(values, tsImportSpecifier(symbol, local))
 				}
 			}
 			for _, symbol := range n.GeneratedTypeSymbols {
@@ -541,6 +650,9 @@ func (g *generator) statement(statement ir.Statement) {
 				if jsonRuntime {
 					g.jsonRuntime = true
 				}
+			}
+			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime {
+				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
@@ -650,6 +762,29 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Newtype:
 		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 	case *ir.Module:
+		if methods, ok := functionOnlyModule(n); ok {
+			properties := make([]string, 0, len(methods))
+			for _, member := range n.Body {
+				if comment, ok := member.(*ir.Comment); ok {
+					g.statement(comment)
+				}
+			}
+			for _, method := range methods {
+				g.function(method)
+				target := method.Name
+				if method.TargetName != "" {
+					target = method.TargetName
+				}
+				target = tsCallableName(target)
+				property := tsMethodName(method.Name)
+				if property != target {
+					property += ": " + target
+				}
+				properties = append(properties, property)
+			}
+			g.line("export const " + n.Name + " = { " + strings.Join(properties, ", ") + " } as const;")
+			break
+		}
 		g.line("export namespace " + n.Name + " {")
 		g.indent++
 		g.statements(n.Body)
@@ -857,6 +992,20 @@ func (g *generator) statement(statement ir.Statement) {
 	}
 }
 
+func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
+	methods := make([]*ir.Method, 0, len(module.Body))
+	for _, member := range module.Body {
+		switch node := member.(type) {
+		case *ir.Comment:
+		case *ir.Method:
+			methods = append(methods, node)
+		default:
+			return nil, false
+		}
+	}
+	return methods, true
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -864,6 +1013,13 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func tsImportSpecifier(exported, local string) string {
+	if local == "" || local == exported {
+		return exported
+	}
+	return exported + " as " + local
 }
 
 func (g *generator) typeUnionCase(node *ir.Case) {
@@ -1615,6 +1771,10 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Reference != nil && n.Reference.PackageRoot {
+			alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Reference.Package))
+			return alias + "." + tsCallableName(n.Reference.Symbol)
+		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
 			return "__trbOrm.column(" + g.expr(n.Receiver) + ", " + strconv.Quote(n.Name) + ")"
 		}
@@ -3445,7 +3605,7 @@ func (g *generator) importedJSONCall(call *ir.Call, packagePath string, argument
 	case *ir.Identifier:
 		name = callee.Name
 	case *ir.Member:
-		name = g.expr(callee.Receiver) + "." + callee.Name
+		name = g.expr(callee)
 	}
 	return name + "(" + strings.Join(arguments, ", ") + ")", true
 }
@@ -4076,6 +4236,12 @@ func classMethods(statements []ir.Statement) map[string]*ir.Method {
 }
 
 func (g *generator) line(text string) {
+	if g.indent == 0 && strings.HasPrefix(text, "import ") {
+		if g.emittedImports[text] {
+			return
+		}
+		g.emittedImports[text] = true
+	}
 	g.b.WriteString(strings.Repeat("  ", g.indent))
 	g.b.WriteString(text)
 	g.b.WriteByte('\n')

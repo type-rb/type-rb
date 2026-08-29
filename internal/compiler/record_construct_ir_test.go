@@ -56,10 +56,10 @@ end
 		},
 		{
 			Filename: "main.trb", ModulePath: "main", Package: "main",
-			Source: []byte(`import models/box as models
+			Source: []byte(`import { Box as ModelBox } from models/box
 
 def main()
-	box := models::Box<String>.new(value: "ok")
+	box := ModelBox<String>.new(value: "ok")
 	puts(box.value)
 	return
 end
@@ -78,8 +78,8 @@ end
 	if construction.Declaration != wantDeclaration {
 		t.Fatalf("imported record declaration = %#v, want %#v", construction.Declaration, wantDeclaration)
 	}
-	target, ok := construction.Target.(*ir.Member)
-	if !ok || target.Reference == nil || target.Reference.Package != "models/box" || target.Reference.Symbol != "Box" {
+	target, ok := construction.Target.(*ir.Identifier)
+	if !ok || target.Name != "ModelBox" || target.Reference == nil || target.Reference.Package != "models/box" || target.Reference.Symbol != "Box" {
 		t.Fatalf("imported record target projection = %#v", construction.Target)
 	}
 }

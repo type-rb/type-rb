@@ -81,12 +81,21 @@ func jobsEnqueueSources(input packageextension.ProjectDeclarationInput, jobs []J
 			"trb/jobs": {
 				"EnqueueError": true, "EnqueueErrorKind": true, "EnqueueRequest": true, "JobReference": true,
 			},
-			"trb/std/json":   {"JsonValue": true, "stringify": true},
+			"trb/std/json":   {"JSON": true, "JsonValue": true},
 			"trb/std/result": {"Result": true},
 			"trb/std/time":   {"Duration": true, "Instant": true},
 		}
 		if configurationModule != job.ModulePath {
 			required[configurationModule] = map[string]bool{"JOBS_ADAPTER": true}
+		}
+		for _, parameter := range job.Parameters {
+			if parameter.TypeModule == "" || parameter.TypeModule == job.ModulePath {
+				continue
+			}
+			if required[parameter.TypeModule] == nil {
+				required[parameter.TypeModule] = map[string]bool{}
+			}
+			required[parameter.TypeModule][parameter.Type.Name] = true
 		}
 		result = append(result, packageextension.ProjectGeneratedSource{
 			ID:              projectEnqueueSourceID + job.ModulePath + ":" + job.Name,
@@ -134,7 +143,7 @@ func jobsEnqueueSource(job Job) (string, error) {
 	var source strings.Builder
 	source.WriteString("def " + requestHelper + "(" + strings.Join(parameters, ", ") + "): " + requestResult + "\n")
 	source.WriteString("\tpayload_values: Array<JsonValue> := [" + strings.Join(values, ", ") + "]\n")
-	source.WriteString("\tpayload := stringify(JsonValue::Array(payload_values)) catch |error|\n")
+	source.WriteString("\tpayload := JSON.stringify(JsonValue::Array(payload_values)) catch |error|\n")
 	source.WriteString("\t\treturn " + requestResult + "::Err(EnqueueError.new(kind: EnqueueErrorKind::Serialization, message: error.message))\n")
 	source.WriteString("\tend\n")
 	source.WriteString("\treturn " + requestResult + "::Ok(EnqueueRequest.new(\n")
@@ -205,7 +214,7 @@ func sortedProjectGenerationImports(required map[string]map[string]bool) []packa
 func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packageextension.RequiredImport) {
 	required := map[string]map[string]bool{
 		"trb/jobs":     {"JobError": true, "JobResult": true},
-		"trb/std/json": {"as_array": true, "parse": true},
+		"trb/std/json": {"JSON": true},
 	}
 	floatArguments := false
 	for _, job := range jobs {
@@ -228,14 +237,10 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 			}
 			switch wireType.Kind {
 			case types.Bool:
-				required["trb/std/json"]["as_boolean"] = true
 			case types.Int:
-				required["trb/std/json"]["as_integer"] = true
 			case types.Float:
 				floatArguments = true
-				required["trb/std/json"]["as_float"] = true
 			case types.String:
-				required["trb/std/json"]["as_string"] = true
 			}
 			if parameter.Newtype && parameter.NewtypeModule != "" && parameter.NewtypeModule != entrypointModule {
 				if required[parameter.NewtypeModule] == nil {
@@ -256,7 +261,7 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 		source.WriteString("\twhen JsonValue::Integer(integer)\n")
 		source.WriteString("\t\treturn Result<Float, JsonError>::Ok(integer.to_f())\n")
 		source.WriteString("\telse\n")
-		source.WriteString("\t\treturn as_float(value)\n")
+		source.WriteString("\t\treturn JSON.as_float(value)\n")
 		source.WriteString("\tend\n")
 		source.WriteString("end\n\n")
 	}
@@ -264,10 +269,10 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 	source.WriteString("\tif payload_version != 1\n")
 	source.WriteString("\t\treturn JobResult::Err(JobError.new(message: \"unsupported job payload version \" + payload_version.to_s()))\n")
 	source.WriteString("\tend\n")
-	source.WriteString("\tparsed := parse(payload) catch |error|\n")
+	source.WriteString("\tparsed := JSON.parse(payload) catch |error|\n")
 	source.WriteString("\t\treturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\n")
 	source.WriteString("\tend\n")
-	source.WriteString("\tpayload_values := as_array(parsed) catch |error|\n")
+	source.WriteString("\tpayload_values := JSON.as_array(parsed) catch |error|\n")
 	source.WriteString("\t\treturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\n")
 	source.WriteString("\tend\n")
 	source.WriteString("\tcase job_name\n")
@@ -327,13 +332,13 @@ func jobsDispatchSource(jobs []Job, entrypointModule string) (string, []packagee
 func jobsArgumentConverter(typ types.Type) string {
 	switch typ.Kind {
 	case types.Bool:
-		return "as_boolean"
+		return "JSON.as_boolean"
 	case types.Int:
-		return "as_integer"
+		return "JSON.as_integer"
 	case types.Float:
 		return "__trb_jobs_as_float"
 	case types.String:
-		return "as_string"
+		return "JSON.as_string"
 	default:
 		panic("unsupported Jobs wire type " + typ.String())
 	}
