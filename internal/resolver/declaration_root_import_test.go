@@ -81,6 +81,21 @@ func TestActivationEnablesCapabilityWithoutBinding(t *testing.T) {
 	}
 }
 
+func TestInferredRootMemberPreservesCompilerOwnedIntrinsic(t *testing.T) {
+	program, diagnostics := parser.Parse([]byte("import trb/internal/json as native_json\n"))
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	result, resolvedDiagnostics := Resolve(program, Options{Mode: "typescript", CompilerOwned: true})
+	if len(resolvedDiagnostics) != 0 {
+		t.Fatalf("resolve diagnostics: %#v", resolvedDiagnostics)
+	}
+	binding, ok := result.InferredTypeMember("JSON", "parse_jsonc")
+	if !ok || binding.Library == nil || binding.Library.Intrinsic != "trb.internal.json.parse_jsonc" {
+		t.Fatalf("inferred compiler-owned member = %#v", binding)
+	}
+}
+
 func TestGeneratedImportsUseASeparateBindingScope(t *testing.T) {
 	source := "import { Response as AuthoredResponse } from services/http\nimport { Response } from services/http\n"
 	program, diagnostics := parser.Parse([]byte(source))

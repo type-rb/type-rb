@@ -4,23 +4,25 @@ func hexSource() string {
 	return `import { Result } from trb/std/result
 import trb/internal/encoding/hex as native_hex
 
-enum HexDecodeErrorKind
-	OddLength
-	InvalidCharacter
-end
+module Hex
+	enum DecodeErrorKind
+		OddLength
+		InvalidCharacter
+	end
 
-record HexDecodeError
-	kind: HexDecodeErrorKind
-	input: String
-	index: Integer
-	message: String
+	record DecodeError
+		kind: Hex::DecodeErrorKind
+		input: String
+		index: Integer
+		message: String
+	end
 end
 
 def encode(value: Bytes): String
 	return native_hex.encode(value)
 end
 
-def decode(value: String): Result<Bytes, HexDecodeError>
+def decode(value: String): Result<Bytes, Hex::DecodeError>
 	return native_hex.decode(value)
 end
 `

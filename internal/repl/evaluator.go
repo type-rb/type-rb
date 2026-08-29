@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
@@ -356,7 +357,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 					definition.Fields = append(definition.Fields, field)
 				}
 			}
-			e.definitions[symbolKey(module, node.Name)] = definition
+			e.definitions[symbolKey(module, runtimeDefinitionName(node.Declaration, node.Name))] = definition
 		case *ir.Enum:
 			changed = true
 			definition := &enumDefinition{Module: module, Node: node, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
@@ -368,7 +369,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 					definition.Methods[member.Name] = member
 				}
 			}
-			e.definitions[symbolKey(module, node.Name)] = definition
+			e.definitions[symbolKey(module, runtimeDefinitionName(node.Declaration, node.Name))] = definition
 		case *ir.TypeAlias:
 			if len(node.Variants) == 0 {
 				continue
@@ -381,7 +382,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 				enumNode.Body = append(enumNode.Body, &member)
 				definition.Members[member.Name] = &member
 			}
-			e.definitions[symbolKey(module, node.Name)] = definition
+			e.definitions[symbolKey(module, runtimeDefinitionName(node.Declaration, node.Name))] = definition
 		case *ir.Class:
 			changed = true
 			definition := &classDefinition{Module: module, Node: node, Methods: map[string]*ir.Method{}}
@@ -393,7 +394,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 					definition.Methods[item.Name] = item
 				}
 			}
-			e.definitions[symbolKey(module, node.Name)] = definition
+			e.definitions[symbolKey(module, runtimeDefinitionName(node.Declaration, node.Name))] = definition
 		case *ir.Method:
 			changed = true
 			e.definitions[symbolKey(module, node.Name)] = &functionDefinition{Module: module, Method: node}
@@ -1039,6 +1040,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				return value, nil
 			}
 		}
+		if node.Namespace && node.Declaration.Kind.IsType() && strings.HasSuffix(node.Declaration.Name, "::"+node.Name) {
+			if value, ok := e.symbol(node.Declaration.Module, node.Declaration.Name); ok {
+				return value, nil
+			}
+		}
 		receiver, err := e.expression(node.Receiver, module, sc)
 		if err != nil {
 			return Value{}, err
@@ -1143,15 +1149,28 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Reference != nil && node.Reference.Package != "" {
 			definitionModule = node.Reference.Package
 		}
-		symbol, ok := e.symbol(definitionModule, node.EnumName)
-		if !ok {
+		var definition *enumDefinition
+		if !node.Declaration.Empty() {
+			for _, candidate := range e.definitions {
+				enum, ok := candidate.(*enumDefinition)
+				if ok && enum.Node.Declaration == node.Declaration {
+					definition = enum
+					break
+				}
+			}
+		}
+		if definition == nil {
+			symbol, ok := e.symbol(definitionModule, node.EnumName)
+			if ok {
+				if typeDefinition, typeOK := symbol.Data.(*typeValue); typeOK {
+					definition = typeDefinition.Enum
+				}
+			}
+		}
+		if definition == nil {
 			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
 		}
-		typeDefinition, ok := symbol.Data.(*typeValue)
-		if !ok || typeDefinition.Enum == nil {
-			return Value{}, fmt.Errorf("%s is not an enum", node.EnumName)
-		}
-		member := typeDefinition.Enum.Members[node.Member]
+		member := definition.Members[node.Member]
 		if member == nil {
 			return Value{}, fmt.Errorf("enum %s has no member %s", node.EnumName, node.Member)
 		}
@@ -1167,7 +1186,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			payload[field] = value
 		}
-		return Value{Type: node.ExprType(), Data: &enumValue{Definition: typeDefinition.Enum, Name: node.Member, Payload: payload}}, nil
+		return Value{Type: node.ExprType(), Data: &enumValue{Definition: definition, Name: node.Member, Payload: payload}}, nil
 	case *ir.TypeApply:
 		return e.expression(node.Receiver, module, sc)
 	case *ir.Index:
@@ -1782,16 +1801,29 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 		if node.Reference != nil && node.Reference.Package != "" {
 			definitionModule = node.Reference.Package
 		}
-		symbol, ok := e.symbol(definitionModule, node.EnumName)
-		if !ok {
+		var definition *enumDefinition
+		if !node.OwnerIdentity.Empty() {
+			for _, candidate := range e.definitions {
+				enum, ok := candidate.(*enumDefinition)
+				if ok && enum.Node.Declaration == node.OwnerIdentity {
+					definition = enum
+					break
+				}
+			}
+		}
+		if definition == nil {
+			symbol, ok := e.symbol(definitionModule, node.EnumName)
+			if ok {
+				if typeValue, typeOK := symbol.Data.(*typeValue); typeOK {
+					definition = typeValue.Enum
+				}
+			}
+		}
+		if definition == nil {
 			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
 		}
-		typeValue, ok := symbol.Data.(*typeValue)
-		if !ok || typeValue.Enum == nil {
-			return Value{}, fmt.Errorf("%s is not an enum", node.EnumName)
-		}
 		for _, raw := range node.RawValues {
-			member := typeValue.Enum.Members[raw.Member]
+			member := definition.Members[raw.Member]
 			if member == nil || member.RawValue == nil {
 				continue
 			}
@@ -1800,7 +1832,7 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 				return Value{}, err
 			}
 			if equal(arguments[0].Value, rawValue) {
-				value := Value{Type: types.FromName(node.EnumName), Data: &enumValue{Definition: typeValue.Enum, Name: raw.Member, Payload: map[string]Value{}}}
+				value := Value{Type: types.FromName(runtimeDefinitionName(definition.Node.Declaration, node.EnumName)), Data: &enumValue{Definition: definition, Name: raw.Member, Payload: map[string]Value{}}}
 				return e.resultOK(node.ExprType(), value)
 			}
 		}
@@ -2241,12 +2273,12 @@ func (e *Evaluator) numberParseResultErr(resultType types.Type, kind, input, mes
 }
 
 func (e *Evaluator) hexDecodeResultErr(resultType types.Type, kind, input string, index int64, message string) (Value, error) {
-	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/hex/index", "HexDecodeErrorKind")].(*enumDefinition)
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/hex/index", "Hex::DecodeErrorKind")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("operation requires trb/std/encoding/hex")
 	}
-	kindValue := Value{Type: types.FromName("HexDecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
-	return e.structuredResultErrFrom(resultType, "trb/std/encoding/hex/index", "HexDecodeError", map[string]Value{
+	kindValue := Value{Type: types.FromName("Hex::DecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/encoding/hex/index", "Hex::DecodeError", map[string]Value{
 		"kind":    kindValue,
 		"input":   {Type: types.FromName("String"), Data: input},
 		"index":   {Type: types.FromName("Integer"), Data: index},
@@ -2255,12 +2287,12 @@ func (e *Evaluator) hexDecodeResultErr(resultType types.Type, kind, input string
 }
 
 func (e *Evaluator) base64DecodeResultErr(resultType types.Type, kind, input string, index int64, message string) (Value, error) {
-	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/base64/index", "Base64DecodeErrorKind")].(*enumDefinition)
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/encoding/base64/index", "Base64::DecodeErrorKind")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("operation requires trb/std/encoding/base64")
 	}
-	kindValue := Value{Type: types.FromName("Base64DecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
-	return e.structuredResultErrFrom(resultType, "trb/std/encoding/base64/index", "Base64DecodeError", map[string]Value{
+	kindValue := Value{Type: types.FromName("Base64::DecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/encoding/base64/index", "Base64::DecodeError", map[string]Value{
 		"kind":    kindValue,
 		"input":   {Type: types.FromName("String"), Data: input},
 		"index":   {Type: types.FromName("Integer"), Data: index},
@@ -2269,12 +2301,12 @@ func (e *Evaluator) base64DecodeResultErr(resultType types.Type, kind, input str
 }
 
 func (e *Evaluator) percentDecodeResultErr(resultType types.Type, kind, input, message string) (Value, error) {
-	kindDefinition, ok := e.definitions[symbolKey("trb/std/url/index", "PercentDecodeErrorKind")].(*enumDefinition)
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/url/index", "URL::DecodeErrorKind")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("operation requires trb/std/url")
 	}
-	kindValue := Value{Type: types.FromName("PercentDecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
-	return e.structuredResultErrFrom(resultType, "trb/std/url/index", "PercentDecodeError", map[string]Value{
+	kindValue := Value{Type: types.FromName("URL::DecodeErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	return e.structuredResultErrFrom(resultType, "trb/std/url/index", "URL::DecodeError", map[string]Value{
 		"kind":    kindValue,
 		"input":   {Type: types.FromName("String"), Data: input},
 		"message": {Type: types.FromName("String"), Data: message},
@@ -2522,11 +2554,11 @@ func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string,
 	if !ok {
 		return Value{}, errors.New("filesystem requires trb/std/result")
 	}
-	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileError")].(*recordDefinition)
+	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::Error")].(*recordDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem runtime is not loaded")
 	}
-	errorType := types.FromName("FileError")
+	errorType := types.FromName("FileSystem::Error")
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
 	}
@@ -2556,11 +2588,11 @@ func (e *Evaluator) processErr(resultType types.Type, operation, command string,
 	if !ok {
 		return Value{}, errors.New("process operation requires trb/std/result")
 	}
-	errorDefinition, ok := e.definitions[symbolKey("trb/std/process/index", "ProcessError")].(*recordDefinition)
+	errorDefinition, ok := e.definitions[symbolKey("trb/std/process/index", "Process::Error")].(*recordDefinition)
 	if !ok {
 		return Value{}, errors.New("process operation requires trb/std/process")
 	}
-	errorValue := Value{Type: types.FromName("ProcessError"), Data: &recordInstance{Definition: errorDefinition, Fields: map[string]Value{
+	errorValue := Value{Type: types.FromName("Process::Error"), Data: &recordInstance{Definition: errorDefinition, Fields: map[string]Value{
 		"operation": {Type: types.FromName("String"), Data: operation},
 		"command":   {Type: types.FromName("String"), Data: command},
 		"message":   {Type: types.FromName("String"), Data: cause.Error()},
@@ -2603,7 +2635,7 @@ func (e *Evaluator) stringifyJSON(resultType types.Type, value Value) (Value, er
 }
 
 func (e *Evaluator) decodeJSONCodec(resultType types.Type, source string, schema *ir.CodecSchema) (Value, error) {
-	parseType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JsonValue"), types.FromName("JsonError")}}
+	parseType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JSON::Value"), types.FromName("JSON::Error")}}
 	parsed, err := e.parseJSON(parseType, source)
 	if err != nil {
 		return Value{}, err
@@ -2636,7 +2668,7 @@ func (e *Evaluator) encodeJSONCodec(resultType types.Type, value Value, schema *
 
 func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, path string) (Value, *jsonConversionError) {
 	variant, ok := value.Data.(*enumValue)
-	if !ok || variant.Definition.Node.Name != "JsonValue" {
+	if !ok || runtimeDefinitionName(variant.Definition.Node.Declaration, variant.Definition.Node.Name) != "JSON::Value" {
 		return Value{}, &jsonConversionError{path: path, message: "expected JSON value"}
 	}
 	if schema.Type.Nullable {
@@ -2907,11 +2939,11 @@ type jsonConversionError struct {
 }
 
 func (e *Evaluator) jsonValue(raw any, path string) (Value, *jsonConversionError) {
-	definition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonValue")].(*enumDefinition)
+	definition, ok := e.definitions[symbolKey("trb/std/json/index", "JSON::Value")].(*enumDefinition)
 	if !ok {
 		return Value{}, &jsonConversionError{path: path, message: "JSON runtime is not loaded"}
 	}
-	typ := types.FromName("JsonValue")
+	typ := types.FromName("JSON::Value")
 	construct := func(name string, payload map[string]Value) Value {
 		return Value{Type: typ, Data: &enumValue{Definition: definition, Name: name, Payload: payload}}
 	}
@@ -2982,7 +3014,7 @@ func (e *Evaluator) jsonValue(raw any, path string) (Value, *jsonConversionError
 
 func jsonRaw(value Value, path string) (any, *jsonConversionError) {
 	item, ok := value.Data.(*enumValue)
-	if !ok || item.Definition.Node.Name != "JsonValue" {
+	if !ok || runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name) != "JSON::Value" {
 		return nil, &jsonConversionError{path: path, message: "unsupported JSON value"}
 	}
 	payload := item.Payload["value"]
@@ -3043,11 +3075,11 @@ func (e *Evaluator) jsonError(resultType types.Type, kind, message, path string,
 	if !ok {
 		return Value{}, errors.New("JSON requires trb/std/result")
 	}
-	errorDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonError")].(*recordDefinition)
+	errorDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JSON::Error")].(*recordDefinition)
 	if !ok {
 		return Value{}, errors.New("JSON runtime is not loaded")
 	}
-	kindDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JsonErrorKind")].(*enumDefinition)
+	kindDefinition, ok := e.definitions[symbolKey("trb/std/json/index", "JSON::ErrorKind")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("JSON runtime is not loaded")
 	}
@@ -3061,8 +3093,8 @@ func (e *Evaluator) jsonError(resultType types.Type, kind, message, path string,
 	if column != nil {
 		columnValue.Data = *column
 	}
-	kindValue := Value{Type: types.FromName("JsonErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
-	errorType := types.FromName("JsonError")
+	kindValue := Value{Type: types.FromName("JSON::ErrorKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}}
+	errorType := types.FromName("JSON::Error")
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
 	}
@@ -3361,6 +3393,34 @@ func expressionName(expression ir.Expression) string {
 
 func symbolKey(module, name string) string { return module + "\x00" + name }
 
+func runtimeDefinitionName(declaration identity.Declaration, fallback string) string {
+	if declaration.Kind.IsType() && declaration.Name != "" {
+		return declaration.Name
+	}
+	return fallback
+}
+
+// DisplayType keeps an authored alias intact while restoring an owned nested
+// declaration when lowering retained only its leaf spelling in a composite
+// runtime type.
+func DisplayType(typ types.Type) string {
+	return displayType(typ).String()
+}
+
+func displayType(typ types.Type) types.Type {
+	if typ.Declaration.Kind.IsType() && strings.Contains(typ.Declaration.Name, "::") {
+		parts := strings.Split(typ.Declaration.Name, "::")
+		leaf := parts[len(parts)-1]
+		if typ.Name == leaf {
+			typ.Name = typ.Declaration.Name
+		}
+	}
+	for index := range typ.Args {
+		typ.Args[index] = displayType(typ.Args[index])
+	}
+	return typ
+}
+
 func ownedName(owner, name string) string {
 	if owner == "" {
 		return name
@@ -3411,7 +3471,7 @@ func Inspect(value Value) string {
 		for _, field := range item.Definition.Fields {
 			parts = append(parts, field.Name+": "+Inspect(item.Fields[field.Name]))
 		}
-		return item.Definition.Node.Name + "(" + strings.Join(parts, ", ") + ")"
+		return runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name) + "(" + strings.Join(parts, ", ") + ")"
 	case *objectInstance:
 		names := make([]string, 0, len(item.Fields))
 		for name := range item.Fields {
@@ -3425,31 +3485,32 @@ func Inspect(value Value) string {
 		for _, name := range names {
 			parts = append(parts, strings.TrimPrefix(name, "@")+": "+Inspect(item.Fields[name]))
 		}
-		return "#<" + item.Definition.Node.Name + " " + strings.Join(parts, ", ") + ">"
+		return "#<" + runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name) + " " + strings.Join(parts, ", ") + ">"
 	case *ormQueryValue:
 		return "#<" + item.model.QueryType + ">"
 	case *ormSubqueryValue:
 		return "#<" + value.Type.String() + ">"
 	case *typeValue:
 		if item.Record != nil {
-			return item.Record.Node.Name
+			return runtimeDefinitionName(item.Record.Node.Declaration, item.Record.Node.Name)
 		}
 		if item.Class != nil {
-			return item.Class.Node.Name
+			return runtimeDefinitionName(item.Class.Node.Declaration, item.Class.Node.Name)
 		}
 		if item.Enum != nil {
-			return item.Enum.Node.Name
+			return runtimeDefinitionName(item.Enum.Node.Declaration, item.Enum.Node.Name)
 		}
 	case *enumValue:
+		name := runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name)
 		if len(item.Payload) == 0 {
-			return item.Definition.Node.Name + "::" + item.Name
+			return name + "::" + item.Name
 		}
 		member := item.Definition.Members[item.Name]
 		parts := make([]string, 0, len(member.Fields))
 		for _, field := range member.Fields {
 			parts = append(parts, field.Name+": "+Inspect(item.Payload[field.Name]))
 		}
-		return item.Definition.Node.Name + "::" + item.Name + "(" + strings.Join(parts, ", ") + ")"
+		return name + "::" + item.Name + "(" + strings.Join(parts, ", ") + ")"
 	case map[string]string:
 		return "#<" + value.Type.String() + ">"
 	case *callable:

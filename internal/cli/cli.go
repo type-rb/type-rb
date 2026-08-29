@@ -1571,6 +1571,11 @@ func standardReplExportNames(definition *stdlib.Package) []string {
 		if exported.Name == definition.Root {
 			continue
 		}
+		if strings.Contains(exported.Name, "::") {
+			// Owned declarations are reached through their imported root. They are
+			// not independent named-import candidates in the REPL prelude.
+			continue
+		}
 		names[exported.Name] = true
 	}
 	if definition.Source != "" {

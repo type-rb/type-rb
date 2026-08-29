@@ -96,15 +96,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return resultError(value)
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
-		value := "({ kind: " + g.runtimeName("HexDecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("HexDecodeError") + ")"
+		value := "({ kind: " + g.runtimeName("Hex::DecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("Hex::DecodeError") + ")"
 		return resultError(value)
 	}
 	base64DecodeError := func(kind, input, index, message string) string {
-		value := "({ kind: " + g.runtimeName("Base64DecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("Base64DecodeError") + ")"
+		value := "({ kind: " + g.runtimeName("Base64::DecodeErrorKind") + "." + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("Base64::DecodeError") + ")"
 		return resultError(value)
 	}
 	percentDecodeError := func(kind, input, message string) string {
-		value := "({ kind: " + g.runtimeName("PercentDecodeErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("PercentDecodeError") + ")"
+		value := "({ kind: " + g.runtimeName("URL::DecodeErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("URL::DecodeError") + ")"
 		return resultError(value)
 	}
 	indexLookupError := func(index, size, message string) string {
@@ -188,17 +188,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/json/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONParse(call, arguments[0], false)
+		return g.tsJSONParse(call, arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/jsonc/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONParse(call, arguments[0], true)
+		return g.tsJSONParse(call, arguments[0], true)
 	case "trb.internal.json.stringify":
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/json/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONStringify(call, arguments[0])
+		return g.tsJSONStringify(call, arguments[0])
 	case "trb.internal.json.decode":
 		return g.tsJSONDecode(call, arguments[0])
 	case "trb.internal.json.encode":
@@ -601,7 +601,7 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 		return "undefined"
 	}
 	decodeCall := *call
-	decodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
+	decodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JSON::Error")}}
 	decoded := g.tsJSONDecode(&decodeCall, "source")
 	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.RequestError"
@@ -735,7 +735,7 @@ func (g *generator) tsWebJSON(call *ir.Call, arguments []string) string {
 		status = arguments[1]
 	}
 	encodeCall := *call
-	encodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JsonError")}}
+	encodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), types.FromName("JSON::Error")}}
 	encoded := g.tsJSONEncode(&encodeCall, arguments[0])
 	headers := `new __trb_http.Headers([{ name: "content-type", value: "application/json; charset=utf-8" }])`
 	return "(() => { const encoded = " + encoded + "; if (encoded.kind === \"Err\") { return new __trb_web.Response({ status: 500, headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(\"{\\\"error\\\":\\\"internal_server_error\\\"}\")) }); } return new __trb_web.Response({ status: " + status + ", headers: " + headers + ", body: new __trb_http.Body(new TextEncoder().encode(encoded.value)) }); })()"

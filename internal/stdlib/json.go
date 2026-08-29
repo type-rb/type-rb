@@ -4,107 +4,109 @@ func jsonSource() string {
 	return `import { Result } from trb/std/result
 import trb/internal/json as native_json
 
-enum JsonErrorKind
-	Syntax
-	Decode
-	Encode
+module JSON
+	enum ErrorKind
+		Syntax
+		Decode
+		Encode
+	end
+
+	record Error
+		kind: JSON::ErrorKind
+		message: String
+		path: String
+		line: Integer?
+		column: Integer?
+	end
+
+	enum Value
+		Null
+		Boolean(value: Boolean)
+		Integer(value: Integer)
+		Float(value: Float)
+		String(value: String)
+		Array(value: Array<JSON::Value>)
+		Object(value: Hash<String, JSON::Value>)
+	end
 end
 
-record JsonError
-	kind: JsonErrorKind
-	message: String
-	path: String
-	line: Integer?
-	column: Integer?
-end
-
-enum JsonValue
-	Null
-	Boolean(value: Boolean)
-	Integer(value: Integer)
-	Float(value: Float)
-	String(value: String)
-	Array(value: Array<JsonValue>)
-	Object(value: Hash<String, JsonValue>)
-end
-
-def parse(source: String): Result<JsonValue, JsonError>
+def parse(source: String): Result<JSON::Value, JSON::Error>
 	return native_json.parse(source)
 end
 
-def stringify(value: JsonValue): Result<String, JsonError>
+def stringify(value: JSON::Value): Result<String, JSON::Error>
 	return native_json.stringify(value)
 end
 
-def as_boolean(value: JsonValue): Result<Boolean, JsonError>
+def as_boolean(value: JSON::Value): Result<Boolean, JSON::Error>
 	case value
-	when JsonValue::Boolean(result)
-		return Result<Boolean, JsonError>::Ok(result)
+	when JSON::Value::Boolean(result)
+		return Result<Boolean, JSON::Error>::Ok(result)
 	else
-		return Result<Boolean, JsonError>::Err(_decode_error("", "JSON value is not Boolean"))
+		return Result<Boolean, JSON::Error>::Err(_decode_error("", "JSON value is not Boolean"))
 	end
 end
 
-def as_integer(value: JsonValue): Result<Integer, JsonError>
+def as_integer(value: JSON::Value): Result<Integer, JSON::Error>
 	case value
-	when JsonValue::Integer(result)
-		return Result<Integer, JsonError>::Ok(result)
+	when JSON::Value::Integer(result)
+		return Result<Integer, JSON::Error>::Ok(result)
 	else
-		return Result<Integer, JsonError>::Err(_decode_error("", "JSON value is not Integer"))
+		return Result<Integer, JSON::Error>::Err(_decode_error("", "JSON value is not Integer"))
 	end
 end
 
-def as_float(value: JsonValue): Result<Float, JsonError>
+def as_float(value: JSON::Value): Result<Float, JSON::Error>
 	case value
-	when JsonValue::Float(result)
-		return Result<Float, JsonError>::Ok(result)
+	when JSON::Value::Float(result)
+		return Result<Float, JSON::Error>::Ok(result)
 	else
-		return Result<Float, JsonError>::Err(_decode_error("", "JSON value is not Float"))
+		return Result<Float, JSON::Error>::Err(_decode_error("", "JSON value is not Float"))
 	end
 end
 
-def as_string(value: JsonValue): Result<String, JsonError>
+def as_string(value: JSON::Value): Result<String, JSON::Error>
 	case value
-	when JsonValue::String(result)
-		return Result<String, JsonError>::Ok(result)
+	when JSON::Value::String(result)
+		return Result<String, JSON::Error>::Ok(result)
 	else
-		return Result<String, JsonError>::Err(_decode_error("", "JSON value is not String"))
+		return Result<String, JSON::Error>::Err(_decode_error("", "JSON value is not String"))
 	end
 end
 
-def as_array(value: JsonValue): Result<Array<JsonValue>, JsonError>
+def as_array(value: JSON::Value): Result<Array<JSON::Value>, JSON::Error>
 	case value
-	when JsonValue::Array(result)
-		return Result<Array<JsonValue>, JsonError>::Ok(result)
+	when JSON::Value::Array(result)
+		return Result<Array<JSON::Value>, JSON::Error>::Ok(result)
 	else
-		return Result<Array<JsonValue>, JsonError>::Err(_decode_error("", "JSON value is not Array"))
+		return Result<Array<JSON::Value>, JSON::Error>::Err(_decode_error("", "JSON value is not Array"))
 	end
 end
 
-def as_object(value: JsonValue): Result<Hash<String, JsonValue>, JsonError>
+def as_object(value: JSON::Value): Result<Hash<String, JSON::Value>, JSON::Error>
 	case value
-	when JsonValue::Object(result)
-		return Result<Hash<String, JsonValue>, JsonError>::Ok(result)
+	when JSON::Value::Object(result)
+		return Result<Hash<String, JSON::Value>, JSON::Error>::Ok(result)
 	else
-		return Result<Hash<String, JsonValue>, JsonError>::Err(_decode_error("", "JSON value is not Object"))
+		return Result<Hash<String, JSON::Value>, JSON::Error>::Err(_decode_error("", "JSON value is not Object"))
 	end
 end
 
-def field(value: JsonValue, name: String): Result<JsonValue, JsonError>
+def field(value: JSON::Value, name: String): Result<JSON::Value, JSON::Error>
 	case value
-	when JsonValue::Object(fields)
+	when JSON::Value::Object(fields)
 		if fields.key?(name)
-			return Result<JsonValue, JsonError>::Ok(fields.fetch(name))
+			return Result<JSON::Value, JSON::Error>::Ok(fields.fetch(name))
 		end
-		return Result<JsonValue, JsonError>::Err(_decode_error("/" + name, "JSON object field is missing"))
+		return Result<JSON::Value, JSON::Error>::Err(_decode_error("/" + name, "JSON object field is missing"))
 	else
-		return Result<JsonValue, JsonError>::Err(_decode_error("", "JSON value is not Object"))
+		return Result<JSON::Value, JSON::Error>::Err(_decode_error("", "JSON value is not Object"))
 	end
 end
 
-def _decode_error(path: String, message: String): JsonError
-	return JsonError.new(
-		kind: JsonErrorKind::Decode,
+def _decode_error(path: String, message: String): JSON::Error
+	return JSON::Error.new(
+		kind: JSON::ErrorKind::Decode,
 		message: message,
 		path: path,
 		line: nil,

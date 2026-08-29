@@ -126,7 +126,7 @@ func (e *Evaluator) webRequestJSON(receiver Value, resultType types.Type, schema
 	if !utf8.Valid(data) {
 		return requestError("InvalidUtf8", nil)
 	}
-	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{schema.Type, types.FromName("JsonError")}}
+	jsonResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{schema.Type, types.FromName("JSON::Error")}}
 	decoded, err := e.decodeJSONCodec(jsonResult, string(data), schema)
 	if err != nil {
 		return Value{}, err

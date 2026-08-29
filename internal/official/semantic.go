@@ -87,7 +87,7 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 	body := types.FromName("Body")
 	requestError := types.FromName("RequestError")
 	fileReadError := types.FromName("FileReadError")
-	jsonRuntime := []types.Type{types.FromName("JsonValue")}
+	jsonRuntime := []types.Type{types.FromName("JSON::Value")}
 	return map[string]stdlib.Symbol{
 		"read": {
 			Name:      "read",
@@ -108,7 +108,7 @@ func typescriptBrowserSymbols() map[string]stdlib.Symbol {
 			Parameters: []stdlib.Parameter{
 				{Name: "path", Type: types.FromName("String")},
 				{Name: "method", Type: types.FromName("HttpMethod"), Optional: true, Keyword: true},
-				{Name: "query", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("QueryParameter")}}, Optional: true, Keyword: true},
+				{Name: "query", Type: types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("URL::QueryParameter")}}, Optional: true, Keyword: true},
 				{Name: "headers", Type: types.FromName("Headers"), Optional: true, Keyword: true},
 				{Name: "body", Type: nullable(types.FromName("RequestBody")), Optional: true, Keyword: true},
 				{Name: "timeout_milliseconds", Type: nullable(types.FromName("Integer")), Optional: true, Keyword: true},
@@ -190,7 +190,7 @@ func webTestingSymbols() map[string]stdlib.Symbol {
 
 func webSymbols() map[string]stdlib.Symbol {
 	typeT := types.FromName("T")
-	jsonError := types.FromName("JsonError")
+	jsonError := types.FromName("JSON::Error")
 	encodingResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("String"), jsonError}}
 	contextKey := types.Type{Kind: types.Named, Name: "ContextKey", Args: []types.Type{typeT}}
 	contextValueError := types.FromName("ContextValueError")

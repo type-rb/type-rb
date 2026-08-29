@@ -79,3 +79,59 @@ func TestGeneratedAndAuthoredScopesCanImportTheSameNewtype(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDeclarationRootImportExposesOwnedNestedTypesAcrossBackends(t *testing.T) {
+	definitions := SourceUnit{
+		Filename:   "/project/src/contracts/payloads.trb",
+		ModulePath: "contracts/payloads",
+		Package:    "contracts",
+		Source: []byte(`module Payloads
+	record Error
+		message: String
+	end
+
+	def self.failure(message: String): Payloads::Error
+		return Payloads::Error.new(message: message)
+	end
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/payloads as API
+
+def failure(): API::Error
+	return API.failure("failed")
+end
+
+def main()
+	puts(failure().message)
+	return
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireEffectRuntime(t, mode)
+			artifacts, err := CompileProject([]SourceUnit{definitions, consumer}, Options{
+				Mode: mode, GoModule: "example.com/nested-root", RubyLoader: "require_relative",
+				SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			main := findArtifactByModule(artifacts, "main")
+			if main == nil {
+				t.Fatal("main artifact is missing")
+			}
+			if output := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/nested-root")); output != "failed" {
+				t.Fatalf("nested root output = %q, want failed", output)
+			}
+			if mode == "typescript" {
+				checkTypeScriptArtifacts(t, artifacts, "owned_nested_root")
+			}
+		})
+	}
+}

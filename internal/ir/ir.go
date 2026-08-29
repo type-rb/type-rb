@@ -66,16 +66,19 @@ type Import struct {
 	// SymbolAliases maps exported declaration names to their source-local
 	// bindings for named imports and aliased bare roots.
 	SymbolAliases map[string]string
-	Alias         string
-	QualifiedRoot string
-	UsedSymbols   []string
-	Namespace     bool
-	Kind          string
-	Standard      bool
-	Official      bool
-	Platform      bool
-	Native        bool
-	Runtime       bool
+	// NestedTypeSymbols maps canonical owned declaration names to their
+	// source-local qualified spelling through an imported declaration root.
+	NestedTypeSymbols map[string]string
+	Alias             string
+	QualifiedRoot     string
+	UsedSymbols       []string
+	Namespace         bool
+	Kind              string
+	Standard          bool
+	Official          bool
+	Platform          bool
+	Native            bool
+	Runtime           bool
 	// RuntimeRequired records that generated code must load the source module
 	// for compiler-owned runtime behavior. Fully lowered intrinsics can leave
 	// this false.

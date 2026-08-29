@@ -1,5 +1,5 @@
 import { Body, Header, Headers } from trb/http
-import { QueryParameter } from trb/std/url
+import trb/std/url
 
 record NoBody
 end
@@ -54,7 +54,7 @@ enum RequestBody
 	Text(value: String)
 	Bytes(value: Bytes)
 	File(value: File)
-	Form(value: Array<QueryParameter>)
+	Form(value: Array<URL::QueryParameter>)
 	Json(value: String)
 end
 

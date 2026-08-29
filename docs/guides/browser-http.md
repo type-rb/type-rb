@@ -17,7 +17,7 @@ import {
 } from trb/platform/typescript/browser
 import { Header, Headers, HttpMethod } from trb/http
 import { Result } from trb/std/result
-import { QueryParameter } from trb/std/url
+import trb/std/url
 
 record Todo
 	id: Integer
@@ -31,7 +31,7 @@ end
 def fetch_todo(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
 	raw := try client.request(
 		"/todos",
-		query: [QueryParameter.new(name: "id", value: id.to_s())],
+		query: [URL::QueryParameter.new(name: "id", value: id.to_s())],
 		headers: Headers.new([Header.new(name: "accept", value: "application/json")]),
 		timeout_milliseconds: 2000,
 	)

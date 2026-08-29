@@ -726,7 +726,7 @@ end
 			continue
 		}
 		output := string(artifact.Output)
-		if !strings.Contains(output, "type LocalAlias = Base") {
+		if !strings.Contains(output, "type ServicesLocalAlias = ServicesBase") {
 			t.Fatalf("local alias chain used an unrelated imported authored target:\n%s", output)
 		}
 		return

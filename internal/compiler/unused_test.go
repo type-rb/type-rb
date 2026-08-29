@@ -256,14 +256,14 @@ end
 }
 
 func TestImportedTypesUsedAsGenericArgumentsAreAccepted(t *testing.T) {
-	source := []byte(`import { JsonError } from trb/std/json
+	source := []byte(`import trb/std/json
 
 def identity<T>(value: T): T
 	return value
 end
 
 def discard()
-	identity<JsonError?>(nil)
+	identity<JSON::Error?>(nil)
 	return
 end
 `)

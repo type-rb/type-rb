@@ -139,7 +139,7 @@ type cliConstructField struct {
 func (g *generator) cliEnumValue(command cliapp.Command, commandIndex int) string {
 	qualifier := g.cliQualifier(command.Enum.ModulePath)
 	if command.Payload == nil {
-		return qualifier + goConstantIdentifier(cliDeclarationLeaf(command.Enum.Name), command.MemberName)
+		return qualifier + goConstantIdentifier(command.Enum.Name, command.MemberName)
 	}
 	prefix := "command" + strconv.Itoa(commandIndex)
 	values := g.cliFieldValues(*command.Payload, prefix, cliCommandKeyPrefix(commandIndex))
@@ -147,7 +147,7 @@ func (g *generator) cliEnumValue(command cliapp.Command, commandIndex int) strin
 	if command.PayloadNamedOnly {
 		payload = "map[string]any{" + strconv.Quote(command.PayloadName) + ": " + payload + "}"
 	}
-	return qualifier + "New" + goIdentifier(cliDeclarationLeaf(command.Enum.Name), true) + goIdentifier(command.MemberName, true) + "(" + payload + ")"
+	return qualifier + "New" + goIdentifier(command.Enum.Name, true) + goIdentifier(command.MemberName, true) + "(" + payload + ")"
 }
 
 func (g *generator) cliFieldValues(record cliapp.Record, prefix, keyPrefix string) []cliConstructField {
@@ -248,24 +248,17 @@ func (g *generator) cliRecordExpression(record cliapp.Record, fields []cliConstr
 				arguments = append(arguments, field.Provided)
 			}
 		}
-		return qualifier + goRecordConstructorName(cliDeclarationLeaf(record.Name)) + "(" + strings.Join(arguments, ", ") + ")"
+		return qualifier + goRecordConstructorName(record.Name) + "(" + strings.Join(arguments, ", ") + ")"
 	}
 	items := make([]string, 0, len(fields))
 	for _, field := range fields {
 		items = append(items, goIdentifier(field.Name, true)+": "+field.Value)
 	}
-	return qualifier + goIdentifier(cliDeclarationLeaf(record.Name), true) + "{" + strings.Join(items, ", ") + "}"
+	return qualifier + goIdentifier(record.Name, true) + "{" + strings.Join(items, ", ") + "}"
 }
 
 func (g *generator) cliTypeName(modulePath, name string) string {
-	return g.cliQualifier(modulePath) + goIdentifier(cliDeclarationLeaf(name), true)
-}
-
-func cliDeclarationLeaf(name string) string {
-	if index := strings.LastIndex(name, "::"); index >= 0 {
-		return name[index+2:]
-	}
-	return name
+	return g.cliQualifier(modulePath) + goIdentifier(name, true)
 }
 
 func (g *generator) cliQualifier(modulePath string) string {

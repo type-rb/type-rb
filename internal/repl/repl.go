@@ -171,7 +171,7 @@ func Run(options Options) error {
 			if result.MutableBinding {
 				mutable = " " + colorize(options.Interactive, colorKeyword, "[mut]")
 			}
-			fmt.Fprintf(options.Stdout, "%s %s %s%s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, result.Value.Type.String()), mutable)
+			fmt.Fprintf(options.Stdout, "%s %s %s%s\n", colorize(options.Interactive, colorValue, Inspect(result.Value)), colorize(options.Interactive, colorMuted, ":"), colorize(options.Interactive, colorType, DisplayType(result.Value.Type)), mutable)
 		}
 	}
 	return nil
@@ -237,9 +237,9 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 		}
 		switch statement := statements[len(statements)-1].(type) {
 		case *ir.ExpressionStatement:
-			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, statement.Expression.ExprType().String()))
+			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, DisplayType(statement.Expression.ExprType())))
 		case *ir.Variable:
-			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, statement.Type.String()))
+			fmt.Fprintln(options.Stdout, colorize(options.Interactive, colorType, DisplayType(statement.Type)))
 		default:
 			printReplError(options.Stderr, options.Interactive, "input is not an expression")
 		}

@@ -14,8 +14,8 @@ func TestTypeNameUsesLocalCanonicalDeclarationIdentity(t *testing.T) {
 		Declaration: identity.Declaration{Module: "main", Name: "Services::Box", Kind: identity.Record},
 	}
 	value := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{box}}
-	if got := generator.tsType(value); got != "Array<Services.Box<string>>" {
-		t.Fatalf("TypeScript semantic type = %q, want Array<Services.Box<string>>", got)
+	if got := generator.tsType(value); got != "Array<ServicesBox<string>>" {
+		t.Fatalf("TypeScript semantic type = %q, want Array<ServicesBox<string>>", got)
 	}
 }
 

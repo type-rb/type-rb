@@ -155,11 +155,19 @@ func generatedImportsSource(_ *ast.Program, _ resolver.Result, unit SourceUnit, 
 	sort.Strings(paths)
 	var lines []string
 	for _, path := range paths {
-		var symbols []string
+		bindings := map[string]bool{}
 		for symbol := range required[path] {
-			if !visible[path][symbol] {
-				symbols = append(symbols, symbol)
+			binding := symbol
+			if root, _, nested := strings.Cut(symbol, "::"); nested {
+				binding = root
 			}
+			if !visible[path][binding] {
+				bindings[binding] = true
+			}
+		}
+		var symbols []string
+		for symbol := range bindings {
+			symbols = append(symbols, symbol)
 		}
 		if len(symbols) == 0 {
 			continue

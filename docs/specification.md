@@ -990,7 +990,7 @@ parsed := OrderStatus.from_raw("PENDING")
 ```
 
 Typed JSON codecs encode a raw-value enum as its raw String or Integer and
-decode only declared raw values. Unknown input produces `JsonError`; the
+decode only declared raw values. Unknown input produces `JSON::Error`; the
 target-language object representation never determines the wire value.
 
 #### 3.14.2 Payload enums as sum types

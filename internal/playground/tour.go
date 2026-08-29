@@ -83,7 +83,7 @@ var tourLessons = []Lesson{
 	{
 		ID: "json", Chapter: "Model data and errors", Title: "JSON and typed codecs", Eyebrow: "10 · Model data",
 		Description: "Portable JSON and JSONC packages return Result values. Typed codecs decode checked records without passing untyped maps through the application.",
-		Source:      "import { JsonError } from trb/std/json\nimport trb/std/json\nimport { Result } from trb/std/result\n\nrecord User\n\tname: String\n\tactive: Boolean\nend\n\ndecoded: Result<User, JsonError> := JSON.decode<User>(\"{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true}\")\ncase decoded\nwhen Result::Ok(user)\n\tputs(user.name)\n\tputs(user.active)\nwhen Result::Err(error)\n\tputs(error.message)\nend\n",
+		Source:      "import trb/std/json\nimport { Result } from trb/std/result\n\nrecord User\n\tname: String\n\tactive: Boolean\nend\n\ndecoded: Result<User, JSON::Error> := JSON.decode<User>(\"{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true}\")\ncase decoded\nwhen Result::Ok(user)\n\tputs(user.name)\n\tputs(user.active)\nwhen Result::Err(error)\n\tputs(error.message)\nend\n",
 		Expected:    "Ada\ntrue\n",
 		Hint:        "Remove a JSON field to inspect its path-aware error, or import encode and serialize a User.",
 	},

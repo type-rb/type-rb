@@ -140,14 +140,15 @@ func (g *generator) browserResponseJSON(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	resultType, successType, _ := g.browserResultParts(call)
-	builder := g.jsonCodecBuilder("")
+	jsonAlias := g.ensureJSONRuntime()
+	builder := g.jsonCodecBuilder(jsonAlias)
 	decoder := builder.decoder(call.Codec)
-	jsonValue := "JsonValue"
+	jsonValue := tsJSONQualified(jsonAlias, "JSON.Value")
 	contractError := g.browserError(call, "Contract", "message", "response")
 	return "((response): " + resultType + " => { const source = new TextDecoder(\"utf-8\", { fatal: true }); " +
 		"const fail = (path: string, detail: string): never => { throw new Error((path.length === 0 ? \"/\" : path) + \": \" + detail); }; " + builder.source.String() +
-		"const convert = (value: unknown, path: string): " + jsonValue + " => { if (value === null) return JsonValue.Null; if (typeof value === \"boolean\") return JsonValue.Boolean(value); if (typeof value === \"string\") return JsonValue.String(value); if (typeof value === \"number\") { if (!Number.isFinite(value)) return fail(path, \"JSON number is not finite\"); if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) return fail(path, \"JSON integer is outside the portable range\"); return JsonValue.Integer(value); } return JsonValue.Float(value); } if (Array.isArray(value)) return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) fields[key] = convert(item, path + \"/\" + key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\")); return JsonValue.Object(fields); } return fail(path, \"unsupported JSON value\"); }; " +
-		"try { const parsed: unknown = JSON.parse(source.decode(response.__trb_body.bytes())); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })(" + argument + ")"
+		"const convert = (value: unknown, path: string): " + jsonValue + " => { if (value === null) return " + jsonValue + ".Null; if (typeof value === \"boolean\") return " + jsonValue + ".Boolean(value); if (typeof value === \"string\") return " + jsonValue + ".String(value); if (typeof value === \"number\") { if (!Number.isFinite(value)) return fail(path, \"JSON number is not finite\"); if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) return fail(path, \"JSON integer is outside the portable range\"); return " + jsonValue + ".Integer(value); } return " + jsonValue + ".Float(value); } if (Array.isArray(value)) return " + jsonValue + ".Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); if (typeof value === \"object\") { const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) fields[key] = convert(item, path + \"/\" + key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\")); return " + jsonValue + ".Object(fields); } return fail(path, \"unsupported JSON value\"); }; " +
+		"try { const parsed: unknown = globalThis.JSON.parse(source.decode(response.__trb_body.bytes())); const value = " + decoder + "(convert(parsed, \"\"), \"\"); return " + g.browserOK(call, g.browserResponseValue("response", "value", successType)) + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })(" + argument + ")"
 }
 
 func (g *generator) browserJSONBody(call *ir.Call, argument string) string {
@@ -155,10 +156,12 @@ func (g *generator) browserJSONBody(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	resultType, _, _ := g.browserResultParts(call)
-	builder := g.jsonCodecBuilder("")
+	jsonAlias := g.ensureJSONRuntime()
+	builder := g.jsonCodecBuilder(jsonAlias)
 	encoder := builder.encoder(call.Codec)
+	jsonValue := tsJSONQualified(jsonAlias, "JSON.Value")
 	contractError := g.browserError(call, "Contract", "message", "null")
 	return "((): " + resultType + " => { " + builder.source.String() +
-		"const convert = (value: JsonValue): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) throw new Error(\"JSON integer is outside the portable range\"); return value.value; case \"Float\": if (!Number.isFinite(value.value)) throw new Error(\"JSON Float must be finite\"); return value.value; case \"String\": return value.value; case \"Array\": return value.value.map(convert); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) fields[key] = convert(item); return fields; } } }; " +
-		"try { const source = JSON.stringify(convert(" + encoder + "(" + argument + "))); if (source === undefined) throw new Error(\"JSON encoding produced no value\"); return " + g.browserOK(call, "({ kind: \"Json\", value: source } satisfies "+g.runtimeName("RequestBody")+")") + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })()"
+		"const convert = (value: " + jsonValue + "): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) throw new Error(\"JSON integer is outside the portable range\"); return value.value; case \"Float\": if (!Number.isFinite(value.value)) throw new Error(\"JSON Float must be finite\"); return value.value; case \"String\": return value.value; case \"Array\": return value.value.map(convert); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) fields[key] = convert(item); return fields; } } }; " +
+		"try { const source = globalThis.JSON.stringify(convert(" + encoder + "(" + argument + "))); if (source === undefined) throw new Error(\"JSON encoding produced no value\"); return " + g.browserOK(call, "({ kind: \"Json\", value: source } satisfies "+g.runtimeName("RequestBody")+")") + "; } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + contractError + "; } })()"
 }

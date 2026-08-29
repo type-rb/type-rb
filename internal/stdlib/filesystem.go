@@ -5,37 +5,39 @@ func filesystemSource() string {
 import { Unit } from trb/std/unit
 import trb/internal/filesystem as native_fs
 
-record FileError
-	operation: String
-	path: String
-	message: String
+module FileSystem
+	record Error
+		operation: String
+		path: String
+		message: String
+	end
 end
 
-def exists(path: String): Result<Boolean, FileError>
+def exists(path: String): Result<Boolean, FileSystem::Error>
 	return native_fs.exists(path)
 end
 
-def read_text(path: String): Result<String, FileError>
+def read_text(path: String): Result<String, FileSystem::Error>
 	return native_fs.read_text(path)
 end
 
-def read_bytes(path: String): Result<Bytes, FileError>
+def read_bytes(path: String): Result<Bytes, FileSystem::Error>
 	return native_fs.read_bytes(path)
 end
 
-def write_text(path: String, value: String): Result<Unit, FileError>
+def write_text(path: String, value: String): Result<Unit, FileSystem::Error>
 	return native_fs.write_text(path, value)
 end
 
-def write_bytes(path: String, value: Bytes): Result<Unit, FileError>
+def write_bytes(path: String, value: Bytes): Result<Unit, FileSystem::Error>
 	return native_fs.write_bytes(path, value)
 end
 
-def create_directory(path: String): Result<Unit, FileError>
+def create_directory(path: String): Result<Unit, FileSystem::Error>
 	return native_fs.create_directory(path)
 end
 
-def list(path: String): Result<Array<String>, FileError>
+def list(path: String): Result<Array<String>, FileSystem::Error>
 	return native_fs.list(path)
 end
 `

@@ -160,8 +160,8 @@ decoded := Hex.decode("41F09F9880")
 ```
 
 Encoding uses lowercase ASCII. Decoding accepts uppercase or lowercase input
-and returns `Result<Bytes, HexDecodeError>`. Invalid characters and odd-length
-input are distinguished by `HexDecodeErrorKind`; the error also preserves the
+and returns `Result<Bytes, Hex::DecodeError>`. Invalid characters and odd-length
+input are distinguished by `Hex::DecodeErrorKind`; the error also preserves the
 input, a zero-based character position, and a message. For odd-length input,
 the position is the missing character at the end of the string.
 
@@ -178,8 +178,8 @@ url_decoded := Base64.url_decode("Pz8_")
 
 `encode()` emits padded RFC 4648 Base64. `url_encode()` uses the URL-safe
 alphabet without padding. Their matching decode functions accept only the
-canonical form they emit and return `Result<Bytes, Base64DecodeError>`.
-`Base64DecodeErrorKind` distinguishes invalid length, characters, padding, and
+canonical form they emit and return `Result<Bytes, Base64::DecodeError>`.
+`Base64::DecodeErrorKind` distinguishes invalid length, characters, padding, and
 non-canonical trailing bits; the error includes the input, zero-based position,
 and a message.
 
@@ -446,20 +446,19 @@ target OS or current directory.
 
 ```trb
 import trb/std/url
-import { PercentDecodeError, QueryParameter } from trb/std/url
 import { Result } from trb/std/result
 
 encoded := URL.encode_component("todos/日本語")
 query := URL.build_query([
-	QueryParameter.new(name: "tag", value: "type rb"),
-	QueryParameter.new(name: "tag", value: "go"),
+	URL::QueryParameter.new(name: "tag", value: "type rb"),
+	URL::QueryParameter.new(name: "tag", value: "go"),
 ])
 
-def decode_segment(value: String): Result<String, PercentDecodeError>
+def decode_segment(value: String): Result<String, URL::DecodeError>
 	return URL.decode_component(value)
 end
 
-def decode_query(value: String): Result<Array<QueryParameter>, PercentDecodeError>
+def decode_query(value: String): Result<Array<URL::QueryParameter>, URL::DecodeError>
 	return URL.parse_query(value)
 end
 ```
@@ -467,15 +466,15 @@ end
 `encode_component` preserves only RFC 3986 unreserved ASCII characters and
 encodes all other UTF-8 bytes with uppercase hexadecimal escapes. It does not
 encode spaces as `+`. `decode_component` likewise preserves a literal `+` and
-returns `Result<String, PercentDecodeError>` for malformed escapes or decoded
+returns `Result<String, URL::DecodeError>` for malformed escapes or decoded
 bytes that are not valid UTF-8.
 
-`parse_query` and `build_query` use an ordered `Array<QueryParameter>` so
+`parse_query` and `build_query` use an ordered `Array<URL::QueryParameter>` so
 duplicate names and their global order are preserved. They accept and produce
 query strings without a leading `?`. Parsing treats `+` as a space, skips empty
 `&` segments, and normalizes a name without `=` to an empty value. Building
 uses `+` for spaces and percent-encodes reserved bytes. Invalid escapes and
-decoded bytes that are not valid UTF-8 return `PercentDecodeError`.
+decoded bytes that are not valid UTF-8 return `URL::DecodeError`.
 
 Complete URL parsing remains a future addition to the package.
 
@@ -486,10 +485,9 @@ returns a `Result`:
 
 ```trb
 import trb/std/filesystem
-import { FileError } from trb/std/filesystem
 import { Result } from trb/std/result
 
-def load_config(path: String): Result<String, FileError>
+def load_config(path: String): Result<String, FileSystem::Error>
 	return FileSystem.read_text(path)
 end
 ```
@@ -498,7 +496,7 @@ The package provides existence checks, UTF-8 and raw-byte reads and writes,
 recursive directory creation, and sorted immediate-child listing. Failures
 carry `operation`, `path`, and `message` instead of exposing target exceptions.
 
-Writes and directory creation return `Result<Unit, FileError>`. `Unit` is a
+Writes and directory creation return `Result<Unit, FileSystem::Error>`. `Unit` is a
 storable value representing successful completion; it is distinct from the
 internal `Void` return category.
 
@@ -512,17 +510,16 @@ shell-free process operations:
 
 ```trb
 import trb/std/process
-import { ProcessError, ProcessResult } from trb/std/process
 import { Result } from trb/std/result
 
-def run_formatter(files: Array<String>): Result<ProcessResult, ProcessError>
+def run_formatter(files: Array<String>): Result<Process::Output, Process::Error>
 	return Process.run("formatter", files)
 end
 ```
 
 `run` takes a command and separate `Array<String>` arguments. It captures
 stdout and stderr. A started process with any exit status is
-`Ok(ProcessResult)`; launch or host failures are `Err(ProcessError)`.
+`Ok(Process::Output)`; launch or host failures are `Err(Process::Error)`.
 
 ## JSON and JSONC
 
@@ -530,7 +527,6 @@ stdout and stderr. A started process with any exit status is
 
 ```trb
 import trb/std/json
-import { JsonError } from trb/std/json
 import { Result } from trb/std/result
 
 record User
@@ -539,11 +535,11 @@ record User
 	nickname: String?
 end
 
-def decode_user(source: String): Result<User, JsonError>
+def decode_user(source: String): Result<User, JSON::Error>
 	return JSON.decode<User>(source)
 end
 
-def encode_user(user: User): Result<String, JsonError>
+def encode_user(user: User): Result<String, JSON::Error>
 	return JSON.encode(user)
 end
 ```

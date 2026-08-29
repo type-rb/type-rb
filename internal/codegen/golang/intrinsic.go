@@ -79,30 +79,30 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return resultError(value)
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
-		alias := g.typeAliases["HexDecodeErrorKind"]
-		kindName := goConstantIdentifier("HexDecodeErrorKind", kind)
+		alias := g.typeAliases["Hex::DecodeErrorKind"]
+		kindName := goConstantIdentifier("Hex::DecodeErrorKind", kind)
 		if alias != "" {
 			kindName = alias + "." + kindName
 		}
-		value := g.goType(types.FromName("HexDecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
+		value := g.goType(types.FromName("Hex::DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	base64DecodeError := func(kind, input, index, message string) string {
-		alias := g.typeAliases["Base64DecodeErrorKind"]
-		kindName := goConstantIdentifier("Base64DecodeErrorKind", kind)
+		alias := g.typeAliases["Base64::DecodeErrorKind"]
+		kindName := goConstantIdentifier("Base64::DecodeErrorKind", kind)
 		if alias != "" {
 			kindName = alias + "." + kindName
 		}
-		value := g.goType(types.FromName("Base64DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
+		value := g.goType(types.FromName("Base64::DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Index: " + index + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	percentDecodeError := func(kind, input, message string) string {
-		alias := g.typeAliases["PercentDecodeErrorKind"]
-		kindName := goConstantIdentifier("PercentDecodeErrorKind", kind)
+		alias := g.typeAliases["URL::DecodeErrorKind"]
+		kindName := goConstantIdentifier("URL::DecodeErrorKind", kind)
 		if alias != "" {
 			kindName = alias + "." + kindName
 		}
-		value := g.goType(types.FromName("PercentDecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
+		value := g.goType(types.FromName("URL::DecodeError")) + "{Kind: " + kindName + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	indexLookupError := func(index, size, message string) string {
@@ -234,7 +234,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.internal.json.parse":
 		return g.jsonParse(call, arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
-		if reference := expressionReference(call.Callee); reference != nil && reference.Package == "trb/std/jsonc/index" && g.modulePath != reference.Package {
+		if reference := expressionReference(call.Callee); reference != nil && reference.Package == "trb/std/jsonc/index" && strings.TrimSuffix(g.modulePath, "/index") != strings.TrimSuffix(reference.Package, "/index") {
 			alias := reference.Alias
 			if alias == "" {
 				alias = pathpkg.Base(pathpkg.Dir(reference.Package))
@@ -953,8 +953,8 @@ func (g *generator) webRequestJSON(call *ir.Call, request string) string {
 	}
 	g.requireImport("strings", "")
 	g.requireImport("unicode/utf8", "utf8")
-	if g.typeAliases["JsonError"] == "" {
-		g.typeAliases["JsonError"] = "__trb_json"
+	if g.typeAliases["JSON::Error"] == "" {
+		g.typeAliases["JSON::Error"] = "__trb_json"
 		g.requireImport(pathpkg.Join(g.goModule, "trb/std/json"), "__trb_json")
 	}
 	resultAlias := g.typeAliases["Result"]
@@ -975,7 +975,7 @@ func (g *generator) webRequestJSON(call *ir.Call, request string) string {
 	}
 	okResult := resultAlias + ".NewResultOk[" + valueType + ", " + requestErrorType + "]"
 	innerCall := *call
-	innerCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
+	innerCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JSON::Error")}}
 	decoded := g.jsonDecode(&innerCall, "string(requestValue.TrbFieldBody.Bytes())")
 	missing := webAlias + "." + goConstantIdentifier("RequestError", "MissingContentType")
 	duplicate := webAlias + "." + goConstantIdentifier("RequestError", "DuplicateContentType")
@@ -1136,7 +1136,7 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 	if len(arguments) > 1 {
 		status = arguments[1]
 	}
-	jsonAlias := g.typeAliases["JsonError"]
+	jsonAlias := g.typeAliases["JSON::Error"]
 	if jsonAlias == "" {
 		jsonAlias = "json"
 	}
@@ -1150,7 +1150,7 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 			webAlias = alias
 		}
 	}
-	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JsonError"}
+	builder := &goJSONCodecBuilder{generator: g, jsonAlias: jsonAlias, errorType: jsonAlias + ".JSONError"}
 	g.requireImport(pathpkg.Join(g.goModule, "trb/http"), "__trb_http")
 	encoder := builder.encoder(call.Codec)
 	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"

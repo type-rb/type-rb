@@ -718,13 +718,13 @@ func TestPortableHexPackageLowersAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { Hex, HexDecodeError } from trb/std/encoding/hex
+import trb/std/encoding/hex
 
 def encoded(value: Bytes): String
 	return Hex.encode(value)
 end
 
-def decoded(value: String): Result<Bytes, HexDecodeError>
+def decoded(value: String): Result<Bytes, Hex::DecodeError>
 	return Hex.decode(value)
 end
 `),
@@ -739,8 +739,8 @@ end
 		"ruby": {
 			`.unpack1("H*")`,
 			`[input].pack("H*").b`,
-			`HexDecodeError.new(kind: HexDecodeErrorKind::InvalidCharacter`,
-			`HexDecodeErrorKind::OddLength`,
+			`Hex::DecodeError.new(kind: Hex::DecodeErrorKind::InvalidCharacter`,
+			`Hex::DecodeErrorKind::OddLength`,
 		},
 		"typescript": {
 			`value.toString(16).padStart(2, "0")`,
@@ -775,7 +775,7 @@ end
 		}
 		errorWants := map[string][]string{
 			"go":         {"type HexDecodeErrorKind int", "type HexDecodeError struct"},
-			"ruby":       {"HexDecodeErrorKind = Data.define(:name)", "HexDecodeError = Data.define(:kind, :input, :index, :message)"},
+			"ruby":       {"module Hex", "DecodeErrorKind = Data.define(:name)", "DecodeError = Data.define(:kind, :input, :index, :message)"},
 			"typescript": {"export type HexDecodeErrorKind", "export interface HexDecodeError"},
 		}[mode]
 		for _, want := range errorWants {
@@ -839,15 +839,15 @@ func TestCompilerOwnedNamespaceImportsRetainRequiredRuntimeAcrossBackends(t *tes
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Hex, HexDecodeError } from trb/std/encoding/hex
-import { FileError, FileSystem } from trb/std/filesystem
+		Source: []byte(`import trb/std/encoding/hex
+import trb/std/filesystem
 import { Result } from trb/std/result
 
-def decoded(value: String): Result<Bytes, HexDecodeError>
+def decoded(value: String): Result<Bytes, Hex::DecodeError>
 	return Hex.decode(value)
 end
 
-def loaded(path: String): Result<String, FileError>
+def loaded(path: String): Result<String, FileSystem::Error>
 	return FileSystem.read_text(path)
 end
 `),
@@ -868,8 +868,8 @@ end
 		"typescript": {
 			`import * as __trb_hex from "./trb/std/encoding/hex/index.ts";`,
 			`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`,
-			`HexDecodeError`,
-			`HexDecodeErrorKind.InvalidCharacter`,
+			`__trb_hex.HexDecodeError`,
+			`__trb_hex.HexDecodeErrorKind.InvalidCharacter`,
 			`__trb_filesystem.read_text(path)`,
 		},
 	}
@@ -1111,17 +1111,17 @@ func TestPortableBase64PackageLowersAcrossBackends(t *testing.T) {
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
-import { Base64, Base64DecodeError } from trb/std/encoding/base64
+import trb/std/encoding/base64
 
 def encoded(value: Bytes): String
 	return Base64.encode(value) + Base64.url_encode(value)
 end
 
-def decoded(value: String): Result<Bytes, Base64DecodeError>
+def decoded(value: String): Result<Bytes, Base64::DecodeError>
 	return Base64.decode(value)
 end
 
-def url_decoded(value: String): Result<Bytes, Base64DecodeError>
+def url_decoded(value: String): Result<Bytes, Base64::DecodeError>
 	return Base64.url_decode(value)
 end
 `),
@@ -1139,8 +1139,8 @@ end
 			`[value].pack("m0")`,
 			`.tr("+/", "-_").delete("=")`,
 			`input.unpack1("m0").b`,
-			`Base64DecodeErrorKind::InvalidLength`,
-			`Base64DecodeErrorKind::NonCanonical`,
+			`Base64::DecodeErrorKind::InvalidLength`,
+			`Base64::DecodeErrorKind::NonCanonical`,
 		},
 		"typescript": {
 			`return btoa(binary)`,
@@ -1176,7 +1176,7 @@ end
 		}
 		errorWants := map[string][]string{
 			"go":         {"type Base64DecodeErrorKind int", "type Base64DecodeError struct"},
-			"ruby":       {"Base64DecodeErrorKind = Data.define(:name)", "Base64DecodeError = Data.define(:kind, :input, :index, :message)"},
+			"ruby":       {"module Base64", "DecodeErrorKind = Data.define(:name)", "DecodeError = Data.define(:kind, :input, :index, :message)"},
 			"typescript": {"export type Base64DecodeErrorKind", "export interface Base64DecodeError"},
 		}[mode]
 		for _, want := range errorWants {
@@ -2106,13 +2106,12 @@ func TestPortableURLComponentsLowerAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
 import trb/std/url
-import { PercentDecodeError } from trb/std/url
 
 def encoded(value: String): String
 	return URL.encode_component(value)
 end
 
-def decoded(value: String): Result<String, PercentDecodeError>
+def decoded(value: String): Result<String, URL::DecodeError>
 	return URL.decode_component(value)
 end
 `),
@@ -2121,20 +2120,20 @@ end
 		"go": {
 			`const hexadecimal = "0123456789ABCDEF"`,
 			`utf8.Valid(value)`,
-			`PercentDecodeErrorKindInvalidescape`,
-			`PercentDecodeErrorKindInvalidutf8`,
+			`URLDecodeErrorKindInvalidescape`,
+			`URLDecodeErrorKindInvalidutf8`,
 		},
 		"ruby": {
 			`format("%%%02X", byte)`,
 			`bytes.pack("C*").force_encoding(Encoding::UTF_8)`,
-			`PercentDecodeErrorKind::InvalidEscape`,
-			`PercentDecodeErrorKind::InvalidUtf8`,
+			`URL::DecodeErrorKind::InvalidEscape`,
+			`URL::DecodeErrorKind::InvalidUtf8`,
 		},
 		"typescript": {
 			`new TextEncoder().encode(value)`,
 			`new TextDecoder("utf-8", { fatal: true })`,
-			`PercentDecodeErrorKind.InvalidEscape`,
-			`PercentDecodeErrorKind.InvalidUtf8`,
+			`URLDecodeErrorKind.InvalidEscape`,
+			`URLDecodeErrorKind.InvalidUtf8`,
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -2162,9 +2161,9 @@ end
 			}
 		}
 		errorWants := map[string][]string{
-			"go":         {"type PercentDecodeErrorKind int", "type PercentDecodeError struct"},
-			"ruby":       {"PercentDecodeErrorKind = Data.define(:name)", "PercentDecodeError = Data.define(:kind, :input, :message)"},
-			"typescript": {"export type PercentDecodeErrorKind", "export interface PercentDecodeError"},
+			"go":         {"type URLDecodeErrorKind int", "type URLDecodeError struct"},
+			"ruby":       {"module URL", "DecodeErrorKind = Data.define(:name)", "DecodeError = Data.define(:kind, :input, :message)"},
+			"typescript": {"export type URLDecodeErrorKind", "export interface URLDecodeError"},
 		}[mode]
 		for _, want := range errorWants {
 			if output := string(urlRuntime.Output); !strings.Contains(output, want) {
@@ -2198,23 +2197,22 @@ func TestPortableURLQueryCompilesFromSharedSourceAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
 import trb/std/url
-import { PercentDecodeError, QueryParameter } from trb/std/url
 
-def parsed(value: String): Result<Array<QueryParameter>, PercentDecodeError>
+def parsed(value: String): Result<Array<URL::QueryParameter>, URL::DecodeError>
 	return URL.parse_query(value)
 end
 
-def built(parameters: Array<QueryParameter>): String
+def built(parameters: Array<URL::QueryParameter>): String
 	return URL.build_query(parameters)
 end
 `),
 	}
 	wants := map[string][]string{
 		"go": {
-			`type QueryParameter struct`,
+			`type URLQueryParameter struct`,
 			`func parseQueryParameter(value string)`,
 			`func ParseQuery(value string)`,
-			`func BuildQuery(parameters []QueryParameter) string`,
+			`func BuildQuery(parameters []URLQueryParameter) string`,
 			`DecodeComponent(strings.Join`,
 			`encoded := EncodeComponent(value)`,
 		},
@@ -2228,10 +2226,10 @@ end
 			`encoded = encode_component(value)`,
 		},
 		"typescript": {
-			`export interface QueryParameter`,
+			`export interface URLQueryParameter`,
 			`function _parse_query_parameter(value: string)`,
 			`export function parse_query(value: string)`,
-			`export function build_query(parameters: Array<QueryParameter>): string`,
+			`export function build_query(parameters: Array<URLQueryParameter>): string`,
 			`const __trbCase1 = decode_component(`,
 			`invalid percent escape in URL query component`,
 			`const encoded: string = encode_component(value)`,
@@ -2260,7 +2258,7 @@ func TestPortableURLQueryDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{source: "import trb/std/url\ndef bad()\n\tURL.parse_query(1)\n\treturn\nend\n", want: "argument 1 to parse_query() has type Integer, expected String"},
-		{source: "import trb/std/url\ndef bad(): String\n\treturn URL.build_query([1])\nend\n", want: "argument 1 to build_query() has type Array<Integer>, expected Array<QueryParameter>"},
+		{source: "import trb/std/url\ndef bad(): String\n\treturn URL.build_query([1])\nend\n", want: "argument 1 to build_query() has type Array<Integer>, expected Array<URL::QueryParameter>"},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, test := range tests {
@@ -2923,16 +2921,15 @@ end
 	}
 }
 
-func TestTypeScriptDeduplicatesRootRuntimeAcrossImportsFromSamePackage(t *testing.T) {
+func TestTypeScriptEmitsRootRuntimeOnceForNestedTypes(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import trb/std/filesystem
-import { FileError } from trb/std/filesystem
 import { Result } from trb/std/result
 
-def load(path: String): Result<String, FileError>
+def load(path: String): Result<String, FileSystem::Error>
 	return FileSystem.read_text(path)
 end
 `),
@@ -2971,10 +2968,10 @@ func TestPortableFilesystemPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { FileSystem, FileError } from trb/std/filesystem
+		Source: []byte(`import trb/std/filesystem
 import { Result } from trb/std/result
 
-def load(path: String): Result<String, FileError>
+def load(path: String): Result<String, FileSystem::Error>
 	return FileSystem.read_text(path)
 end
 `),
@@ -3004,7 +3001,7 @@ end
 		consumerWants := map[string][]string{
 			"go":         {`"example.com/filesystem-app/trb/std/filesystem"`, "filesystem.ReadText(path)"},
 			"ruby":       {`require_relative "./trb/std/filesystem/index"`, "read_text(path)"},
-			"typescript": {`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`, `import type { FileError } from "./trb/std/filesystem/index.ts";`, "__trb_filesystem.read_text(path)"},
+			"typescript": {`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`, "__trb_filesystem.FileSystemError", "__trb_filesystem.read_text(path)"},
 		}[mode]
 		for _, want := range consumerWants {
 			if output := string(consumer.Output); !strings.Contains(output, want) {
@@ -3012,9 +3009,9 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {"type FileError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileError]", "__trb_result.NewResultOk[unit.Unit, FileError]", "slices.Sort(names)"},
-			"ruby":       {"FileError = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
-			"typescript": {"export interface FileError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileError>", "Result.Ok<Unit, FileError>", "{} satisfies Unit", "fs.readdirSync(__trbPath)"},
+			"go":         {"type FileSystemError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileSystemError]", "__trb_result.NewResultOk[unit.Unit, FileSystemError]", "slices.Sort(names)"},
+			"ruby":       {"module FileSystem", "Error = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
+			"typescript": {"export interface FileSystemError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileSystemError>", "Result.Ok<Unit, FileSystemError>", "{} satisfies Unit", "fs.readdirSync(__trbPath)"},
 		}[mode]
 		for _, want := range runtimeWants {
 			if output := string(filesystemRuntime.Output); !strings.Contains(output, want) {
@@ -3074,10 +3071,10 @@ func TestPortableProcessPackageLowersAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Process, ProcessError, ProcessResult } from trb/std/process
+		Source: []byte(`import trb/std/process
 import { Result } from trb/std/result
 
-def execute(command: String, args: Array<String>): Result<ProcessResult, ProcessError>
+def execute(command: String, args: Array<String>): Result<Process::Output, Process::Error>
 	return Process.run(command, args)
 end
 `),
@@ -3085,17 +3082,17 @@ end
 	wants := map[string][]string{
 		"go": {
 			`exec.Command(commandName, commandArguments...)`,
-			`ProcessResult{Status: status`,
+			`ProcessOutput{Status: status`,
 			`os.LookupEnv(`,
 		},
 		"ruby": {
 			`Open3.capture3(command, *arguments)`,
-			`ProcessResult.new(status: status.exitstatus || -1`,
+			`Process::Output.new(status: status.exitstatus || -1`,
 			`ENV[name]`,
 		},
 		"typescript": {
 			`childProcess.spawnSync(__trbCommand, __trbArguments)`,
-			`} satisfies ProcessResult`,
+			`} satisfies ProcessOutput`,
 			`?.env?.[name] ?? null`,
 		},
 	}
@@ -3166,15 +3163,15 @@ func TestPortableJSONPackagesCompileAcrossBackends(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { JSON, JsonError, JsonValue } from trb/std/json
+		Source: []byte(`import trb/std/json
 import trb/std/jsonc
 import { Result } from trb/std/result
 
-def strict(source: String): Result<JsonValue, JsonError>
+def strict(source: String): Result<JSON::Value, JSON::Error>
 	return JSON.parse(source)
 end
 
-def comments(source: String): Result<JsonValue, JsonError>
+def comments(source: String): Result<JSON::Value, JSON::Error>
 	return JSONC.parse(source)
 end
 `),
@@ -3222,7 +3219,7 @@ func TestPortableJSONPackagesReportDiagnosticsAcrossBackends(t *testing.T) {
 		{
 			name:   "stringify value",
 			source: "import { JSON } from trb/std/json\nvalue := JSON.stringify(\"not JSON\")\n",
-			want:   "argument 1 to stringify() has type String, expected JsonValue",
+			want:   "argument 1 to stringify() has type String, expected JSON::Value",
 		},
 		{
 			name:       "internal import",
@@ -3284,14 +3281,14 @@ end
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import { User } from contracts/user
-import { JSON, JsonError } from trb/std/json
+import trb/std/json
 import { Result } from trb/std/result
 
-def decode_user(source: String): Result<User, JsonError>
+def decode_user(source: String): Result<User, JSON::Error>
 	return JSON.decode<User>(source)
 end
 
-def encode_user(user: User): Result<String, JsonError>
+def encode_user(user: User): Result<String, JSON::Error>
 	return JSON.encode(user)
 end
 `),
@@ -3308,9 +3305,9 @@ end
 			}
 		}
 		for _, want := range map[string][]string{
-			"go":         {"func DecodeUser", "JsonErrorKindDecode", "Id: field0", "func(value int)"},
-			"ruby":       {"JsonErrorKind::Decode", `User.new(id: field0`},
-			"typescript": {"import { UserStatus }", "JsonErrorKind.Decode", "case \"ACTIVE\": return UserStatus.Active", "return { id: field0"},
+			"go":         {"func DecodeUser", "JSONErrorKindDecode", "Id: field0", "func(value int)"},
+			"ruby":       {"JSON::ErrorKind::Decode", `User.new(id: field0`},
+			"typescript": {"import { UserStatus }", "__trb_json.JSONErrorKind.Decode", "case \"ACTIVE\": return UserStatus.Active", "return { id: field0"},
 		}[mode] {
 			if !strings.Contains(output, want) {
 				t.Fatalf("%s typed JSON codec output does not contain %q:\n%s", mode, want, output)
