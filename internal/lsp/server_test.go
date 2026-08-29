@@ -838,7 +838,7 @@ func TestServerDiagnosesAndAutoImportsStandardTypes(t *testing.T) {
 		if item.Label != "Result" {
 			continue
 		}
-		if len(item.AdditionalTextEdits) != 1 || item.AdditionalTextEdits[0].NewText != "import { Result } from trb/std/result\n" || item.AdditionalTextEdits[0].Range != (rangeValue{}) {
+		if len(item.AdditionalTextEdits) != 1 || item.AdditionalTextEdits[0].NewText != "import trb/std/result\n" || item.AdditionalTextEdits[0].Range != (rangeValue{}) {
 			t.Fatalf("Result completion=%#v", item)
 		}
 		return
@@ -850,7 +850,7 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 	userFilename := cleanPath("models/user.trb")
 	mainFilename := cleanPath("main.trb")
 	userSource := "record User\n\tname: String\nend\n"
-	valid := "import { User } from models/user\n\ndef inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
+	valid := "import models/user\n\ndef inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
 	invalid := "def inspect(user: User)\n\tputs(user.name)\n\treturn\nend\n"
 	uri := uriFromPath(mainFilename)
 	userOffset := strings.Index(invalid, "User")
@@ -886,14 +886,14 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 	var completions completionList
 	decodeResult(t, frames[3], &completions)
 	for _, item := range completions.Items {
-		if item.Label == "User" && len(item.AdditionalTextEdits) == 1 && item.AdditionalTextEdits[0].NewText == "import { User } from models/user\n" {
+		if item.Label == "User" && len(item.AdditionalTextEdits) == 1 && item.AdditionalTextEdits[0].NewText == "import models/user\n" {
 			var actions []codeAction
 			decodeResult(t, frames[4], &actions)
 			if len(actions) != 1 || actions[0].Title != "Add import for User" || actions[0].Kind != "quickfix" {
 				t.Fatalf("project auto-import actions=%#v", actions)
 			}
 			edits := actions[0].Edit.Changes[uri]
-			if len(edits) != 1 || edits[0].NewText != "import { User } from models/user\n" || edits[0].Range != (rangeValue{}) {
+			if len(edits) != 1 || edits[0].NewText != "import models/user\n" || edits[0].Range != (rangeValue{}) {
 				t.Fatalf("project auto-import action edits=%#v", edits)
 			}
 			return
@@ -905,7 +905,7 @@ func TestServerAutoImportsAnUnambiguousProjectType(t *testing.T) {
 func TestServerOnlyOffersAutoImportForUndeclaredNameDiagnostics(t *testing.T) {
 	userFilename := cleanPath("models/user.trb")
 	mainFilename := cleanPath("main.trb")
-	valid := "import { User } from models/user\n\ndef inspect(user: User)\n\treturn\nend\n"
+	valid := "import models/user\n\ndef inspect(user: User)\n\treturn\nend\n"
 	invalid := "def inspect(user: User)\n\treturn\nend\n"
 	server := New(Options{
 		Mode: "go", Input: bytes.NewReader(nil), Output: io.Discard,

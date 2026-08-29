@@ -100,7 +100,10 @@ type Package struct {
 	// Root names the public declaration that owns this package's qualified
 	// operations. Its members are backed by Symbols but are not themselves
 	// top-level named exports.
-	Root           string
+	Root string
+	// BuiltinRoot marks the narrow compiler-owned case where Root is the
+	// canonical imported static API for an existing built-in type.
+	BuiltinRoot    bool
 	RuntimeAlias   string
 	RuntimeExports []RuntimeExport
 	Source         string
@@ -732,7 +735,7 @@ end
 		},
 	},
 	"trb/std/bytes": {
-		Path: "trb/std/bytes", Root: "Bytes",
+		Path: "trb/std/bytes", Root: "Bytes", BuiltinRoot: true,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"from_string": unary("from_string", "trb.std.bytes.from_string", stringType, bytesType),
@@ -880,7 +883,7 @@ end
 		},
 	},
 	"trb/std/string_builder": {
-		Path: "trb/std/string_builder", Root: "StringBuilder",
+		Path: "trb/std/string_builder", Root: "StringBuilder", BuiltinRoot: true,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"new": {
