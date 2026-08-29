@@ -499,27 +499,55 @@ switches.
 ### 3.7 Imports and Formatting
 
 - Imports are explicit in every mode and are resolved before type checking.
+- A named import selects public top-level declarations by their exact authored
+  names. Modules, classes, records, enums, interfaces, type aliases, newtypes,
+  constants, and functions may be imported this way. Each declaration may use
+  `as` to choose a different local binding. The alias does not change the
+  exported declaration identity, owner, runtime name, or provider selection.
+  One authored source scope cannot bind the same declaration identity under
+  multiple local names.
+- A bare import selects exactly one public declaration root. Eligible roots are
+  modules, classes, records, enums, interfaces, type aliases, newtypes, and
+  constants; top-level functions require a named import. Resolution removes
+  ASCII `_` from the logical final path segment and folds ASCII letter case,
+  then compares that key with each eligible declaration name after folding
+  ASCII letter case without removing declaration characters. It binds the
+  unique match under its exact authored name. Zero matches and multiple
+  matches are errors. A bare import may use `as` after root selection.
+- Bare imports are neither lowercase package namespaces nor wildcard imports.
+  Adding an unrelated export does not add a source binding. Named imports never
+  search inside a declaration; members remain qualified by their owner.
+- `activate PATH` enables a compiler or provider capability declared by the
+  resolved target without creating a source binding. It accepts neither a
+  named list nor an alias and rejects ordinary modules with no capability.
+  An authored declaration import also enables the target's applicable
+  capabilities. Activation is source-module-local and is not re-exported.
 - A package provider may define a declaration-only reference position for a
   declarative API. The initial case is the first model argument of
   `trb/orm`'s `belongs_to`, `has_many`, and `has_one`: model declarations in
   the same source directory resolve there without an import. The name is not
   made visible to ordinary expressions or type annotations, and a subdirectory
   begins a different ORM model group.
-- Every ordinary import must be used. A package import is used by referencing
-  one of its members; every symbol in a named import list must be referenced.
-  Imports that explicitly activate a compiler integration, such as a native
-  syntax or type provider package, and imports that activate an external fixed
-  declaration provider count as semantic uses.
+- Every imported declaration must be used. A bare root is used through its
+  bound declaration, and every declaration in a named list is checked
+  independently. If only a capability is needed, `activate` is the canonical
+  bindingless form. Importing and activating the same canonical target in one
+  source module is redundant.
 - Project module identities come from paths below `sourceDir`; source files do
   not declare target packages.
-- A project import may omit a terminal `/index`. The omitted form is the
-  canonical authored spelling when it resolves uniquely to the directory's
-  `index.trb`; an explicit `/index` remains accepted. If both `name.trb` and
-  `name/index.trb` exist, `from name` resolves `name.trb`, so tooling retains
-  `/index` when it is needed to select the directory entry. Project-aware
-  formatting removes an explicit `/index` only when resolving the shortened
-  path selects the same module. Unresolved paths and source-only formatting
-  without a project snapshot retain an explicit `/index`.
+- A direct module `name.trb` and directory entry `name/index.trb` define the
+  same authored import root and cannot coexist in one resolved source graph.
+  When only the directory entry exists, both `name` and `name/index` resolve to
+  the same module identity and the shorter form is canonical. Project-aware
+  formatting removes a terminal `/index` only after resolution proves that
+  identity. Unresolved imports and source-only formatting without a project
+  snapshot preserve the authored path.
+- Formatting combines compatible named imports of the same canonical target
+  and import group. For a compiler-proven root-stable target, it may convert
+  between a singleton exact named import and the equivalent bare root, or
+  expand a bare root when combining it with other named declarations. It does
+  not perform those rewrites for a non-root-stable target, and never converts
+  between `import` and `activate`.
 - External TypeRB packages declare a canonical identity in
   `trbpackage.json`. A project lock may map an explicit short import to that
   identity. Alias mappings are scoped to the application or declaring package,
@@ -529,14 +557,14 @@ switches.
 - A REPL may add hidden imports for public declarations whose names resolve to
   exactly one project module, and for public types exported by portable
   standard packages. Ambiguous declarations still require an explicit import.
-  Completion may present portable standard functions and package namespaces,
+  Completion may present portable standard functions and declaration roots,
   including every matching origin; accepting one applies its ordinary named or
-  package import visibly to the input buffer. When the current submission is
+  bare import visibly to the input buffer. When the current submission is
   only the unresolved candidate, even a unique match remains a cancellable
   selection. Escape, Backspace, or Delete restores the original input without
   confirming the candidate. Confirming the selection replaces the editable
   input with only the import; a later accept submits that import. A selected
-  package namespace may instead be confirmed with `.`, and a selected
+  declaration root may instead be confirmed with `.`, and a selected
   parameterized function with `(`. These commit characters prepend the visible
   import, preserve the candidate as an expression, insert the character after
   it, and keep editing active. Other ordinary characters cancel the selection
@@ -1246,7 +1274,7 @@ end
   an inferred error value remain typed without an error-package import. Source
   references to a declaration itself—including type annotations, constructors,
   and case patterns—still require an explicit import such as
-  `import { Result } from trb/std/result` or
+  `import trb/std/result` or
   `import { IndexLookupError } from trb/std/errors`.
 - Postfix propagation with `?` or `!`, implicit exceptions, and unchecked
   `unwrap` are not part of the language. Callable names may still end in `?`

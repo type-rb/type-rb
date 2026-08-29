@@ -142,10 +142,16 @@ Imports are explicit and resolved before type checking:
 
 ```trb
 import app/models/user
-import app/repos/user_repo
-import { Contract } from acme/contracts
+import { UserRepo } from app/repos/user_repo
+import { Contract as ExternalContract } from acme/contracts
 import trb/std/strings
 ```
+
+A bare import binds one unique public declaration root whose authored name
+matches the final path segment, such as `User`, `Strings`, or `JSON`. It does
+not create a lowercase package namespace or import every export. Use a named
+import for exact peer declarations and top-level functions; `as` changes only
+the local binding.
 
 Portable libraries use `trb/std/*`. Target-specific APIs use
 `trb/platform/<mode>/*` and are rejected when imported from another mode:
@@ -154,16 +160,20 @@ Portable libraries use `trb/std/*`. Target-specific APIs use
 import trb/platform/go/http
 ```
 
+Compiler capabilities without a source binding use `activate`, for example
+`activate trb/platform/ruby/native`. An authored declaration import may also
+enable capabilities declared by its target, but the imported binding must
+still be used.
+
 Project package identities come from paths below `sourceDir`; source files do
 not declare target packages. External TypeRB packages also use explicit
 imports. A project may configure a short import such as `acme/contracts`; its
 lock maps that name to the canonical package identity without changing source
 syntax by target mode.
 
-Ordinary imports must be used. Package imports require a member reference, and
-each symbol named inside `{ ... }` must be referenced. Compiler integration
-imports count as semantic uses when they activate their documented syntax or
-type provider.
+Every imported declaration must be used. Each declaration named inside
+`{ ... }` is checked independently. Use `activate` instead of an unused import
+when only a compiler capability is needed.
 
 ## Types and bindings
 
