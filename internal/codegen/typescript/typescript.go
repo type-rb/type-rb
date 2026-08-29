@@ -185,6 +185,15 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	g.integrationImports(program.Extensions)
 	statements := mergeTypeScriptImports(program.Statements)
+	// Generated required-import edges can be appended after the authored
+	// declaration that consumes them. Register their nominal type spellings
+	// before emitting any statement so annotation generation is independent of
+	// physical statement order.
+	for _, statement := range statements {
+		if imported, ok := statement.(*ir.Import); ok {
+			g.registerNestedTypeMappings(imported)
+		}
+	}
 	for i, statement := range statements {
 		if i > 0 {
 			g.b.WriteByte('\n')
@@ -242,6 +251,7 @@ func mergeTypeScriptImports(statements []ir.Statement) []ir.Statement {
 		clone.UsedSymbols = slices.Clone(imported.UsedSymbols)
 		clone.GeneratedTypeSymbols = slices.Clone(imported.GeneratedTypeSymbols)
 		clone.SymbolAliases = maps.Clone(imported.SymbolAliases)
+		clone.NestedTypeSymbols = maps.Clone(imported.NestedTypeSymbols)
 		clone.IntrinsicSymbols = maps.Clone(imported.IntrinsicSymbols)
 		clone.RuntimeIndependentSymbols = maps.Clone(imported.RuntimeIndependentSymbols)
 		clone.SymbolKinds = maps.Clone(imported.SymbolKinds)
@@ -262,6 +272,7 @@ func mergeTypeScriptImport(target, source *ir.Import) {
 	target.UsedSymbols = mergeImportNames(target.UsedSymbols, source.UsedSymbols)
 	target.GeneratedTypeSymbols = mergeImportNames(target.GeneratedTypeSymbols, source.GeneratedTypeSymbols)
 	copyImportMap(&target.SymbolAliases, source.SymbolAliases)
+	copyImportMap(&target.NestedTypeSymbols, source.NestedTypeSymbols)
 	copyImportMap(&target.IntrinsicSymbols, source.IntrinsicSymbols)
 	copyImportMap(&target.RuntimeIndependentSymbols, source.RuntimeIndependentSymbols)
 	copyImportMap(&target.SymbolKinds, source.SymbolKinds)
@@ -309,6 +320,15 @@ func copyImportMap[K comparable, V any](target *map[K]V, source map[K]V) {
 	maps.Copy(*target, source)
 }
 
+func typescriptQualifiedRootDeclaration(imported *ir.Import) bool {
+	switch imported.SymbolKinds[imported.QualifiedRoot] {
+	case "class", "record", "enum", "interface", "type_alias", "newtype", "enum_alias":
+		return true
+	default:
+		return false
+	}
+}
+
 func localNestedTypeOwners(statements []ir.Statement) map[string]string {
 	result := map[string]string{}
 	var collect func([]ir.Statement, string)
@@ -323,27 +343,27 @@ func localNestedTypeOwners(statements []ir.Statement) map[string]string {
 				collect(node.Body, nested)
 			case *ir.Class:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			case *ir.Record:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			case *ir.Enum:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			case *ir.Interface:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			case *ir.TypeAlias:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			case *ir.Newtype:
 				if owner != "" {
-					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+					result[node.Name] = tsOwnedTypeName(owner + "::" + node.Name)
 				}
 			}
 		}
@@ -453,6 +473,19 @@ func (g *generator) ensureWebRuntime() string {
 		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/web/index", g.moduleExtensions["trb/web/index"])) + ";")
 		g.webRuntime = true
 	}
+	g.ensureURLRuntime()
+	return alias
+}
+
+func (g *generator) ensureURLRuntime() string {
+	const alias = "__trb_url"
+	if !g.runtimeImports[alias] {
+		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/url/index", g.moduleExtensions["trb/std/url/index"])) + ";")
+		g.runtimeImports[alias] = true
+	}
+	for _, name := range []string{"URL::DecodeErrorKind", "URL::DecodeError", "URL::QueryParameter"} {
+		g.typeMappings[name] = alias + "." + tsOwnedTypeName(name)
+	}
 	return alias
 }
 
@@ -461,6 +494,9 @@ func (g *generator) ensureJSONRuntime() string {
 	if !g.jsonRuntime {
 		g.line("import * as " + alias + " from " + strconv.Quote(tsImportPath(g.modulePath, "trb/std/json/index", g.moduleExtensions["trb/std/json/index"])) + ";")
 		g.jsonRuntime = true
+	}
+	for _, name := range []string{"JSON::ErrorKind", "JSON::Error", "JSON::Value"} {
+		g.typeMappings[name] = alias + "." + tsOwnedTypeName(name)
 	}
 	return alias
 }
@@ -494,6 +530,24 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(comment(n.Text))
 	case *ir.Import:
+		nestedTypeSymbols := maps.Clone(n.NestedTypeSymbols)
+		if nestedTypeSymbols == nil {
+			nestedTypeSymbols = map[string]string{}
+		}
+		for _, symbol := range append(append([]string(nil), n.Symbols...), n.GeneratedTypeSymbols...) {
+			if strings.Contains(symbol, "::") {
+				if _, exists := nestedTypeSymbols[symbol]; !exists {
+					nestedTypeSymbols[symbol] = symbol
+				}
+			}
+		}
+		nestedTypeRequired := false
+		for _, symbol := range append(append([]string(nil), n.UsedSymbols...), n.GeneratedTypeSymbols...) {
+			if strings.Contains(symbol, "::") {
+				nestedTypeRequired = true
+				break
+			}
+		}
 		if n.Native && len(n.RuntimeSymbols) > 0 {
 			names := make([]string, 0, len(n.RuntimeSymbols))
 			for name := range n.RuntimeSymbols {
@@ -547,12 +601,22 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			return
 		}
-		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) {
+		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) && !nestedTypeRequired {
 			return
 		}
 		importPath := n.Path
 		if !n.Native {
 			importPath = tsImportPath(g.modulePath, n.Path, g.moduleExtensions[n.Path])
+		}
+		if len(nestedTypeSymbols) > 0 {
+			if n.Standard || n.Official || strings.HasPrefix(n.Path, "trb/") {
+				alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Path))
+				if n.Path == "trb/std/json/index" {
+					alias = g.ensureJSONRuntime()
+				} else {
+					g.line("import * as " + alias + " from " + strconv.Quote(importPath) + ";")
+				}
+			}
 		}
 		browserRuntime := n.Path == "trb/platform/typescript/browser/index" && n.RuntimeRequired
 		if browserRuntime {
@@ -579,6 +643,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.ensureJSONRuntime()
 		}
 		jsonRuntime := n.Path == "trb/std/json/index" && n.RuntimeRequired
+		qualifiedRootDeclaration := typescriptQualifiedRootDeclaration(n)
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
@@ -597,7 +662,10 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			for _, symbol := range n.Symbols {
-				if symbol == n.QualifiedRoot {
+				if symbol == n.QualifiedRoot && !qualifiedRootDeclaration {
+					continue
+				}
+				if strings.Contains(symbol, "::") {
 					continue
 				}
 				local := n.SymbolAliases[symbol]
@@ -633,6 +701,9 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			for _, symbol := range n.GeneratedTypeSymbols {
+				if strings.Contains(symbol, "::") {
+					continue
+				}
 				target := &types
 				switch n.SymbolKinds[symbol] {
 				case "enum", "enum_alias":
@@ -651,7 +722,7 @@ func (g *generator) statement(statement ir.Statement) {
 					g.jsonRuntime = true
 				}
 			}
-			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime {
+			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime && !qualifiedRootDeclaration {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
@@ -783,6 +854,10 @@ func (g *generator) statement(statement ir.Statement) {
 				properties = append(properties, property)
 			}
 			g.line("export const " + n.Name + " = { " + strings.Join(properties, ", ") + " } as const;")
+			break
+		}
+		if declarationOnlyModule(n) {
+			g.ownedModuleDeclarations(n.Body, n.Name)
 			break
 		}
 		g.line("export namespace " + n.Name + " {")
@@ -992,6 +1067,34 @@ func (g *generator) statement(statement ir.Statement) {
 	}
 }
 
+func (g *generator) registerNestedTypeMappings(imported *ir.Import) {
+	nested := maps.Clone(imported.NestedTypeSymbols)
+	if nested == nil {
+		nested = map[string]string{}
+	}
+	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
+		if strings.Contains(symbol, "::") {
+			if _, exists := nested[symbol]; !exists {
+				nested[symbol] = symbol
+			}
+		}
+	}
+	if imported.Standard || imported.Official || strings.HasPrefix(imported.Path, "trb/") {
+		alias := "__trb_" + pathpkg.Base(pathpkg.Dir(imported.Path))
+		for canonical, local := range nested {
+			mapped := alias + "." + tsOwnedTypeName(canonical)
+			g.typeMappings[canonical] = mapped
+			g.typeMappings[local] = mapped
+		}
+		return
+	}
+	for canonical, local := range nested {
+		mapped := tsOwnedTypeName(local)
+		g.typeMappings[canonical] = mapped
+		g.typeMappings[local] = mapped
+	}
+}
+
 func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
 	methods := make([]*ir.Method, 0, len(module.Body))
 	for _, member := range module.Body {
@@ -1004,6 +1107,67 @@ func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
 		}
 	}
 	return methods, true
+}
+
+func declarationOnlyModule(module *ir.Module) bool {
+	for _, member := range module.Body {
+		switch node := member.(type) {
+		case *ir.Comment, *ir.Class, *ir.Record, *ir.Enum, *ir.Interface, *ir.TypeAlias, *ir.Newtype:
+		case *ir.Module:
+			if !declarationOnlyModule(node) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (g *generator) ownedModuleDeclarations(statements []ir.Statement, owner string) {
+	for _, statement := range statements {
+		qualified := func(name string) string { return tsOwnedTypeName(owner + "::" + name) }
+		switch node := statement.(type) {
+		case *ir.Comment:
+			g.statement(node)
+		case *ir.Module:
+			g.ownedModuleDeclarations(node.Body, owner+"::"+node.Name)
+		case *ir.Class:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		case *ir.Record:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		case *ir.Enum:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		case *ir.Interface:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		case *ir.TypeAlias:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		case *ir.Newtype:
+			name := node.Name
+			node.Name = qualified(name)
+			g.statement(node)
+			node.Name = name
+		}
+	}
+}
+
+func tsOwnedTypeName(name string) string {
+	return strings.ReplaceAll(name, "::", "")
 }
 
 func containsString(values []string, target string) bool {
@@ -1771,6 +1935,20 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Namespace && n.ExprType().Declaration.Kind.IsType() && n.ExprType().Declaration.Name != "" {
+			owner := g.runtimeName(n.ExprType().Declaration.Name)
+			if n.ExprType().Declaration.LeafName() == n.Name {
+				return owner
+			}
+			return owner + "." + tsMethodName(n.Name)
+		}
+		if n.Namespace && n.Reference != nil && n.Reference.Declaration.Kind.IsType() && n.Reference.Declaration.Name != "" {
+			owner := g.runtimeName(n.Reference.Declaration.Name)
+			if n.Reference.Declaration.LeafName() == n.Name {
+				return owner
+			}
+			return owner + "." + tsMethodName(n.Name)
+		}
 		if n.Reference != nil && n.Reference.PackageRoot {
 			alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Reference.Package))
 			return alias + "." + tsCallableName(n.Reference.Symbol)
@@ -2097,7 +2275,7 @@ func (g *generator) localDeclarationName(declaration identity.Declaration) strin
 	if declaration.Empty() || declaration.Module != g.modulePath {
 		return ""
 	}
-	return strings.ReplaceAll(declaration.Name, "::", ".")
+	return tsOwnedTypeName(declaration.Name)
 }
 
 func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
@@ -3160,6 +3338,20 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 		if !node.Namespace {
 			return typescriptRecordConstructionTarget{}, false
 		}
+		declaration := node.ExprType().Declaration
+		if node.Reference != nil && node.Reference.Declaration.Kind.IsType() {
+			declaration = node.Reference.Declaration
+		}
+		if declaration.Kind.IsType() && declaration.Name != "" {
+			name := g.runtimeName(declaration.Name)
+			helper := tsRecordConstructorName(tsOwnedTypeName(declaration.Name))
+			if mapped := g.typeMappings[declaration.Name]; mapped != "" {
+				if separator := strings.LastIndex(mapped, "."); separator >= 0 {
+					helper = mapped[:separator+1] + helper
+				}
+			}
+			return typescriptRecordConstructionTarget{typeName: name, helperName: helper}, true
+		}
 		return typescriptRecordConstructionTarget{
 			typeName:   g.expr(node),
 			helperName: g.expr(node.Receiver) + "." + tsRecordConstructorName(node.Name),
@@ -3318,18 +3510,26 @@ func portableFloatString(value string) string {
 
 func (g *generator) tsJSONParse(call *ir.Call, argument string, comments bool) string {
 	resultType := g.tsType(call.ExprType())
-	result := g.runtimeName("Result")
 	strip := ""
 	if comments {
 		strip = `const stripComments = (input: string): string => { const result = input.split(""); let inString = false; let escaped = false; for (let index = 0; index < result.length; index += 1) { const character = result[index]!; if (inString) { if (escaped) { escaped = false; continue; } if (character === "\\") { escaped = true; } else if (character === "\"") { inString = false; } continue; } if (character === "\"") { inString = true; continue; } if (character !== "/" || index + 1 >= result.length) { continue; } if (result[index + 1] === "/") { result[index] = " "; result[index + 1] = " "; index += 2; while (index < result.length && result[index] !== "\n") { if (result[index] !== "\r") { result[index] = " "; } index += 1; } index -= 1; } else if (result[index + 1] === "*") { result[index] = " "; result[index + 1] = " "; index += 2; while (index < result.length) { if (index + 1 < result.length && result[index] === "*" && result[index + 1] === "/") { result[index] = " "; result[index + 1] = " "; index += 1; break; } if (result[index] !== "\n" && result[index] !== "\r") { result[index] = " "; } index += 1; } } } return result.join(""); }; __trbSource = stripComments(__trbSource); `
 	}
-	return "((): " + resultType + " => { let __trbSource = " + argument + "; " + strip + "const syntaxError = (error: unknown): JsonError => { const message = error instanceof Error ? error.message : String(error); const lineMatch = message.match(/line (\\d+)/i); const columnMatch = message.match(/column (\\d+)/i); let line: number | null = lineMatch === null ? null : Number.parseInt(lineMatch[1]!, 10); let column: number | null = columnMatch === null ? null : Number.parseInt(columnMatch[1]!, 10); if (line === null || column === null) { const positionMatch = message.match(/position (\\d+)/i); if (positionMatch !== null) { const position = Number.parseInt(positionMatch[1]!, 10); const prefix = __trbSource.slice(0, position); const lines = prefix.split(\"\\n\"); line = lines.length; column = Array.from(lines[lines.length - 1]!).length + 1; } } return { kind: JsonErrorKind.Syntax, message, path: \"\", line, column }; }; let raw: unknown; try { raw = JSON.parse(__trbSource); } catch (error) { return " + result + ".Err<JsonValue, JsonError>(syntaxError(error)); } const decodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: unknown, path: string): JsonValue => { if (value === null) { return JsonValue.Null; } if (typeof value === \"boolean\") { return JsonValue.Boolean(value); } if (typeof value === \"number\") { if (!Number.isFinite(value)) { return failure(decodeError(path, \"JSON number is not finite\")); } if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) { return failure(decodeError(path, \"JSON integer is outside the portable range\")); } return JsonValue.Integer(value); } return JsonValue.Float(value); } if (typeof value === \"string\") { return JsonValue.String(value); } if (Array.isArray(value)) { return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); } if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return JsonValue.Object(fields); } return failure(decodeError(path, \"unsupported JSON value\")); }; try { return " + result + ".Ok<JsonValue, JsonError>(convert(raw, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return " + result + ".Err<JsonValue, JsonError>((error as any).error as JsonError); } return " + result + ".Err<JsonValue, JsonError>(syntaxError(error)); } })()"
+	return g.qualifyOwnedJSON("((): " + resultType + " => { let __trbSource = " + argument + "; " + strip + "const syntaxError = (error: unknown): JSON.Error => { const message = error instanceof Error ? error.message : String(error); const lineMatch = message.match(/line (\\d+)/i); const columnMatch = message.match(/column (\\d+)/i); let line: number | null = lineMatch === null ? null : Number.parseInt(lineMatch[1]!, 10); let column: number | null = columnMatch === null ? null : Number.parseInt(columnMatch[1]!, 10); if (line === null || column === null) { const positionMatch = message.match(/position (\\d+)/i); if (positionMatch !== null) { const position = Number.parseInt(positionMatch[1]!, 10); const prefix = __trbSource.slice(0, position); const lines = prefix.split(\"\\n\"); line = lines.length; column = Array.from(lines[lines.length - 1]!).length + 1; } } return { kind: JSON.ErrorKind.Syntax, message, path: \"\", line, column }; }; let raw: unknown; try { raw = globalThis.JSON.parse(__trbSource); } catch (error) { return Result.Err<JSON.Value, JSON.Error>(syntaxError(error)); } const decodeError = (path: string, message: string): JSON.Error => ({ kind: JSON.ErrorKind.Decode, message, path, line: null, column: null }); const failure = (error: JSON.Error): never => { throw { __trbJSONError: true, error }; }; const convert = (value: unknown, path: string): JSON.Value => { if (value === null) { return JSON.Value.Null; } if (typeof value === \"boolean\") { return JSON.Value.Boolean(value); } if (typeof value === \"number\") { if (!Number.isFinite(value)) { return failure(decodeError(path, \"JSON number is not finite\")); } if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) { return failure(decodeError(path, \"JSON integer is outside the portable range\")); } return JSON.Value.Integer(value); } return JSON.Value.Float(value); } if (typeof value === \"string\") { return JSON.Value.String(value); } if (Array.isArray(value)) { return JSON.Value.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); } if (typeof value === \"object\") { const fields: Record<string, JSON.Value> = {}; for (const [key, item] of Object.entries(value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return JSON.Value.Object(fields); } return failure(decodeError(path, \"unsupported JSON value\")); }; try { return Result.Ok<JSON.Value, JSON.Error>(convert(raw, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return Result.Err<JSON.Value, JSON.Error>((error as any).error as JSON.Error); } return Result.Err<JSON.Value, JSON.Error>(syntaxError(error)); } })()")
 }
 
 func (g *generator) tsJSONStringify(call *ir.Call, argument string) string {
 	resultType := g.tsType(call.ExprType())
-	result := g.runtimeName("Result")
-	return "((): " + resultType + " => { const encodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Encode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: JsonValue, path: string): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) { return failure(encodeError(path, \"JSON integer is outside the portable range\")); } return value.value; case \"Float\": if (!Number.isFinite(value.value)) { return failure(encodeError(path, \"JSON Float must be finite\")); } return value.value; case \"String\": return value.value; case \"Array\": return value.value.map((item, index) => convert(item, path + \"/\" + String(index))); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return fields; } } }; try { return " + result + ".Ok<string, JsonError>(JSON.stringify(convert(" + argument + ", \"\"))); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return " + result + ".Err<string, JsonError>((error as any).error as JsonError); } const message = error instanceof Error ? error.message : String(error); return " + result + ".Err<string, JsonError>(encodeError(\"\", message)); } })()"
+	return g.qualifyOwnedJSON("((): " + resultType + " => { const encodeError = (path: string, message: string): JSON.Error => ({ kind: JSON.ErrorKind.Encode, message, path, line: null, column: null }); const failure = (error: JSON.Error): never => { throw { __trbJSONError: true, error }; }; const convert = (value: JSON.Value, path: string): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) { return failure(encodeError(path, \"JSON integer is outside the portable range\")); } return value.value; case \"Float\": if (!Number.isFinite(value.value)) { return failure(encodeError(path, \"JSON Float must be finite\")); } return value.value; case \"String\": return value.value; case \"Array\": return value.value.map((item, index) => convert(item, path + \"/\" + String(index))); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return fields; } } }; try { return Result.Ok<string, JSON.Error>(globalThis.JSON.stringify(convert(" + argument + ", \"\"))); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return Result.Err<string, JSON.Error>((error as any).error as JSON.Error); } const message = error instanceof Error ? error.message : String(error); return Result.Err<string, JSON.Error>(encodeError(\"\", message)); } })()")
+}
+
+func (g *generator) qualifyOwnedJSON(value string) string {
+	replacer := strings.NewReplacer(
+		"Result.", g.runtimeName("Result")+".",
+		"JSON.ErrorKind", g.runtimeName("JSON::ErrorKind"),
+		"JSON.Error", g.runtimeName("JSON::Error"),
+		"JSON.Value", g.runtimeName("JSON::Value"),
+	)
+	return replacer.Replace(value)
 }
 
 func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
@@ -3341,8 +3541,8 @@ func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
 	decoder := builder.decoder(call.Codec)
 	resultType := g.tsType(call.ExprType())
 	valueType := builder.codecType(call.Codec)
-	errorType := tsJSONQualified(jsonAlias, "JsonError")
-	jsonErrorKind := tsJSONQualified(jsonAlias, "JsonErrorKind.Decode")
+	errorType := tsJSONQualified(jsonAlias, "JSON.Error")
+	jsonErrorKind := tsJSONQualified(jsonAlias, "JSON.ErrorKind.Decode")
 	parse := tsJSONQualified(jsonAlias, "parse")
 	result := g.runtimeName("Result")
 	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return " + result + ".Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return " + result + ".Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return " + result + ".Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
@@ -3431,7 +3631,7 @@ func (b *tsJSONCodecBuilder) runtimeTypeName(schema *ir.CodecSchema) string {
 		return name
 	}
 	if declaration := schema.Type.Declaration; declaration.Kind.IsType() && declaration.Module == b.modulePath {
-		return strings.ReplaceAll(declaration.Name, "::", ".")
+		return tsOwnedTypeName(declaration.Name)
 	}
 	if owner := b.localTypeOwners[name]; owner != "" {
 		return owner
@@ -3447,7 +3647,7 @@ func (b *tsJSONCodecBuilder) name(prefix string) string {
 func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 	name := b.name("Decode")
 	valueType := b.codecType(schema)
-	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
+	jsonValue := tsJSONQualified(b.jsonAlias, "JSON.Value")
 	if schema.Type.Nullable {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
@@ -3519,56 +3719,63 @@ func tsJSONPointerEscape(value string) string {
 }
 
 func tsJSONQualified(alias, name string) string {
+	name = tsFlattenOwnedJSON(name)
 	if alias == "" {
 		return name
 	}
 	return alias + "." + name
 }
 
+func tsFlattenOwnedJSON(value string) string {
+	value = strings.ReplaceAll(value, "JSON.ErrorKind", "JSONErrorKind")
+	value = strings.ReplaceAll(value, "JSON.Error", "JSONError")
+	return strings.ReplaceAll(value, "JSON.Value", "JSONValue")
+}
+
 func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 	name := b.name("Encode")
 	valueType := b.codecType(schema)
-	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
+	jsonValue := tsJSONQualified(b.jsonAlias, "JSON.Value")
 	if schema.Type.Nullable {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
 		child := b.encoder(&nonnull)
-		b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => value === null ? " + tsJSONQualified(b.jsonAlias, "JsonValue.Null") + " : " + child + "(value); ")
+		b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => value === null ? " + tsJSONQualified(b.jsonAlias, "JSON.Value.Null") + " : " + child + "(value); ")
 		return name
 	}
 	body := ""
 	switch schema.Kind {
 	case "boolean":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Boolean") + "(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Boolean") + "(value);"
 	case "integer":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Integer") + "(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Integer") + "(value);"
 	case "float":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Float") + "(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Float") + "(value);"
 	case "string":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value);"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.String") + "(value);"
 	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value.to_s());"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.String") + "(value.to_s());"
 	case "time_zone":
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.String") + "(value.identifier());"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.String") + "(value.identifier());"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {
 			kind = "Integer"
 		}
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue."+kind) + "(value as " + b.typeString(schema.RawType) + ");"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value."+kind) + "(value as " + b.typeString(schema.RawType) + ");"
 	case "array":
 		child := b.encoder(schema.Element)
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Array") + "(value.map((item) => " + child + "(item)));"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Array") + "(value.map((item) => " + child + "(item)));"
 	case "hash":
 		child := b.encoder(schema.Element)
-		body = "const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) { fields[key] = " + child + "(item); } return " + tsJSONQualified(b.jsonAlias, "JsonValue.Object") + "(fields);"
+		body = "const fields: Record<string, " + jsonValue + "> = {}; for (const [key, item] of Object.entries(value)) { fields[key] = " + child + "(item); } return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Object") + "(fields);"
 	case "record":
 		parts := make([]string, 0, len(schema.Fields))
 		for _, field := range schema.Fields {
 			child := b.encoder(field.Schema)
 			parts = append(parts, strconv.Quote(field.WireName)+": "+child+"(value."+field.Name+")")
 		}
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Object") + "({ " + strings.Join(parts, ", ") + " });"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JSON.Value.Object") + "({ " + strings.Join(parts, ", ") + " });"
 	}
 	b.source.WriteString("const " + name + " = (value: " + valueType + "): " + jsonValue + " => { " + body + " }; ")
 	return name
@@ -3600,7 +3807,7 @@ func receiverMember(expression ir.Expression) (*ir.Member, bool) {
 
 func (g *generator) importedJSONCall(call *ir.Call, packagePath string, arguments []string) (string, bool) {
 	reference := expressionReference(call.Callee)
-	if reference == nil || reference.Package != packagePath || g.modulePath == packagePath {
+	if reference == nil || reference.Package != packagePath || strings.TrimSuffix(g.modulePath, "/index") == strings.TrimSuffix(packagePath, "/index") {
 		return "", false
 	}
 	name := reference.Symbol
@@ -3750,7 +3957,7 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 		result.arguments[index] = g.semanticTypeIdentity(argument)
 	}
 	if typ.Kind == types.Named && typ.Declaration.Kind.IsType() && typ.Declaration.Module == g.modulePath {
-		result.name = strings.ReplaceAll(typ.Declaration.Name, "::", ".")
+		result.name = tsOwnedTypeName(typ.Declaration.Name)
 	}
 	if !typeScriptTypeIdentityPresent(result) {
 		return nil
@@ -3787,10 +3994,13 @@ func (g *generator) tsSuspendingFunctionType(t types.Type) string {
 }
 
 func (g *generator) runtimeName(name string) string {
-	if alias := g.typeAliases[name]; alias != "" {
-		return alias + "." + name
+	if mapped := g.typeMappings[name]; mapped != "" {
+		return mapped
 	}
-	return name
+	if alias := g.typeAliases[name]; alias != "" {
+		return alias + "." + tsOwnedTypeName(name)
+	}
+	return tsOwnedTypeName(name)
 }
 
 func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[string]string, standardResult bool) string {

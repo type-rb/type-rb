@@ -18,7 +18,7 @@ func TestTypeScriptBrowserHTTPClient(t *testing.T) {
 } from trb/platform/typescript/browser
 import { Body, Header, Headers, HttpMethod } from trb/http
 import { Result } from trb/std/result
-import { QueryParameter } from trb/std/url
+import trb/std/url
 
 record Todo
 	id: Integer
@@ -30,7 +30,7 @@ record CreateTodoInput
 end
 
 def fetch_todo(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
-	response := try client.request("/todos", query: [QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
+	response := try client.request("/todos", query: [URL::QueryParameter.new(name: "id", value: id.to_s())], headers: Headers.new([Header.new(name: "accept", value: "application/json")]), timeout_milliseconds: 1000)
 	return response.json<Todo>()
 end
 
@@ -42,7 +42,7 @@ end
 
 def fetch_with_local_request_names(client: HttpClient, id: Integer): Result<Response<Todo>, RequestError>
 	path := "/todos"
-	query := [QueryParameter.new(name: "id", value: id.to_s())]
+	query := [URL::QueryParameter.new(name: "id", value: id.to_s())]
 	headers := Headers.new([Header.new(name: "accept", value: "application/json")])
 	timeout := 1000
 	response := try client.request(path, query: query, headers: headers, timeout_milliseconds: timeout)
@@ -155,8 +155,8 @@ end
 	}
 	output := string(artifactForModule(artifacts, "main").Output)
 	for _, expected := range []string{
-		"(value: JsonValue, path: string): Services.Todo",
-		"(value: Services.Todo): JsonValue",
+		"(value: __trb_json.JSONValue, path: string): ServicesTodo",
+		"(value: ServicesTodo): __trb_json.JSONValue",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated browser JSON codec is missing qualified type %q:\n%s", expected, output)

@@ -148,9 +148,9 @@ func BuildBrowserClient(catalog EndpointCatalog, input packageextension.ProjectD
 	if generator.usesJSONBody {
 		generator.requireImport("trb/platform/typescript/browser", "json_body")
 	}
-	generator.requireImport("trb/std/result", "Result")
+	generator.requireRootImport("trb/std/result")
 	if generator.usesQuery {
-		generator.requireImport("trb/std/url", "QueryParameter")
+		generator.requireRootImport("trb/std/url")
 	}
 	if generator.usesPathValue {
 		generator.requireRootImport("trb/std/url")
@@ -253,7 +253,7 @@ func (g *browserClientGenerator) method(endpoint EndpointContract, resultName, m
 	source.WriteString("\t\tpath := " + g.pathSource(endpoint, input) + "\n")
 	if input.query != nil {
 		g.usesQuery = true
-		source.WriteString("\t\tmut query: Array<QueryParameter> := []\n")
+		source.WriteString("\t\tmut query: Array<URL::QueryParameter> := []\n")
 		for _, field := range input.query.Fields {
 			g.writeQueryField(&source, input.queryModule, field.Type, "input.query."+field.Name, field.Name, "\t\t")
 		}
@@ -365,7 +365,7 @@ func (g *browserClientGenerator) writeQueryType(source *strings.Builder, moduleP
 		source.WriteString(indent + "end\n")
 		return
 	}
-	source.WriteString(indent + "query.push(QueryParameter.new(name: " + strconv.Quote(wireName) + ", value: " + g.parameterTypeValue(modulePath, typ, expression, visiting) + "))\n")
+	source.WriteString(indent + "query.push(URL::QueryParameter.new(name: " + strconv.Quote(wireName) + ", value: " + g.parameterTypeValue(modulePath, typ, expression, visiting) + "))\n")
 }
 
 func (g *browserClientGenerator) parameterValue(modulePath string, use packageextension.ProjectTypeUse, expression string) string {

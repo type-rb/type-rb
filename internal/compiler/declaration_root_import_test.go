@@ -22,6 +22,82 @@ func TestDeclarationRootStandardImportLowersQualifiedMembers(t *testing.T) {
 	}
 }
 
+func TestDeclarationRootEnumImportRetainsTypeScriptRuntimeBinding(t *testing.T) {
+	definitions := SourceUnit{
+		Filename:   "/project/src/contracts/result.trb",
+		ModulePath: "contracts/result",
+		Package:    "contracts",
+		Source: []byte(`enum Result<T, E>
+	Ok(value: T)
+	Err(error: E)
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/result
+
+def main()
+	result := Result<Integer, String>::Ok(7)
+	case result
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error)
+	end
+	return
+end
+`),
+	}
+	requireEffectRuntime(t, "typescript")
+	artifacts, err := CompileProject([]SourceUnit{definitions, consumer}, Options{
+		Mode: "typescript", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := findArtifactByModule(artifacts, "main")
+	if main == nil || !strings.Contains(string(main.Output), `import { Result } from "./contracts/result.ts";`) {
+		t.Fatalf("declaration-root enum does not retain its runtime binding:\n%s", main.Output)
+	}
+	if output := strings.TrimSpace(runEffectProject(t, "typescript", artifacts, "")); output != "7" {
+		t.Fatalf("declaration-root enum output = %q, want 7", output)
+	}
+}
+
+func TestDeclarationRootStandardResultImportRetainsTypeScriptRuntimeBinding(t *testing.T) {
+	source := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import trb/std/result
+
+def main()
+	result := Result<Integer, String>::Ok(7)
+	case result
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error)
+	end
+	return
+end
+`),
+	}
+	requireEffectRuntime(t, "typescript")
+	artifacts, err := CompileProject([]SourceUnit{source}, Options{
+		Mode: "typescript", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := strings.TrimSpace(runEffectProject(t, "typescript", artifacts, "")); output != "7" {
+		t.Fatalf("declaration-root standard Result output = %q, want 7", output)
+	}
+}
+
 func TestNamedImportAliasKeepsOneCanonicalDeclarationIdentity(t *testing.T) {
 	artifacts, err := CompileProject([]SourceUnit{
 		{Filename: "web/response.trb", ModulePath: "web/response", Source: []byte("class Response\nend\n")},
@@ -77,5 +153,61 @@ func TestGeneratedAndAuthoredScopesCanImportTheSameNewtype(t *testing.T) {
 	}, Options{Mode: "go", GoModule: "example.com/generated-newtype", SourceRoot: "/project"})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeclarationRootImportExposesOwnedNestedTypesAcrossBackends(t *testing.T) {
+	definitions := SourceUnit{
+		Filename:   "/project/src/contracts/payloads.trb",
+		ModulePath: "contracts/payloads",
+		Package:    "contracts",
+		Source: []byte(`module Payloads
+	record Error
+		message: String
+	end
+
+	def self.failure(message: String): Payloads::Error
+		return Payloads::Error.new(message: message)
+	end
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename:   "/project/src/main.trb",
+		ModulePath: "main",
+		Package:    "main",
+		Source: []byte(`import contracts/payloads as API
+
+def failure(): API::Error
+	return API.failure("failed")
+end
+
+def main()
+	puts(failure().message)
+	return
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireEffectRuntime(t, mode)
+			artifacts, err := CompileProject([]SourceUnit{definitions, consumer}, Options{
+				Mode: mode, GoModule: "example.com/nested-root", RubyLoader: "require_relative",
+				SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			main := findArtifactByModule(artifacts, "main")
+			if main == nil {
+				t.Fatal("main artifact is missing")
+			}
+			if output := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/nested-root")); output != "failed" {
+				t.Fatalf("nested root output = %q, want failed", output)
+			}
+			if mode == "typescript" {
+				checkTypeScriptArtifacts(t, artifacts, "owned_nested_root")
+			}
+		})
 	}
 }

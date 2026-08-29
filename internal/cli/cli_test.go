@@ -2633,9 +2633,9 @@ func TestReplEvaluatesPortableHexAcrossModes(t *testing.T) {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
 		want := "\"41f09f9880\" : String\n" +
-			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, HexDecodeError>\n" +
-			"Result::Err(error: HexDecodeError(kind: HexDecodeErrorKind::InvalidCharacter, input: \"0g\", index: 1, message: \"invalid hexadecimal character\")) : Result<Bytes, HexDecodeError>\n" +
-			"Result::Err(error: HexDecodeError(kind: HexDecodeErrorKind::OddLength, input: \"abc\", index: 3, message: \"hex input has odd length\")) : Result<Bytes, HexDecodeError>\n"
+			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, Hex::DecodeError>\n" +
+			"Result::Err(error: Hex::DecodeError(kind: Hex::DecodeErrorKind::InvalidCharacter, input: \"0g\", index: 1, message: \"invalid hexadecimal character\")) : Result<Bytes, Hex::DecodeError>\n" +
+			"Result::Err(error: Hex::DecodeError(kind: Hex::DecodeErrorKind::OddLength, input: \"abc\", index: 3, message: \"hex input has odd length\")) : Result<Bytes, Hex::DecodeError>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s hex REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -2665,16 +2665,16 @@ func TestReplEvaluatesPortableBase64AcrossModes(t *testing.T) {
 		}
 		want := "\"QfCfmIA=\" : String\n" +
 			"\"Pz8_\" : String\n" +
-			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Ok(value: Bytes[63, 63, 63]) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidLength, input: \"AAA\", index: 3, message: \"base64 input length must be a multiple of 4\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidPadding, input: \"AA=A\", index: 3, message: \"invalid base64 padding\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidCharacter, input: \"AA$=\", index: 2, message: \"invalid base64 character\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::NonCanonical, input: \"AB==\", index: 1, message: \"non-canonical base64 encoding\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidLength, input: \"A\", index: 1, message: \"base64url input has invalid length\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidPadding, input: \"AA==\", index: 2, message: \"base64url input must not contain padding\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::InvalidCharacter, input: \"AA$\", index: 2, message: \"invalid base64url character\")) : Result<Bytes, Base64DecodeError>\n" +
-			"Result::Err(error: Base64DecodeError(kind: Base64DecodeErrorKind::NonCanonical, input: \"AB\", index: 1, message: \"non-canonical base64url encoding\")) : Result<Bytes, Base64DecodeError>\n"
+			"Result::Ok(value: Bytes[65, 240, 159, 152, 128]) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Ok(value: Bytes[63, 63, 63]) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidLength, input: \"AAA\", index: 3, message: \"base64 input length must be a multiple of 4\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidPadding, input: \"AA=A\", index: 3, message: \"invalid base64 padding\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidCharacter, input: \"AA$=\", index: 2, message: \"invalid base64 character\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::NonCanonical, input: \"AB==\", index: 1, message: \"non-canonical base64 encoding\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidLength, input: \"A\", index: 1, message: \"base64url input has invalid length\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidPadding, input: \"AA==\", index: 2, message: \"base64url input must not contain padding\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::InvalidCharacter, input: \"AA$\", index: 2, message: \"invalid base64url character\")) : Result<Bytes, Base64::DecodeError>\n" +
+			"Result::Err(error: Base64::DecodeError(kind: Base64::DecodeErrorKind::NonCanonical, input: \"AB\", index: 1, message: \"non-canonical base64url encoding\")) : Result<Bytes, Base64::DecodeError>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s base64 REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -2927,10 +2927,9 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		bytesPath := filepath.Join(directory, "value.bin")
 		missingPath := filepath.Join(directory, "missing.txt")
 		input := strings.Join([]string{
-			"import { FileError } from trb/std/filesystem",
 			"import trb/std/filesystem",
 			"import { Result } from trb/std/result",
-			"def describe(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
+			"def describe(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
 			"FileSystem.create_directory(" + strconv.Quote(directory) + ")",
 			"FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
 			"FileSystem.read_text(" + strconv.Quote(textPath) + ")",
@@ -2947,14 +2946,14 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
-			"Result::Ok(value: \"A😀\") : Result<String, FileError>\n" +
-			"Result::Ok(value: true) : Result<Boolean, FileError>\n" +
-			"Result::Ok(value: false) : Result<Boolean, FileError>\n" +
-			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileError>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileError>\n" +
-			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileError>\n" +
+		want := "Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
+			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
+			"Result::Ok(value: \"A😀\") : Result<String, FileSystem::Error>\n" +
+			"Result::Ok(value: true) : Result<Boolean, FileSystem::Error>\n" +
+			"Result::Ok(value: false) : Result<Boolean, FileSystem::Error>\n" +
+			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileSystem::Error>\n" +
+			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
+			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileSystem::Error>\n" +
 			"\"read_text\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s filesystem REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
@@ -2981,10 +2980,9 @@ func TestReplEvaluatesPortableProcessAcrossModes(t *testing.T) {
 		}
 		t.Setenv("TRB_PROCESS_REPL_TEST", "available")
 		input := "import trb/std/process\n" +
-			"import { ProcessError, ProcessResult } from trb/std/process\n" +
 			"import { Result } from trb/std/result\n" +
-			"def describe(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.status.to_s() + \":\" + result.stdout + \":\" + result.stderr; when Result::Err(error); return error.operation; end; end\n" +
-			"def operation(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.stdout; when Result::Err(error); return error.operation; end; end\n" +
+			"def describe(value: Result<Process::Output, Process::Error>): String; case value; when Result::Ok(result); return result.status.to_s() + \":\" + result.stdout + \":\" + result.stderr; when Result::Err(error); return error.operation; end; end\n" +
+			"def operation(value: Result<Process::Output, Process::Error>): String; case value; when Result::Ok(result); return result.stdout; when Result::Err(error); return error.operation; end; end\n" +
 			"Process.argv()\n" +
 			"Process.environment(\"TRB_PROCESS_REPL_TEST\")\n" +
 			"describe(Process.run(\"/bin/sh\", [\"-c\", \"printf out; printf err >&2; exit 3\"]))\n" +
@@ -3019,7 +3017,6 @@ func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 		}
 
 		input := strings.Join([]string{
-			"import { JsonError, JsonValue } from trb/std/json",
 			"import trb/std/json",
 			"import trb/std/jsonc",
 			"import { Result } from trb/std/result",
@@ -3027,8 +3024,8 @@ func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 			`JSON.parse("1.5")`,
 			`JSON.parse("{\"name\":\"Ada\",\"enabled\":true}")`,
 			`JSONC.parse("{\n  // comment\n  \"name\": \"Ada\"\n}")`,
-			`JSON.stringify(JsonValue::Object({"name" => JsonValue::String("Ada")}))`,
-			`JSON.as_string(JsonValue::Integer(1))`,
+			`JSON.stringify(JSON::Value::Object({"name" => JSON::Value::String("Ada")}))`,
+			`JSON.as_string(JSON::Value::Integer(1))`,
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -3036,12 +3033,12 @@ func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: JsonValue::Integer(value: 1)) : Result<JsonValue, JsonError>\n" +
-			"Result::Ok(value: JsonValue::Float(value: 1.5)) : Result<JsonValue, JsonError>\n" +
-			"Result::Ok(value: JsonValue::Object(value: {\"enabled\": JsonValue::Boolean(value: true), \"name\": JsonValue::String(value: \"Ada\")})) : Result<JsonValue, JsonError>\n" +
-			"Result::Ok(value: JsonValue::Object(value: {\"name\": JsonValue::String(value: \"Ada\")})) : Result<JsonValue, JsonError>\n" +
-			"Result::Ok(value: \"{\\\"name\\\":\\\"Ada\\\"}\") : Result<String, JsonError>\n" +
-			"Result::Err(error: JsonError(kind: JsonErrorKind::Decode, message: \"JSON value is not String\", path: \"\", line: nil, column: nil)) : Result<String, JsonError>\n"
+		want := "Result::Ok(value: JSON::Value::Integer(value: 1)) : Result<JSON::Value, JSON::Error>\n" +
+			"Result::Ok(value: JSON::Value::Float(value: 1.5)) : Result<JSON::Value, JSON::Error>\n" +
+			"Result::Ok(value: JSON::Value::Object(value: {\"enabled\": JSON::Value::Boolean(value: true), \"name\": JSON::Value::String(value: \"Ada\")})) : Result<JSON::Value, JSON::Error>\n" +
+			"Result::Ok(value: JSON::Value::Object(value: {\"name\": JSON::Value::String(value: \"Ada\")})) : Result<JSON::Value, JSON::Error>\n" +
+			"Result::Ok(value: \"{\\\"name\\\":\\\"Ada\\\"}\") : Result<String, JSON::Error>\n" +
+			"Result::Err(error: JSON::Error(kind: JSON::ErrorKind::Decode, message: \"JSON value is not String\", path: \"\", line: nil, column: nil)) : Result<String, JSON::Error>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s JSON REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -3064,7 +3061,6 @@ func TestReplEvaluatesTypedJSONRecordCodecsAcrossModes(t *testing.T) {
 		}
 
 		input := strings.Join([]string{
-			"import { JsonError } from trb/std/json",
 			"import trb/std/json",
 			"import { Result } from trb/std/result",
 			`record User; id: Integer @json("user_id"); name: String; end`,
@@ -3078,9 +3074,9 @@ func TestReplEvaluatesTypedJSONRecordCodecsAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: User(id: 1, name: \"Ada\")) : Result<User, JsonError>\n" +
-			"Result::Ok(value: \"{\\\"name\\\":\\\"Lin\\\",\\\"user_id\\\":2}\") : Result<String, JsonError>\n" +
-			"Result::Err(error: JsonError(kind: JsonErrorKind::Decode, message: \"missing field name\", path: \"/name\", line: nil, column: nil)) : Result<User, JsonError>\n"
+		want := "Result::Ok(value: User(id: 1, name: \"Ada\")) : Result<User, JSON::Error>\n" +
+			"Result::Ok(value: \"{\\\"name\\\":\\\"Lin\\\",\\\"user_id\\\":2}\") : Result<String, JSON::Error>\n" +
+			"Result::Err(error: JSON::Error(kind: JSON::ErrorKind::Decode, message: \"missing field name\", path: \"/name\", line: nil, column: nil)) : Result<User, JSON::Error>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s typed JSON codec REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -3121,7 +3117,7 @@ func TestReplEvaluatesTypedWebQueryBindingAcrossModes(t *testing.T) {
 		}
 		want := "Result::Ok(value: Query(page: 2, tag: [\"a\", \"b\"])) : Result<Query, ParameterError>\n" +
 			"Result::Err(error: ParameterError::Missing(source: ParameterSource::Query, name: \"page\")) : Result<Query, ParameterError>\n" +
-			"Result::Err(error: ParameterError::MalformedQuery(error: PercentDecodeError(kind: PercentDecodeErrorKind::InvalidEscape, input: \"%ZZ\", message: \"invalid percent escape in URL query component\"))) : Result<Query, ParameterError>\n" +
+			"Result::Err(error: ParameterError::MalformedQuery(error: URL::DecodeError(kind: URL::DecodeErrorKind::InvalidEscape, input: \"%ZZ\", message: \"invalid percent escape in URL query component\"))) : Result<Query, ParameterError>\n" +
 			"Result::Ok(value: Payload(title: \"ship\")) : Result<Payload, RequestError>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s typed web query REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
@@ -3213,7 +3209,7 @@ func TestReplEvaluatesWebEndpointInputBindingAcrossModes(t *testing.T) {
 		want := "Result::Ok(value: Input(params: Params(id: 7), query: Query(page: 2), body: Payload(title: \"ship\"))) : Result<Input, EndpointInputError>\n" +
 			"Result::Err(error: EndpointInputError::Params(error: ParameterError::Invalid(source: ParameterSource::Path, name: \"id\", value: \"bad\", expected: \"Integer\"))) : Result<Input, EndpointInputError>\n" +
 			"Result::Err(error: EndpointInputError::Query(error: ParameterError::Missing(source: ParameterSource::Query, name: \"page\"))) : Result<Input, EndpointInputError>\n" +
-			"Result::Err(error: EndpointInputError::Body(error: RequestError::InvalidJson(error: JsonError(kind: JsonErrorKind::Decode, message: \"missing field title\", path: \"/title\", line: nil, column: nil)))) : Result<Input, EndpointInputError>\n"
+			"Result::Err(error: EndpointInputError::Body(error: RequestError::InvalidJson(error: JSON::Error(kind: JSON::ErrorKind::Decode, message: \"missing field title\", path: \"/title\", line: nil, column: nil)))) : Result<Input, EndpointInputError>\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s endpoint input REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -4060,8 +4056,8 @@ func TestReplEvaluatesRawValueEnumsAcrossModes(t *testing.T) {
 			want := "OrderStatus::Completed : OrderStatus\n" +
 				"\"COMPLETED\" : String\n" +
 				"true : Boolean\n" +
-				"Result::Ok(value: \"\\\"COMPLETED\\\"\") : Result<String, JsonError>\n" +
-				"Result::Ok(value: OrderStatus::Pending) : Result<OrderStatus, JsonError>\n" +
+				"Result::Ok(value: \"\\\"COMPLETED\\\"\") : Result<String, JSON::Error>\n" +
+				"Result::Ok(value: OrderStatus::Pending) : Result<OrderStatus, JSON::Error>\n" +
 				"Result::Ok(value: OrderStatus::Pending) : Result<OrderStatus, EnumValueError>\n" +
 				"Result::Err(error: EnumValueError(value: \"UNKNOWN\", message: \"unknown raw value for OrderStatus\")) : Result<OrderStatus, EnumValueError>\n"
 			if stdout.String() != want || stderr.Len() != 0 {
@@ -5406,10 +5402,9 @@ func TestRunPortableURLComponentsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := `import { Result } from trb/std/result
-import { PercentDecodeError, PercentDecodeErrorKind } from trb/std/url
 import trb/std/url
 
-def decode(value: String): Result<String, PercentDecodeError>
+def decode(value: String): Result<String, URL::DecodeError>
 	return URL.decode_component(value)
 end
 
@@ -5419,9 +5414,9 @@ def decoded(value: String): String
 		return text
 	when Result::Err(error)
 		case error.kind
-		when PercentDecodeErrorKind::InvalidEscape
+		when URL::DecodeErrorKind::InvalidEscape
 			return "invalid escape"
-		when PercentDecodeErrorKind::InvalidUtf8
+		when URL::DecodeErrorKind::InvalidUtf8
 			return "invalid utf8"
 		end
 	end
@@ -5477,8 +5472,7 @@ func TestRunPortableURLQueryAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { QueryParameter } from trb/std/url
-import trb/std/url
+		source := `import trb/std/url
 import { Result } from trb/std/result
 
 def print_query(source: String)
@@ -5495,11 +5489,11 @@ end
 
 def main()
 	query := URL.build_query([
-		QueryParameter.new(name: "tag", value: "type rb"),
-		QueryParameter.new(name: "tag", value: "go"),
-		QueryParameter.new(name: "symbol", value: "+&="),
-		QueryParameter.new(name: "tilde", value: "~"),
-		QueryParameter.new(name: "star", value: "*"),
+		URL::QueryParameter.new(name: "tag", value: "type rb"),
+		URL::QueryParameter.new(name: "tag", value: "go"),
+		URL::QueryParameter.new(name: "symbol", value: "+&="),
+		URL::QueryParameter.new(name: "tilde", value: "~"),
+		URL::QueryParameter.new(name: "star", value: "*"),
 	])
 	puts(query)
 	print_query("tag=go&&tag=type+rb&empty&symbol=%2B&text=%E6%97%A5%E6%9C%AC%E8%AA%9E&")
@@ -5527,9 +5521,8 @@ end
 }
 
 func TestREPLPortableURLQueryUsesCompilerOwnedSource(t *testing.T) {
-	input := "import { QueryParameter } from trb/std/url\n" +
-		"import trb/std/url\n" +
-		"URL.build_query([QueryParameter.new(name: \"tag\", value: \"type rb\"), QueryParameter.new(name: \"tag\", value: \"go\")])\n" +
+	input := "import trb/std/url\n" +
+		"URL.build_query([URL::QueryParameter.new(name: \"tag\", value: \"type rb\"), URL::QueryParameter.new(name: \"tag\", value: \"go\")])\n" +
 		"URL.parse_query(\"tag=type+rb&tag=go\")\n" +
 		":quit\n"
 	var stdout, stderr bytes.Buffer
@@ -5538,7 +5531,7 @@ func TestREPLPortableURLQueryUsesCompilerOwnedSource(t *testing.T) {
 		t.Fatalf("REPL status=%d stderr=%s", status, stderr.String())
 	}
 	want := "\"tag=type+rb&tag=go\" : String\n" +
-		"Result::Ok(value: [QueryParameter(name: \"tag\", value: \"type rb\"), QueryParameter(name: \"tag\", value: \"go\")]) : Result<Array<QueryParameter>, PercentDecodeError>\n"
+		"Result::Ok(value: [URL::QueryParameter(name: \"tag\", value: \"type rb\"), URL::QueryParameter(name: \"tag\", value: \"go\")]) : Result<Array<URL::QueryParameter>, URL::DecodeError>\n"
 	if stdout.String() != want {
 		t.Fatalf("unexpected URL query REPL output: want %q, got %q; stderr=%s", want, stdout.String(), stderr.String())
 	}
@@ -6177,12 +6170,11 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		missingPath := filepath.Join(directory, "missing.txt")
 		bmpPath := filepath.Join(directory, "\uE000")
 		astralPath := filepath.Join(directory, "\U00010000")
-		source := "import { FileError } from trb/std/filesystem\n" +
-			"import trb/std/filesystem\n" +
+		source := "import trb/std/filesystem\n" +
 			"import { Result } from trb/std/result\n\n" +
-			"def text_or_operation(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
-			"def names_or_error(value: Result<Array<String>, FileError>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
-			"def boolean_or_false(value: Result<Boolean, FileError>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
+			"def text_or_operation(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
+			"def names_or_error(value: Result<Array<String>, FileSystem::Error>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
+			"def boolean_or_false(value: Result<Boolean, FileSystem::Error>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
 			"def main()\n" +
 			"\t_directory := FileSystem.create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
 			"\t\treturn\n" +
@@ -6245,11 +6237,10 @@ func TestRunCompilerOwnedProcessAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { ProcessError, ProcessResult } from trb/std/process
-import trb/std/process
+		source := `import trb/std/process
 import { Result } from trb/std/result
 
-def describe(value: Result<ProcessResult, ProcessError>): String
+def describe(value: Result<Process::Output, Process::Error>): String
 	case value
 	when Result::Ok(result)
 		return result.status.to_s() + ":" + result.stdout + ":" + result.stderr
@@ -6258,7 +6249,7 @@ def describe(value: Result<ProcessResult, ProcessError>): String
 	end
 end
 
-def succeeded(value: Result<ProcessResult, ProcessError>): Boolean
+def succeeded(value: Result<Process::Output, Process::Error>): Boolean
 	case value
 	when Result::Ok(result)
 		return result.success
@@ -6267,7 +6258,7 @@ def succeeded(value: Result<ProcessResult, ProcessError>): Boolean
 	end
 end
 
-def operation(value: Result<ProcessResult, ProcessError>): String
+def operation(value: Result<Process::Output, Process::Error>): String
 	case value
 	when Result::Ok(result)
 		return result.stdout
@@ -6276,7 +6267,7 @@ def operation(value: Result<ProcessResult, ProcessError>): String
 	end
 end
 
-def directory_available(value: Result<String, ProcessError>): Boolean
+def directory_available(value: Result<String, Process::Error>): Boolean
 	case value
 	when Result::Ok(directory)
 		return !directory.empty?()
@@ -6336,13 +6327,12 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := "import { JsonError, JsonValue } from trb/std/json\n" +
-			"import trb/std/json\n" +
+		source := "import trb/std/json\n" +
 			"import trb/std/jsonc\n" +
 			"import { Result } from trb/std/result\n\n" +
-			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case JSON.stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
-			"def error_path(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
-			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() || !error.message.empty?(); end; end\n\n" +
+			"def render(value: Result<JSON::Value, JSON::Error>): String; case value; when Result::Ok(item); case JSON.stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
+			"def error_path(value: Result<JSON::Value, JSON::Error>): String; case value; when Result::Ok(item); return render(Result<JSON::Value, JSON::Error>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
+			"def valid(value: Result<JSON::Value, JSON::Error>): Boolean; case value; when Result::Ok(item); return render(Result<JSON::Value, JSON::Error>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() || !error.message.empty?(); end; end\n\n" +
 			"def main()\n" +
 			"\tputs(render(JSONC.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
 			"\tputs(error_path(JSON.parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +
@@ -6396,7 +6386,6 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		mainSource := "import { Address, User } from contracts/user\n" +
-			"import { JsonError } from trb/std/json\n" +
 			"import trb/std/json\n" +
 			"import { Result } from trb/std/result\n\n" +
 			"def round_trip(source: String): String; case JSON.decode<User>(source); when Result::Ok(user); case JSON.encode(user); when Result::Ok(encoded); case JSON.decode<User>(encoded); when Result::Ok(copy); return copy.name + \":\" + copy.address.city; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
@@ -6726,7 +6715,7 @@ func TestRunOfficialWebQueryHelpersAcrossAvailableBackends(t *testing.T) {
 		}
 		mainSource := `import { Body, Headers, HttpMethod } from trb/http
 import { QueryValueError, Request } from trb/web
-import { PercentDecodeError } from trb/std/url
+import trb/std/url
 import { Result } from trb/std/result
 
 def request(query_string: String): Request
@@ -6749,7 +6738,7 @@ def render_value(result: Result<String, QueryValueError>): String
 	end
 end
 
-def print_values(result: Result<Array<String>, PercentDecodeError>)
+def print_values(result: Result<Array<String>, URL::DecodeError>)
 	case result
 	when Result::Ok(values)
 		puts(values.size())

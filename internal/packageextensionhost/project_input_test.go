@@ -181,6 +181,42 @@ end
 	}
 }
 
+func TestExportProjectDeclarationInputSeparatesAuthoredAndGeneratedImportProvenance(t *testing.T) {
+	authored := `import { ReportInput } from acme/contracts
+
+record AuthoredContract
+	input: ReportInput
+end
+`
+	generated := `import { ReportInput } from github.com/acme/contracts/index
+
+record GeneratedContract
+	input: ReportInput
+end
+`
+	program := parseProjectInputTest(t, "routes/reports", authored+generated)
+	program.CompilerGeneratedStart = len(authored)
+	input, err := ExportProjectDeclarationInput("trb/web", []*ast.Program{program}, ProjectDeclarationInputOptions{
+		PackageAliasesByModule: map[string]map[string]string{
+			"routes/reports": {"acme/contracts": "github.com/acme/contracts"},
+		},
+		KnownModulePaths: []string{"github.com/acme/contracts/index"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions := map[string]*packageextension.Definition{}
+	for _, record := range input.Modules[0].Records {
+		definitions[record.Name] = record.Fields[0].Type.Authored.Definition
+	}
+	if definition := definitions["AuthoredContract"]; definition == nil || definition.ImportPath != "acme/contracts" {
+		t.Fatalf("generated import replaced authored provenance: %#v", definition)
+	}
+	if definition := definitions["GeneratedContract"]; definition == nil || definition.ImportPath != "github.com/acme/contracts/index" {
+		t.Fatalf("generated declaration did not use its generated import scope: %#v", definition)
+	}
+}
+
 func TestExportProjectDeclarationInputIgnoresNestedImportsDuringResolution(t *testing.T) {
 	program := parseProjectInputTest(t, "contracts/envelope", `import { Unit } from trb/std/unit
 

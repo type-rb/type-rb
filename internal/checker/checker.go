@@ -1451,6 +1451,10 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 		c.validateTypeReferenceInScope(argument, typeParameters)
 	}
 	_, declared := c.declaredTypes[ref.Name]
+	if !declared {
+		declaration := c.authoredOwnerIdentities[ref.Name]
+		declared = declaration.Kind.IsType()
+	}
 	binding, imported := c.importedTypeAt(ref.Name, ref.Span())
 	_, parameter := typeParameters[ref.Name]
 	if types.FromName(ref.Name).Kind == types.Named && !declared && !imported && !parameter {
@@ -6630,6 +6634,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if n.Namespace {
+			if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists && binding.Export != nil && binding.Member == nil && binding.Export.Kind != resolver.ModuleExport {
+				typ = c.resolvedBindingType(binding)
+				c.recordReference(n, binding)
+				break
+			}
+		}
 		if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
 			switch {
 			case classAccess && n.Name == "new":
@@ -6693,6 +6704,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.recordReference(n, binding)
 			} else if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
 				c.recordReference(n, binding)
+			}
+			if !variant.Declaration.Empty() {
+				c.result.ExpressionDeclarations[n] = variant.Declaration
 			}
 			typ = receiverType
 			if len(variant.Fields) > 0 && c.enumCallee == 0 && c.enumPattern == 0 {
@@ -7883,7 +7897,9 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 		}
 		specialized := stdlib.Instantiate(*binding.Library, inferenceArguments)
 		library = &specialized
-		for _, parameter := range specialized.Parameters {
+		for index := range specialized.Parameters {
+			parameter := &specialized.Parameters[index]
+			parameter.Type = c.canonicalContractType(parameter.Type, c.activeTypeParameterSet())
 			parameters = append(parameters, parameter.Type)
 			if !parameter.Optional {
 				required++
@@ -9410,11 +9426,18 @@ func (c *Checker) canonicalType(typ types.Type, typeParameters map[string]bool) 
 	for index := range typ.Args {
 		typ.Args[index] = c.canonicalType(typ.Args[index], typeParameters)
 	}
-	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] || !typ.Declaration.Empty() {
+	if typ.Kind == types.Named && !typ.Declaration.Empty() {
+		if declaration := c.authoredOwnerIdentities[typ.Declaration.Name]; declaration.Kind.IsType() {
+			typ.Name = declaration.LeafName()
+		}
+		return typ
+	}
+	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] {
 		return typ
 	}
 	if declaration := c.authoredTypeIdentity(typ.Name, c.activeTypeOwner); !declaration.Empty() {
 		typ.Declaration = declaration
+		typ.Name = declaration.LeafName()
 		return typ
 	}
 	lookups := []func(string) (resolver.Binding, bool){

@@ -141,19 +141,19 @@ var typeT = types.FromName("T")
 var typeE = types.FromName("E")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
-var fileErrorType = types.FromName("FileError")
-var jsonValueType = types.FromName("JsonValue")
-var jsonErrorType = types.FromName("JsonError")
-var processResultType = types.FromName("ProcessResult")
-var processErrorType = types.FromName("ProcessError")
+var fileErrorType = types.FromName("FileSystem::Error")
+var jsonValueType = types.FromName("JSON::Value")
+var jsonErrorType = types.FromName("JSON::Error")
+var processResultType = types.FromName("Process::Output")
+var processErrorType = types.FromName("Process::Error")
 var numberParseErrorType = types.FromName("NumberParseError")
-var hexDecodeErrorType = types.FromName("HexDecodeError")
-var base64DecodeErrorType = types.FromName("Base64DecodeError")
+var hexDecodeErrorType = types.FromName("Hex::DecodeError")
+var base64DecodeErrorType = types.FromName("Base64::DecodeError")
 var indexLookupErrorType = types.FromName("IndexLookupError")
 var sliceRangeErrorType = types.FromName("SliceRangeError")
 var keyLookupErrorType = types.FromName("KeyLookupError")
-var percentDecodeErrorType = types.FromName("PercentDecodeError")
-var queryParameterType = types.FromName("QueryParameter")
+var percentDecodeErrorType = types.FromName("URL::DecodeError")
+var queryParameterType = types.FromName("URL::QueryParameter")
 var dateType = types.FromName("Date")
 var timeOfDayType = types.FromName("TimeOfDay")
 var dateTimeType = types.FromName("DateTime")
@@ -468,9 +468,9 @@ end
 		Root:       "URL",
 		ModulePath: "trb/std/url/index",
 		RuntimeExports: []RuntimeExport{
-			{Name: "PercentDecodeErrorKind", Kind: "enum"},
-			{Name: "PercentDecodeError", Kind: "record"},
-			{Name: "QueryParameter", Kind: "record"},
+			{Name: "URL::DecodeErrorKind", Kind: "enum"},
+			{Name: "URL::DecodeError", Kind: "record"},
+			{Name: "URL::QueryParameter", Kind: "record"},
 		},
 		Source: urlSource(),
 		Kind:   Portable,
@@ -560,9 +560,9 @@ end
 		Root:       "JSON",
 		ModulePath: "trb/std/json/index",
 		RuntimeExports: []RuntimeExport{
-			{Name: "JsonErrorKind", Kind: "enum"},
-			{Name: "JsonError", Kind: "record"},
-			{Name: "JsonValue", Kind: "enum"},
+			{Name: "JSON::ErrorKind", Kind: "enum"},
+			{Name: "JSON::Error", Kind: "record"},
+			{Name: "JSON::Value", Kind: "enum"},
 		},
 		Source: jsonSource(),
 		Kind:   Portable,
@@ -571,7 +571,7 @@ end
 			"decode": {
 				Name:            "decode",
 				Intrinsic:       "trb.internal.json.decode",
-				RequiredSymbols: []string{"JsonError"},
+				RequiredSymbols: []string{"JSON"},
 				TypeParameters:  []string{"T"},
 				Parameters:      []Parameter{{Name: "source", Type: stringType}},
 				Return:          jsonResult(typeT),
@@ -579,7 +579,7 @@ end
 			"encode": {
 				Name:            "encode",
 				Intrinsic:       "trb.internal.json.encode",
-				RequiredSymbols: []string{"JsonError"},
+				RequiredSymbols: []string{"JSON"},
 				TypeParameters:  []string{"T"},
 				Parameters:      []Parameter{{Name: "value", Type: typeT}},
 				Return:          jsonResult(stringType),
@@ -767,8 +767,8 @@ end
 		Root:       "Hex",
 		ModulePath: "trb/std/encoding/hex/index",
 		RuntimeExports: []RuntimeExport{
-			{Name: "HexDecodeErrorKind", Kind: "enum"},
-			{Name: "HexDecodeError", Kind: "record"},
+			{Name: "Hex::DecodeErrorKind", Kind: "enum"},
+			{Name: "Hex::DecodeError", Kind: "record"},
 		},
 		Source: hexSource(),
 		Kind:   Portable,
@@ -791,8 +791,8 @@ end
 		Root:       "Base64",
 		ModulePath: "trb/std/encoding/base64/index",
 		RuntimeExports: []RuntimeExport{
-			{Name: "Base64DecodeErrorKind", Kind: "enum"},
-			{Name: "Base64DecodeError", Kind: "record"},
+			{Name: "Base64::DecodeErrorKind", Kind: "enum"},
+			{Name: "Base64::DecodeError", Kind: "record"},
 		},
 		Source: base64Source(),
 		Kind:   Portable,
@@ -1483,7 +1483,7 @@ func jsonParse(name string) Symbol {
 		Return:     jsonResult(jsonValueType),
 	}
 	if name == "parse_jsonc" {
-		result.RequiredSymbols = []string{"JsonErrorKind"}
+		result.RequiredSymbols = []string{"JSON"}
 	}
 	return result
 }

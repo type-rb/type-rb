@@ -442,10 +442,14 @@ func Assignable(target, value Type) bool {
 // Equivalent compares semantic types while ignoring binding-level readonly
 // state. Mutable generic containers use it to avoid unsound argument widening.
 func Equivalent(left, right Type) bool {
-	if left.Kind != right.Kind || left.Name != right.Name || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
+	if left.Kind != right.Kind || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
 		return false
 	}
-	if !left.Declaration.Empty() && !right.Declaration.Empty() && left.Declaration != right.Declaration {
+	if !left.Declaration.Empty() && !right.Declaration.Empty() {
+		if left.Declaration != right.Declaration {
+			return false
+		}
+	} else if left.Name != right.Name {
 		return false
 	}
 	for index := range left.Args {

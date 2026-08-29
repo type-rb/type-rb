@@ -1561,10 +1561,10 @@ func rubyJSONParse(argument string, comments bool) string {
 		strip = `strip_comments = ->(input) { result = input.dup; in_string = false; escaped = false; index = 0; while index < result.bytesize; byte = result.getbyte(index); if in_string; if escaped; escaped = false; elsif byte == 92; escaped = true; elsif byte == 34; in_string = false; end; index += 1; next; end; if byte == 34; in_string = true; index += 1; next; end; if byte == 47 && index + 1 < result.bytesize; following = result.getbyte(index + 1); if following == 47; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; while index < result.bytesize && result.getbyte(index) != 10; result.setbyte(index, 32) unless result.getbyte(index) == 13; index += 1; end; next; elsif following == 42; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; while index < result.bytesize; if index + 1 < result.bytesize && result.getbyte(index) == 42 && result.getbyte(index + 1) == 47; result.setbyte(index, 32); result.setbyte(index + 1, 32); index += 2; break; end; byte = result.getbyte(index); result.setbyte(index, 32) unless byte == 10 || byte == 13; index += 1; end; next; end; end; index += 1; end; result }; source = strip_comments.call(source); `
 	}
 	errorValue := func(kind, message, path, line, column string) string {
-		return "JsonError.new(kind: JsonErrorKind::" + kind + ", message: " + message + ", path: " + path + ", line: " + line + ", column: " + column + ")"
+		return "JSON::Error.new(kind: JSON::ErrorKind::" + kind + ", message: " + message + ", path: " + path + ", line: " + line + ", column: " + column + ")"
 	}
 	conversionError := errorValue("Decode", "message", "path", "nil", "nil")
-	convert := "convert = nil; convert = ->(value, path) { if value.nil?; JsonValue::Null; elsif value == true || value == false; JsonValue::Boolean.new(value); elsif value.is_a?(Integer) || value.is_a?(Float); number = value.to_f; unless number.finite?; message = \"JSON number is not finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; if number == number.to_i; if number < -9007199254740991 || number > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; JsonValue::Integer.new(number.to_i); else; JsonValue::Float.new(number); end; elsif value.is_a?(String); JsonValue::String.new(value); elsif value.is_a?(Array); JsonValue::Array.new(value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }); elsif value.is_a?(Hash); fields = {}; value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; JsonValue::Object.new(fields); else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
+	convert := "convert = nil; convert = ->(value, path) { if value.nil?; JSON::Value::Null; elsif value == true || value == false; JSON::Value::Boolean.new(value); elsif value.is_a?(Integer) || value.is_a?(Float); number = value.to_f; unless number.finite?; message = \"JSON number is not finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; if number == number.to_i; if number < -9007199254740991 || number > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; JSON::Value::Integer.new(number.to_i); else; JSON::Value::Float.new(number); end; elsif value.is_a?(String); JSON::Value::String.new(value); elsif value.is_a?(Array); JSON::Value::Array.new(value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }); elsif value.is_a?(Hash); fields = {}; value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; JSON::Value::Object.new(fields); else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
 	syntaxError := errorValue("Syntax", "error.message", `""`, "line", "column")
 	genericError := errorValue("Syntax", "error.message", `""`, "nil", "nil")
 	return "->(source) { begin; require \"json\"; " + strip + convert + "; raw = JSON.parse(source); outcome = catch(:__trb_json_error) { [:ok, convert.call(raw, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(outcome[1]); end; rescue JSON::ParserError => error; line_match = error.message.match(/line (\\d+)/); column_match = error.message.match(/column (\\d+)/); line = line_match && line_match[1].to_i; column = column_match && column_match[1].to_i; Result::Err.new(" + syntaxError + "); rescue StandardError => error; Result::Err.new(" + genericError + "); end }.call(" + argument + ")"
@@ -1572,10 +1572,10 @@ func rubyJSONParse(argument string, comments bool) string {
 
 func rubyJSONStringify(argument string) string {
 	errorValue := func(message, path string) string {
-		return "JsonError.new(kind: JsonErrorKind::Encode, message: " + message + ", path: " + path + ", line: nil, column: nil)"
+		return "JSON::Error.new(kind: JSON::ErrorKind::Encode, message: " + message + ", path: " + path + ", line: nil, column: nil)"
 	}
 	conversionError := errorValue("message", "path")
-	convert := "convert = nil; convert = ->(value, path) { if value.equal?(JsonValue::Null); nil; elsif value.is_a?(JsonValue::Boolean); value.value; elsif value.is_a?(JsonValue::Integer); if value.value < -9007199254740991 || value.value > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JsonValue::Float); unless value.value.finite?; message = \"JSON Float must be finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JsonValue::String); value.value; elsif value.is_a?(JsonValue::Array); value.value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }; elsif value.is_a?(JsonValue::Object); fields = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; fields; else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
+	convert := "convert = nil; convert = ->(value, path) { if value.equal?(JSON::Value::Null); nil; elsif value.is_a?(JSON::Value::Boolean); value.value; elsif value.is_a?(JSON::Value::Integer); if value.value < -9007199254740991 || value.value > 9007199254740991; message = \"JSON integer is outside the portable range\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JSON::Value::Float); unless value.value.finite?; message = \"JSON Float must be finite\"; throw :__trb_json_error, [:error, " + conversionError + "]; end; value.value; elsif value.is_a?(JSON::Value::String); value.value; elsif value.is_a?(JSON::Value::Array); value.value.each_with_index.map { |item, index| convert.call(item, path + \"/\" + index.to_s) }; elsif value.is_a?(JSON::Value::Object); fields = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); fields[key] = convert.call(item, path + \"/\" + escaped) }; fields; else; message = \"unsupported JSON value\"; throw :__trb_json_error, [:error, " + conversionError + "]; end }"
 	encodeError := errorValue("error.message", `""`)
 	return "->(value) { begin; require \"json\"; " + convert + "; outcome = catch(:__trb_json_error) { [:ok, convert.call(value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(JSON.generate(outcome[1])); end; rescue StandardError => error; Result::Err.new(" + encodeError + "); end }.call(" + argument + ")"
 }
@@ -1587,7 +1587,7 @@ func rubyJSONDecode(call *ir.Call, argument string) string {
 	builder := &rubyJSONCodecBuilder{}
 	decoder := builder.decoder(call.Codec)
 	parsed := rubyJSONParse(argument, false)
-	errorValue := "JsonError.new(kind: JsonErrorKind::Decode, message: message, path: path, line: nil, column: nil)"
+	errorValue := "JSON::Error.new(kind: JSON::ErrorKind::Decode, message: message, path: path, line: nil, column: nil)"
 	return "-> { fail = ->(path, message) { throw :__trb_json_codec_error, [:error, " + errorValue + "] }; " + builder.source.String() + " parsed = " + parsed + "; if parsed.is_a?(Result::Err); parsed; else; outcome = catch(:__trb_json_codec_error) { [:ok, " + decoder + ".call(parsed.value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(outcome[1]); end; end }.call"
 }
 
@@ -1616,26 +1616,26 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
 		child := b.decoder(&nonnull)
-		b.source.WriteString(name + " = ->(value, path) { value.equal?(JsonValue::Null) ? nil : " + child + ".call(value, path) }; ")
+		b.source.WriteString(name + " = ->(value, path) { value.equal?(JSON::Value::Null) ? nil : " + child + ".call(value, path) }; ")
 		return name
 	}
 	expected := func(kind string) string { return "fail.call(path, " + strconv.Quote("expected "+kind) + ")" }
 	body := ""
 	switch schema.Kind {
 	case "boolean":
-		body = "unless value.is_a?(JsonValue::Boolean); " + expected("Boolean") + "; end; value.value"
+		body = "unless value.is_a?(JSON::Value::Boolean); " + expected("Boolean") + "; end; value.value"
 	case "integer":
-		body = "unless value.is_a?(JsonValue::Integer); " + expected("Integer") + "; end; value.value"
+		body = "unless value.is_a?(JSON::Value::Integer); " + expected("Integer") + "; end; value.value"
 	case "float":
-		body = "if value.is_a?(JsonValue::Integer); value.value.to_f; elsif value.is_a?(JsonValue::Float); value.value; else; " + expected("Float") + "; end"
+		body = "if value.is_a?(JSON::Value::Integer); value.value.to_f; elsif value.is_a?(JSON::Value::Float); value.value; else; " + expected("Float") + "; end"
 	case "string":
-		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; value.value"
+		body = "unless value.is_a?(JSON::Value::String); " + expected("String") + "; end; value.value"
 	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
 		method := "try_parse"
 		if schema.Kind == "time_zone" {
 			method = "try_get"
 		}
-		body = "unless value.is_a?(JsonValue::String); " + expected("String") + "; end; parsed = " + rubyTimeRuntimeClass(schema.Type.Name) + "." + method + "(value.value); parsed.is_a?(Result::Err) ? fail.call(path, " + strconv.Quote("invalid "+schema.Type.Name) + ") : parsed.value"
+		body = "unless value.is_a?(JSON::Value::String); " + expected("String") + "; end; parsed = " + rubyTimeRuntimeClass(schema.Type.Name) + "." + method + "(value.value); parsed.is_a?(Result::Err) ? fail.call(path, " + strconv.Quote("invalid "+schema.Type.Name) + ") : parsed.value"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {
@@ -1645,16 +1645,16 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		for _, item := range schema.RawValues {
 			branches = append(branches, "when "+item.Raw+" then "+schema.Type.Name+"::"+item.Member)
 		}
-		body = "unless value.is_a?(JsonValue::" + kind + "); " + expected(kind) + "; end; case value.value; " + strings.Join(branches, "; ") + "; else; fail.call(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "); end"
+		body = "unless value.is_a?(JSON::Value::" + kind + "); " + expected(kind) + "; end; case value.value; " + strings.Join(branches, "; ") + "; else; fail.call(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "); end"
 	case "array":
 		child := b.decoder(schema.Element)
-		body = "unless value.is_a?(JsonValue::Array); " + expected("Array") + "; end; value.value.each_with_index.map { |item, index| " + child + ".call(item, path + \"/\" + index.to_s) }"
+		body = "unless value.is_a?(JSON::Value::Array); " + expected("Array") + "; end; value.value.each_with_index.map { |item, index| " + child + ".call(item, path + \"/\" + index.to_s) }"
 	case "hash":
 		child := b.decoder(schema.Element)
-		body = "unless value.is_a?(JsonValue::Object); " + expected("Object") + "; end; decoded = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); decoded[key] = " + child + ".call(item, path + \"/\" + escaped) }; decoded"
+		body = "unless value.is_a?(JSON::Value::Object); " + expected("Object") + "; end; decoded = {}; value.value.each { |key, item| escaped = key.gsub(\"~\", \"~0\").gsub(\"/\", \"~1\"); decoded[key] = " + child + ".call(item, path + \"/\" + escaped) }; decoded"
 	case "record":
 		var fields strings.Builder
-		fields.WriteString("unless value.is_a?(JsonValue::Object); " + expected(schema.Type.Name) + "; end; ")
+		fields.WriteString("unless value.is_a?(JSON::Value::Object); " + expected(schema.Type.Name) + "; end; ")
 		parts := make([]string, 0, len(schema.Fields))
 		for index, field := range schema.Fields {
 			child := b.decoder(field.Schema)
@@ -1685,42 +1685,42 @@ func (b *rubyJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		nonnull := *schema
 		nonnull.Type.Nullable = false
 		child := b.encoder(&nonnull)
-		b.source.WriteString(name + " = ->(value) { value.nil? ? JsonValue::Null : " + child + ".call(value) }; ")
+		b.source.WriteString(name + " = ->(value) { value.nil? ? JSON::Value::Null : " + child + ".call(value) }; ")
 		return name
 	}
 	body := ""
 	switch schema.Kind {
 	case "boolean":
-		body = "JsonValue::Boolean.new(value)"
+		body = "JSON::Value::Boolean.new(value)"
 	case "integer":
-		body = "JsonValue::Integer.new(value)"
+		body = "JSON::Value::Integer.new(value)"
 	case "float":
-		body = "JsonValue::Float.new(value)"
+		body = "JSON::Value::Float.new(value)"
 	case "string":
-		body = "JsonValue::String.new(value)"
+		body = "JSON::Value::String.new(value)"
 	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration":
-		body = "JsonValue::String.new(value.to_s())"
+		body = "JSON::Value::String.new(value.to_s())"
 	case "time_zone":
-		body = "JsonValue::String.new(value.identifier())"
+		body = "JSON::Value::String.new(value.identifier())"
 	case "raw_enum":
 		kind := "String"
 		if schema.RawType.Kind == types.Int {
 			kind = "Integer"
 		}
-		body = "JsonValue::" + kind + ".new(value.raw_value)"
+		body = "JSON::Value::" + kind + ".new(value.raw_value)"
 	case "array":
 		child := b.encoder(schema.Element)
-		body = "JsonValue::Array.new(value.map { |item| " + child + ".call(item) })"
+		body = "JSON::Value::Array.new(value.map { |item| " + child + ".call(item) })"
 	case "hash":
 		child := b.encoder(schema.Element)
-		body = "fields = {}; value.each { |key, item| fields[key] = " + child + ".call(item) }; JsonValue::Object.new(fields)"
+		body = "fields = {}; value.each { |key, item| fields[key] = " + child + ".call(item) }; JSON::Value::Object.new(fields)"
 	case "record":
 		parts := make([]string, 0, len(schema.Fields))
 		for _, field := range schema.Fields {
 			child := b.encoder(field.Schema)
 			parts = append(parts, strconv.Quote(field.WireName)+" => "+child+".call(value."+field.Name+")")
 		}
-		body = "JsonValue::Object.new({" + strings.Join(parts, ", ") + "})"
+		body = "JSON::Value::Object.new({" + strings.Join(parts, ", ") + "})"
 	}
 	b.source.WriteString(name + " = ->(value) { " + body + " }; ")
 	return name

@@ -62,8 +62,8 @@ end
 	enqueue := projectGenerationSource(t, first, projectEnqueueSourceID+"jobs/send_receipt_job:SendReceiptJob")
 	for _, expected := range []string{
 		"def __trb_jobs_SendReceiptJob_request(order_id: OrderId, ratio: Float): Result<EnqueueRequest, EnqueueError>",
-		"payload_values: Array<JsonValue> := [JsonValue::Integer(order_id), JsonValue::Float(ratio)]",
-		"JSON.stringify(JsonValue::Array(payload_values))",
+		"payload_values: Array<JSON::Value> := [JSON::Value::Integer(order_id), JSON::Value::Float(ratio)]",
+		"JSON.stringify(JSON::Value::Array(payload_values))",
 		"maximum_attempts: nil",
 		"return JOBS_ADAPTER.enqueue(request)",
 		"if delay.before?(Duration.seconds(0))",

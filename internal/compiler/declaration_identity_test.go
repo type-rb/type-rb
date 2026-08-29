@@ -212,7 +212,7 @@ end
 		t.Fatalf("nested collection element identity = %#v, want %#v", got, wantNested)
 	}
 	output := string(main.Output)
-	if !containsAll(output, "function read(box: Box): string", "const locals: Array<Services.Box>") {
+	if !containsAll(output, "function read(box: Box): string", "const locals: Array<ServicesBox>") {
 		t.Fatalf("TypeScript did not render distinct semantic identities:\n%s", output)
 	}
 }

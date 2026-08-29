@@ -58,6 +58,7 @@ type Export struct {
 	CallResultBridge       NativeCallResultBridge
 	Variadic               bool
 	Members                map[string]Member
+	Nested                 map[string]Export
 	Fields                 []RecordField
 	EnumMembers            []string
 	EnumVariants           []EnumVariant
@@ -353,8 +354,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 	sort.Strings(modulePaths)
 	for _, modulePath := range modulePaths {
 		module := catalog.Modules[modulePath]
-		for name := range module.Exports {
-			exported := module.Exports[name]
+		for name, exported := range flattenExports(module.Exports) {
 			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
 				continue
 			}
@@ -444,7 +444,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 	for _, name := range typeNames {
 		exported := typesByName[name]
 		owner := typeOwners[name]
-		owner.Exports[name] = *exported
+		setExport(owner.Exports, name, *exported)
 		if exported.Kind == TypeAliasExport {
 			catalog.typeAliases[name] = *exported
 		}
@@ -456,6 +456,33 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		diagnostics[filename] = diagnostic.Normalize(items, filename, diagnostic.ResolutionError)
 	}
 	return catalog, diagnostics
+}
+
+func flattenExports(exports map[string]Export) map[string]Export {
+	result := map[string]Export{}
+	var visit func(map[string]Export)
+	visit = func(current map[string]Export) {
+		for _, exported := range current {
+			result[exported.Name] = exported
+			visit(exported.Nested)
+		}
+	}
+	visit(exports)
+	return result
+}
+
+func setExport(exports map[string]Export, name string, replacement Export) bool {
+	for key, exported := range exports {
+		if exported.Name == name {
+			exports[key] = replacement
+			return true
+		}
+		if setExport(exported.Nested, name, replacement) {
+			exports[key] = exported
+			return true
+		}
+	}
+	return false
 }
 
 func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagnostic) {
@@ -538,11 +565,34 @@ func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagno
 				}
 				symbols[localName] = binding
 				identities[identityKey] = localName
+				bindNestedSymbols(symbols, identities, resolved, binding, localName)
 			}
 		}
 	}
 	addPrelude(&result)
 	return result, diagnostic.Normalize(diagnostics, options.Filename, diagnostic.ResolutionError)
+}
+
+func bindNestedSymbols(symbols map[string]Binding, identities map[string]string, imported *Import, owner Binding, localOwner string) {
+	if owner.Export == nil {
+		return
+	}
+	names := make([]string, 0, len(owner.Export.Nested))
+	for name := range owner.Export.Nested {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		nested := owner.Export.Nested[name]
+		copy := nested
+		binding := Binding{Import: imported, Name: nested.Name, Export: &copy}
+		localName := localOwner + "::" + name
+		if _, exists := symbols[localName]; !exists {
+			symbols[localName] = binding
+			identities[bindingIdentityKey(binding)] = localName
+		}
+		bindNestedSymbols(symbols, identities, imported, binding, localName)
+	}
 }
 
 // CompilerOwnedType returns declarations that were inferred from a portable
@@ -571,7 +621,7 @@ func (r Result) CatalogTypeAlias(name string) (Export, bool) {
 		return exported, ok
 	}
 	for _, module := range r.Catalog.Modules {
-		exported, ok := module.Exports[name]
+		exported, ok := exportNamed(module.Exports, name)
 		if ok && exported.Kind == TypeAliasExport {
 			return exported, true
 		}
@@ -600,7 +650,7 @@ func (r Result) CatalogType(name string) (Binding, bool) {
 		if module == nil {
 			continue
 		}
-		exported, exists := module.Exports[name]
+		exported, exists := exportNamed(module.Exports, name)
 		if !exists || !typeExport(exported.Kind) {
 			continue
 		}
@@ -623,6 +673,18 @@ func (r Result) CatalogType(name string) (Binding, bool) {
 		return Binding{Import: imported, Name: name, Export: &copy}, true
 	}
 	return Binding{}, false
+}
+
+func exportNamed(exports map[string]Export, name string) (Export, bool) {
+	for _, exported := range exports {
+		if exported.Name == name {
+			return exported, true
+		}
+		if nested, ok := exportNamed(exported.Nested, name); ok {
+			return nested, true
+		}
+	}
+	return Export{}, false
 }
 
 // ContractType resolves a catalog-owned type only when it is reachable from a
@@ -948,15 +1010,26 @@ func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding,
 // identity, preserving aliases and authored/generated scope separation.
 func (r Result) TypeMemberIdentity(declaration identity.Declaration, name string) (Binding, bool) {
 	binding, ok := r.ImportedTypeIdentity(declaration)
-	if !ok {
-		return Binding{}, false
+	if ok {
+		return typeMemberBinding(binding, name)
 	}
-	return typeMemberBinding(binding, name)
+	for _, symbols := range []map[string]Binding{r.Symbols, r.GeneratedSymbols} {
+		for _, candidate := range symbols {
+			if candidate.Export != nil && candidate.DeclarationIdentity() == declaration {
+				return typeMemberBinding(candidate, name)
+			}
+		}
+	}
+	return Binding{}, false
 }
 
 func typeMemberBinding(binding Binding, name string) (Binding, bool) {
 	if binding.Export == nil || binding.Import == nil {
 		return Binding{}, false
+	}
+	if nested, ok := binding.Export.Nested[name]; ok {
+		copy := nested
+		return Binding{Import: binding.Import, Name: nested.Name, Export: &copy}, true
 	}
 	member, ok := binding.Export.Members[name]
 	if !ok {
@@ -1057,26 +1130,22 @@ func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) 
 		if !exists {
 			continue
 		}
-		member, exists := exported.Members[memberName]
-		if !exists {
+		exportCopy := exported
+		binding, exists := typeMemberBinding(Binding{Import: imported, Name: typeName, Export: &exportCopy}, memberName)
+		if !exists || binding.Member == nil {
 			return Binding{}, false
 		}
-		exportCopy := exported
-		memberCopy := member
-		return Binding{Import: imported, Name: memberName, Export: &exportCopy, Member: &memberCopy}, true
+		return binding, true
 	}
 	contract, exists := r.ContractType(typeName)
 	if !exists || contract.Export == nil {
 		return Binding{}, false
 	}
-	member, exists := contract.Export.Members[memberName]
-	if !exists {
+	binding, exists := typeMemberBinding(contract, memberName)
+	if !exists || binding.Member == nil {
 		return Binding{}, false
 	}
-	memberCopy := member
-	contract.Name = memberName
-	contract.Member = &memberCopy
-	return contract, true
+	return binding, true
 }
 
 // ValidateImportGraph rejects project import cycles with a deterministic path.
@@ -1636,7 +1705,20 @@ func cloneStringMap(input map[string]string) map[string]string {
 func cloneExports(input map[string]Export) map[string]Export {
 	result := make(map[string]Export, len(input))
 	for name, exported := range input {
+		exported.Members = cloneMembers(exported.Members)
+		exported.Nested = cloneExports(exported.Nested)
 		result[name] = exported
+	}
+	return result
+}
+
+func cloneMembers(input map[string]Member) map[string]Member {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]Member, len(input))
+	for name, member := range input {
+		result[name] = member
 	}
 	return result
 }
@@ -1973,23 +2055,35 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			}
 		case *ast.ModuleStatement:
 			if public(node.Name) {
-				exported := Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
+				exported := Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Nested: map[string]Export{}, Span: node.Span()}
+				owned := ownedTypeNames(node.Name, node.Body)
 				for _, statement := range node.Body {
 					switch item := statement.(type) {
 					case *ast.VariableStatement:
 						if item.Constant && public(item.Name) {
-							exported.Members[item.Name] = Member{Name: item.Name, Kind: ValueExport, Type: variableType(item), Class: true}
+							exported.Members[item.Name] = Member{Name: item.Name, Kind: ValueExport, Type: qualifyOwnedType(variableType(item), owned), Class: true}
 						}
 					case *ast.MethodStatement:
 						if item.Class && public(item.Name) {
 							parameterTypes, variadic := parameters(item.Parameters)
-							member := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Variadic: variadic, Class: true}
+							for index := range parameterTypes {
+								parameterTypes[index].Type = qualifyOwnedType(parameterTypes[index].Type, owned)
+							}
+							member := Member{Name: item.Name, Kind: FunctionExport, Type: qualifyOwnedType(returnTypeRef(item.ReturnType), owned), Parameters: parameterTypes, Variadic: variadic, Class: true}
 							for _, parameter := range item.TypeParameters {
 								member.TypeParameters = append(member.TypeParameters, parameter.Name)
 							}
 							exported.Members[item.Name] = member
 						}
 					}
+				}
+				for name, nested := range CollectExports(node.Body) {
+					if !rootEligible(nested.Kind) || nested.Kind == ValueExport {
+						continue
+					}
+					nested = qualifyNestedExport(nested, node.Name, owned)
+					exported.Nested[name] = nested
+					exported.Members[name] = Member{Name: name, Kind: nested.Kind, Type: nested.Type, Class: true}
 				}
 				result[node.Name] = exported
 			}
@@ -2025,6 +2119,87 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 		result[name] = exported
 	}
 	return result
+}
+
+func ownedTypeNames(owner string, statements []ast.Statement) map[string]string {
+	result := map[string]string{}
+	for _, statement := range statements {
+		var name string
+		switch node := statement.(type) {
+		case *ast.ClassStatement:
+			name = node.Name
+		case *ast.RecordStatement:
+			name = node.Name
+		case *ast.EnumStatement:
+			name = node.Name
+		case *ast.TypeAliasStatement:
+			name = node.Name
+		case *ast.NewtypeStatement:
+			name = node.Name
+		case *ast.InterfaceStatement:
+			name = node.Name
+		case *ast.ModuleStatement:
+			name = node.Name
+		}
+		if public(name) {
+			result[name] = owner + "::" + name
+		}
+	}
+	return result
+}
+
+func qualifyNestedExport(exported Export, owner string, owned map[string]string) Export {
+	originalName := exported.Name
+	exported.Name = owner + "::" + originalName
+	exported.Type = qualifyOwnedType(exported.Type, owned)
+	if exported.Type.Kind == types.Named && exported.Type.Name == originalName {
+		exported.Type.Name = exported.Name
+	}
+	exported.AliasTarget = qualifyOwnedType(exported.AliasTarget, owned)
+	exported.NewtypeTarget = qualifyOwnedType(exported.NewtypeTarget, owned)
+	exported.EnumRawType = qualifyOwnedType(exported.EnumRawType, owned)
+	for index := range exported.Interfaces {
+		exported.Interfaces[index] = qualifyOwnedType(exported.Interfaces[index], owned)
+	}
+	for index := range exported.Parameters {
+		exported.Parameters[index].Type = qualifyOwnedType(exported.Parameters[index].Type, owned)
+	}
+	for index := range exported.Fields {
+		exported.Fields[index].Type = qualifyOwnedType(exported.Fields[index].Type, owned)
+	}
+	for index := range exported.EnumVariants {
+		for fieldIndex := range exported.EnumVariants[index].Fields {
+			exported.EnumVariants[index].Fields[fieldIndex].Type = qualifyOwnedType(exported.EnumVariants[index].Fields[fieldIndex].Type, owned)
+		}
+	}
+	for name, member := range exported.Members {
+		member.Type = qualifyOwnedType(member.Type, owned)
+		for index := range member.Parameters {
+			member.Parameters[index].Type = qualifyOwnedType(member.Parameters[index].Type, owned)
+		}
+		exported.Members[name] = member
+	}
+	for name, nested := range exported.Nested {
+		exported.Nested[name] = qualifyNestedExport(nested, owner, owned)
+	}
+	return exported
+}
+
+func qualifyOwnedType(typ types.Type, owned map[string]string) types.Type {
+	for index := range typ.Args {
+		typ.Args[index] = qualifyOwnedType(typ.Args[index], owned)
+	}
+	if typ.Kind != types.Named || typ.Name == "" {
+		return typ
+	}
+	root, suffix, qualified := strings.Cut(typ.Name, "::")
+	if replacement := owned[root]; replacement != "" {
+		typ.Name = replacement
+		if qualified {
+			typ.Name += "::" + suffix
+		}
+	}
+	return typ
 }
 
 func recordJSONName(field *ast.RecordFieldStatement) string {

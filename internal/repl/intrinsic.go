@@ -344,7 +344,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 				return e.processErr(typ, "run", commandName, runErr)
 			}
 		}
-		definition, ok := e.definitions[symbolKey("trb/std/process/index", "ProcessResult")].(*recordDefinition)
+		definition, ok := e.definitions[symbolKey("trb/std/process/index", "Process::Output")].(*recordDefinition)
 		if !ok {
 			return Value{}, errors.New("process.run requires trb/std/process")
 		}
@@ -354,7 +354,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			"stderr":  {Type: types.FromName("String"), Data: strings.ToValidUTF8(stderr.String(), "�")},
 			"success": {Type: types.FromName("Boolean"), Data: status == 0},
 		}
-		value := Value{Type: types.FromName("ProcessResult"), Data: &recordInstance{Definition: definition, Fields: fields}}
+		value := Value{Type: types.FromName("Process::Output"), Data: &recordInstance{Definition: definition, Fields: fields}}
 		return e.filesystemOK(typ, value)
 	case "trb.internal.json.parse", "trb.internal.json.parse_jsonc":
 		if err := require(1); err != nil {

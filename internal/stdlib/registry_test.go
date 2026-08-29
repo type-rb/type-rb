@@ -211,8 +211,8 @@ func TestPortableHexContract(t *testing.T) {
 	if got := definition.Symbols["encode"].Return.String(); got != "String" {
 		t.Fatalf("hex.encode return=%s, want String", got)
 	}
-	if got := definition.Symbols["decode"].Return.String(); got != "Result<Bytes, HexDecodeError>" {
-		t.Fatalf("hex.decode return=%s, want Result<Bytes, HexDecodeError>", got)
+	if got := definition.Symbols["decode"].Return.String(); got != "Result<Bytes, Hex::DecodeError>" {
+		t.Fatalf("hex.decode return=%s, want Result<Bytes, Hex::DecodeError>", got)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestPortableBase64Contract(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"decode", "url_decode"} {
-		if got := definition.Symbols[name].Return.String(); got != "Result<Bytes, Base64DecodeError>" {
-			t.Fatalf("base64.%s return=%s, want Result<Bytes, Base64DecodeError>", name, got)
+		if got := definition.Symbols[name].Return.String(); got != "Result<Bytes, Base64::DecodeError>" {
+			t.Fatalf("base64.%s return=%s, want Result<Bytes, Base64::DecodeError>", name, got)
 		}
 	}
 }
@@ -241,11 +241,11 @@ func TestPortableURLContract(t *testing.T) {
 	if got := definition.Symbols["encode_component"].Return.String(); got != "String" {
 		t.Fatalf("url.encode_component return=%s, want String", got)
 	}
-	if got := definition.Symbols["decode_component"].Return.String(); got != "Result<String, PercentDecodeError>" {
-		t.Fatalf("url.decode_component return=%s, want Result<String, PercentDecodeError>", got)
+	if got := definition.Symbols["decode_component"].Return.String(); got != "Result<String, URL::DecodeError>" {
+		t.Fatalf("url.decode_component return=%s, want Result<String, URL::DecodeError>", got)
 	}
-	if got := definition.Symbols["parse_query"].Return.String(); got != "Result<Array<QueryParameter>, PercentDecodeError>" {
-		t.Fatalf("url.parse_query return=%s, want Result<Array<QueryParameter>, PercentDecodeError>", got)
+	if got := definition.Symbols["parse_query"].Return.String(); got != "Result<Array<URL::QueryParameter>, URL::DecodeError>" {
+		t.Fatalf("url.parse_query return=%s, want Result<Array<URL::QueryParameter>, URL::DecodeError>", got)
 	}
 	if definition.Symbols["parse_query"].Intrinsic != "" || definition.Symbols["build_query"].Intrinsic != "" {
 		t.Fatal("URL query operations must remain compiler-owned TypeRB source")
@@ -261,8 +261,8 @@ func TestPortableURLContract(t *testing.T) {
 		t.Fatal("internal URL package must not expose query building as an intrinsic")
 	}
 	build := definition.Symbols["build_query"]
-	if len(build.Parameters) != 1 || build.Parameters[0].Type.String() != "Array<QueryParameter>" || build.Return.String() != "String" {
-		t.Fatalf("url.build_query contract=%#v, want Array<QueryParameter> -> String", build)
+	if len(build.Parameters) != 1 || build.Parameters[0].Type.String() != "Array<URL::QueryParameter>" || build.Return.String() != "String" {
+		t.Fatalf("url.build_query contract=%#v, want Array<URL::QueryParameter> -> String", build)
 	}
 }
 

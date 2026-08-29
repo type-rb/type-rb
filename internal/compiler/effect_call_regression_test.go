@@ -90,13 +90,13 @@ end
 	wants := map[string]string{
 		"go":         "StatusReady",
 		"ruby":       "Result::Ok.new(Services::Status::Ready)",
-		"typescript": "Result.Ok<Services.Status, EnumValueError>(Services.Status.Ready)",
+		"typescript": "Result.Ok<ServicesStatus, EnumValueError>(ServicesStatus.Ready)",
 	}
 	typeScript, err := Compile("nested_raw_enum.trb", source, "typescript")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output := string(typeScript.Output); !strings.Contains(output, "const parsed: Result<Services.Status, EnumValueError>") {
+	if output := string(typeScript.Output); !strings.Contains(output, "const parsed: Result<ServicesStatus, EnumValueError>") {
 		t.Fatalf("generated TypeScript raw enum binding is not qualified:\n%s", output)
 	}
 	typeScriptProject, err := CompileProject([]SourceUnit{{
@@ -168,7 +168,7 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	if output := string(typeScript.Output); !strings.Contains(output, "const box: Services.Box<number>") {
+	if output := string(typeScript.Output); !strings.Contains(output, "const box: ServicesBox<number>") {
 		t.Fatalf("generated TypeScript record binding is not qualified:\n%s", output)
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -204,8 +204,8 @@ end
 	}
 	output := string(artifact.Output)
 	for _, expected := range []string{
-		"const status: Services.Status = Services.Status.Ready;",
-		"const box: Services.Box<string> = ({value: \"ok\"} satisfies Services.Box<string>);",
+		"const status: ServicesStatus = ServicesStatus.Ready;",
+		"const box: ServicesBox<string> = ({value: \"ok\"} satisfies ServicesBox<string>);",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript is missing qualified annotation %q:\n%s", expected, output)
@@ -241,17 +241,17 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifact.Output)
-	if expected := "function passthrough(box: Services.Box<string>): Services.Box<string>"; !strings.Contains(output, expected) {
+	if expected := "function passthrough(box: ServicesBox<string>): ServicesBox<string>"; !strings.Contains(output, expected) {
 		t.Fatalf("generated TypeScript is missing qualified function boundary %q:\n%s", expected, output)
 	}
-	if expected := "((): Services.Box<string> =>"; !strings.Contains(output, expected) {
+	if expected := "((): ServicesBox<string> =>"; !strings.Contains(output, expected) {
 		t.Fatalf("generated TypeScript is missing qualified if-expression boundary %q:\n%s", expected, output)
 	}
 	checkTypeScriptArtifacts(t, []*Artifact{artifact}, "qualified_function_boundary")
 }
 
 func TestNestedTypesStayQualifiedInTypeScriptJSONCodecs(t *testing.T) {
-	source := []byte(`import { JSON, JsonError } from trb/std/json
+	source := []byte(`import trb/std/json
 import { Result } from trb/std/result
 
 module Services
@@ -264,15 +264,15 @@ module Services
 	end
 end
 
-def decode_box(source: String): Result<Box, JsonError>
+def decode_box(source: String): Result<Box, JSON::Error>
 	return JSON.decode<Box>(source)
 end
 
-def encode_box(box: Box): Result<String, JsonError>
+def encode_box(box: Box): Result<String, JSON::Error>
 	return JSON.encode(box)
 end
 
-def decode_status(source: String): Result<Status, JsonError>
+def decode_status(source: String): Result<Status, JSON::Error>
 	return JSON.decode<Status>(source)
 end
 `)
@@ -285,10 +285,10 @@ end
 	artifact := artifactForModule(artifacts, "main")
 	output := string(artifact.Output)
 	for _, expected := range []string{
-		"function decode_box(source: string): Result<Services.Box, JsonError>",
-		"(value: Services.Box)",
-		"Result.Ok<Services.Box, __trb_json.JsonError>",
-		"case \"READY\": return Services.Status.Ready;",
+		"function decode_box(source: string): Result<ServicesBox, __trb_json.JSONError>",
+		"(value: ServicesBox)",
+		"Result.Ok<ServicesBox, __trb_json.JSONError>",
+		"case \"READY\": return ServicesStatus.Ready;",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript JSON codec is missing qualified type %q:\n%s", expected, output)
@@ -321,7 +321,7 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifactForModule(artifacts, "main").Output)
-	if expected := "Result<Services.User, ContextValueError>"; !strings.Contains(output, expected) {
+	if expected := "Result<ServicesUser, ContextValueError>"; !strings.Contains(output, expected) {
 		t.Fatalf("generated TypeScript context lookup is missing qualified type %q:\n%s", expected, output)
 	}
 	checkTypeScriptArtifacts(t, artifacts, "qualified_context_fetch")
@@ -348,7 +348,7 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifact.Output)
-	if expected := `const event: Services.Event = Services.Event.Value("ok");`; !strings.Contains(output, expected) {
+	if expected := `const event: ServicesEvent = ServicesEvent.Value("ok");`; !strings.Contains(output, expected) {
 		t.Fatalf("generated TypeScript is missing qualified payload enum construction %q:\n%s", expected, output)
 	}
 	checkTypeScriptArtifacts(t, []*Artifact{artifact}, "qualified_payload_enum")
@@ -501,7 +501,7 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifactForModule(artifacts, "main").Output)
-	for _, expected := range []string{"const local: Services.Box<string>", "const remote: ModelBox<string>"} {
+	for _, expected := range []string{"const local: ServicesBox<string>", "const remote: ModelBox<string>"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript is missing distinct qualified annotation %q:\n%s", expected, output)
 		}
@@ -549,8 +549,8 @@ end
 	output := string(artifactForModule(artifacts, "main").Output)
 	for _, expected := range []string{
 		"function read(box: Box): string",
-		"const locals: Array<Services.Box>",
-		"values: Array<Services.Box>",
+		"const locals: Array<ServicesBox>",
+		"values: Array<ServicesBox>",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript did not preserve named-import type identity %q:\n%s", expected, output)
@@ -748,7 +748,7 @@ end
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import { User } from models/user
-import { JSON, JsonError } from trb/std/json
+import trb/std/json
 import { Result } from trb/std/result
 
 module Services
@@ -757,7 +757,7 @@ module Services
 	end
 end
 
-def decode_user(source: String): Result<User, JsonError>
+def decode_user(source: String): Result<User, JSON::Error>
 	return JSON.decode<User>(source)
 end
 `),

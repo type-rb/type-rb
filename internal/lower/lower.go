@@ -433,6 +433,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			DeclaredPath:              n.Path,
 			Symbols:                   append([]string(nil), n.Symbols...),
 			SymbolAliases:             map[string]string{},
+			NestedTypeSymbols:         map[string]string{},
 			Alias:                     n.Alias,
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
@@ -468,7 +469,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 					selectedRuntimeSymbols[name] = true
 				}
 			}
-			for name, exported := range resolved.Exports {
+			for name, exported := range flattenResolvedExports(resolved.Exports) {
 				kind := string(exported.Kind)
 				if exported.Kind == resolver.TypeAliasExport && exported.AliasEnum {
 					kind = "enum_alias"
@@ -489,7 +490,22 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 					result.RuntimeSymbols[name] = *lowerRuntimeBinding(exported.Runtime)
 				}
 			}
+			for _, name := range resolved.Symbols {
+				exported, ok := resolved.Exports[name]
+				if !ok {
+					continue
+				}
+				local := resolved.LocalName(name)
+				collectNestedTypeSymbols(result.NestedTypeSymbols, exported, local)
+			}
 			result.GeneratedTypeSymbols = contractTypeSymbols(resolved, resolved.Kind == resolver.NativeImport)
+			for _, name := range result.GeneratedTypeSymbols {
+				if strings.Contains(name, "::") {
+					if _, exists := result.NestedTypeSymbols[name]; !exists {
+						result.NestedTypeSymbols[name] = name
+					}
+				}
+			}
 			result.TypeContracts = typeContracts(resolved, result.GeneratedTypeSymbols)
 			if resolved.Definition != nil {
 				result.QualifiedRoot = resolved.Definition.Root
@@ -515,7 +531,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 						result.SymbolTypeParameters[name] = append([]string(nil), symbol.TypeParameters...)
 					}
 					if symbol.Intrinsic != "" {
-						if _, hasRuntimeExport := resolved.Exports[name]; symbol.RuntimeIndependent || !hasRuntimeExport {
+						if _, hasRuntimeExport := resolved.Exports[name]; resolved.Definition.Internal || symbol.RuntimeIndependent || !hasRuntimeExport {
 							result.IntrinsicSymbols[name] = true
 						}
 						if symbol.RuntimeIndependent {
@@ -735,6 +751,29 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return &ir.NativeBlock{Base: base(n.Base), Header: n.Header, Body: l.statements(n.Body), Closer: n.Closer}
 	default:
 		return nil
+	}
+}
+
+func flattenResolvedExports(exports map[string]resolver.Export) map[string]resolver.Export {
+	result := map[string]resolver.Export{}
+	var visit func(map[string]resolver.Export)
+	visit = func(current map[string]resolver.Export) {
+		for _, exported := range current {
+			result[exported.Name] = exported
+			visit(exported.Nested)
+		}
+	}
+	visit(exports)
+	return result
+}
+
+func collectNestedTypeSymbols(result map[string]string, owner resolver.Export, localOwner string) {
+	for name, nested := range owner.Nested {
+		local := localOwner + "::" + name
+		if contractTypeExport(nested.Kind) {
+			result[nested.Name] = local
+		}
+		collectNestedTypeSymbols(result, nested, local)
 	}
 }
 

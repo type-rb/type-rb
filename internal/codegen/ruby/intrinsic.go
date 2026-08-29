@@ -51,11 +51,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Result::Ok.new(" + value + ")"
 	}
 	filesystemError := func(operation, path, message string) string {
-		value := "FileError.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
+		value := "FileSystem::Error.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
 		return "Result::Err.new(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
-		value := "ProcessError.new(operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + ")"
+		value := "Process::Error.new(operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + ")"
 		return "Result::Err.new(" + value + ")"
 	}
 	numberParseError := func(kind, input, message string) string {
@@ -63,15 +63,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Result::Err.new(" + value + ")"
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
-		value := "HexDecodeError.new(kind: HexDecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
+		value := "Hex::DecodeError.new(kind: Hex::DecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
 	base64DecodeError := func(kind, input, index, message string) string {
-		value := "Base64DecodeError.new(kind: Base64DecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
+		value := "Base64::DecodeError.new(kind: Base64::DecodeErrorKind::" + kind + ", input: " + input + ", index: " + index + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
 	percentDecodeError := func(kind, input, message string) string {
-		value := "PercentDecodeError.new(kind: PercentDecodeErrorKind::" + kind + ", input: " + input + ", message: " + strconv.Quote(message) + ")"
+		value := "URL::DecodeError.new(kind: URL::DecodeErrorKind::" + kind + ", input: " + input + ", message: " + strconv.Quote(message) + ")"
 		return "Result::Err.new(" + value + ")"
 	}
 	indexLookupError := func(index, size, message string) string {
@@ -138,7 +138,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "-> { begin; " + filesystemOK("Dir.pwd") + "; rescue StandardError => error; " + processError("working_directory", strconv.Quote(""), "error.message") + "; end }.call"
 	case "trb.internal.process.run":
 		text := "->(value) { value.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace) }"
-		value := "ProcessResult.new(status: status.exitstatus || -1, stdout: text.call(stdout), stderr: text.call(stderr), success: status.success?)"
+		value := "Process::Output.new(status: status.exitstatus || -1, stdout: text.call(stdout), stderr: text.call(stderr), success: status.success?)"
 		return "->(command, arguments) { begin; require \"open3\"; stdout, stderr, status = Open3.capture3(command, *arguments); text = " + text + "; " + filesystemOK(value) + "; rescue StandardError => error; " + processError("run", "command", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.internal.json.parse":
 		return rubyJSONParse(arguments[0], false)

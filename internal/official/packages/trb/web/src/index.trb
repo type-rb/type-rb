@@ -1,6 +1,5 @@
 import trb/std/result
-import { JsonError } from trb/std/json
-import { PercentDecodeError, QueryParameter } from trb/std/url
+import trb/std/json
 import trb/std/url
 import { Body, Header, Headers, HeaderValueError, HttpMethod } from trb/http
 import trb/internal/runtime
@@ -11,7 +10,7 @@ record RequestCookie
 end
 
 enum QueryValueError
-	Malformed(error: PercentDecodeError)
+	Malformed(error: URL::DecodeError)
 	Missing(name: String)
 	Duplicate(name: String)
 end
@@ -26,7 +25,7 @@ enum RequestError
 	DuplicateContentType
 	UnsupportedContentType(value: String)
 	InvalidUtf8
-	InvalidJson(error: JsonError)
+	InvalidJson(error: JSON::Error)
 end
 
 enum ParameterSource
@@ -35,7 +34,7 @@ enum ParameterSource
 end
 
 enum ParameterError
-	MalformedQuery(error: PercentDecodeError)
+	MalformedQuery(error: URL::DecodeError)
 	Missing(*, source: ParameterSource, name: String)
 	Duplicate(*, source: ParameterSource, name: String)
 	Invalid(*, source: ParameterSource, name: String, value: String, expected: String)
@@ -76,11 +75,11 @@ class Request
 		return
 	end
 
-	def query_parameters(): Result<Array<QueryParameter>, PercentDecodeError>
+	def query_parameters(): Result<Array<URL::QueryParameter>, URL::DecodeError>
 		return URL.parse_query(@query_string)
 	end
 
-	def query_values(name: String): Result<Array<String>, PercentDecodeError>
+	def query_values(name: String): Result<Array<String>, URL::DecodeError>
 		case query_parameters()
 		when Result::Ok(parameters)
 			mut values: Array<String> := []
@@ -89,9 +88,9 @@ class Request
 					values.push(parameter.value)
 				end
 			end
-			return Result<Array<String>, PercentDecodeError>::Ok(values)
+			return Result<Array<String>, URL::DecodeError>::Ok(values)
 		when Result::Err(error)
-			return Result<Array<String>, PercentDecodeError>::Err(error)
+			return Result<Array<String>, URL::DecodeError>::Err(error)
 		end
 	end
 
