@@ -34,6 +34,25 @@ func TestBareImportBindsTheExactMatchingDeclaration(t *testing.T) {
 	}
 }
 
+func TestMatchesDeclarationRootUsesTheResolverKeyRule(t *testing.T) {
+	tests := []struct {
+		path string
+		name string
+		want bool
+	}{
+		{path: "trb/std/math", name: "Math", want: true},
+		{path: "trb/std/json", name: "JSON", want: true},
+		{path: "trb/std/secure_random", name: "SecureRandom", want: true},
+		{path: "shared/ui/DataTable/index", name: "DataTable", want: true},
+		{path: "trb/std/secure_random", name: "SECURE_RANDOM", want: false},
+	}
+	for _, test := range tests {
+		if got := MatchesDeclarationRoot(test.path, test.name); got != test.want {
+			t.Errorf("MatchesDeclarationRoot(%q, %q) = %v, want %v", test.path, test.name, got, test.want)
+		}
+	}
+}
+
 func TestNamedImportAliasesBindOnlyTheLocalAlias(t *testing.T) {
 	program, diagnostics := parser.Parse([]byte("import { Response as WebResponse } from services/http\n"))
 	if len(diagnostics) != 0 {

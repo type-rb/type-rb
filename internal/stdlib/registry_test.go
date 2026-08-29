@@ -79,6 +79,18 @@ func TestPublicPortablePackagesExcludeInternalContracts(t *testing.T) {
 	}
 }
 
+func TestPublicBuiltinRootsRequireAnExplicitCompilerOwnedExtension(t *testing.T) {
+	for packagePath, definition := range registry {
+		if definition == nil || definition.Internal || definition.Root == "" {
+			continue
+		}
+		builtin := types.FromName(definition.Root).Kind != types.Named
+		if builtin != definition.BuiltinRoot {
+			t.Errorf("package %s root %s: builtin=%v, BuiltinRoot=%v", packagePath, definition.Root, builtin, definition.BuiltinRoot)
+		}
+	}
+}
+
 func TestGenericReceiverContractsSpecializeReturnTypes(t *testing.T) {
 	arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 	_, slice, ok := LookupReceiverMethod(arrayType, "slice")

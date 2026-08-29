@@ -1153,7 +1153,7 @@ func autoImportEdit(source string, required Import) (TextEdit, bool) {
 		if !ok {
 			continue
 		}
-		if required.Symbol == "" && len(imported.Symbols) == 0 && imported.Path == required.Path && imported.Alias == "" {
+		if required.Symbol == "" && len(imported.Symbols) == 0 && imported.Path == required.Path {
 			return TextEdit{}, false
 		}
 		for _, name := range imported.Symbols {

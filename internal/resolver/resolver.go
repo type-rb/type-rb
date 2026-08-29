@@ -1846,6 +1846,13 @@ func RootDeclaration(imported *Import) (string, bool) {
 	return root, root != ""
 }
 
+// MatchesDeclarationRoot reports whether name has the declaration-root key
+// derived from modulePath. Callers remain responsible for restricting name to
+// a root-eligible declaration kind.
+func MatchesDeclarationRoot(modulePath, name string) bool {
+	return pathRootKey(logicalImportSegment(modulePath)) == declarationRootKey(name)
+}
+
 func logicalImportSegment(modulePath string) string {
 	clean := pathpkg.Clean(strings.TrimSuffix(modulePath, ".trb"))
 	if pathpkg.Base(clean) == "index" {

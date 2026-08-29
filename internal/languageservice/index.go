@@ -479,18 +479,14 @@ func BuildImportCandidates(programs []*ir.Program, modulePath string) Context {
 	return BuildProjectImportCandidates(programs).ForModule(modulePath)
 }
 
-// StandardImportCandidates returns portable runtime types that can be made
-// visible by inserting one explicit import. Duplicate export names are omitted.
+// StandardImportCandidates returns public portable declarations that can be
+// made visible by inserting one explicit import. Duplicate top-level names are
+// omitted, while package roots retain their qualified member completion.
 func StandardImportCandidates(mode string) Context {
 	byName := map[string][]Symbol{}
-	for _, definition := range stdlib.RuntimeExportPackages(mode) {
-		for _, symbol := range standardSymbols(definition) {
-			for _, exported := range definition.RuntimeExports {
-				if symbol.Name == exported.Name {
-					byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, definition.Path))
-					break
-				}
-			}
+	for _, definition := range stdlib.PublicPortablePackages(mode) {
+		for _, symbol := range standardImportSymbols(definition) {
+			byName[symbol.Name] = append(byName[symbol.Name], withImport(symbol, definition.Path))
 		}
 	}
 	result := emptyContext()
@@ -526,14 +522,15 @@ func MergeImportCandidateSets(contexts ...Context) Context {
 // snapshot when the current source no longer declares or imports that name.
 // This lets completion repair a missing import without weakening diagnostics.
 func MergeImportCandidates(current, candidates Context, source string) Context {
-	visible := sourceVisibleNames(source)
+	visible, bareImports := sourceVisibility(source)
 	result := current
 	byName := make(map[string]Symbol, len(current.Symbols)+len(candidates.Symbols))
 	for _, symbol := range current.Symbols {
 		byName[symbol.Name] = symbol
 	}
 	for _, symbol := range candidates.Symbols {
-		if !visible[symbol.Name] {
+		alreadyImported := symbol.Import != nil && symbol.Import.Symbol == "" && bareImports[symbol.Import.Path]
+		if !visible[symbol.Name] && !alreadyImported {
 			byName[symbol.Name] = symbol
 		}
 	}
@@ -546,7 +543,13 @@ func MergeImportCandidates(current, candidates Context, source string) Context {
 }
 
 func sourceVisibleNames(source string) map[string]bool {
+	visible, _ := sourceVisibility(source)
+	return visible
+}
+
+func sourceVisibility(source string) (map[string]bool, map[string]bool) {
 	visible := map[string]bool{}
+	bareImports := map[string]bool{}
 	program, _ := parser.Parse([]byte(source))
 	for name := range resolver.CollectExports(program.Statements) {
 		visible[name] = true
@@ -556,6 +559,9 @@ func sourceVisibleNames(source string) map[string]bool {
 		if !ok {
 			continue
 		}
+		if len(imported.Symbols) == 0 {
+			bareImports[imported.Path] = true
+		}
 		for _, name := range imported.Symbols {
 			visible[name] = true
 		}
@@ -563,7 +569,7 @@ func sourceVisibleNames(source string) map[string]bool {
 			visible[imported.Alias] = true
 		}
 	}
-	return visible
+	return visible, bareImports
 }
 
 func withImport(symbol Symbol, path string) Symbol {
@@ -571,14 +577,30 @@ func withImport(symbol Symbol, path string) Symbol {
 }
 
 func withImportFromModule(symbol Symbol, path, modulePath string) Symbol {
+	importSymbol := symbol.Name
+	if declarationRootCompletion(symbol.Kind) && resolver.MatchesDeclarationRoot(path, symbol.Name) {
+		importSymbol = ""
+	}
+	return withImportRequirement(symbol, path, modulePath, importSymbol)
+}
+
+func withImportRequirement(symbol Symbol, path, modulePath, importSymbol string) Symbol {
 	result := symbol
-	result.Import = &Import{Path: path, ModulePath: modulePath, Symbol: symbol.Name}
+	result.Import = &Import{Path: path, ModulePath: modulePath, Symbol: importSymbol}
 	result.Members = append([]Symbol(nil), symbol.Members...)
 	for index := range result.Members {
-		result.Members[index] = withImportFromModule(result.Members[index], path, modulePath)
-		result.Members[index].Import.Symbol = symbol.Name
+		result.Members[index] = withImportRequirement(result.Members[index], path, modulePath, importSymbol)
 	}
 	return result
+}
+
+func declarationRootCompletion(kind CompletionKind) bool {
+	switch kind {
+	case CompletionType, CompletionModule, CompletionConstant, CompletionValue:
+		return true
+	default:
+		return false
+	}
 }
 
 func projectImportPath(modulePath string, modulePaths map[string]bool) string {
@@ -828,6 +850,97 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 	}
 }
 
+func standardImportSymbols(definition *stdlib.Package) []Symbol {
+	if definition == nil {
+		return nil
+	}
+	sourceExports := standardSourceExports(definition)
+	declared := map[string]Symbol{}
+	for name, exported := range sourceExports {
+		declared[name] = standardExportSymbol(exported)
+	}
+	for name, library := range definition.Symbols {
+		if !library.CompilerOnly {
+			declared[name] = standardLibrarySymbol(library)
+		}
+	}
+	for _, exported := range definition.RuntimeExports {
+		if _, exists := declared[exported.Name]; !exists {
+			declared[exported.Name] = standardRuntimeExportSymbol(exported)
+		}
+	}
+
+	result := []Symbol{}
+	if definition.Root != "" {
+		result = append(result, standardPackageRootSymbol(definition, sourceExports))
+	}
+	names := make([]string, 0, len(declared))
+	for name := range declared {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		symbol := declared[name]
+		if name == definition.Root || strings.Contains(name, "::") {
+			continue
+		}
+		if definition.Root != "" && symbol.Kind == CompletionFunction {
+			continue
+		}
+		result = append(result, symbol)
+	}
+	sortSymbols(result)
+	return result
+}
+
+func standardSourceExports(definition *stdlib.Package) map[string]resolver.Export {
+	if definition == nil || definition.Source == "" {
+		return nil
+	}
+	program, diagnostics := parser.Parse([]byte(definition.Source))
+	if len(diagnostics) != 0 {
+		return nil
+	}
+	return resolver.CollectExports(program.Statements)
+}
+
+func standardPackageRootSymbol(definition *stdlib.Package, sourceExports map[string]resolver.Export) Symbol {
+	root := Symbol{Name: definition.Root, Kind: CompletionModule, Detail: definition.Path, Type: types.FromName(definition.Root)}
+	if exported, exists := sourceExports[definition.Root]; exists {
+		root = standardExportSymbol(exported)
+		root.Name = definition.Root
+		root.Detail = definition.Path
+	}
+	members := map[string]Symbol{}
+	for _, member := range root.Members {
+		members[member.Name] = member
+	}
+	for name, exported := range sourceExports {
+		if exported.Kind != resolver.FunctionExport {
+			continue
+		}
+		member := standardExportSymbol(exported)
+		member.Name = name
+		member.Kind = CompletionMethod
+		members[name] = member
+	}
+	for name, library := range definition.Symbols {
+		if library.CompilerOnly {
+			continue
+		}
+		member := standardLibrarySymbol(library)
+		member.Name = name
+		member.Kind = CompletionMethod
+		members[name] = member
+	}
+	root.Members = make([]Symbol, 0, len(members))
+	for _, member := range members {
+		root.Members = append(root.Members, member)
+	}
+	sortSymbols(root.Members)
+	return root
+}
+
 func standardSymbols(definition *stdlib.Package) []Symbol {
 	if definition == nil {
 		return nil
@@ -837,27 +950,110 @@ func standardSymbols(definition *stdlib.Package) []Symbol {
 		if library.CompilerOnly {
 			continue
 		}
-		parameters := make([]CallParameter, len(library.Parameters))
-		for index, parameter := range library.Parameters {
-			parameters[index] = CallParameter{
-				Name: parameter.Name, Label: parameter.Name + ": " + displayType(parameter.Type),
-				NamedOnly: parameter.Keyword, Keyword: parameter.Keyword, Optional: parameter.Optional,
-			}
-		}
-		result = append(result, Symbol{
-			Name:   library.Name,
-			Kind:   CompletionFunction,
-			Detail: librarySignature(library),
-			Type:   library.Return,
-			Call:   &CallInfo{ParameterCount: len(library.Parameters), Parameters: parameters},
-		})
+		result = append(result, standardLibrarySymbol(library))
 	}
 	for _, exported := range definition.RuntimeExports {
-		kind := CompletionType
-		result = append(result, Symbol{Name: exported.Name, Kind: kind, Detail: exported.Kind, Type: types.FromName(exported.Name)})
+		result = append(result, standardRuntimeExportSymbol(exported))
 	}
 	sortSymbols(result)
 	return result
+}
+
+func standardLibrarySymbol(library stdlib.Symbol) Symbol {
+	parameters := make([]CallParameter, len(library.Parameters))
+	for index, parameter := range library.Parameters {
+		parameters[index] = CallParameter{
+			Name: parameter.Name, Label: parameter.Name + ": " + displayType(parameter.Type),
+			NamedOnly: parameter.Keyword, Keyword: parameter.Keyword, Optional: parameter.Optional,
+		}
+	}
+	return Symbol{
+		Name:   library.Name,
+		Kind:   CompletionFunction,
+		Detail: librarySignature(library),
+		Type:   library.Return,
+		Call: &CallInfo{
+			ParameterCount:        len(library.Parameters),
+			ExplicitTypeArguments: len(library.TypeParameters) > 0,
+			TypeParameters:        append([]string(nil), library.TypeParameters...),
+			Parameters:            parameters,
+		},
+	}
+}
+
+func standardRuntimeExportSymbol(exported stdlib.RuntimeExport) Symbol {
+	return Symbol{Name: exported.Name, Kind: CompletionType, Detail: exported.Kind, Type: types.FromName(exported.Name)}
+}
+
+func standardExportSymbol(exported resolver.Export) Symbol {
+	kind := CompletionType
+	switch exported.Kind {
+	case resolver.FunctionExport:
+		kind = CompletionFunction
+	case resolver.ModuleExport:
+		kind = CompletionModule
+	case resolver.ValueExport:
+		kind = CompletionConstant
+	}
+	result := Symbol{Name: exported.Name, Kind: kind, Detail: string(exported.Kind), Type: exported.Type}
+	if exported.Kind == resolver.FunctionExport {
+		result.Detail, result.Call = standardCallDetail(exported.Name, exported.TypeParameters, exported.Parameters, exported.Type)
+	}
+	for name, member := range exported.Members {
+		if !member.Class {
+			continue
+		}
+		result.Members = append(result.Members, standardExportMemberSymbol(name, member))
+	}
+	sortSymbols(result.Members)
+	return result
+}
+
+func standardExportMemberSymbol(name string, member resolver.Member) Symbol {
+	kind := CompletionMethod
+	if member.Kind == resolver.ValueExport {
+		kind = CompletionConstant
+	}
+	result := Symbol{Name: name, Kind: kind, Detail: displayType(member.Type), Type: member.Type}
+	if member.Kind == resolver.FunctionExport {
+		result.Detail, result.Call = standardCallDetail(name, member.TypeParameters, member.Parameters, member.Type)
+	}
+	return result
+}
+
+func standardCallDetail(name string, typeParameters []string, parameters []callsignature.Parameter, resultType types.Type) (string, *CallInfo) {
+	parts := make([]string, 0, len(parameters)+1)
+	callParameters := make([]CallParameter, len(parameters))
+	namedBoundary := false
+	for index, parameter := range parameters {
+		parameterName := "arg" + strconv.Itoa(index)
+		parameterLabel := displayType(parameter.Type)
+		keyword := parameter.Kind == callsignature.NamedOnly
+		if keyword {
+			if !namedBoundary {
+				parts = append(parts, "*")
+				namedBoundary = true
+			}
+			parameterName = parameter.Label
+			parameterLabel = parameter.Label + ": " + parameterLabel
+		}
+		parts = append(parts, parameterLabel)
+		callParameters[index] = CallParameter{
+			Name: parameterName, Label: parameterLabel, NamedOnly: keyword, Keyword: keyword,
+			Optional: parameter.Presence == callsignature.Omittable,
+		}
+	}
+	genericSuffix := ""
+	if len(typeParameters) > 0 {
+		genericSuffix = "<" + strings.Join(typeParameters, ", ") + ">"
+	}
+	detail := name + genericSuffix + "(" + strings.Join(parts, ", ") + "): " + displayType(resultType)
+	return detail, &CallInfo{
+		ParameterCount:        len(parameters),
+		ExplicitTypeArguments: len(typeParameters) > 0,
+		TypeParameters:        append([]string(nil), typeParameters...),
+		Parameters:            callParameters,
+	}
 }
 
 func collectSymbols(statements []ir.Statement, owner, sourcePath string, context *Context) []Symbol {
