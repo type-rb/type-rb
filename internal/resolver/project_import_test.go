@@ -91,3 +91,18 @@ func TestCatalogBackedRubyImportFallsBackOnlyToOpaqueRuby(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogRejectsDirectAndDirectoryIndexForOneImportRoot(t *testing.T) {
+	direct, directDiagnostics := parser.Parse([]byte("class User\nend\n"))
+	indexed, indexedDiagnostics := parser.Parse([]byte("class UserIndex\nend\n"))
+	if len(directDiagnostics) != 0 || len(indexedDiagnostics) != 0 {
+		t.Fatal(directDiagnostics, indexedDiagnostics)
+	}
+	_, diagnostics := NewCatalog([]Module{
+		{Path: "models/user", Filename: "models/user.trb", Program: direct},
+		{Path: "models/user/index", Filename: "models/user/index.trb", Program: indexed},
+	})
+	if len(diagnostics["models/user/index.trb"]) != 1 {
+		t.Fatalf("catalog diagnostics = %#v", diagnostics)
+	}
+}

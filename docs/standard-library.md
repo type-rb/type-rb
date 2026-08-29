@@ -17,13 +17,13 @@ puts("Hello, TypeRB!")
 puts(1 + 2)
 ```
 
-Import `trb/std/io` when namespaced access is useful. Both forms resolve to the
+Import `trb/std/io` when declaration-root access is useful. Both forms resolve to the
 same operation:
 
 ```trb
 import trb/std/io
 
-io.puts("Hello, TypeRB!")
+IO.puts("Hello, TypeRB!")
 ```
 
 ## Scalars and strings
@@ -43,7 +43,7 @@ whole := 2.75.to_i()
 distance := (-8).abs()
 bounded := 12.clamp(0, 10)
 rounded := (-2.5).round()
-root := math.sqrt(9)
+root := Math.sqrt(9)
 even := distance.even?()
 ordinary := ratio.finite?()
 enabled := true.to_s()
@@ -62,7 +62,7 @@ last_emoji := "A😀B😀".rindex("😀")
 characters := "A😀".chars()
 reversed := "A😀".reverse()
 replaced := "a😀a".replace_all("a", "$&")
-upper := strings.uppercase("Hello")
+upper := Strings.uppercase("Hello")
 ```
 
 Integer parsing accepts a complete ASCII decimal integer with an optional sign.
@@ -76,14 +76,14 @@ point, and exponent. At least one digit is required. `to_f()` raises on an
 invalid spelling or a value that overflows the portable binary64 range;
 `try_to_f()` returns `Result<Float, NumberParseError>`. Non-finite spellings
 such as `NaN` and `Infinity` are not accepted. Values smaller than the binary64
-range round to signed zero consistently across backends. Package forms are
-`numbers.parse_float` and `numbers.try_parse_float`.
+range round to signed zero consistently across backends. Declaration-root
+forms are `Numbers.parse_float` and `Numbers.try_parse_float`.
 
 `Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
 toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
 uses a portable fixed decimal spelling without exponent notation, including
-`.0` for integral Float values. Their package forms are `numbers.to_float`,
-`numbers.truncate`, and `numbers.float_to_string`.
+`.0` for integral Float values. Their declaration-root forms are
+`Numbers.to_float`, `Numbers.truncate`, and `Numbers.float_to_string`.
 
 Integers provide `abs()`, `zero?()`, `positive?()`, `negative?()`, `even?()`,
 `odd?()`, `min()`, `max()`, and `clamp()`. An invalid clamp range raises.
@@ -98,12 +98,13 @@ Float. Integer arguments use the ordinary safe widening to Float. Negative
 square roots and logarithms are NaN, and logarithms of zero are negative
 infinity. Exponentiation remains the `**` operator.
 
-`Boolean#to_s()` returns lowercase `"true"` or `"false"`. Package forms use
-`numbers.absolute`, `numbers.zero`, `numbers.positive`, `numbers.negative`,
-`numbers.even`, `numbers.odd`, `numbers.float_absolute`, `numbers.finite`,
-`numbers.infinite`, and `numbers.nan`, plus `numbers.min`, `numbers.max`,
-`numbers.clamp`, `numbers.floor`, `numbers.ceil`, `numbers.round`,
-`numbers.truncate`, and `booleans.to_string`.
+`Boolean#to_s()` returns lowercase `"true"` or `"false"`. Declaration-root
+forms use `Numbers.absolute`, `Numbers.zero`, `Numbers.positive`,
+`Numbers.negative`, `Numbers.even`, `Numbers.odd`,
+`Numbers.float_absolute`, `Numbers.finite`, `Numbers.infinite`, and
+`Numbers.nan`, plus `Numbers.min`, `Numbers.max`, `Numbers.clamp`,
+`Numbers.floor`, `Numbers.ceil`, `Numbers.round`, `Numbers.truncate`, and
+`Booleans.to_string`.
 
 `String#size`, `[]`, `try_fetch`, `slice`, `try_slice`, `index`, and `rindex`
 operate on Unicode code points rather than encoded bytes. Indexes are
@@ -126,8 +127,8 @@ sequence. String trimming uses the pinned Unicode 17.0 `White_Space` set,
 preserves internal whitespace, and does not remove U+FEFF. `replace_all()`
 replaces every non-overlapping literal occurrence. The replacement is also
 literal, so strings such as `$&` and `$1` have no special meaning; an empty
-pattern raises. Package forms use `characters`, `reverse`, and `replace_all`
-from `trb/std/strings`.
+pattern raises. The declaration-root forms are `Strings.characters`,
+`Strings.reverse`, and `Strings.replace_all`.
 
 ## Bytes
 
@@ -140,7 +141,7 @@ import trb/std/bytes
 payload := "A😀".to_bytes()
 byte_length := payload.size()
 first := payload.at(0)
-text := bytes.to_string(payload)
+text := Bytes.to_string(payload)
 ```
 
 String conversion uses UTF-8. Decoding invalid input replaces it with U+FFFD;
@@ -152,10 +153,10 @@ strict and concatenation is non-mutating.
 `trb/std/encoding/hex` converts between `Bytes` and hexadecimal text:
 
 ```trb
-import { decode, encode } from trb/std/encoding/hex
+import trb/std/encoding/hex
 
-text := encode("A😀".to_bytes())
-decoded := decode("41F09F9880")
+text := Hex.encode("A😀".to_bytes())
+decoded := Hex.decode("41F09F9880")
 ```
 
 Encoding uses lowercase ASCII. Decoding accepts uppercase or lowercase input
@@ -167,12 +168,12 @@ the position is the missing character at the end of the string.
 `trb/std/encoding/base64` provides strict standard and URL-safe Base64:
 
 ```trb
-import { decode, encode, url_decode, url_encode } from trb/std/encoding/base64
+import trb/std/encoding/base64
 
-text := encode("A😀".to_bytes())
-url_text := url_encode("???".to_bytes())
-decoded := decode("QfCfmIA=")
-url_decoded := url_decode("Pz8_")
+text := Base64.encode("A😀".to_bytes())
+url_text := Base64.url_encode("???".to_bytes())
+decoded := Base64.decode("QfCfmIA=")
+url_decoded := Base64.url_decode("Pz8_")
 ```
 
 `encode()` emits padded RFC 4648 Base64. `url_encode()` uses the URL-safe
@@ -184,18 +185,18 @@ and a message.
 
 ## Hashing
 
-`trb/std/hash` computes one-shot SHA-256 and SHA-512 digests. It also provides
+`trb/std/digest` computes one-shot SHA-256 and SHA-512 digests. It also provides
 SHA-1 and MD5 for legacy compatibility and non-security checksums:
 
 ```trb
-import { md5, sha1, sha256, sha512 } from trb/std/hash
-import { encode } from trb/std/encoding/hex
+import trb/std/digest
+import trb/std/encoding/hex
 
-digest := sha256("message".to_bytes())
-text := encode(digest)
-larger_digest := sha512("message".to_bytes())
-legacy_digest := sha1("legacy identifier".to_bytes())
-checksum := md5("legacy payload".to_bytes())
+digest := Digest.sha256("message".to_bytes())
+text := Hex.encode(digest)
+larger_digest := Digest.sha512("message".to_bytes())
+legacy_digest := Digest.sha1("legacy identifier".to_bytes())
+checksum := Digest.md5("legacy payload".to_bytes())
 ```
 
 All four functions accept and return `Bytes`. Digest formatting stays explicit by
@@ -209,10 +210,10 @@ an external legacy format specifically requires the older digest.
 `trb/std/hmac` provides HMAC-SHA-256, HMAC-SHA-512, and tag comparison:
 
 ```trb
-import { equal, sha256 } from trb/std/hmac
+import trb/std/hmac
 
 def valid_tag?(key: Bytes, message: Bytes, expected: Bytes): Boolean
-	return equal(sha256(key, message), expected)
+	return HMAC.equal(HMAC.sha256(key, message), expected)
 end
 ```
 
@@ -225,7 +226,7 @@ Use `trb/std/secure_compare` for the same comparison contract outside HMAC:
 ```trb
 import trb/std/secure_compare
 
-matches := secure_compare.equal(actual_digest, expected_digest)
+matches := SecureCompare.equal(actual_digest, expected_digest)
 ```
 
 `equal()` accepts two `Bytes` values. For equal-length values it examines every
@@ -240,8 +241,8 @@ simulation, and user-interface behavior:
 ```trb
 import trb/std/random
 
-fraction := random.float()
-index := random.integer(10)
+fraction := Random.float()
+index := Random.integer(10)
 ```
 
 `float()` returns a `Float` in the half-open interval `[0.0, 1.0)`.
@@ -255,7 +256,7 @@ Use `trb/std/secure_random` when bytes must be unpredictable:
 ```trb
 import trb/std/secure_random
 
-token := secure_random.bytes(32)
+token := SecureRandom.bytes(32)
 ```
 
 `bytes(length)` returns cryptographically secure `Bytes`. The portable
@@ -271,7 +272,7 @@ Use `StringBuilder` for incremental text construction:
 ```trb
 import trb/std/string_builder
 
-mut builder := string_builder.new()
+mut builder := StringBuilder.new()
 builder.append("Hello")
 builder.append_codepoint(33)
 blank := builder.empty?()
@@ -288,13 +289,13 @@ data set shared by all targets:
 import trb/std/unicode
 
 hiragana_a := 12354
-is_letter := unicode.letter(hiragana_a)
-character := unicode.from_codepoint(hiragana_a)
+is_letter := Unicode.letter(hiragana_a)
+character := Unicode.from_codepoint(hiragana_a)
 points := "A😀".codepoints()
 ```
 
 The package also exposes digit, case, whitespace, valid-scalar, and identifier
-classification. `unicode.version()` reports the pinned data version.
+classification. `Unicode.version()` reports the pinned data version.
 
 ## Arrays and hashes
 
@@ -430,9 +431,9 @@ accessing the host filesystem:
 ```trb
 import trb/std/path
 
-config_path := path.join("config", "../trbconfig.jsonc")
-directory := path.directory("src/compiler/main.trb")
-parts := path.components("/srv/type-rb")
+config_path := Path.join("config", "../trbconfig.jsonc")
+directory := Path.directory("src/compiler/main.trb")
+parts := Path.components("/srv/type-rb")
 ```
 
 The package provides `clean`, two-part `join`, `absolute`, `components`,
@@ -444,21 +445,22 @@ target OS or current directory.
 `trb/std/url` encodes individual URL components and ordered query parameters:
 
 ```trb
-import { PercentDecodeError, QueryParameter, build_query, decode_component, encode_component, parse_query } from trb/std/url
-import { Result } from trb/std/result
+import trb/std/url
+import { PercentDecodeError, QueryParameter } from trb/std/url
+import trb/std/result
 
-encoded := encode_component("todos/日本語")
-query := build_query([
+encoded := URL.encode_component("todos/日本語")
+query := URL.build_query([
 	QueryParameter.new(name: "tag", value: "type rb"),
 	QueryParameter.new(name: "tag", value: "go"),
 ])
 
 def decode_segment(value: String): Result<String, PercentDecodeError>
-	return decode_component(value)
+	return URL.decode_component(value)
 end
 
 def decode_query(value: String): Result<Array<QueryParameter>, PercentDecodeError>
-	return parse_query(value)
+	return URL.parse_query(value)
 end
 ```
 
@@ -483,11 +485,12 @@ Complete URL parsing remains a future addition to the package.
 returns a `Result`:
 
 ```trb
-import { FileError, read_text } from trb/std/filesystem
-import { Result } from trb/std/result
+import trb/std/filesystem
+import { FileError } from trb/std/filesystem
+import trb/std/result
 
 def load_config(path: String): Result<String, FileError>
-	return read_text(path)
+	return FileSystem.read_text(path)
 end
 ```
 
@@ -508,11 +511,12 @@ lexical path operations.
 shell-free process operations:
 
 ```trb
-import { ProcessError, ProcessResult, run } from trb/std/process
-import { Result } from trb/std/result
+import trb/std/process
+import { ProcessError, ProcessResult } from trb/std/process
+import trb/std/result
 
 def run_formatter(files: Array<String>): Result<ProcessResult, ProcessError>
-	return run("formatter", files)
+	return Process.run("formatter", files)
 end
 ```
 
@@ -525,8 +529,9 @@ stdout and stderr. A started process with any exit status is
 `trb/std/json` provides an explicit JSON value enum plus typed record codecs:
 
 ```trb
-import { JsonError, decode, encode } from trb/std/json
-import { Result } from trb/std/result
+import trb/std/json
+import { JsonError } from trb/std/json
+import trb/std/result
 
 record User
 	id: Integer @json("user_id")
@@ -535,11 +540,11 @@ record User
 end
 
 def decode_user(source: String): Result<User, JsonError>
-	return decode<User>(source)
+	return JSON.decode<User>(source)
 end
 
 def encode_user(user: User): Result<String, JsonError>
-	return encode(user)
+	return JSON.encode(user)
 end
 ```
 
@@ -550,7 +555,7 @@ value and reject unknown values during decode. Unknown object fields are
 ignored. Schema information remains in typed IR; generated code does not
 reflect over target objects.
 
-`json.parse` accepts strict JSON. `jsonc.parse` additionally accepts line and
+`JSON.parse` accepts strict JSON. `JSONC.parse` additionally accepts line and
 block comments. Both reject trailing commas. Parse, stringify, encode, decode,
 and accessors return typed errors with JSON Pointer paths where applicable.
 
@@ -598,7 +603,7 @@ and injectable clocks are not part of the initial package.
 Import `Result<T, E>` explicitly:
 
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 ```
 
 Construct `Result::Ok(value)` or `Result::Err(error)` and handle it with an
@@ -642,7 +647,7 @@ The current portable standard library includes:
 - `trb/std/bytes`
 - `trb/std/encoding/hex`
 - `trb/std/encoding/base64`
-- `trb/std/hash`
+- `trb/std/digest`
 - `trb/std/hmac`
 - `trb/std/secure_compare`
 - `trb/std/string_builder`

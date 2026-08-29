@@ -21,7 +21,7 @@ class WebMiddlewareChain implements Next
 
 	def call(context: Context): Response
 		if @called
-			return runtime.fail<Response>("trb/web Next.call may only be called once")
+			return Runtime.fail<Response>("trb/web Next.call may only be called once")
 		end
 		@called = true
 		if @index >= @middlewares.size()

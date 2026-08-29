@@ -1,7 +1,7 @@
 package stdlib
 
 func urlSource() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/internal/url as native_url
 
 enum PercentDecodeErrorKind

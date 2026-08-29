@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const rawValueEnumSource = `import { decode, encode } from trb/std/json
+const rawValueEnumSource = `import { JSON } from trb/std/json
 
 enum OrderStatus
 	Pending = "PENDING"
@@ -25,14 +25,14 @@ def main()
 	status := OrderStatus::Completed
 	puts(status.raw_value())
 	puts(status.terminal?())
-	encoded := encode(status)
+	encoded := JSON.encode(status)
 	case encoded
 	when Result::Ok(json)
 		puts(json)
 	when Result::Err(error)
 		puts(error.message)
 	end
-	decoded := decode<OrderStatus>("\"COMPLETED\"")
+	decoded := JSON.decode<OrderStatus>("\"COMPLETED\"")
 	case decoded
 	when Result::Ok(value)
 		puts(value.terminal?())

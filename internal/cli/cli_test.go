@@ -997,7 +997,7 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 		"import trb/std/strings",
 		"import { User } from models/user",
 		`name := "Ada"`,
-		"strings.uppercase(name)",
+		"Strings.uppercase(name)",
 		"user := User.new(name: name)",
 		"user.name",
 		":type user",
@@ -1233,7 +1233,7 @@ func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
 	t.Fatal("Date completion candidate is missing")
 }
 
-func TestReplStandardCandidatesIncludePackageAndAmbiguousFunctionImports(t *testing.T) {
+func TestReplStandardCandidatesIncludeDistinctDeclarationRoots(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
@@ -1251,27 +1251,21 @@ func TestReplStandardCandidatesIncludePackageAndAmbiguousFunctionImports(t *test
 			service := languageservice.New(mode)
 			service.SetCandidates(candidates)
 
-			math, ok := completionWithImport(service.Complete("ma", len("ma")), "math", "import trb/std/math\n")
+			math, ok := completionWithImport(service.Complete("Ma", len("Ma")), "Math", "import trb/std/math\n")
 			if !ok {
-				t.Fatalf("math package completion is missing: %#v", math)
+				t.Fatalf("Math root completion is missing: %#v", math)
 			}
-			if !hasCompletionLabel(service.Complete("math.sq", len("math.sq")), "sqrt") {
-				t.Fatal("math package completion is missing sqrt()")
+			if !hasCompletionLabel(service.Complete("Math.sq", len("Math.sq")), "sqrt") {
+				t.Fatal("Math root completion is missing sqrt()")
 			}
-			if _, ok := completionWithImport(service.Complete("md", len("md")), "md5", "import { md5 } from trb/std/hash\n"); !ok {
-				t.Fatal("md5 named-import completion is missing")
+			if _, ok := completionWithImport(service.Complete("Di", len("Di")), "Digest", "import trb/std/digest\n"); !ok {
+				t.Fatal("Digest root completion is missing")
 			}
-			sha256 := 0
-			for _, item := range service.Complete("sha", len("sha")) {
-				if item.Label == "sha256" && len(item.AdditionalEdits) == 1 {
-					switch item.AdditionalEdits[0].NewText {
-					case "import { sha256 } from trb/std/hash\n", "import { sha256 } from trb/std/hmac\n":
-						sha256++
-					}
-				}
+			if _, ok := completionWithImport(service.Complete("HM", len("HM")), "HMAC", "import trb/std/hmac\n"); !ok {
+				t.Fatal("HMAC root completion is missing")
 			}
-			if sha256 != 2 {
-				t.Fatalf("sha256 origin count=%d, want 2", sha256)
+			if !hasCompletionLabel(service.Complete("Digest.sha", len("Digest.sha")), "sha256") || !hasCompletionLabel(service.Complete("HMAC.sha", len("HMAC.sha")), "sha256") {
+				t.Fatal("root-qualified sha256 completions are missing")
 			}
 		})
 	}
@@ -2187,7 +2181,7 @@ func TestReplSupportsPreludeAndNamespacedPutsForAnyValue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := "puts(1 + 2)\nimport trb/std/io\nio.puts([1, 2])\n:quit\n"
+	input := "puts(1 + 2)\nimport trb/std/io\nIO.puts([1, 2])\n:quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 	if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2248,13 +2242,13 @@ false.to_s()
 2.5.round()
 (-2.5).round()
 2.75.truncate()
-math.sqrt(9)
-math.exp(0)
-math.log(1)
-math.log2(8)
-math.log10(100)
-math.sqrt(-1).nan?()
-math.log(0).infinite?()
+Math.sqrt(9)
+Math.exp(0)
+Math.log(1)
+Math.log2(8)
+Math.log10(100)
+Math.sqrt(-1).nan?()
+Math.log(0).infinite?()
 "a😀".size()
 "A😀"[1]
 "A😀".try_fetch(2)
@@ -2632,7 +2626,7 @@ func TestReplEvaluatesPortableHexAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/encoding/hex\nhex.encode(\"A😀\".to_bytes())\nhex.decode(\"41F09F9880\")\nhex.decode(\"0g\")\nhex.decode(\"abc\")\n:quit\n"
+		input := "import trb/std/encoding/hex\nHex.encode(\"A😀\".to_bytes())\nHex.decode(\"41F09F9880\")\nHex.decode(\"0g\")\nHex.decode(\"abc\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2663,7 +2657,7 @@ func TestReplEvaluatesPortableBase64AcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/encoding/base64\nbase64.encode(\"A😀\".to_bytes())\nbase64.url_encode(\"???\".to_bytes())\nbase64.decode(\"QfCfmIA=\")\nbase64.url_decode(\"Pz8_\")\nbase64.decode(\"AAA\")\nbase64.decode(\"AA=A\")\nbase64.decode(\"AA$=\")\nbase64.decode(\"AB==\")\nbase64.url_decode(\"A\")\nbase64.url_decode(\"AA==\")\nbase64.url_decode(\"AA$\")\nbase64.url_decode(\"AB\")\n:quit\n"
+		input := "import trb/std/encoding/base64\nBase64.encode(\"A😀\".to_bytes())\nBase64.url_encode(\"???\".to_bytes())\nBase64.decode(\"QfCfmIA=\")\nBase64.url_decode(\"Pz8_\")\nBase64.decode(\"AAA\")\nBase64.decode(\"AA=A\")\nBase64.decode(\"AA$=\")\nBase64.decode(\"AB==\")\nBase64.url_decode(\"A\")\nBase64.url_decode(\"AA==\")\nBase64.url_decode(\"AA$\")\nBase64.url_decode(\"AB\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2702,7 +2696,7 @@ func TestReplEvaluatesPortableHashAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/hash\nimport trb/std/encoding/hex\nhex.encode(hash.md5(\"\".to_bytes()))\nhex.encode(hash.md5(\"abc\".to_bytes()))\nhex.encode(hash.sha1(\"\".to_bytes()))\nhex.encode(hash.sha1(\"abc\".to_bytes()))\nhex.encode(hash.sha256(\"\".to_bytes()))\nhex.encode(hash.sha256(\"abc\".to_bytes()))\nhex.encode(hash.sha512(\"\".to_bytes()))\nhex.encode(hash.sha512(\"abc\".to_bytes()))\n:quit\n"
+		input := "import trb/std/digest\nimport trb/std/encoding/hex\nHex.encode(Digest.md5(\"\".to_bytes()))\nHex.encode(Digest.md5(\"abc\".to_bytes()))\nHex.encode(Digest.sha1(\"\".to_bytes()))\nHex.encode(Digest.sha1(\"abc\".to_bytes()))\nHex.encode(Digest.sha256(\"\".to_bytes()))\nHex.encode(Digest.sha256(\"abc\".to_bytes()))\nHex.encode(Digest.sha512(\"\".to_bytes()))\nHex.encode(Digest.sha512(\"abc\".to_bytes()))\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2737,7 +2731,7 @@ func TestReplEvaluatesPortableHMACAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/hmac\nimport trb/std/secure_compare\nimport trb/std/encoding/hex\nkey := \"Jefe\".to_bytes()\nmessage := \"what do ya want for nothing?\".to_bytes()\ntag := hmac.sha256(key, message)\nhex.encode(tag)\nhex.encode(hmac.sha512(key, message))\nhmac.equal(tag, tag)\nhmac.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nhmac.equal(tag, \"short\".to_bytes())\nsecure_compare.equal(tag, tag)\nsecure_compare.equal(tag, hmac.sha256(key, \"other\".to_bytes()))\nsecure_compare.equal(tag, \"short\".to_bytes())\n:quit\n"
+		input := "import trb/std/hmac\nimport trb/std/secure_compare\nimport trb/std/encoding/hex\nkey := \"Jefe\".to_bytes()\nmessage := \"what do ya want for nothing?\".to_bytes()\ntag := HMAC.sha256(key, message)\nHex.encode(tag)\nHex.encode(HMAC.sha512(key, message))\nHMAC.equal(tag, tag)\nHMAC.equal(tag, HMAC.sha256(key, \"other\".to_bytes()))\nHMAC.equal(tag, \"short\".to_bytes())\nSecureCompare.equal(tag, tag)\nSecureCompare.equal(tag, HMAC.sha256(key, \"other\".to_bytes()))\nSecureCompare.equal(tag, \"short\".to_bytes())\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2771,7 +2765,7 @@ func TestReplEvaluatesPortableRandomAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/random\nimport trb/std/secure_random\nrandom.float() >= 0.0\nrandom.float() < 1.0\nrandom.integer(10) >= 0\nrandom.integer(10) < 10\nsecure_random.bytes(0).size()\nsecure_random.bytes(32).size()\n:quit\n"
+		input := "import trb/std/random\nimport trb/std/secure_random\nRandom.float() >= 0.0\nRandom.float() < 1.0\nRandom.integer(10) >= 0\nRandom.integer(10) < 10\nSecureRandom.bytes(0).size()\nSecureRandom.bytes(32).size()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2785,7 +2779,7 @@ func TestReplEvaluatesPortableRandomAcrossModes(t *testing.T) {
 }
 
 func TestReplRejectsInvalidPortableRandomBounds(t *testing.T) {
-	input := "import trb/std/random\nimport trb/std/secure_random\nrandom.integer(0)\nsecure_random.bytes(65537)\n:quit\n"
+	input := "import trb/std/random\nimport trb/std/secure_random\nRandom.integer(0)\nSecureRandom.bytes(65537)\n:quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 	if status := command.Run([]string{"repl", "--mode", "go"}); status != 0 {
@@ -2816,7 +2810,7 @@ func TestReplEvaluatesPortableStringBuilderAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/string_builder\nmut builder := string_builder.from_string(\"A\")\nbuilder.empty?()\nbuilder.append(\"😀\")\nbuilder.append_codepoint(33)\nbuilder\nbuilder.size()\nsnapshot := builder.to_s()\nbuilder.clear()\nbuilder.empty?()\nbuilder.to_s()\nsnapshot\n:quit\n"
+		input := "import trb/std/string_builder\nmut builder := StringBuilder.from_string(\"A\")\nbuilder.empty?()\nbuilder.append(\"😀\")\nbuilder.append_codepoint(33)\nbuilder\nbuilder.size()\nsnapshot := builder.to_s()\nbuilder.clear()\nbuilder.empty?()\nbuilder.to_s()\nsnapshot\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2900,7 +2894,7 @@ func TestReplEvaluatesPortablePathAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/path\npath.separator()\npath.clean(\"a/./b/../c\")\npath.clean(\"/../../srv//app\")\npath.join(\"/srv/app\", \"../data\")\npath.absolute(\"/srv/app\")\npath.components(\"/srv/app/main.trb\")\npath.base(\"/srv/app/main.trb\")\npath.directory(\"/srv/app/main.trb\")\npath.join(\"\", \"\")\n:quit\n"
+		input := "import trb/std/path\nPath.separator()\nPath.clean(\"a/./b/../c\")\nPath.clean(\"/../../srv//app\")\nPath.join(\"/srv/app\", \"../data\")\nPath.absolute(\"/srv/app\")\nPath.components(\"/srv/app/main.trb\")\nPath.base(\"/srv/app/main.trb\")\nPath.directory(\"/srv/app/main.trb\")\nPath.join(\"\", \"\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2933,18 +2927,19 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		bytesPath := filepath.Join(directory, "value.bin")
 		missingPath := filepath.Join(directory, "missing.txt")
 		input := strings.Join([]string{
-			"import { FileError, create_directory, exists, list, read_bytes, read_text, write_bytes, write_text } from trb/std/filesystem",
+			"import { FileError } from trb/std/filesystem",
+			"import trb/std/filesystem",
 			"import { Result } from trb/std/result",
 			"def describe(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
-			"create_directory(" + strconv.Quote(directory) + ")",
-			"write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
-			"read_text(" + strconv.Quote(textPath) + ")",
-			"exists(" + strconv.Quote(textPath) + ")",
-			"exists(" + strconv.Quote(missingPath) + ")",
-			"list(" + strconv.Quote(directory) + ")",
-			"write_bytes(" + strconv.Quote(bytesPath) + ", \"B\".to_bytes())",
-			"read_bytes(" + strconv.Quote(bytesPath) + ")",
-			"describe(read_text(" + strconv.Quote(missingPath) + "))",
+			"FileSystem.create_directory(" + strconv.Quote(directory) + ")",
+			"FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
+			"FileSystem.read_text(" + strconv.Quote(textPath) + ")",
+			"FileSystem.exists(" + strconv.Quote(textPath) + ")",
+			"FileSystem.exists(" + strconv.Quote(missingPath) + ")",
+			"FileSystem.list(" + strconv.Quote(directory) + ")",
+			"FileSystem.write_bytes(" + strconv.Quote(bytesPath) + ", \"B\".to_bytes())",
+			"FileSystem.read_bytes(" + strconv.Quote(bytesPath) + ")",
+			"describe(FileSystem.read_text(" + strconv.Quote(missingPath) + "))",
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -2986,14 +2981,15 @@ func TestReplEvaluatesPortableProcessAcrossModes(t *testing.T) {
 		}
 		t.Setenv("TRB_PROCESS_REPL_TEST", "available")
 		input := "import trb/std/process\n" +
+			"import { ProcessError, ProcessResult } from trb/std/process\n" +
 			"import { Result } from trb/std/result\n" +
 			"def describe(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.status.to_s() + \":\" + result.stdout + \":\" + result.stderr; when Result::Err(error); return error.operation; end; end\n" +
 			"def operation(value: Result<ProcessResult, ProcessError>): String; case value; when Result::Ok(result); return result.stdout; when Result::Err(error); return error.operation; end; end\n" +
-			"process.argv()\n" +
-			"process.environment(\"TRB_PROCESS_REPL_TEST\")\n" +
-			"describe(process.run(\"/bin/sh\", [\"-c\", \"printf out; printf err >&2; exit 3\"]))\n" +
+			"Process.argv()\n" +
+			"Process.environment(\"TRB_PROCESS_REPL_TEST\")\n" +
+			"describe(Process.run(\"/bin/sh\", [\"-c\", \"printf out; printf err >&2; exit 3\"]))\n" +
 			"empty_args: Array<String> := []\n" +
-			"operation(process.run(\"/type-rb-command-that-does-not-exist\", empty_args))\n" +
+			"operation(Process.run(\"/type-rb-command-that-does-not-exist\", empty_args))\n" +
 			":quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
@@ -3023,15 +3019,16 @@ func TestReplEvaluatesPortableJSONAcrossModes(t *testing.T) {
 		}
 
 		input := strings.Join([]string{
-			"import { JsonError, JsonValue, as_string, parse, stringify } from trb/std/json",
+			"import { JsonError, JsonValue } from trb/std/json",
+			"import trb/std/json",
 			"import trb/std/jsonc",
 			"import { Result } from trb/std/result",
-			`parse("1")`,
-			`parse("1.5")`,
-			`parse("{\"name\":\"Ada\",\"enabled\":true}")`,
-			`jsonc.parse("{\n  // comment\n  \"name\": \"Ada\"\n}")`,
-			`stringify(JsonValue::Object({"name" => JsonValue::String("Ada")}))`,
-			`as_string(JsonValue::Integer(1))`,
+			`JSON.parse("1")`,
+			`JSON.parse("1.5")`,
+			`JSON.parse("{\"name\":\"Ada\",\"enabled\":true}")`,
+			`JSONC.parse("{\n  // comment\n  \"name\": \"Ada\"\n}")`,
+			`JSON.stringify(JsonValue::Object({"name" => JsonValue::String("Ada")}))`,
+			`JSON.as_string(JsonValue::Integer(1))`,
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -3067,12 +3064,13 @@ func TestReplEvaluatesTypedJSONRecordCodecsAcrossModes(t *testing.T) {
 		}
 
 		input := strings.Join([]string{
-			"import { JsonError, decode, encode } from trb/std/json",
+			"import { JsonError } from trb/std/json",
+			"import trb/std/json",
 			"import { Result } from trb/std/result",
 			`record User; id: Integer @json("user_id"); name: String; end`,
-			`decode<User>("{\"user_id\":1,\"name\":\"Ada\"}")`,
-			`encode(User.new(id: 2, name: "Lin"))`,
-			`decode<User>("{\"user_id\":1}")`,
+			`JSON.decode<User>("{\"user_id\":1,\"name\":\"Ada\"}")`,
+			`JSON.encode(User.new(id: 2, name: "Lin"))`,
+			`JSON.decode<User>("{\"user_id\":1}")`,
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -3309,7 +3307,7 @@ func TestReplEvaluatesCompilerOwnedUnicodeAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "import trb/std/unicode\nunicode.version()\nunicode.letter(12354)\nunicode.digit(1632)\nunicode.identifier_start(64)\nunicode.valid_scalar(55296)\nunicode.from_codepoint(128512)\n\"A😀\".codepoints()\n\"\".empty?()\n\"TypeRB\".include?(\"RB\")\n:quit\n"
+		input := "import trb/std/unicode\nUnicode.version()\nUnicode.letter(12354)\nUnicode.digit(1632)\nUnicode.identifier_start(64)\nUnicode.valid_scalar(55296)\nUnicode.from_codepoint(128512)\n\"A😀\".codepoints()\n\"\".empty?()\n\"TypeRB\".include?(\"RB\")\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -4044,13 +4042,13 @@ func TestReplEvaluatesRawValueEnumsAcrossModes(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			input := "import { decode, encode } from trb/std/json\n" +
+			input := "import trb/std/json\n" +
 				"enum OrderStatus; Pending = \"PENDING\"; Completed = \"COMPLETED\"; def terminal?(): Boolean; return self == OrderStatus::Completed; end; end\n" +
 				"status := OrderStatus::Completed\n" +
 				"status.raw_value()\n" +
 				"status.terminal?()\n" +
-				"encode(status)\n" +
-				"decode<OrderStatus>(\"\\\"PENDING\\\"\")\n" +
+				"JSON.encode(status)\n" +
+				"JSON.decode<OrderStatus>(\"\\\"PENDING\\\"\")\n" +
 				"OrderStatus.from_raw(\"PENDING\")\n" +
 				"OrderStatus.from_raw(\"UNKNOWN\")\n" +
 				":quit\n"
@@ -4184,12 +4182,12 @@ func TestReplDefaultsToGoWithoutProjectConfiguration(t *testing.T) {
 
 func TestReplModeFlagWorksWithoutProjectConfiguration(t *testing.T) {
 	for _, test := range []struct {
-		mode        string
-		packagePath string
+		mode      string
+		statement string
 	}{
-		{mode: "go", packagePath: "trb/platform/go/context"},
-		{mode: "ruby", packagePath: "trb/platform/ruby/rails"},
-		{mode: "typescript", packagePath: "trb/platform/typescript/node"},
+		{mode: "go", statement: "import trb/platform/go/context"},
+		{mode: "ruby", statement: "activate trb/platform/ruby/rails"},
+		{mode: "typescript", statement: "import trb/platform/typescript/node"},
 	} {
 		t.Run(test.mode, func(t *testing.T) {
 			root := t.TempDir()
@@ -4202,7 +4200,7 @@ func TestReplModeFlagWorksWithoutProjectConfiguration(t *testing.T) {
 			}
 			defer func() { _ = os.Chdir(previous) }()
 
-			input := "import " + test.packagePath + "\n1\n:quit\n"
+			input := test.statement + "\n1\n:quit\n"
 			var stdout, stderr bytes.Buffer
 			command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 			if status := command.Run([]string{"repl", "--mode", test.mode}); status != 0 {
@@ -4223,7 +4221,7 @@ func TestReplModeFlagOverridesProjectMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	input := "import trb/platform/ruby/rails\n1\n:quit\n"
+	input := "activate trb/platform/ruby/rails\n1\n:quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 	if status := command.Run([]string{"repl", "--config", config.Path, "--mode", "ruby"}); status != 0 {
@@ -4266,7 +4264,7 @@ func TestBuildCopiesRailsProjectAndTranspilesTRBTree(t *testing.T) {
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
 	}
-	routes := "import trb/platform/ruby/rails\n\nRails.application.routes.draw do\n  resources :posts\nend\n"
+	routes := "activate trb/platform/ruby/rails\n\nRails.application.routes.draw do\n  resources :posts\nend\n"
 	if err := os.WriteFile(filepath.Join(root, "config", "routes.trb"), []byte(routes), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4496,7 +4494,7 @@ func TestRunCompilesProjectImportClosure(t *testing.T) {
 		t.Fatal(err)
 	}
 	mainPath := filepath.Join(root, "src", "main.trb")
-	main := "import trb/std/io\nimport models/user\n\ndef main()\n  user := User.new(\"Imported\")\n  io.puts(user.name())\n  return\nend\n"
+	main := "import trb/std/io\nimport models/user\n\ndef main()\n  user := User.new(\"Imported\")\n  IO.puts(user.name())\n  return\nend\n"
 	if err := os.WriteFile(mainPath, []byte(main), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -4777,7 +4775,7 @@ func TestRunPortableStringReplacementAcrossAvailableBackends(t *testing.T) {
 		source := "import trb/std/strings\n\n" +
 			"def main()\n" +
 			"\tputs(\"a😀a\".replace_all(\"a\", \"$&\"))\n" +
-			"\tputs(strings.replace_all(\"aaaa\", \"aa\", \"$1\"))\n" +
+			"\tputs(Strings.replace_all(\"aaaa\", \"aa\", \"$1\"))\n" +
 			"\treturn\n" +
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -4847,13 +4845,13 @@ def main()
 	puts(2.5.round())
 	puts((-2.5).round())
 	puts(2.75.truncate())
-	puts(math.sqrt(9) == 3.0)
-	puts(math.exp(0) == 1.0)
-	puts(math.log(1) == 0.0)
-	puts(math.log2(8) == 3.0)
-	puts(math.log10(100) == 2.0)
-	puts(math.sqrt(-1).nan?())
-	puts(math.log(0).infinite?())
+	puts(Math.sqrt(9) == 3.0)
+	puts(Math.exp(0) == 1.0)
+	puts(Math.log(1) == 0.0)
+	puts(Math.log2(8) == 3.0)
+	puts(Math.log10(100) == 2.0)
+	puts(Math.sqrt(-1).nan?())
+	puts(Math.log(0).infinite?())
 	puts((1 + 2).to_s())
 	return
 end
@@ -4900,10 +4898,10 @@ func TestRunPortableHexAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := `import { Result } from trb/std/result
-import { decode, encode } from trb/std/encoding/hex
+import trb/std/encoding/hex
 
 def decoded_text(input: String): String
-	case decode(input)
+	case Hex.decode(input)
 	when Result::Ok(value)
 		return value.to_s()
 	when Result::Err(error)
@@ -4912,7 +4910,7 @@ def decoded_text(input: String): String
 end
 
 def main()
-	puts(encode("A😀".to_bytes()))
+	puts(Hex.encode("A😀".to_bytes()))
 	puts(decoded_text("41F09F9880"))
 	puts(decoded_text("0g"))
 	puts(decoded_text("abc"))
@@ -4933,7 +4931,7 @@ end
 	}
 }
 
-func TestRunCompilerOwnedNamespaceImportsAcrossAvailableBackends(t *testing.T) {
+func TestRunCompilerOwnedDeclarationRootsAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
 			if _, err := exec.LookPath("ruby"); err != nil {
@@ -4964,7 +4962,7 @@ import trb/std/process
 import { Result } from trb/std/result
 
 def decoded_text(input: String): String
-	case hex.decode(input)
+	case Hex.decode(input)
 	when Result::Ok(value)
 		return value.to_s()
 	when Result::Err(error)
@@ -4973,9 +4971,9 @@ def decoded_text(input: String): String
 end
 
 def main()
-	puts(hex.encode("A".to_bytes()))
+	puts(Hex.encode("A".to_bytes()))
 	puts(decoded_text("41"))
-	puts(process.argv().size())
+	puts(Process.argv().size())
 	return
 end
 `
@@ -5020,10 +5018,10 @@ func TestRunPortableBase64AcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := `import { Result } from trb/std/result
-import { decode, encode, url_decode, url_encode } from trb/std/encoding/base64
+import trb/std/encoding/base64
 
 def decoded_text(input: String): String
-	case decode(input)
+	case Base64.decode(input)
 	when Result::Ok(value)
 		return value.to_s()
 	when Result::Err(error)
@@ -5032,7 +5030,7 @@ def decoded_text(input: String): String
 end
 
 def url_decoded_text(input: String): String
-	case url_decode(input)
+	case Base64.url_decode(input)
 	when Result::Ok(value)
 		return value.to_s()
 	when Result::Err(error)
@@ -5041,8 +5039,8 @@ def url_decoded_text(input: String): String
 end
 
 def main()
-	puts(encode("A😀".to_bytes()))
-	puts(url_encode("???".to_bytes()))
+	puts(Base64.encode("A😀".to_bytes()))
+	puts(Base64.url_encode("???".to_bytes()))
 	puts(decoded_text("QfCfmIA="))
 	puts(url_decoded_text("Pz8_"))
 	puts(decoded_text("AAA"))
@@ -5105,31 +5103,31 @@ func TestRunPortableHashAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import trb/std/hash
-import { decode, encode } from trb/std/encoding/hex
+		source := `import trb/std/digest
+import trb/std/encoding/hex
 
 def main()
 	a8 := "aaaaaaaa"
 	a56 := a8 + a8 + a8 + a8 + a8 + a8 + a8
 	a112 := a56 + a56
-	decoded := decode("00") catch |_error|
+	decoded := Hex.decode("00") catch |_error|
 		return
 	end
 	if decoded.size() != 1
 		return
 	end
-	puts(encode(hash.md5("".to_bytes())))
-	puts(encode(hash.md5("abc".to_bytes())))
-	puts(encode(hash.md5(a56.to_bytes())))
-	puts(encode(hash.sha1("".to_bytes())))
-	puts(encode(hash.sha1("abc".to_bytes())))
-	puts(encode(hash.sha1(a56.to_bytes())))
-	puts(encode(hash.sha256("".to_bytes())))
-	puts(encode(hash.sha256("abc".to_bytes())))
-	puts(encode(hash.sha256(a56.to_bytes())))
-	puts(encode(hash.sha512("".to_bytes())))
-	puts(encode(hash.sha512("abc".to_bytes())))
-	puts(encode(hash.sha512(a112.to_bytes())))
+	puts(Hex.encode(Digest.md5("".to_bytes())))
+	puts(Hex.encode(Digest.md5("abc".to_bytes())))
+	puts(Hex.encode(Digest.md5(a56.to_bytes())))
+	puts(Hex.encode(Digest.sha1("".to_bytes())))
+	puts(Hex.encode(Digest.sha1("abc".to_bytes())))
+	puts(Hex.encode(Digest.sha1(a56.to_bytes())))
+	puts(Hex.encode(Digest.sha256("".to_bytes())))
+	puts(Hex.encode(Digest.sha256("abc".to_bytes())))
+	puts(Hex.encode(Digest.sha256(a56.to_bytes())))
+	puts(Hex.encode(Digest.sha512("".to_bytes())))
+	puts(Hex.encode(Digest.sha512("abc".to_bytes())))
+	puts(Hex.encode(Digest.sha512(a112.to_bytes())))
 	return
 end
 `
@@ -5277,9 +5275,9 @@ func TestRunPortableHMACAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { equal, sha256, sha512 } from trb/std/hmac
+		source := `import trb/std/hmac
 import trb/std/secure_compare
-import { decode, encode } from trb/std/encoding/hex
+import trb/std/encoding/hex
 
 def main()
 	a8 := "aaaaaaaa"
@@ -5288,23 +5286,23 @@ def main()
 	key136 := a64 + a64 + a8
 	key := "Jefe".to_bytes()
 	message := "what do ya want for nothing?".to_bytes()
-	tag := sha256(key, message)
-	decoded := decode("00") catch |_error|
+	tag := HMAC.sha256(key, message)
+	decoded := Hex.decode("00") catch |_error|
 		return
 	end
 	if decoded.size() != 1
 		return
 	end
-	puts(encode(tag))
-	puts(encode(sha512(key, message)))
-	puts(encode(sha256(key80.to_bytes(), "message".to_bytes())))
-	puts(encode(sha512(key136.to_bytes(), "message".to_bytes())))
-	puts(equal(tag, tag))
-	puts(equal(tag, sha256(key, "other".to_bytes())))
-	puts(equal(tag, "short".to_bytes()))
-	puts(secure_compare.equal(tag, tag))
-	puts(secure_compare.equal(tag, sha256(key, "other".to_bytes())))
-	puts(secure_compare.equal(tag, "short".to_bytes()))
+	puts(Hex.encode(tag))
+	puts(Hex.encode(HMAC.sha512(key, message)))
+	puts(Hex.encode(HMAC.sha256(key80.to_bytes(), "message".to_bytes())))
+	puts(Hex.encode(HMAC.sha512(key136.to_bytes(), "message".to_bytes())))
+	puts(HMAC.equal(tag, tag))
+	puts(HMAC.equal(tag, HMAC.sha256(key, "other".to_bytes())))
+	puts(HMAC.equal(tag, "short".to_bytes()))
+	puts(SecureCompare.equal(tag, tag))
+	puts(SecureCompare.equal(tag, HMAC.sha256(key, "other".to_bytes())))
+	puts(SecureCompare.equal(tag, "short".to_bytes()))
 	return
 end
 `
@@ -5357,12 +5355,12 @@ func TestRunPortableRandomAcrossAvailableBackends(t *testing.T) {
 import trb/std/secure_random
 
 def main()
-	fraction := random.float()
-	index := random.integer(10)
+	fraction := Random.float()
+	index := Random.integer(10)
 	puts(fraction >= 0.0 && fraction < 1.0)
 	puts(index >= 0 && index < 10)
-	puts(secure_random.bytes(0).size())
-	puts(secure_random.bytes(32).size())
+	puts(SecureRandom.bytes(0).size())
+	puts(SecureRandom.bytes(32).size())
 	return
 end
 `
@@ -5408,10 +5406,11 @@ func TestRunPortableURLComponentsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := `import { Result } from trb/std/result
-import { PercentDecodeError, PercentDecodeErrorKind, decode_component, encode_component } from trb/std/url
+import { PercentDecodeError, PercentDecodeErrorKind } from trb/std/url
+import trb/std/url
 
 def decode(value: String): Result<String, PercentDecodeError>
-	return decode_component(value)
+	return URL.decode_component(value)
 end
 
 def decoded(value: String): String
@@ -5429,7 +5428,7 @@ def decoded(value: String): String
 end
 
 def main()
-	puts(encode_component("a b/😀+~"))
+	puts(URL.encode_component("a b/😀+~"))
 	puts(decoded("a%20b%2F%F0%9F%98%80%2B~"))
 	puts(decoded("a+b"))
 	puts(decoded("%"))
@@ -5478,11 +5477,12 @@ func TestRunPortableURLQueryAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { Result } from trb/std/result
-import { QueryParameter, build_query, parse_query } from trb/std/url
+		source := `import { QueryParameter } from trb/std/url
+import trb/std/url
+import { Result } from trb/std/result
 
 def print_query(source: String)
-	case parse_query(source)
+	case URL.parse_query(source)
 	when Result::Ok(parameters)
 		parameters.each do |parameter|
 			puts(parameter.name + ":" + parameter.value)
@@ -5494,7 +5494,7 @@ def print_query(source: String)
 end
 
 def main()
-	query := build_query([
+	query := URL.build_query([
 		QueryParameter.new(name: "tag", value: "type rb"),
 		QueryParameter.new(name: "tag", value: "go"),
 		QueryParameter.new(name: "symbol", value: "+&="),
@@ -5527,9 +5527,10 @@ end
 }
 
 func TestREPLPortableURLQueryUsesCompilerOwnedSource(t *testing.T) {
-	input := "import { QueryParameter, build_query, parse_query } from trb/std/url\n" +
-		"build_query([QueryParameter.new(name: \"tag\", value: \"type rb\"), QueryParameter.new(name: \"tag\", value: \"go\")])\n" +
-		"parse_query(\"tag=type+rb&tag=go\")\n" +
+	input := "import { QueryParameter } from trb/std/url\n" +
+		"import trb/std/url\n" +
+		"URL.build_query([QueryParameter.new(name: \"tag\", value: \"type rb\"), QueryParameter.new(name: \"tag\", value: \"go\")])\n" +
+		"URL.parse_query(\"tag=type+rb&tag=go\")\n" +
 		":quit\n"
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
@@ -5569,7 +5570,7 @@ func TestRunCompilerOwnedUnicodeAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := "import trb/std/unicode\n\ndef main()\n\tputs(unicode.version())\n\tputs(unicode.letter(12354))\n\tputs(unicode.from_codepoint(128512))\n\treturn\nend\n"
+		source := "import trb/std/unicode\n\ndef main()\n\tputs(Unicode.version())\n\tputs(Unicode.letter(12354))\n\tputs(Unicode.from_codepoint(128512))\n\treturn\nend\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -5621,7 +5622,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"def string_index_result(value: Result<String, IndexLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.index.to_s() + \"/\" + error.size.to_s() + \" \" + error.message; end; end\n" +
 			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
-			"def scalar_check(value: Float): Boolean; return (-4).abs() == numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == booleans.to_string(true); end\n\n" +
+			"def scalar_check(value: Float): Boolean; return (-4).abs() == Numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == Booleans.to_string(true); end\n\n" +
 			"def main()\n" +
 			"\tputs(scalar_check(0.25))\n" +
 			"\tputs(parse_result(\"12\".try_to_i()))\n" +
@@ -5638,14 +5639,14 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
 			"\tputs(\"A😀\".chars().join(\"|\"))\n" +
 			"\tputs(\"A😀\".reverse())\n" +
-			"\tputs(strings.reverse(\"TypeRB\"))\n" +
+			"\tputs(Strings.reverse(\"TypeRB\"))\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +
 			"\tlabels: Hash<String, String> := {\"name\" => \"Ada\"}\n" +
 			"\tputs(key_result(labels.try_fetch(\"name\")))\n" +
 			"\tputs(key_result(labels.try_fetch(\"missing\")))\n" +
-			"\tbuilder := string_builder.new()\n" +
+			"\tbuilder := StringBuilder.new()\n" +
 			"\tputs(builder.empty?())\n" +
 			"\treturn\n" +
 			"end\n"
@@ -5802,7 +5803,7 @@ def main()
 	end
 	ordered_strings := ["😀", ""].sort()
 	ordered_strings_descending := ["😀", ""].sort_descending()
-	floats := [math.sqrt(-1), 1.0, -1.0]
+	floats := [Math.sqrt(-1), 1.0, -1.0]
 	floats_ascending := floats.sort()
 	floats_descending := floats.sort_descending()
 	mut repeated := [3, 1, 3, 2, 1]
@@ -6176,28 +6177,29 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		missingPath := filepath.Join(directory, "missing.txt")
 		bmpPath := filepath.Join(directory, "\uE000")
 		astralPath := filepath.Join(directory, "\U00010000")
-		source := "import { FileError, create_directory, exists, list, read_text, write_text } from trb/std/filesystem\n" +
+		source := "import { FileError } from trb/std/filesystem\n" +
+			"import trb/std/filesystem\n" +
 			"import { Result } from trb/std/result\n\n" +
 			"def text_or_operation(value: Result<String, FileError>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
 			"def names_or_error(value: Result<Array<String>, FileError>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
 			"def boolean_or_false(value: Result<Boolean, FileError>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
 			"def main()\n" +
-			"\t_directory := create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
+			"\t_directory := FileSystem.create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
 			"\t\treturn\n" +
 			"\tend\n" +
-			"\t_text := write_text(" + strconv.Quote(textPath) + ", \"A😀\") catch |_error|\n" +
+			"\t_text := FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\") catch |_error|\n" +
 			"\t\treturn\n" +
 			"\tend\n" +
-			"\t_astral := write_text(" + strconv.Quote(astralPath) + ", \"\") catch |_error|\n" +
+			"\t_astral := FileSystem.write_text(" + strconv.Quote(astralPath) + ", \"\") catch |_error|\n" +
 			"\t\treturn\n" +
 			"\tend\n" +
-			"\t_bmp := write_text(" + strconv.Quote(bmpPath) + ", \"\") catch |_error|\n" +
+			"\t_bmp := FileSystem.write_text(" + strconv.Quote(bmpPath) + ", \"\") catch |_error|\n" +
 			"\t\treturn\n" +
 			"\tend\n" +
-			"\tputs(text_or_operation(read_text(" + strconv.Quote(textPath) + ")))\n" +
-			"\tputs(text_or_operation(read_text(" + strconv.Quote(missingPath) + ")))\n" +
-			"\tputs(names_or_error(list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +
-			"\tputs(boolean_or_false(exists(" + strconv.Quote(textPath) + ")))\n" +
+			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(textPath) + ")))\n" +
+			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(missingPath) + ")))\n" +
+			"\tputs(names_or_error(FileSystem.list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +
+			"\tputs(boolean_or_false(FileSystem.exists(" + strconv.Quote(textPath) + ")))\n" +
 			"\treturn\n" +
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -6243,7 +6245,8 @@ func TestRunCompilerOwnedProcessAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := `import { ProcessError, ProcessResult, argv, run, working_directory } from trb/std/process
+		source := `import { ProcessError, ProcessResult } from trb/std/process
+import trb/std/process
 import { Result } from trb/std/result
 
 def describe(value: Result<ProcessResult, ProcessError>): String
@@ -6283,13 +6286,13 @@ def directory_available(value: Result<String, ProcessError>): Boolean
 end
 
 def main()
-	result := run("/bin/sh", ["-c", "printf out; printf err >&2; exit 7"])
+	result := Process.run("/bin/sh", ["-c", "printf out; printf err >&2; exit 7"])
 	puts(describe(result))
 	puts(succeeded(result))
 	empty_arguments: Array<String> := []
-	puts(operation(run("/type-rb-command-that-does-not-exist", empty_arguments)))
-	puts(directory_available(working_directory()))
-	puts(argv().size())
+	puts(operation(Process.run("/type-rb-command-that-does-not-exist", empty_arguments)))
+	puts(directory_available(Process.working_directory()))
+	puts(Process.argv().size())
 	return
 end
 `
@@ -6333,16 +6336,17 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := "import { JsonError, JsonValue, parse, stringify } from trb/std/json\n" +
+		source := "import { JsonError, JsonValue } from trb/std/json\n" +
+			"import trb/std/json\n" +
 			"import trb/std/jsonc\n" +
 			"import { Result } from trb/std/result\n\n" +
-			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
+			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case JSON.stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
 			"def error_path(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
 			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() || !error.message.empty?(); end; end\n\n" +
 			"def main()\n" +
-			"\tputs(render(jsonc.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
-			"\tputs(error_path(parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +
-			"\tputs(valid(jsonc.parse(\"{\\\"value\\\":1,}\")))\n" +
+			"\tputs(render(JSONC.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
+			"\tputs(error_path(JSON.parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +
+			"\tputs(valid(JSONC.parse(\"{\\\"value\\\":1,}\")))\n" +
 			"\treturn\n" +
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -6392,9 +6396,10 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		mainSource := "import { Address, User } from contracts/user\n" +
-			"import { JsonError, decode, encode } from trb/std/json\n" +
+			"import { JsonError } from trb/std/json\n" +
+			"import trb/std/json\n" +
 			"import { Result } from trb/std/result\n\n" +
-			"def round_trip(source: String): String; case decode<User>(source); when Result::Ok(user); case encode(user); when Result::Ok(encoded); case decode<User>(encoded); when Result::Ok(copy); return copy.name + \":\" + copy.address.city; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
+			"def round_trip(source: String): String; case JSON.decode<User>(source); when Result::Ok(user); case JSON.encode(user); when Result::Ok(encoded); case JSON.decode<User>(encoded); when Result::Ok(copy); return copy.name + \":\" + copy.address.city; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
 			"def main()\n" +
 			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[1,1.5],\\\"metadata\\\":{\\\"active\\\":1},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
 			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"scores\\\":[],\\\"metadata\\\":{},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
@@ -7661,7 +7666,7 @@ func TestRunOfficialWebRequestErrorsAcrossAvailableBackends(t *testing.T) {
 		mainSource := `import { Body, Header, Headers, HttpMethod } from trb/http
 import { Request } from trb/web
 import { dispatch } from trb/web/testing
-import { decode } from trb/std/encoding/hex
+import trb/std/encoding/hex
 import { Result } from trb/std/result
 
 record RequestInput
@@ -7689,7 +7694,7 @@ def main()
 	print_response(RequestInput.new(headers: Headers.new([Header.new(name: "content-type", value: "text/plain")]), body: valid_body))
 	print_response(RequestInput.new(headers: Headers.new([Header.new(name: "content-type", value: "Application/JSON; Charset=UTF-8")]), body: valid_body))
 	print_response(RequestInput.new(headers: Headers.new([Header.new(name: "content-type", value: "application/vnd.example+json")]), body: valid_body))
-	case decode("FF")
+	case Hex.decode("FF")
 	when Result::Ok(invalid_utf8)
 		print_response(RequestInput.new(headers: Headers.new([Header.new(name: "content-type", value: "application/json")]), body: Body.new(invalid_utf8)))
 	when Result::Err(_error)
@@ -8121,7 +8126,7 @@ import { LoggerOptions } from trb/web/middleware/logger
 LOGGER_OPTIONS := LoggerOptions.new(stderr: false, exclude_paths: ["/health"])
 
 def call(context: Context, next_handler: Next): Response
-	return logger.call(context, next_handler, LOGGER_OPTIONS)
+	return Logger.call(context, next_handler, LOGGER_OPTIONS)
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
@@ -8247,7 +8252,7 @@ end
 
 ORDERED: Array<Middleware> := [
 	TraceMiddleware.new("first"),
-	secure_headers.middleware(),
+	SecureHeaders.middleware(),
 	TraceMiddleware.new("second"),
 ]
 DOUBLE_CALL: Array<Middleware> := [DoubleCallMiddleware.new()]
@@ -8340,9 +8345,9 @@ CUSTOM_OPTIONS := SecureHeadersOptions.new(headers: {"x-custom-security" => "ena
 
 def call(context: Context, next_handler: Next): Response
 	if context.request.path == "/custom"
-		return secure_headers.call(context, next_handler, CUSTOM_OPTIONS)
+		return SecureHeaders.call(context, next_handler, CUSTOM_OPTIONS)
 	end
-	return secure_headers.call(context, next_handler)
+	return SecureHeaders.call(context, next_handler)
 end
 `
 		routeSource := `import { Context, Response, text } from trb/web
@@ -8443,7 +8448,7 @@ end
 import trb/web/middleware/request_id
 
 def call(context: Context, next_handler: Next): Response
-	return request_id.call(context, next_handler)
+	return RequestID.call(context, next_handler)
 end
 `
 		routeSource := `import { Context, Response, text } from trb/web
@@ -8577,9 +8582,9 @@ CORS_OPTIONS := CORSOptions.new(
 
 def call(context: Context, next_handler: Next): Response
 	if context.request.path == "/wildcard"
-		return cors.call(context, next_handler)
+		return CORS.call(context, next_handler)
 	end
-	return cors.call(context, next_handler, CORS_OPTIONS)
+	return CORS.call(context, next_handler, CORS_OPTIONS)
 end
 `
 		routeSource := `import { Context, Response, text } from trb/web
@@ -8660,7 +8665,7 @@ func TestBuildCanEmbedInExistingRailsProjectWithoutManagingGemfile(t *testing.T)
 	if err := os.MkdirAll(filepath.Dir(controller), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := "import trb/platform/ruby/rails\n\nmodule Api\n  module V1\n    module Internal\n      class InsurersController < Api::ApplicationController\n        def index()\n          insurers := Insurer.all()\n          render(json: insurers)\n          return\n        end\n\n        def show()\n          insurer := Insurer.find_by!(code: params[:code])\n          render(json: insurer.as_json())\n          return\n        end\n      end\n    end\n  end\nend\n"
+	source := "activate trb/platform/ruby/rails\n\nmodule Api\n  module V1\n    module Internal\n      class InsurersController < Api::ApplicationController\n        def index()\n          insurers := Insurer.all()\n          render(json: insurers)\n          return\n        end\n\n        def show()\n          insurer := Insurer.find_by!(code: params[:code])\n          render(json: insurer.as_json())\n          return\n        end\n      end\n    end\n  end\nend\n"
 	if err := os.WriteFile(controller, []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}

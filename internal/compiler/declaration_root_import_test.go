@@ -1,0 +1,81 @@
+package compiler
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestDeclarationRootStandardImportLowersQualifiedMembers(t *testing.T) {
+	wants := map[string]string{
+		"go":         "math.Sqrt(9.0)",
+		"ruby":       "Math.sqrt(value)",
+		"typescript": "Math.sqrt(9.0)",
+	}
+	for mode, want := range wants {
+		artifact, err := CompileWithOptions("math.trb", []byte("import trb/std/math\n\ndef value(): Float\n\treturn Math.sqrt(9.0)\nend\n"), Options{Mode: mode, ModulePath: "math"})
+		if err != nil {
+			t.Fatalf("%s: %v", mode, err)
+		}
+		if !strings.Contains(string(artifact.Output), want) {
+			t.Fatalf("%s output does not contain %q:\n%s", mode, want, artifact.Output)
+		}
+	}
+}
+
+func TestNamedImportAliasKeepsOneCanonicalDeclarationIdentity(t *testing.T) {
+	artifacts, err := CompileProject([]SourceUnit{
+		{Filename: "web/response.trb", ModulePath: "web/response", Source: []byte("class Response\nend\n")},
+		{Filename: "browser/response.trb", ModulePath: "browser/response", Source: []byte("class Response\nend\n")},
+		{Filename: "main.trb", ModulePath: "main", Source: []byte("import { Response as WebResponse } from web/response\nimport { Response as BrowserResponse } from browser/response\n\ndef values(): Array<Any>\n\treturn [WebResponse.new(), BrowserResponse.new()]\nend\n")},
+	}, Options{Mode: "ruby", SourceRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := findArtifactByModule(artifacts, "main")
+	if main == nil || !strings.Contains(string(main.Output), "Response.new") {
+		t.Fatalf("aliased declarations were not lowered to their exported runtime names: %s", main.Output)
+	}
+}
+
+func TestActivateEnablesRubyNativeSyntaxWithoutADeclarationBinding(t *testing.T) {
+	_, err := CompileWithOptions("native.trb", []byte("activate trb/platform/ruby/native\n\ndef value(): Any\n\treturn native_call 1\nend\n"), Options{Mode: "ruby", ModulePath: "native"})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGeneratedImportDoesNotSatisfyAuthoredUnusedImport(t *testing.T) {
+	_, err := CompileProject([]SourceUnit{
+		{Filename: "models/response.trb", ModulePath: "models/response", Source: []byte("class Response\nend\n")},
+		{
+			Filename:   "main.trb",
+			ModulePath: "main",
+			Source:     []byte("import { Response } from models/response\n"),
+			CompilerGeneratedSources: []CompilerGeneratedSource{{
+				ID:     "test.generated",
+				Source: []byte("import { Response } from models/response\n\ndef generated(): Response\n\treturn Response.new()\nend\n"),
+			}},
+		},
+	}, Options{Mode: "ruby", SourceRoot: "/project"})
+	if err == nil || !strings.Contains(err.Error(), "imported symbol Response is not used") {
+		t.Fatalf("compile error = %v", err)
+	}
+}
+
+func TestGeneratedAndAuthoredScopesCanImportTheSameNewtype(t *testing.T) {
+	_, err := CompileProject([]SourceUnit{
+		{Filename: "contracts/index.trb", ModulePath: "contracts/index", Source: []byte("newtype OrderId = Integer\n")},
+		{
+			Filename:   "main.trb",
+			ModulePath: "main",
+			Source:     []byte("import { OrderId } from contracts\n\ndef authored(value: OrderId): OrderId\n\treturn value\nend\n"),
+			CompilerGeneratedSources: []CompilerGeneratedSource{
+				{ID: "test.imports", Source: []byte("import { OrderId } from contracts/index\n")},
+				{ID: "test.generated", Source: []byte("def generated(value: Integer): OrderId\n\treturn OrderId.new(value)\nend\n")},
+			},
+		},
+	}, Options{Mode: "go", GoModule: "example.com/generated-newtype", SourceRoot: "/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+}

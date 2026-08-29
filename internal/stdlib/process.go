@@ -1,7 +1,7 @@
 package stdlib
 
 func processSource() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/internal/process as native_process
 
 record ProcessResult

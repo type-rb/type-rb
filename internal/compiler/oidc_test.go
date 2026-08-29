@@ -12,7 +12,7 @@ func TestCompilePortableOidcBearerAuthentication(t *testing.T) {
 		Source: []byte(`import { OidcAuthError, OidcPrincipal, bearer_options } from trb/auth/oidc
 import { Result } from trb/std/result
 import { Context, Next, Response } from trb/web
-import { authenticate, principal } from trb/web/auth/bearer
+import trb/web/auth/bearer
 
 AUTH := bearer_options(
 	issuer: "https://identity.example/",
@@ -20,11 +20,11 @@ AUTH := bearer_options(
 )
 
 def protect(context: Context, next_handler: Next): Response
-	return authenticate(context, next_handler, AUTH)
+	return Bearer.authenticate(context, next_handler, AUTH)
 end
 
 def current_principal(context: Context): Result<OidcPrincipal, OidcAuthError>
-	return principal(context)
+	return Bearer.principal(context)
 end
 `),
 	}
@@ -48,7 +48,7 @@ end
 			for _, expected := range map[string][]string{
 				"go":         {"trbOidcVerifyBearer", "trbOidcLoadProvider", "rsa.VerifyPKCS1v15"},
 				"ruby":       {"TrbOidcRuntime.verify_bearer", "def load_provider", "rsa.verify"},
-				"typescript": {"trb_oidc_verify_bearer", "trb_oidc_load_provider", "crypto.subtle.verify"},
+				"typescript": {"trb_oidc_verify_bearer", "trb_oidc_load_provider", "crypto.subtle.verify", "unauthorized: _unauthorized"},
 			}[mode] {
 				if !strings.Contains(generated.String(), expected) {
 					t.Fatalf("generated %s OIDC bearer package is missing %q:\n%s", mode, expected, generated.String())

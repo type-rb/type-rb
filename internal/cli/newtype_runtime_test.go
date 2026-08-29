@@ -23,15 +23,15 @@ record Payload
 end
 `,
 		"main.trb": `import { Payload, UserId, UserIds } from contracts
-import { decode, encode } from trb/std/json
+import trb/std/json
 
 def main()
 	id := UserId.new(7)
 	payload := Payload.new(id: id, ids: UserIds.new([id]), parent_id: nil)
-	encoded := encode(payload) catch |_error|
+	encoded := JSON.encode(payload) catch |_error|
 		return
 	end
-	decoded := decode<Payload>(encoded) catch |_error|
+	decoded := JSON.decode<Payload>(encoded) catch |_error|
 		return
 	end
 	puts(decoded.id.value())

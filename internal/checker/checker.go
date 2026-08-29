@@ -1519,15 +1519,24 @@ func (c *Checker) genericTypeArityAt(name string, span token.Span) (int, bool) {
 }
 
 func (c *Checker) importedTypeAt(name string, span token.Span) (resolver.Binding, bool) {
-	binding, ok := c.resolution.ImportedType(name)
-	if !ok || c.importBindingVisible(binding, span) {
-		return binding, ok
-	}
-	return resolver.Binding{}, false
+	return c.resolution.ImportedTypeAt(name, c.generatedSpan(span))
+}
+
+func (c *Checker) generatedSpan(span token.Span) bool {
+	return c.compilerGeneratedStart > 0 && span.Start.Offset >= c.compilerGeneratedStart
 }
 
 func (c *Checker) importBindingVisible(binding resolver.Binding, span token.Span) bool {
 	return binding.Import == nil || !binding.Import.CompilerGenerated || c.compilerGeneratedStart > 0 && span.Start.Offset >= c.compilerGeneratedStart
+}
+
+func (c *Checker) importedValueAt(name string, span token.Span) (resolver.Binding, bool) {
+	if c.generatedSpan(span) {
+		binding, ok := c.resolution.GeneratedSymbols[name]
+		return binding, ok
+	}
+	binding, ok := c.resolution.Symbols[name]
+	return binding, ok
 }
 
 func (c *Checker) collect(statements []ast.Statement) {
@@ -2241,13 +2250,13 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if c.mode != "ruby" {
 				c.error(n.Span(), "unsupported statement syntax in portable TypeRB")
 			} else if !c.resolution.NativeSyntax {
-				c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
+				c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
 		case *ast.NativeBlock:
 			if c.mode != "ruby" {
 				c.error(n.Span(), "unsupported block syntax in portable TypeRB")
 			} else if !c.resolution.NativeSyntax {
-				c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
+				c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
 		}
@@ -2623,13 +2632,17 @@ func (c *Checker) recordReference(expression ast.Expression, binding resolver.Bi
 			}
 		}
 		for _, name := range binding.Library.RequiredSymbols {
-			c.markImportedSymbolUsed(name)
+			c.markImportedSymbolUsed(name, binding.Import != nil && binding.Import.CompilerGenerated)
 		}
 	}
 }
 
-func (c *Checker) markImportedSymbolUsed(name string) {
-	if binding, ok := c.resolution.Symbols[name]; ok {
+func (c *Checker) markImportedSymbolUsed(name string, generated bool) {
+	symbols := c.resolution.Symbols
+	if generated {
+		symbols = c.resolution.GeneratedSymbols
+	}
+	if binding, ok := symbols[name]; ok {
 		c.markImportUsed(binding)
 	}
 }
@@ -3365,7 +3378,12 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 			result[index].Owner = ""
 			result[index].Declaration = typ.Declaration
 			result[index].TypeArguments = append([]types.Type(nil), typ.Args...)
-			if reference, exists := c.resolution.TypeMember(typ.Name, variant.Name); exists {
+			// An alias owns its generated constructors. Do not retain the
+			// underlying enum package reference when the alias is local.
+			result[index].Reference = nil
+			if reference, exists := c.resolution.TypeMemberIdentity(typ.Declaration, variant.Name); exists {
+				result[index].Reference = &reference
+			} else if reference, exists := c.resolution.TypeMember(typ.Name, variant.Name); exists {
 				result[index].Reference = &reference
 			}
 		}
@@ -3388,7 +3406,11 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		}
 		return variants, true
 	}
-	if binding, ok := c.resolution.ImportedType(typ.Name); ok && binding.Export.Kind == resolver.EnumExport {
+	binding, imported := c.resolution.ImportedTypeIdentity(typ.Declaration)
+	if !imported {
+		binding, imported = c.resolution.ImportedType(typ.Name)
+	}
+	if imported && binding.Export.Kind == resolver.EnumExport {
 		substitutions := typeSubstitutions(binding.Export.TypeParameters, typ.Args)
 		variants := make([]EnumVariant, 0, len(binding.Export.EnumVariants))
 		for _, imported := range binding.Export.EnumVariants {
@@ -3398,7 +3420,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 				fieldType = c.canonicalContractType(fieldType, c.activeTypeParameterSet())
 				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: fieldType, NamedOnly: field.NamedOnly})
 			}
-			if reference, exists := c.resolution.TypeMember(typ.Name, imported.Name); exists {
+			if reference, exists := c.resolution.TypeMemberIdentity(binding.DeclarationIdentity(), imported.Name); exists {
 				variant.Reference = &reference
 			}
 			variants = append(variants, variant)
@@ -4312,7 +4334,7 @@ func (c *Checker) jsxProvider(span token.Span) *stdlib.JSXProvider {
 	var provider *stdlib.JSXProvider
 	var selected *resolver.Import
 	seen := map[*resolver.Import]bool{}
-	for _, imported := range c.resolution.Imports {
+	for _, imported := range c.resolution.Capabilities {
 		if imported == nil || imported.Definition == nil || imported.Definition.JSX == nil || seen[imported] {
 			continue
 		}
@@ -5167,7 +5189,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 		if c.resolution.NativeSyntax {
 			return
 		}
-		c.error(class.Superclass.Span(), fmt.Sprintf("Ruby superclass %s requires import trb/platform/ruby/native or trb/platform/ruby/rails", name))
+		c.error(class.Superclass.Span(), fmt.Sprintf("Ruby superclass %s requires activate trb/platform/ruby/native or trb/platform/ruby/rails", name))
 		return
 	}
 	c.error(class.Superclass.Span(), fmt.Sprintf("superclass %s is not declared or imported", name))
@@ -6104,7 +6126,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if value.constant {
 				c.result.Constants[n] = value.owner
 			}
-		} else if binding, ok := c.resolution.Symbols[n.Name]; ok && c.importBindingVisible(binding, n.Span()) {
+		} else if binding, ok := c.importedValueAt(n.Name, n.Span()); ok {
 			typ = c.resolvedBindingType(binding)
 			c.recordReference(n, binding)
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
@@ -6665,7 +6687,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
 				break
 			}
-			if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
+			if variant.Reference != nil {
+				c.recordReference(n, *variant.Reference)
+			} else if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists {
+				c.recordReference(n, binding)
+			} else if binding, exists := c.resolution.TypeMember(receiverType.Name, n.Name); exists {
 				c.recordReference(n, binding)
 			}
 			typ = receiverType
@@ -6727,7 +6753,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				classType = classType || imported.Export.Kind == resolver.ClassExport
 			}
 			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport
-			c.markImportedSymbolUsed(receiverType.Name)
+			c.markImportedSymbolUsed(receiverType.Name, c.generatedSpan(n.Span()))
 			c.recordReference(n, binding)
 		} else if binding, exists := c.resolution.InferredTypeMember(dataReceiverType.Name, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
 			binding = specializeResolvedEnumMember(dataReceiverType, binding)
@@ -6909,7 +6935,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				binding = specializeResolvedEnumMember(c.result.Expressions[member.Receiver], binding)
 				binding = specializeResolvedClassMember(c.result.Expressions[member.Receiver], binding)
 			}
-			if binding.Member != nil && len(binding.Member.TypeParameters) > 0 {
+			if binding.Member != nil && binding.Library == nil && len(binding.Member.TypeParameters) > 0 {
 				c.error(n.Callee.Span(), fmt.Sprintf("generic method %s requires explicit type arguments", binding.Name))
 				break
 			}
@@ -7196,7 +7222,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if c.mode != "ruby" {
 			c.error(n.Span(), "unsupported expression syntax in portable TypeRB")
 		} else if !c.resolution.NativeSyntax {
-			c.error(n.Span(), "Ruby-native syntax requires import trb/platform/ruby/native or trb/platform/ruby/rails")
+			c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 		}
 	}
 	if call, ok := expression.(*ast.CallExpression); ok {

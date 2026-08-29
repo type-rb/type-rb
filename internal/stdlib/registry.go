@@ -95,8 +95,15 @@ type receiverMethodTarget struct {
 }
 
 type Package struct {
-	Path           string
-	ModulePath     string
+	Path       string
+	ModulePath string
+	// Root names the public declaration that owns this package's qualified
+	// operations. Its members are backed by Symbols but are not themselves
+	// top-level named exports.
+	Root string
+	// BuiltinRoot marks the narrow compiler-owned case where Root is the
+	// canonical imported static API for an existing built-in type.
+	BuiltinRoot    bool
 	RuntimeAlias   string
 	RuntimeExports []RuntimeExport
 	Source         string
@@ -106,6 +113,7 @@ type Package struct {
 	NativeSyntax   bool
 	TypeProvider   string
 	JSX            *JSXProvider
+	Capability     bool
 	Symbols        map[string]Symbol
 }
 
@@ -189,7 +197,7 @@ end
 			{Name: "ResultExpectation", Kind: "class"},
 		},
 		Source: `import { assert_equal, assert_false, assert_nil, assert_not_equal, assert_result_err, assert_result_ok, assert_true } from trb/internal/test
-import { Result } from trb/std/result
+import trb/std/result
 
 class Expectation<T>
 	readonly @actual: T
@@ -310,7 +318,7 @@ end
 		Symbols: map[string]Symbol{},
 	},
 	"trb/std/io": {
-		Path: "trb/std/io",
+		Path: "trb/std/io", Root: "IO",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"puts": {
@@ -339,13 +347,13 @@ end
 		Symbols: map[string]Symbol{},
 	},
 	"trb/internal/time": {
-		Path:     "trb/internal/time",
+		Path: "trb/internal/time", Root: "Time",
 		Kind:     Portable,
 		Internal: true,
 		Symbols:  timeIntrinsicSymbols(),
 	},
 	"trb/internal/runtime": {
-		Path:     "trb/internal/runtime",
+		Path: "trb/internal/runtime", Root: "Runtime",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -360,13 +368,13 @@ end
 		},
 	},
 	"trb/internal/jobs/sql": {
-		Path:     "trb/internal/jobs/sql",
+		Path: "trb/internal/jobs/sql", Root: "SQL",
 		Kind:     Portable,
 		Internal: true,
 		Symbols:  jobsSQLIntrinsicSymbols(),
 	},
 	"trb/internal/auth/oidc": {
-		Path:     "trb/internal/auth/oidc",
+		Path: "trb/internal/auth/oidc", Root: "OIDC",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -387,7 +395,7 @@ end
 		},
 	},
 	"trb/internal/web/logger": {
-		Path:     "trb/internal/web/logger",
+		Path: "trb/internal/web/logger", Root: "Logger",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -404,7 +412,7 @@ end
 		},
 	},
 	"trb/internal/web/compression": {
-		Path:     "trb/internal/web/compression",
+		Path: "trb/internal/web/compression", Root: "Compression",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -418,7 +426,7 @@ end
 		},
 	},
 	"trb/internal/web/timeout": {
-		Path:     "trb/internal/web/timeout",
+		Path: "trb/internal/web/timeout", Root: "Timeout",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -436,7 +444,7 @@ end
 		},
 	},
 	"trb/std/path": {
-		Path:       "trb/std/path",
+		Path: "trb/std/path", Root: "Path",
 		ModulePath: "trb/std/path/index",
 		Source:     pathSource(),
 		Kind:       Portable,
@@ -457,6 +465,7 @@ end
 	},
 	"trb/std/url": {
 		Path:       "trb/std/url",
+		Root:       "URL",
 		ModulePath: "trb/std/url/index",
 		RuntimeExports: []RuntimeExport{
 			{Name: "PercentDecodeErrorKind", Kind: "enum"},
@@ -473,7 +482,7 @@ end
 		},
 	},
 	"trb/internal/url": {
-		Path:     "trb/internal/url",
+		Path: "trb/internal/url", Root: "URL",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -482,21 +491,21 @@ end
 		},
 	},
 	"trb/std/filesystem": {
-		Path:       "trb/std/filesystem",
+		Path: "trb/std/filesystem", Root: "FileSystem",
 		ModulePath: "trb/std/filesystem/index",
 		Source:     filesystemSource(),
 		Kind:       Portable,
 		Symbols:    map[string]Symbol{},
 	},
 	"trb/std/process": {
-		Path:       "trb/std/process",
+		Path: "trb/std/process", Root: "Process",
 		ModulePath: "trb/std/process/index",
 		Source:     processSource(),
 		Kind:       Portable,
 		Symbols:    map[string]Symbol{},
 	},
 	"trb/internal/process": {
-		Path:     "trb/internal/process",
+		Path: "trb/internal/process", Root: "Process",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -528,7 +537,7 @@ end
 		},
 	},
 	"trb/internal/filesystem": {
-		Path:     "trb/internal/filesystem",
+		Path: "trb/internal/filesystem", Root: "FileSystem",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -548,6 +557,7 @@ end
 	},
 	"trb/std/json": {
 		Path:       "trb/std/json",
+		Root:       "JSON",
 		ModulePath: "trb/std/json/index",
 		RuntimeExports: []RuntimeExport{
 			{Name: "JsonErrorKind", Kind: "enum"},
@@ -584,6 +594,7 @@ end
 	},
 	"trb/std/jsonc": {
 		Path:       "trb/std/jsonc",
+		Root:       "JSONC",
 		ModulePath: "trb/std/jsonc/index",
 		Source:     jsoncSource(),
 		Kind:       Portable,
@@ -597,7 +608,7 @@ end
 		},
 	},
 	"trb/internal/json": {
-		Path:     "trb/internal/json",
+		Path: "trb/internal/json", Root: "JSON",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -612,7 +623,7 @@ end
 		},
 	},
 	"trb/std/strings": {
-		Path: "trb/std/strings",
+		Path: "trb/std/strings", Root: "Strings",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"length":    unary("length", "trb.std.strings.length", stringType, integerType),
@@ -706,6 +717,7 @@ end
 	},
 	"trb/std/unicode": {
 		Path:       "trb/std/unicode",
+		Root:       "Unicode",
 		ModulePath: "trb/std/unicode/index",
 		Source:     unicodeSource(),
 		Kind:       Portable,
@@ -723,7 +735,7 @@ end
 		},
 	},
 	"trb/std/bytes": {
-		Path: "trb/std/bytes",
+		Path: "trb/std/bytes", Root: "Bytes", BuiltinRoot: true,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"from_string": unary("from_string", "trb.std.bytes.from_string", stringType, bytesType),
@@ -752,6 +764,7 @@ end
 	},
 	"trb/std/encoding/hex": {
 		Path:       "trb/std/encoding/hex",
+		Root:       "Hex",
 		ModulePath: "trb/std/encoding/hex/index",
 		RuntimeExports: []RuntimeExport{
 			{Name: "HexDecodeErrorKind", Kind: "enum"},
@@ -765,7 +778,7 @@ end
 		},
 	},
 	"trb/internal/encoding/hex": {
-		Path:     "trb/internal/encoding/hex",
+		Path: "trb/internal/encoding/hex", Root: "Hex",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -775,6 +788,7 @@ end
 	},
 	"trb/std/encoding/base64": {
 		Path:       "trb/std/encoding/base64",
+		Root:       "Base64",
 		ModulePath: "trb/std/encoding/base64/index",
 		RuntimeExports: []RuntimeExport{
 			{Name: "Base64DecodeErrorKind", Kind: "enum"},
@@ -790,7 +804,7 @@ end
 		},
 	},
 	"trb/internal/encoding/base64": {
-		Path:     "trb/internal/encoding/base64",
+		Path: "trb/internal/encoding/base64", Root: "Base64",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -800,9 +814,10 @@ end
 			"url_decode": unary("url_decode", "trb.std.encoding.base64.url_decode", stringType, structuredErrorResult(bytesType, base64DecodeErrorType)),
 		},
 	},
-	"trb/std/hash": {
-		Path:       "trb/std/hash",
-		ModulePath: "trb/std/hash/index",
+	"trb/std/digest": {
+		Path:       "trb/std/digest",
+		Root:       "Digest",
+		ModulePath: "trb/std/digest/index",
 		Source:     hashSource(),
 		Kind:       Portable,
 		Symbols: map[string]Symbol{
@@ -813,7 +828,7 @@ end
 		},
 	},
 	"trb/internal/hash": {
-		Path:     "trb/internal/hash",
+		Path: "trb/internal/hash", Root: "Hash",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -825,6 +840,7 @@ end
 	},
 	"trb/std/hmac": {
 		Path:       "trb/std/hmac",
+		Root:       "HMAC",
 		ModulePath: "trb/std/hmac/index",
 		Source:     hmacSource(),
 		Kind:       Portable,
@@ -835,7 +851,7 @@ end
 		},
 	},
 	"trb/internal/hmac": {
-		Path:     "trb/internal/hmac",
+		Path: "trb/internal/hmac", Root: "HMAC",
 		Kind:     Portable,
 		Internal: true,
 		Symbols: map[string]Symbol{
@@ -845,14 +861,14 @@ end
 		},
 	},
 	"trb/std/secure_compare": {
-		Path: "trb/std/secure_compare",
+		Path: "trb/std/secure_compare", Root: "SecureCompare",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"equal": bytesBinary("equal", "trb.std.secure_compare.equal", booleanType),
 		},
 	},
 	"trb/std/random": {
-		Path: "trb/std/random",
+		Path: "trb/std/random", Root: "Random",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"float":   {Name: "float", Intrinsic: "trb.std.random.float", Return: floatType},
@@ -860,14 +876,14 @@ end
 		},
 	},
 	"trb/std/secure_random": {
-		Path: "trb/std/secure_random",
+		Path: "trb/std/secure_random", Root: "SecureRandom",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"bytes": unary("bytes", "trb.std.secure_random.bytes", integerType, bytesType),
 		},
 	},
 	"trb/std/string_builder": {
-		Path: "trb/std/string_builder",
+		Path: "trb/std/string_builder", Root: "StringBuilder", BuiltinRoot: true,
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"new": {
@@ -1135,7 +1151,7 @@ end
 		},
 	},
 	"trb/std/numbers": {
-		Path: "trb/std/numbers",
+		Path: "trb/std/numbers", Root: "Numbers",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"to_string":         unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
@@ -1165,7 +1181,7 @@ end
 		},
 	},
 	"trb/std/math": {
-		Path: "trb/std/math",
+		Path: "trb/std/math", Root: "Math",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"sqrt":  unary("sqrt", "trb.std.math.sqrt", floatType, floatType),
@@ -1176,7 +1192,7 @@ end
 		},
 	},
 	"trb/std/booleans": {
-		Path: "trb/std/booleans",
+		Path: "trb/std/booleans", Root: "Booleans",
 		Kind: Portable,
 		Symbols: map[string]Symbol{
 			"to_string": unary("to_string", "trb.std.booleans.to_string", booleanType, stringType),
@@ -1198,7 +1214,7 @@ end
 		Symbols:      map[string]Symbol{},
 	},
 	"trb/platform/go/context": {
-		Path:    "trb/platform/go/context",
+		Path: "trb/platform/go/context", Root: "Context",
 		Kind:    Platform,
 		Targets: map[string]bool{"go": true},
 		Symbols: map[string]Symbol{
@@ -1215,7 +1231,7 @@ end
 		},
 	},
 	"trb/platform/go/http": {
-		Path: "trb/platform/go/http", Kind: Platform, Targets: map[string]bool{"go": true},
+		Path: "trb/platform/go/http", Root: "HTTP", Kind: Platform, Targets: map[string]bool{"go": true},
 		Symbols: map[string]Symbol{
 			"router": {Name: "router", Intrinsic: "trb.platform.go.http.router", Return: types.FromName("HTTPRouter")},
 			"handle": {Name: "handle", Intrinsic: "trb.platform.go.http.handle", Parameters: []Parameter{{Name: "router", Type: types.FromName("HTTPRouter")}, {Name: "pattern", Type: stringType}, {Name: "handler", Type: types.FromName("Any")}}, Return: voidType},
@@ -1241,7 +1257,7 @@ end
 		},
 	},
 	"trb/platform/typescript/node": {
-		Path:    "trb/platform/typescript/node",
+		Path: "trb/platform/typescript/node", Root: "Node",
 		Kind:    Platform,
 		Targets: map[string]bool{"typescript": true},
 		Symbols: map[string]Symbol{

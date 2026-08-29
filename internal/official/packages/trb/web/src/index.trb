@@ -1,6 +1,7 @@
-import { Result } from trb/std/result
+import trb/std/result
 import { JsonError } from trb/std/json
-import { PercentDecodeError, QueryParameter, parse_query } from trb/std/url
+import { PercentDecodeError, QueryParameter } from trb/std/url
+import trb/std/url
 import { Body, Header, Headers, HeaderValueError, HttpMethod } from trb/http
 import trb/internal/runtime
 
@@ -76,7 +77,7 @@ class Request
 	end
 
 	def query_parameters(): Result<Array<QueryParameter>, PercentDecodeError>
-		return parse_query(@query_string)
+		return URL.parse_query(@query_string)
 	end
 
 	def query_values(name: String): Result<Array<String>, PercentDecodeError>
@@ -308,12 +309,12 @@ class Response
 
 	def set_cookie(cookie_value: ResponseCookie): Response
 		if !_valid_response_cookie?(cookie_value)
-			return runtime.fail<Response>("trb/web response cookie is invalid")
+			return Runtime.fail<Response>("trb/web response cookie is invalid")
 		end
 		prefix := cookie_value.name + "="
 		header_values("set-cookie").each do |existing_value|
 			if existing_value.start_with?(prefix)
-				return runtime.fail<Response>("trb/web response contains duplicate cookie name")
+				return Runtime.fail<Response>("trb/web response contains duplicate cookie name")
 			end
 		end
 		mut parts := [cookie_value.name + "=" + cookie_value.value]

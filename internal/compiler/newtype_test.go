@@ -224,7 +224,7 @@ end
 func TestTypedJSONUsesNewtypeRepresentationsAcrossBackends(t *testing.T) {
 	source := SourceUnit{
 		Filename: "/project/main.trb", ModulePath: "main", Package: "main",
-		Source: []byte(`import { decode, encode } from trb/std/json
+		Source: []byte(`import { JSON } from trb/std/json
 
 newtype UserId = Integer
 newtype UserIds = Array<UserId>
@@ -238,13 +238,13 @@ end
 def encode_payload(): String
 	id := UserId.new(7)
 	payload := Payload.new(id: id, ids: UserIds.new([id]), parent_id: nil)
-	return encode(payload) catch |_error|
+	return JSON.encode(payload) catch |_error|
 		return ""
 	end
 end
 
 def decode_id(source: String): UserId?
-	payload := decode<Payload>(source) catch |_error|
+	payload := JSON.decode<Payload>(source) catch |_error|
 		return nil
 	end
 	return payload.id

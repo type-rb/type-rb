@@ -63,7 +63,7 @@ end
 import trb/web/middleware/logger
 
 def call(context: Context, next_handler: Next): Response
-	return logger.call(context, next_handler)
+	return Logger.call(context, next_handler)
 end
 `
 			if err := os.WriteFile(filepath.Join(routeDirectory, "_middleware.trb"), []byte(middlewareSource), 0o644); err != nil {

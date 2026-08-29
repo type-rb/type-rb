@@ -233,11 +233,11 @@ end
 	}
 }
 
-func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
+func TestCompletionIncludesExplicitImportedNamesAndDeclarationRoots(t *testing.T) {
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/user.trb", ModulePath: "models/user", Source: []byte("record User\n\tname: String\nend\n")},
 		{Filename: "models/state.trb", ModulePath: "models/state", Source: []byte("enum State\n\tOpen\n\tClosed\nend\n")},
-		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport models/state as states\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\n")},
+		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport { State as WorkflowState } from models/state\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\n")},
 	}, compiler.Options{Mode: "go", Package: "main", ModulePath: "repl", AllowUnusedImports: true})
 	if err != nil {
 		t.Fatal(err)
@@ -252,8 +252,8 @@ func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	if _, ok := findCompletion(service.Complete("Us", 2), "User"); !ok {
 		t.Fatal("named project import was not completed")
 	}
-	if _, ok := findCompletion(service.Complete("strings.up", len("strings.up")), "uppercase"); !ok {
-		t.Fatal("standard package namespace member was not completed")
+	if _, ok := findCompletion(service.Complete("Strings.up", len("Strings.up")), "uppercase"); !ok {
+		t.Fatal("standard package root member was not completed")
 	}
 	if _, ok := findCompletion(service.Complete("Result::O", len("Result::O")), "Ok"); !ok {
 		t.Fatal("imported enum member was not completed")
@@ -264,8 +264,8 @@ func TestCompletionIncludesExplicitImportedNamesAndNamespaces(t *testing.T) {
 	if _, ok := findCompletion(service.Complete("Date.pa", len("Date.pa")), "parse"); !ok {
 		t.Fatal("imported standard type member was not completed")
 	}
-	if _, ok := findCompletion(service.Complete("states::State::O", len("states::State::O")), "Open"); !ok {
-		t.Fatal("aliased project namespace member was not completed")
+	if _, ok := findCompletion(service.Complete("WorkflowState::O", len("WorkflowState::O")), "Open"); !ok {
+		t.Fatal("aliased project declaration member was not completed")
 	}
 
 	withoutImport := languageservice.New("go")
@@ -410,7 +410,7 @@ func TestCompletionOffersImportCandidatesWithoutChangingCheckedContext(t *testin
 	}
 }
 
-func TestCompletionAddsExplicitStandardImport(t *testing.T) {
+func TestCompletionAddsCanonicalStandardImport(t *testing.T) {
 	service := languageservice.New("go")
 	service.SetCandidates(languageservice.StandardImportCandidates("go"))
 	item, ok := findCompletion(service.Complete("# Values\nRes", len("# Values\nRes")), "Result")
@@ -419,7 +419,7 @@ func TestCompletionAddsExplicitStandardImport(t *testing.T) {
 	}
 	want := languageservice.TextEdit{
 		Range:   languageservice.OffsetRange{Start: len("# Values\n"), End: len("# Values\n")},
-		NewText: "import { Result } from trb/std/result\n",
+		NewText: "import trb/std/result\n",
 	}
 	if len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0] != want {
 		t.Fatalf("additional edits=%#v, want %#v", item.AdditionalEdits, want)
@@ -430,8 +430,30 @@ func TestCompletionAddsExplicitStandardImport(t *testing.T) {
 	if !ok || len(item.AdditionalEdits) != 1 {
 		t.Fatalf("Result completion=%#v, ok=%v", item, ok)
 	}
-	if got := item.AdditionalEdits[0]; got.Range.Start != len("import { Date } from trb/std/time\n") || got.NewText != "import { Result } from trb/std/result\n" {
+	if got := item.AdditionalEdits[0]; got.Range.Start != len("import { Date } from trb/std/time\n") || got.NewText != "import trb/std/result\n" {
 		t.Fatalf("additional edit=%#v", got)
+	}
+}
+
+func TestCompletionOffersStandardPackageRootsAndNamedFunctions(t *testing.T) {
+	service := languageservice.New("go")
+	service.SetCandidates(languageservice.StandardImportCandidates("go"))
+
+	math, ok := findCompletion(service.Complete("Mat", len("Mat")), "Math")
+	if !ok || len(math.AdditionalEdits) != 1 || math.AdditionalEdits[0].NewText != "import trb/std/math\n" {
+		t.Fatalf("Math completion=%#v, ok=%v", math, ok)
+	}
+	sqrt, ok := findCompletion(service.Complete("Math.sq", len("Math.sq")), "sqrt")
+	if !ok || len(sqrt.AdditionalEdits) != 1 || sqrt.AdditionalEdits[0].NewText != "import trb/std/math\n" {
+		t.Fatalf("Math.sqrt completion=%#v, ok=%v", sqrt, ok)
+	}
+	describe, ok := findCompletion(service.Complete("desc", len("desc")), "describe")
+	if !ok || len(describe.AdditionalEdits) != 1 || describe.AdditionalEdits[0].NewText != "import { describe } from trb/std/test\n" {
+		t.Fatalf("describe completion=%#v, ok=%v", describe, ok)
+	}
+	date, ok := findCompletion(service.Complete("Dat", len("Dat")), "Date")
+	if !ok || len(date.AdditionalEdits) != 1 || date.AdditionalEdits[0].NewText != "import { Date } from trb/std/time\n" {
+		t.Fatalf("Date completion=%#v, ok=%v", date, ok)
 	}
 }
 
@@ -455,8 +477,8 @@ func TestCompletionKeepsAmbiguousImportOriginsDistinct(t *testing.T) {
 	service := languageservice.New("go")
 	service.SetCandidates(languageservice.Context{Symbols: []languageservice.Symbol{
 		{
-			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/hash",
-			Import: &languageservice.Import{Path: "trb/std/hash", Symbol: "sha256"},
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/digest",
+			Import: &languageservice.Import{Path: "trb/std/digest", Symbol: "sha256"},
 		},
 		{
 			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(key: Bytes, value: Bytes): Bytes — trb/std/hmac",
@@ -480,8 +502,8 @@ func TestCompletionKeepsAmbiguousImportOriginsDistinct(t *testing.T) {
 		}
 		byImport[item.AdditionalEdits[0].NewText] = item
 	}
-	if _, ok := byImport["import { sha256 } from trb/std/hash\n"]; !ok {
-		t.Fatalf("hash candidate missing: %#v", matched)
+	if _, ok := byImport["import { sha256 } from trb/std/digest\n"]; !ok {
+		t.Fatalf("digest candidate missing: %#v", matched)
 	}
 	if _, ok := byImport["import { sha256 } from trb/std/hmac\n"]; !ok {
 		t.Fatalf("hmac candidate missing: %#v", matched)
@@ -506,13 +528,13 @@ func TestCompletionCandidateRepairsAStaleCheckedImport(t *testing.T) {
 	}}}
 	candidates := languageservice.Context{Symbols: []languageservice.Symbol{{
 		Name: "Result", Kind: languageservice.CompletionType,
-		Import: &languageservice.Import{Path: "trb/std/result", Symbol: "Result"},
+		Import: &languageservice.Import{Path: "trb/std/result"},
 	}}}
 	items := languageservice.Complete(languageservice.CompletionRequest{
 		Source: "Res", Cursor: 3, Mode: "go", Context: checked, Candidates: candidates, RepairImports: true,
 	})
 	item, ok := findCompletion(items, "Result")
-	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import { Result } from trb/std/result\n" {
+	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import trb/std/result\n" {
 		t.Fatalf("repaired Result completion=%#v, ok=%v", item, ok)
 	}
 }
@@ -586,6 +608,8 @@ func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 		{ModulePath: "app/main"},
 		{ModulePath: "models/user", Statements: []ir.Statement{&ir.Record{Name: "User"}, &ir.Record{Name: "Unique"}}},
 		{ModulePath: "admin/user", Statements: []ir.Statement{&ir.Record{Name: "User"}}},
+		{ModulePath: "models/account", Statements: []ir.Statement{&ir.Record{Name: "Account"}}},
+		{ModulePath: "helpers/render", Statements: []ir.Statement{&ir.Method{Name: "render"}}},
 		{ModulePath: "shared/ui/DataTable/index", Statements: []ir.Statement{&ir.Method{Name: "DataTable"}}},
 	}
 	project := languageservice.BuildProjectImportCandidates(programs)
@@ -603,13 +627,21 @@ func TestProjectImportCandidatesOmitAmbiguousAndSameModuleNames(t *testing.T) {
 	if !ok || item.AdditionalEdits[0].NewText != "import { DataTable } from shared/ui/DataTable\n" {
 		t.Fatalf("index-module completion=%#v, ok=%v", item, ok)
 	}
+	item, ok = findCompletion(service.Complete("Acc", 3), "Account")
+	if !ok || item.AdditionalEdits[0].NewText != "import models/account\n" {
+		t.Fatalf("declaration-root completion=%#v, ok=%v", item, ok)
+	}
+	item, ok = findCompletion(service.Complete("rend", 4), "render")
+	if !ok || item.AdditionalEdits[0].NewText != "import { render } from helpers/render\n" {
+		t.Fatalf("root-matching function completion=%#v, ok=%v", item, ok)
+	}
 
 	service.SetCandidates(project.ForModule("models/user"))
 	if _, ok := findCompletion(service.Complete("Uni", 3), "Unique"); ok {
 		t.Fatal("same-module Unique candidate was completed")
 	}
 	item, ok = findCompletion(service.Complete("Us", 2), "User")
-	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import { User } from admin/user\n" {
+	if !ok || len(item.AdditionalEdits) != 1 || item.AdditionalEdits[0].NewText != "import admin/user\n" {
 		t.Fatalf("external User completion after excluding current module=%#v, ok=%v", item, ok)
 	}
 

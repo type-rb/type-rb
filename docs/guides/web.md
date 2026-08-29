@@ -23,7 +23,7 @@ functions determine HTTP methods. For example,
 <!-- trb-doc-test: web-update-todo -->
 ```trb
 import { Context, Response, json } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record UpdateTodo
 	title: String
@@ -69,7 +69,7 @@ runtime permission to reflect over application types:
 
 ```trb
 import { Context, Response, text } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record TodoParams
 	id: Integer
@@ -285,7 +285,7 @@ the producer and consumer:
 
 ```trb
 import { Context, ContextKey, Next, Response, text } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record CurrentUser
 	id: Integer
@@ -331,7 +331,7 @@ import { Context, Next, Response } from trb/web
 import trb/web/middleware/compression
 
 def call(context: Context, next_handler: Next): Response
-	return compression.call(context, next_handler)
+	return Compression.call(context, next_handler)
 end
 ```
 
@@ -352,7 +352,7 @@ import { TimeoutOptions } from trb/web/middleware/timeout
 OPTIONS := TimeoutOptions.new(milliseconds: 5000)
 
 def call(context: Context, next_handler: Next): Response
-	return timeout.call(context, next_handler, OPTIONS)
+	return Timeout.call(context, next_handler, OPTIONS)
 end
 ```
 

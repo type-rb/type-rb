@@ -64,7 +64,7 @@ end
 }
 
 func TestCompileRubyRailsKeepsNativeDSLAndLowersTypedCore(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/rails
+	source := []byte(`activate trb/platform/ruby/rails
 
 # A normal Active Record model.
 class Post < ApplicationRecord
@@ -135,7 +135,7 @@ end
 
 def main()
   user := User.new("Alice")
-  io.puts(user.name())
+  IO.puts(user.name())
   return
 end
 `)
@@ -203,7 +203,7 @@ end
 
 def main()
   greeter := Greeter.new()
-  io.puts(greeter.greet("TypeRB"))
+  IO.puts(greeter.greet("TypeRB"))
   return
 end
 `)
@@ -589,7 +589,7 @@ func TestPortableIterationChecksSourceParametersAndSliceSize(t *testing.T) {
 }
 
 func TestRubyNativeEnumerableCanUsePortableIterationBlock(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 def print_all(values: Any)
   values.each do |value|
@@ -688,13 +688,13 @@ func TestPortableBackendsReportNativeFallbackAsUnsupportedSyntax(t *testing.T) {
 
 func TestRubyNativeFallbackStillRequiresExplicitImport(t *testing.T) {
 	_, err := Compile("bad.trb", []byte("class User\n  belongs_to :account\nend\n"), "ruby")
-	if err == nil || !strings.Contains(err.Error(), "Ruby-native syntax requires import") {
+	if err == nil || !strings.Contains(err.Error(), "Ruby-native syntax requires activate") {
 		t.Fatalf("expected explicit Ruby-native import diagnostic, got %v", err)
 	}
 }
 
 func TestRubyCompatibilityForNamespacesKeywordsSettersAndSingletonClass(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 class Admin::Post < ActiveRecord::Base
   def configure(*, cache: Boolean = false, required:, raw: nil): Boolean
@@ -734,7 +734,7 @@ end
 }
 
 func TestRubyCompatibilityForConstantsNativeBlocksSplatAndQuotedSymbols(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/rails
+	source := []byte(`activate trb/platform/ruby/rails
 
 DEFAULTS = { timeout: 5 }
 
@@ -1081,7 +1081,7 @@ end
 }
 
 func TestExplicitRubyNativeAnyRetainsTruthinessCompatibility(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 def dynamic(value: Any)
   if value
@@ -2277,7 +2277,7 @@ end
 		}
 	}
 
-	native := []byte(`import trb/platform/ruby/native
+	native := []byte(`activate trb/platform/ruby/native
 
 def compare(left: Any, right: Any): Any
   return left <=> right
@@ -2304,7 +2304,7 @@ end
 		}
 	}
 
-	native := []byte(`import trb/platform/ruby/native
+	native := []byte(`activate trb/platform/ruby/native
 
 def legacy_assignment()
   undeclared = 1
@@ -3777,7 +3777,7 @@ func TestQualifiedGenericPackageFunctionsRemainFunctions(t *testing.T) {
 	source := []byte(`import trb/std/json
 
 def encode_message()
-	_encoded := json.encode<String>("hello") catch |_error|
+	_encoded := JSON.encode<String>("hello") catch |_error|
 		return
 	end
 	return
@@ -3941,7 +3941,7 @@ def greet(name: String): String
   return "Hello, #{name}!"
 end
 def main()
-  io.puts(greet("World"))
+  IO.puts(greet("World"))
   return
 end
 `), Options{Mode: "go", Package: "greet"})
@@ -4019,7 +4019,7 @@ func TestStringInterpolationAcceptsExplicitStringsAcrossModes(t *testing.T) {
 alias Label = String
 
 def render(label: Label, ratio: Float): String
-	return "#{strings.uppercase(label)}:#{ratio.to_s()}"
+	return "#{Strings.uppercase(label)}:#{ratio.to_s()}"
 end
 
 def render_optional(label: Label?): String
@@ -4224,7 +4224,7 @@ end
 }
 
 func TestValueReturnFlowKeepsRubyNativeEscapeExplicit(t *testing.T) {
-	native := []byte(`import trb/platform/ruby/native
+	native := []byte(`activate trb/platform/ruby/native
 
 def framework_value(): Any
 	framework_call()
@@ -4234,7 +4234,7 @@ end
 		t.Fatalf("explicit Ruby-native terminal expression was rejected: %v", err)
 	}
 
-	portable := []byte(`import trb/platform/ruby/native
+	portable := []byte(`activate trb/platform/ruby/native
 
 def echo(value: String): String
 	value
@@ -4313,7 +4313,7 @@ func TestConstantsAreRuntimeInitializedImmutableScopedBindings(t *testing.T) {
 
 	source := []byte(`import trb/std/strings
 
-APP_NAME := strings.uppercase("typerb")
+APP_NAME := Strings.uppercase("typerb")
 
 module Limits
   MAX_ITEMS := 10

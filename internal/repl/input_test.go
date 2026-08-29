@@ -174,11 +174,11 @@ func TestAcceptedImportConfirmationSourceTurnsBareCandidateIntoImportSubmission(
 		InsertText:  "sha256",
 		Replacement: languageservice.OffsetRange{Start: 0, End: len(source)},
 		AdditionalEdits: []languageservice.TextEdit{{
-			Range: languageservice.OffsetRange{}, NewText: "import { sha256 } from trb/std/hash\n",
+			Range: languageservice.OffsetRange{}, NewText: "import { sha256 } from trb/std/digest\n",
 		}},
 	}
 	got, cursor, ok := acceptedImportConfirmationSource(source, item)
-	want := "import { sha256 } from trb/std/hash"
+	want := "import { sha256 } from trb/std/digest"
 	if !ok || got != want || cursor != len(want) {
 		t.Fatalf("bare completion=(%q, %d, %v), want (%q, %d, true)", got, cursor, ok, want, len(want))
 	}
@@ -313,8 +313,8 @@ func TestTerminalAcceptLineCommitsSelectedImportCompletionWithoutSubmitting(t *t
 			Call:   &languageservice.CallInfo{ParameterCount: 2},
 		},
 		{
-			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "hash",
-			Import: &languageservice.Import{Path: "trb/std/hash", Symbol: "sha256"},
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "digest",
+			Import: &languageservice.Import{Path: "trb/std/digest", Symbol: "sha256"},
 			Call:   &languageservice.CallInfo{ParameterCount: 1},
 		},
 	}})
@@ -328,7 +328,7 @@ func TestTerminalAcceptLineCommitsSelectedImportCompletionWithoutSubmitting(t *t
 	complete()
 	terminal.Keymap.Commands()["accept-line"]()
 
-	if got := string(*terminal.Line()); got != "import { sha256 } from trb/std/hash" && got != "import { sha256 } from trb/std/hmac" {
+	if got := string(*terminal.Line()); got != "import { sha256 } from trb/std/digest" && got != "import { sha256 } from trb/std/hmac" {
 		t.Fatalf("accepted line=%q, want selected import", got)
 	}
 	if accepted, _, _ := terminal.History.LineAccepted(); accepted {

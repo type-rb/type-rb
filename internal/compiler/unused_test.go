@@ -244,7 +244,7 @@ func TestImportsUsedByPackagesAndTypesAreAccepted(t *testing.T) {
 import { Result } from trb/std/result
 
 def print_result(result: Result<Integer, String>)
-	io.puts(result)
+	IO.puts(result)
 	return
 end
 `)

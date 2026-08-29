@@ -31,7 +31,7 @@ import trb/web/auth/bearer
 import { OIDC } from auth/config
 
 def call(context: Context, next_handler: Next): Response
-	return bearer.authenticate(context, next_handler, OIDC)
+	return Bearer.authenticate(context, next_handler, OIDC)
 end
 ```
 
@@ -41,12 +41,12 @@ in the immutable request context. Handlers retrieve it without sharing a
 string key or performing a cast:
 
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 import { Context, Response, text } from trb/web
 import trb/web/auth/bearer
 
 def get(context: Context): Response
-	case bearer.principal(context)
+	case Bearer.principal(context)
 	when Result::Ok(principal)
 		return text(principal.subject)
 	when Result::Err(_error)
@@ -55,7 +55,7 @@ def get(context: Context): Response
 end
 ```
 
-Use `bearer.verify(request, options)` when an application needs verification
+Use `Bearer.verify(request, options)` when an application needs verification
 without the standard middleware response. It returns
 `Result<OidcPrincipal, OidcAuthError>` and distinguishes missing credentials,
 invalid credentials, provider failures, and invalid configuration.

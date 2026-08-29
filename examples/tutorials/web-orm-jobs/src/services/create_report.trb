@@ -1,8 +1,8 @@
-import { GenerateReportJob } from jobs/generate_report_job
-import { Report } from models/report
+import jobs/generate_report_job
+import models/report
 import { EnqueueError } from trb/jobs
 import { Database, DbError } from trb/orm
-import { Result } from trb/std/result
+import trb/std/result
 
 enum CreateReportError
 	Database(error: DbError)

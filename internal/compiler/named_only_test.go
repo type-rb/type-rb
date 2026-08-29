@@ -273,7 +273,7 @@ end
 func TestRubyNativeKeywordCandidatesSurviveProjectImports(t *testing.T) {
 	api := SourceUnit{
 		Filename: "/project/src/app/api.trb", ModulePath: "app/api", Package: "api",
-		Source: []byte(`import trb/platform/ruby/native
+		Source: []byte(`activate trb/platform/ruby/native
 def configure(required:, raw: nil): String
 	return "configured"
 end

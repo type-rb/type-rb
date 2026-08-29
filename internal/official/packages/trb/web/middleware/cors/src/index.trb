@@ -1,5 +1,5 @@
 import { Context, Next, Request, Response, empty } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 
 enum PreflightMaxAge
 	Disabled
@@ -15,17 +15,6 @@ record CORSOptions
 	max_age: PreflightMaxAge
 end
 
-def default_options(): CORSOptions
-	return CORSOptions.new(
-		allow_origins: ["*"],
-		allow_methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
-		allow_headers: [],
-		expose_headers: [],
-		credentials: false,
-		max_age: PreflightMaxAge::Disabled,
-	)
-end
-
 class CORSMiddleware implements Middleware
 	@options: CORSOptions
 
@@ -39,12 +28,25 @@ class CORSMiddleware implements Middleware
 	end
 end
 
-def middleware(options: CORSOptions = default_options()): Middleware
-	return CORSMiddleware.new(options)
-end
+module CORS
+	def self.default_options(): CORSOptions
+		return CORSOptions.new(
+			allow_origins: ["*"],
+			allow_methods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
+			allow_headers: [],
+			expose_headers: [],
+			credentials: false,
+			max_age: PreflightMaxAge::Disabled,
+		)
+	end
 
-def call(context: Context, next_handler: Next, options: CORSOptions = default_options()): Response
-	return _invoke(context, next_handler, options)
+	def self.middleware(options: CORSOptions = CORS.default_options()): Middleware
+		return CORSMiddleware.new(options)
+	end
+
+	def self.call(context: Context, next_handler: Next, options: CORSOptions = CORS.default_options()): Response
+		return _invoke(context, next_handler, options)
+	end
 end
 
 def _invoke(context: Context, next_handler: Next, options: CORSOptions): Response

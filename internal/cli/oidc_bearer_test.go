@@ -59,7 +59,6 @@ func TestOidcBearerAuthenticationAcrossAvailableBackends(t *testing.T) {
 			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
 				t.Fatalf("build status=%d stdout=%s stderr=%s", status, buildStdout.String(), buildStderr.String())
 			}
-
 			server := oidcBearerServerCommand(t, mode, filepath.Join(root, "build"))
 			var serverOutput bytes.Buffer
 			server.Stdout = &serverOutput
@@ -82,7 +81,7 @@ func TestOidcBearerAuthenticationAcrossAvailableBackends(t *testing.T) {
 
 			response := oidcBearerRequest(t, client, baseURL+"/protected", "")
 			if response.status != 401 || response.body != `{"error":"unauthorized"}` || response.authenticate != "Bearer" {
-				t.Fatalf("missing bearer response=%#v", response)
+				t.Fatalf("missing bearer response=%#v\n%s", response, serverOutput.String())
 			}
 
 			valid := identity.Token(t, identity.URL, "api", "user-1", identity.kid)
@@ -156,13 +155,13 @@ AUTH := bearer_options(
 
 def verify_all(requests: Array<Request>, options: OidcBearerOptions): Array<Result<OidcPrincipal, OidcAuthError>>
 	return requests.map do |request|
-		verified := bearer.verify(request, options)
+		verified := Bearer.verify(request, options)
 		verified
 	end
 end
 
 def call(context: Context, next_handler: Next): Response
-	return bearer.authenticate(context, next_handler, AUTH)
+	return Bearer.authenticate(context, next_handler, AUTH)
 end
 `, issuer),
 		"routes/protected/index.trb": `import { Result } from trb/std/result
@@ -170,7 +169,7 @@ import { Context, Response, text } from trb/web
 import trb/web/auth/bearer
 
 def get(context: Context): Response
-	case bearer.principal(context)
+	case Bearer.principal(context)
 	when Result::Ok(value)
 		return text(value.subject + ":" + value.roles.join(","))
 	when Result::Err(_error)

@@ -136,16 +136,19 @@ type Member struct {
 
 type Import struct {
 	Node                *ast.ImportStatement
+	ActivationNode      *ast.ActivateStatement
 	Kind                ImportKind
 	Path                string
 	ModulePath          string
 	Alias               string
 	Symbols             []string
+	SymbolAliases       map[string]string
 	Definition          *stdlib.Package
 	Exports             map[string]Export
 	Filename            string
 	CompilerGenerated   bool
 	DeclarationProvider bool
+	RootStable          bool
 }
 
 func (i *Import) RuntimePath() string {
@@ -156,6 +159,16 @@ func (i *Import) RuntimePath() string {
 		return ""
 	}
 	return i.Path
+}
+
+func (i *Import) LocalName(name string) string {
+	if i == nil {
+		return name
+	}
+	if alias := i.SymbolAliases[name]; alias != "" {
+		return alias
+	}
+	return name
 }
 
 type Binding struct {
@@ -238,12 +251,15 @@ func (b Binding) Type() types.Type {
 }
 
 type Result struct {
-	Imports      map[*ast.ImportStatement]*Import
-	Packages     map[string]*Import
-	Symbols      map[string]Binding
-	NativeSyntax bool
-	Declarations *declaration.Catalog
-	Catalog      *Catalog
+	Imports          map[*ast.ImportStatement]*Import
+	Activations      map[*ast.ActivateStatement]*Import
+	Capabilities     []*Import
+	Packages         map[string]*Import
+	Symbols          map[string]Binding
+	GeneratedSymbols map[string]Binding
+	NativeSyntax     bool
+	Declarations     *declaration.Catalog
+	Catalog          *Catalog
 }
 
 type Options struct {
@@ -273,6 +289,7 @@ type Catalog struct {
 	Modules            map[string]*Module
 	CompilerOwnedTypes map[string]Export
 	typeAliases        map[string]Export
+	ambiguousTypes     map[string]bool
 }
 
 func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic) {
@@ -280,6 +297,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		Modules:            map[string]*Module{},
 		CompilerOwnedTypes: map[string]Export{},
 		typeAliases:        map[string]Export{},
+		ambiguousTypes:     map[string]bool{},
 	}
 	diagnostics := map[string][]diagnostic.Diagnostic{}
 	for i := range modules {
@@ -294,6 +312,35 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 				Span:     module.Program.Span(),
 			})
 			continue
+		}
+		peer := strings.TrimSuffix(clean, "/index")
+		if peer == clean {
+			peer = pathpkg.Join(clean, "index")
+		}
+		if previous := catalog.Modules[peer]; previous != nil {
+			diagnostics[module.Filename] = append(diagnostics[module.Filename], diagnostic.Diagnostic{
+				Severity: diagnostic.Error,
+				Message:  fmt.Sprintf("module paths %s and %s define the same import root; provided by %s and %s", clean, peer, module.Filename, previous.Filename),
+				Span:     module.Program.Span(),
+			})
+			continue
+		}
+		if !module.DeclarationProvider {
+			wanted := pathRootKey(logicalImportSegment(clean))
+			var roots []string
+			for name, exported := range module.Exports {
+				if rootEligible(exported.Kind) && declarationRootKey(name) == wanted {
+					roots = append(roots, name)
+				}
+			}
+			if len(roots) > 1 {
+				sort.Strings(roots)
+				diagnostics[module.Filename] = append(diagnostics[module.Filename], diagnostic.Diagnostic{
+					Severity: diagnostic.Error,
+					Message:  fmt.Sprintf("root-stable module %s declares multiple matching roots: %s", clean, strings.Join(roots, ", ")),
+					Span:     module.Program.Span(),
+				})
+			}
 		}
 		catalog.Modules[clean] = module
 	}
@@ -311,12 +358,10 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
 				continue
 			}
-			if previous := typeOwners[name]; previous != nil {
-				diagnostics[module.Filename] = append(diagnostics[module.Filename], diagnostic.Diagnostic{
-					Severity: diagnostic.Error,
-					Message:  fmt.Sprintf("exported type %s is already declared in %s", name, previous.Filename),
-					Span:     exported.Span,
-				})
+			if typeOwners[name] != nil || catalog.ambiguousTypes[name] {
+				delete(typeOwners, name)
+				delete(typesByName, name)
+				catalog.ambiguousTypes[name] = true
 				continue
 			}
 			copy := exported
@@ -415,47 +460,84 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 
 func Resolve(program *ast.Program, options Options) (Result, []diagnostic.Diagnostic) {
 	result := Result{
-		Imports:      map[*ast.ImportStatement]*Import{},
-		Packages:     map[string]*Import{},
-		Symbols:      map[string]Binding{},
-		Declarations: options.Declarations,
-		Catalog:      options.Catalog,
+		Imports:          map[*ast.ImportStatement]*Import{},
+		Activations:      map[*ast.ActivateStatement]*Import{},
+		Packages:         map[string]*Import{},
+		Symbols:          map[string]Binding{},
+		GeneratedSymbols: map[string]Binding{},
+		Declarations:     options.Declarations,
+		Catalog:          options.Catalog,
 	}
 	var diagnostics []diagnostic.Diagnostic
+	boundIdentities := map[string]string{}
+	generatedBoundIdentities := map[string]string{}
+	activatedTargets := map[string]ast.Node{}
 	for _, statement := range program.Statements {
-		node, ok := statement.(*ast.ImportStatement)
-		if !ok {
-			continue
-		}
-		resolved, items := resolveImport(node, options)
-		diagnostics = append(diagnostics, items...)
-		if resolved == nil {
-			continue
-		}
-		resolved.CompilerGenerated = options.CompilerGeneratedStart > 0 && node.Span().Start.Offset >= options.CompilerGeneratedStart
-		result.Imports[node] = resolved
-		if resolved.Definition != nil && resolved.Definition.NativeSyntax && resolved.Definition.Supports(options.Mode) {
-			result.NativeSyntax = true
-		}
-
-		if resolved.Alias != "" {
-			if previous := result.Packages[resolved.Alias]; previous != nil {
-				diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("import alias %s is already used by %s", resolved.Alias, previous.Path)))
-			} else {
-				result.Packages[resolved.Alias] = resolved
+		switch node := statement.(type) {
+		case *ast.ActivateStatement:
+			generated := options.CompilerGeneratedStart > 0 && node.Span().Start.Offset >= options.CompilerGeneratedStart
+			if generated {
+				diagnostics = append(diagnostics, errorAt(node, "compiler-generated source cannot activate capabilities"))
+				continue
 			}
-		}
-		if resolved.Alias == "" || len(node.Symbols) > 0 {
+			resolved, items := resolveActivation(node, options)
+			diagnostics = append(diagnostics, items...)
+			if resolved == nil {
+				continue
+			}
+			if previous := activatedTargets[resolved.RuntimePath()]; previous != nil {
+				diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("capabilities from %s are already enabled in this module", resolved.Path)))
+				continue
+			}
+			activatedTargets[resolved.RuntimePath()] = node
+			result.Activations[node] = resolved
+			result.Capabilities = append(result.Capabilities, resolved)
+			if resolved.Definition != nil && resolved.Definition.NativeSyntax && resolved.Definition.Supports(options.Mode) {
+				result.NativeSyntax = true
+			}
+			continue
+		case *ast.ImportStatement:
+			resolved, items := resolveImport(node, options)
+			diagnostics = append(diagnostics, items...)
+			if resolved == nil {
+				continue
+			}
+			resolved.CompilerGenerated = options.CompilerGeneratedStart > 0 && node.Span().Start.Offset >= options.CompilerGeneratedStart
+			result.Imports[node] = resolved
+			if !resolved.CompilerGenerated && importHasCapability(resolved, options.Mode) {
+				if previous := activatedTargets[resolved.RuntimePath()]; previous != nil {
+					diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("capabilities from %s are already enabled in this module", resolved.Path)))
+				} else {
+					activatedTargets[resolved.RuntimePath()] = node
+					result.Capabilities = append(result.Capabilities, resolved)
+					if resolved.Definition != nil && resolved.Definition.NativeSyntax && resolved.Definition.Supports(options.Mode) {
+						result.NativeSyntax = true
+					}
+				}
+			}
+			symbols := result.Symbols
+			identities := boundIdentities
+			if resolved.CompilerGenerated {
+				symbols = result.GeneratedSymbols
+				identities = generatedBoundIdentities
+			}
 			for _, name := range resolved.Symbols {
 				binding, ok := bindingFor(resolved, name)
 				if !ok {
 					continue
 				}
-				if previous, exists := result.Symbols[name]; exists {
-					diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("imported symbol %s conflicts with %s", name, previous.Import.Path)))
+				localName := resolved.LocalName(name)
+				identityKey := bindingIdentityKey(binding)
+				if previousLocal := identities[identityKey]; previousLocal != "" {
+					diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("declaration %s from %s is already imported as %s", name, resolved.Path, previousLocal)))
 					continue
 				}
-				result.Symbols[name] = binding
+				if previous, exists := symbols[localName]; exists {
+					diagnostics = append(diagnostics, errorAt(node, fmt.Sprintf("imported binding %s conflicts with %s", localName, previous.Import.Path)))
+					continue
+				}
+				symbols[localName] = binding
+				identities[identityKey] = localName
 			}
 		}
 	}
@@ -503,6 +585,9 @@ func (r Result) CatalogTypeAlias(name string) (Export, bool) {
 // source annotations must continue to use ImportedType.
 func (r Result) CatalogType(name string) (Binding, bool) {
 	if r.Catalog == nil {
+		return Binding{}, false
+	}
+	if r.Catalog.ambiguousTypes[name] {
 		return Binding{}, false
 	}
 	modulePaths := make([]string, 0, len(r.Catalog.Modules))
@@ -807,17 +892,16 @@ func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool)
 }
 
 func (r Result) TypeMember(typeName, name string) (Binding, bool) {
+	if binding, exists := r.Symbols[typeName]; exists && binding.Export != nil {
+		if result, ok := typeMemberBinding(binding, name); ok {
+			return result, true
+		}
+	}
 	for _, binding := range r.Symbols {
 		if binding.Export == nil || binding.Export.Name != typeName {
 			continue
 		}
-		member, ok := binding.Export.Members[name]
-		if !ok {
-			return Binding{}, false
-		}
-		copy := member
-		exported := *binding.Export
-		return Binding{Import: binding.Import, Name: name, Export: &exported, Member: &copy}, true
+		return typeMemberBinding(binding, name)
 	}
 	for _, imported := range r.Packages {
 		exported, exists := imported.Exports[typeName]
@@ -830,12 +914,70 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 		}
 		copy := member
 		exportCopy := exported
-		return Binding{Import: imported, Name: name, Export: &exportCopy, Member: &copy}, true
+		result := Binding{Import: imported, Name: name, Export: &exportCopy, Member: &copy}
+		if imported.Definition != nil && imported.Definition.Root == exported.Name {
+			if symbol, exists := imported.Definition.Symbols[name]; exists {
+				symbolCopy := symbol
+				result.Library = &symbolCopy
+			}
+		}
+		return result, true
 	}
 	return Binding{}, false
 }
 
+// ImportedTypeIdentity resolves an already-canonical declaration identity
+// across authored and compiler-generated import scopes. It does not make a
+// generated binding visible by source spelling; callers must already hold the
+// semantic identity from a resolved expression.
+func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding, bool) {
+	if declaration.Empty() {
+		return Binding{}, false
+	}
+	for _, symbols := range []map[string]Binding{r.Symbols, r.GeneratedSymbols} {
+		for _, binding := range symbols {
+			if binding.Export != nil && typeExport(binding.Export.Kind) && binding.DeclarationIdentity() == declaration {
+				return binding, true
+			}
+		}
+	}
+	return Binding{}, false
+}
+
+// TypeMemberIdentity resolves a member through an already-resolved type
+// identity, preserving aliases and authored/generated scope separation.
+func (r Result) TypeMemberIdentity(declaration identity.Declaration, name string) (Binding, bool) {
+	binding, ok := r.ImportedTypeIdentity(declaration)
+	if !ok {
+		return Binding{}, false
+	}
+	return typeMemberBinding(binding, name)
+}
+
+func typeMemberBinding(binding Binding, name string) (Binding, bool) {
+	if binding.Export == nil || binding.Import == nil {
+		return Binding{}, false
+	}
+	member, ok := binding.Export.Members[name]
+	if !ok {
+		return Binding{}, false
+	}
+	memberCopy := member
+	exportCopy := *binding.Export
+	result := Binding{Import: binding.Import, Name: name, Export: &exportCopy, Member: &memberCopy}
+	if binding.Import.Definition != nil && binding.Import.Definition.Root == exportCopy.Name {
+		if symbol, exists := binding.Import.Definition.Symbols[name]; exists {
+			symbolCopy := symbol
+			result.Library = &symbolCopy
+		}
+	}
+	return result, true
+}
+
 func (r Result) ImportedType(typeName string) (Binding, bool) {
+	if binding, exists := r.Symbols[typeName]; exists && binding.Export != nil && typeExport(binding.Export.Kind) {
+		return binding, true
+	}
 	for _, binding := range r.Symbols {
 		if binding.Export != nil && binding.Export.Name == typeName && (binding.Export.Kind == ClassExport || binding.Export.Kind == RecordExport || binding.Export.Kind == EnumExport || binding.Export.Kind == TypeAliasExport || binding.Export.Kind == NewtypeExport || binding.Export.Kind == InterfaceExport) {
 			return binding, true
@@ -849,6 +991,24 @@ func (r Result) ImportedType(typeName string) (Binding, bool) {
 		}
 	}
 	return Binding{}, false
+}
+
+// ImportedTypeAt resolves source-visible types from the authored or generated
+// import scope selected by the caller. Generated imports never satisfy an
+// authored reference, even when both scopes use the same local spelling.
+func (r Result) ImportedTypeAt(typeName string, generated bool) (Binding, bool) {
+	if generated {
+		if binding, exists := r.GeneratedSymbols[typeName]; exists && binding.Export != nil && typeExport(binding.Export.Kind) {
+			return binding, true
+		}
+		for _, binding := range r.GeneratedSymbols {
+			if binding.Export != nil && binding.Export.Name == typeName && typeExport(binding.Export.Kind) {
+				return binding, true
+			}
+		}
+		return Binding{}, false
+	}
+	return r.ImportedType(typeName)
 }
 
 // InferredType resolves a type that appears in the contract of an explicitly
@@ -993,6 +1153,76 @@ func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagn
 	return resolveProjectImport(node, options)
 }
 
+func resolveActivation(node *ast.ActivateStatement, options Options) (*Import, []diagnostic.Diagnostic) {
+	activationError := func(message string) (*Import, []diagnostic.Diagnostic) {
+		return nil, []diagnostic.Diagnostic{errorAt(node, message)}
+	}
+	if definition, ok := stdlib.Lookup(node.Path); ok {
+		if !definition.Supports(options.Mode) {
+			return activationError(fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))
+		}
+		resolved := &Import{ActivationNode: node, Kind: StandardImport, Path: node.Path, ModulePath: definition.ModulePath, Definition: definition, Exports: map[string]Export{}, RootStable: true}
+		if !importHasCapability(resolved, options.Mode) {
+			return activationError(fmt.Sprintf("package %s does not declare an activatable capability", node.Path))
+		}
+		return resolved, nil
+	}
+	if bundled, ok := official.Lookup(node.Path); ok {
+		definition := bundled.Definition
+		if !definition.Supports(options.Mode) {
+			return activationError(fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))
+		}
+		resolved := &Import{ActivationNode: node, Kind: OfficialImport, Path: node.Path, ModulePath: definition.ModulePath, Definition: definition, Exports: map[string]Export{}, RootStable: true}
+		if !importHasCapability(resolved, options.Mode) {
+			return activationError(fmt.Sprintf("package %s does not declare an activatable capability", node.Path))
+		}
+		return resolved, nil
+	}
+	if stdlib.IsReservedPath(node.Path) {
+		return activationError(fmt.Sprintf("unknown TypeRB package %s", node.Path))
+	}
+	candidates, valid := ProjectImportModuleCandidates(node.Path)
+	if !valid {
+		return activationError(fmt.Sprintf("invalid activation path %q", node.Path))
+	}
+	canonical := CanonicalPackageImport(candidates[0], options.PackageAliases)
+	if options.Catalog != nil {
+		module := options.Catalog.Modules[canonical]
+		if module == nil && len(candidates) > 1 {
+			module = options.Catalog.Modules[pathpkg.Join(canonical, "index")]
+		}
+		if module == nil {
+			return activationError(fmt.Sprintf("cannot resolve activation target %s", node.Path))
+		}
+		resolved := &Import{
+			ActivationNode: node, Kind: ProjectImport, Path: module.Path, ModulePath: module.Path,
+			Exports: module.Exports, Filename: module.Filename, DeclarationProvider: module.DeclarationProvider,
+			RootStable: !module.DeclarationProvider,
+		}
+		if !importHasCapability(resolved, options.Mode) {
+			return activationError(fmt.Sprintf("package %s does not declare an activatable capability", node.Path))
+		}
+		return resolved, nil
+	}
+	return activationError(fmt.Sprintf("cannot resolve activation target %s", node.Path))
+}
+
+func importHasCapability(imported *Import, mode string) bool {
+	if imported == nil {
+		return false
+	}
+	if imported.DeclarationProvider {
+		return true
+	}
+	definition := imported.Definition
+	return definition != nil && definition.Supports(mode) && (definition.NativeSyntax || definition.TypeProvider != "" || definition.JSX != nil || definition.Capability)
+}
+
+func bindingIdentityKey(binding Binding) string {
+	declaration := binding.DeclarationIdentity()
+	return fmt.Sprintf("%s\x00%v\x00%s", declaration.Module, declaration.Kind, declaration.Name)
+}
+
 func resolveNativeImport(node *ast.ImportStatement, catalog *nativepackage.Catalog) (*Import, []diagnostic.Diagnostic) {
 	if catalog.UnavailableReason != "" {
 		return nil, []diagnostic.Diagnostic{errorAt(node, catalog.UnavailableReason)}
@@ -1004,21 +1234,26 @@ func resolveNativeImport(node *ast.ImportStatement, catalog *nativepackage.Catal
 	if issue := module.Unsupported["*"]; issue != "" {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("native package %s cannot be represented safely: %s", node.Path, issue))}
 	}
-	resolved := &Import{Node: node, Kind: NativeImport, Path: node.Path, ModulePath: node.Path, Alias: node.Alias, Exports: map[string]Export{}}
+	resolved := &Import{
+		Node: node, Kind: NativeImport, Path: node.Path, ModulePath: node.Path,
+		SymbolAliases: cloneStringMap(node.SymbolAliases), Exports: map[string]Export{}, RootStable: false,
+	}
 	for name, exported := range module.Exports {
 		resolved.Exports[name] = nativeExport(name, exported, true)
 	}
 	for name, exported := range module.Records {
 		resolved.Exports[name] = nativeExport(name, exported, false)
 	}
-	if resolved.Alias == "" && len(node.Symbols) == 0 {
-		resolved.Alias = defaultAlias(node.Path)
-	}
 	if len(node.Symbols) > 0 {
 		resolved.Symbols = append([]string(nil), node.Symbols...)
-	} else if resolved.Alias == "" {
-		for name := range module.Exports {
-			resolved.Symbols = append(resolved.Symbols, name)
+	} else {
+		root, diagnostics := selectBareRoot(node, resolved)
+		if len(diagnostics) > 0 {
+			return nil, diagnostics
+		}
+		resolved.Symbols = []string{root}
+		if node.Alias != "" {
+			resolved.SymbolAliases[root] = node.Alias
 		}
 	}
 	for _, name := range resolved.Symbols {
@@ -1145,13 +1380,14 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s is internal to the TypeRB standard library", node.Path))}
 	}
 	resolved := &Import{
-		Node:       node,
-		Kind:       kind,
-		Path:       node.Path,
-		ModulePath: definition.ModulePath,
-		Alias:      node.Alias,
-		Definition: definition,
-		Exports:    map[string]Export{},
+		Node:          node,
+		Kind:          kind,
+		Path:          node.Path,
+		ModulePath:    definition.ModulePath,
+		SymbolAliases: cloneStringMap(node.SymbolAliases),
+		Definition:    definition,
+		Exports:       map[string]Export{},
+		RootStable:    true,
 	}
 	if !definition.Supports(options.Mode) {
 		return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not support mode %s", node.Path, options.Mode))}
@@ -1166,37 +1402,36 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 		resolved.Exports = CollectExports(program.Statements)
 		if options.Catalog != nil {
 			if module := options.Catalog.Modules[definition.ModulePath]; module != nil {
-				resolved.Exports = module.Exports
+				resolved.Exports = cloneExports(module.Exports)
 			}
 		}
 	}
+	addDefinedRoot(resolved, definition)
 	if definition.RuntimeAlias != "" {
 		resolved.Alias = definition.RuntimeAlias
-	} else if resolved.Alias == "" && len(node.Symbols) == 0 {
-		resolved.Alias = definition.DefaultAlias()
 	}
 	if len(node.Symbols) > 0 {
 		resolved.Symbols = append([]string(nil), node.Symbols...)
 	} else {
-		seen := map[string]bool{}
-		for name, symbol := range definition.Symbols {
-			if symbol.CompilerOnly {
-				continue
-			}
-			resolved.Symbols = append(resolved.Symbols, name)
-			seen[name] = true
+		root, diagnostics := selectBareRoot(node, resolved)
+		if len(diagnostics) > 0 {
+			return nil, diagnostics
 		}
-		for name := range resolved.Exports {
-			if seen[name] {
-				continue
-			}
-			resolved.Symbols = append(resolved.Symbols, name)
+		resolved.Symbols = []string{root}
+		if node.Alias != "" {
+			resolved.SymbolAliases[root] = node.Alias
 		}
 	}
 	for _, name := range resolved.Symbols {
 		symbol, librarySymbol := definition.Symbols[name]
 		_, sourceExport := resolved.Exports[name]
+		if definition.Root != "" {
+			librarySymbol = false
+		}
 		if !librarySymbol && !sourceExport {
+			if root := resolved.Exports[definition.Root]; root.Members[name].Name != "" {
+				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s as a top-level declaration; use %s.%s through the root import", node.Path, name, definition.Root, name))}
+			}
 			return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s", node.Path, name))}
 		}
 		if librarySymbol && symbol.CompilerOnly && !options.CompilerOwned {
@@ -1214,7 +1449,7 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 	}
 	clean := moduleCandidates[0]
 	canonical := CanonicalPackageImport(clean, options.PackageAliases)
-	resolved := &Import{Node: node, Kind: ProjectImport, Path: canonical, Alias: node.Alias, Exports: map[string]Export{}}
+	resolved := &Import{Node: node, Kind: ProjectImport, Path: canonical, SymbolAliases: cloneStringMap(node.SymbolAliases), Exports: map[string]Export{}, RootStable: true}
 	if options.Catalog != nil {
 		module := options.Catalog.Modules[canonical]
 		if module == nil && len(moduleCandidates) > 1 {
@@ -1223,8 +1458,12 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 		if module != nil {
 			resolved.Path = module.Path
 			resolved.Filename = module.Filename
-			resolved.Exports = module.Exports
+			resolved.Exports = cloneExports(module.Exports)
 			resolved.DeclarationProvider = module.DeclarationProvider
+			resolved.RootStable = !module.DeclarationProvider
+			if module.DeclarationProvider {
+				addDeclarationProviderRoots(resolved, options.Declarations)
+			}
 			return finalizeProjectImport(resolved)
 		}
 		// Ruby projects may explicitly import an opaque .rb file which is not a
@@ -1272,9 +1511,42 @@ func resolveProjectImport(node *ast.ImportStatement, options Options) (*Import, 
 		// the common Zeitwerk case, infer the constant from the file basename.
 		name := constantName(pathpkg.Base(clean))
 		resolved.Exports[name] = Export{Name: name, Kind: ClassExport, Type: types.FromName(name)}
+		resolved.RootStable = false
 	}
 
 	return finalizeProjectImport(resolved)
+}
+
+// addDeclarationProviderRoots exposes a provider's real top-level namespace as
+// the package declaration root. Qualified declarations such as Pagy::Offset
+// and Pagy::Method establish Pagy without inventing an activation-only symbol.
+func addDeclarationProviderRoots(imported *Import, catalog *declaration.Catalog) {
+	if imported == nil || catalog == nil {
+		return
+	}
+	provider := strings.TrimSuffix(imported.RuntimePath(), "/index")
+	add := func(name, owner string) {
+		if owner != provider {
+			return
+		}
+		root, _, qualified := strings.Cut(name, "::")
+		if !qualified || root == "" {
+			return
+		}
+		if _, exists := imported.Exports[root]; !exists {
+			imported.Exports[root] = Export{Name: root, Kind: ModuleExport, Type: types.FromName(root)}
+		}
+	}
+	for name, declared := range catalog.Types {
+		if declared != nil {
+			add(name, declared.Provider)
+		}
+	}
+	for name, declared := range catalog.Modules {
+		if declared != nil {
+			add(name, declared.Provider)
+		}
+	}
 }
 
 // ProjectImportModuleCandidates returns the canonical module identities that
@@ -1353,13 +1625,201 @@ func CanonicalPackageImport(importPath string, aliases map[string]string) string
 	return importPath
 }
 
+func cloneStringMap(input map[string]string) map[string]string {
+	result := make(map[string]string, len(input))
+	for name, value := range input {
+		result[name] = value
+	}
+	return result
+}
+
+func cloneExports(input map[string]Export) map[string]Export {
+	result := make(map[string]Export, len(input))
+	for name, exported := range input {
+		result[name] = exported
+	}
+	return result
+}
+
+func addDefinedRoot(imported *Import, definition *stdlib.Package) {
+	if imported == nil || definition == nil || definition.Root == "" {
+		return
+	}
+	members := map[string]Member{}
+	root, existingRoot := imported.Exports[definition.Root]
+	if existingRoot {
+		for name, member := range root.Members {
+			members[name] = member
+		}
+	}
+	for name, symbol := range definition.Symbols {
+		if symbol.CompilerOnly {
+			continue
+		}
+		parameters := make([]callsignature.Parameter, len(symbol.Parameters))
+		for index, parameter := range symbol.Parameters {
+			kind := callsignature.Positional
+			label := ""
+			if parameter.Keyword {
+				kind = callsignature.NamedOnly
+				label = parameter.Name
+			}
+			presence := callsignature.Required
+			if parameter.Optional {
+				presence = callsignature.Omittable
+			}
+			parameters[index] = callsignature.Parameter{Kind: kind, Label: label, Type: parameter.Type, Presence: presence}
+		}
+		members[name] = Member{
+			Name: name, Kind: FunctionExport, Type: symbol.Return, TypeParameters: append([]string(nil), symbol.TypeParameters...),
+			Parameters: parameters, Variadic: symbol.Variadic, Class: true,
+		}
+	}
+	for name, exported := range imported.Exports {
+		if name == definition.Root || exported.Kind != FunctionExport {
+			continue
+		}
+		if _, libraryMember := members[name]; !libraryMember {
+			members[name] = Member{
+				Name: name, Kind: FunctionExport, Type: exported.Type,
+				TypeParameters: append([]string(nil), exported.TypeParameters...),
+				Parameters:     append([]callsignature.Parameter(nil), exported.Parameters...),
+				Variadic:       exported.Variadic, Class: true, Generated: "package_root",
+				CallResultBridge: exported.CallResultBridge,
+			}
+		} else {
+			member := members[name]
+			member.Generated = "package_root"
+			members[name] = member
+		}
+		delete(imported.Exports, name)
+	}
+	if !existingRoot {
+		root = Export{Name: definition.Root, Kind: ModuleExport, Type: types.FromName(definition.Root)}
+	} else {
+		root.Members = nil
+	}
+	root.Members = members
+	imported.Exports[definition.Root] = root
+}
+
+func selectBareRoot(node *ast.ImportStatement, imported *Import) (string, []diagnostic.Diagnostic) {
+	segment := logicalImportSegment(imported.RuntimePath())
+	wanted := pathRootKey(segment)
+	var candidates []string
+	var available []string
+	for name, exported := range imported.Exports {
+		if imported.Kind == NativeImport && !exported.NativeExported {
+			continue
+		}
+		available = append(available, name)
+		if rootEligible(exported.Kind) && declarationRootKey(name) == wanted {
+			candidates = append(candidates, name)
+		}
+	}
+	if imported.Definition != nil && imported.Definition.Root == "" {
+		for name, symbol := range imported.Definition.Symbols {
+			if !symbol.CompilerOnly {
+				available = append(available, name)
+			}
+		}
+	}
+	sort.Strings(candidates)
+	sort.Strings(available)
+	switch len(candidates) {
+	case 1:
+		return candidates[0], nil
+	case 0:
+		message := fmt.Sprintf("import %s has no root declaration matching %s", node.Path, segment)
+		if len(available) > 0 {
+			message += "; available top-level declarations: " + strings.Join(available, ", ")
+		}
+		return "", []diagnostic.Diagnostic{errorAt(node, message)}
+	default:
+		return "", []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("import %s has multiple root declarations matching %s: %s; use an exact named import", node.Path, segment, strings.Join(candidates, ", ")))}
+	}
+}
+
+// RootDeclaration returns the unique current declaration-root candidate for
+// tooling. RootStable separately determines whether a formatter may rely on
+// that uniqueness for canonical form conversion.
+func RootDeclaration(imported *Import) (string, bool) {
+	if imported == nil {
+		return "", false
+	}
+	wanted := pathRootKey(logicalImportSegment(imported.RuntimePath()))
+	root := ""
+	for name, exported := range imported.Exports {
+		if imported.Kind == NativeImport && !exported.NativeExported {
+			continue
+		}
+		if !rootEligible(exported.Kind) || declarationRootKey(name) != wanted {
+			continue
+		}
+		if root != "" {
+			return "", false
+		}
+		root = name
+	}
+	return root, root != ""
+}
+
+// MatchesDeclarationRoot reports whether name has the declaration-root key
+// derived from modulePath. Callers remain responsible for restricting name to
+// a root-eligible declaration kind.
+func MatchesDeclarationRoot(modulePath, name string) bool {
+	return pathRootKey(logicalImportSegment(modulePath)) == declarationRootKey(name)
+}
+
+func logicalImportSegment(modulePath string) string {
+	clean := pathpkg.Clean(strings.TrimSuffix(modulePath, ".trb"))
+	if pathpkg.Base(clean) == "index" {
+		clean = pathpkg.Dir(clean)
+	}
+	return pathpkg.Base(clean)
+}
+
+func pathRootKey(name string) string {
+	return asciiFold(strings.ReplaceAll(name, "_", ""))
+}
+
+func declarationRootKey(name string) string {
+	return asciiFold(name)
+}
+
+func asciiFold(value string) string {
+	var result strings.Builder
+	result.Grow(len(value))
+	for _, char := range value {
+		if char >= 'A' && char <= 'Z' {
+			char += 'a' - 'A'
+		}
+		result.WriteRune(char)
+	}
+	return result.String()
+}
+
+func rootEligible(kind ExportKind) bool {
+	switch kind {
+	case ClassExport, RecordExport, EnumExport, TypeAliasExport, NewtypeExport, ModuleExport, InterfaceExport, ValueExport:
+		return true
+	default:
+		return false
+	}
+}
+
 func finalizeProjectImport(resolved *Import) (*Import, []diagnostic.Diagnostic) {
 	node := resolved.Node
 	if len(node.Symbols) > 0 {
 		resolved.Symbols = append([]string(nil), node.Symbols...)
-	} else if resolved.Alias == "" {
-		for name := range resolved.Exports {
-			resolved.Symbols = append(resolved.Symbols, name)
+	} else {
+		root, diagnostics := selectBareRoot(node, resolved)
+		if len(diagnostics) > 0 {
+			return nil, diagnostics
+		}
+		resolved.Symbols = []string{root}
+		if node.Alias != "" {
+			resolved.SymbolAliases[root] = node.Alias
 		}
 	}
 	for _, name := range resolved.Symbols {
@@ -1515,8 +1975,20 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			if public(node.Name) {
 				exported := Export{Name: node.Name, Kind: ModuleExport, Type: types.FromName(node.Name), Members: map[string]Member{}, Span: node.Span()}
 				for _, statement := range node.Body {
-					if value, ok := statement.(*ast.VariableStatement); ok && value.Constant && public(value.Name) {
-						exported.Members[value.Name] = Member{Name: value.Name, Kind: ValueExport, Type: variableType(value), Class: true}
+					switch item := statement.(type) {
+					case *ast.VariableStatement:
+						if item.Constant && public(item.Name) {
+							exported.Members[item.Name] = Member{Name: item.Name, Kind: ValueExport, Type: variableType(item), Class: true}
+						}
+					case *ast.MethodStatement:
+						if item.Class && public(item.Name) {
+							parameterTypes, variadic := parameters(item.Parameters)
+							member := Member{Name: item.Name, Kind: FunctionExport, Type: returnTypeRef(item.ReturnType), Parameters: parameterTypes, Variadic: variadic, Class: true}
+							for _, parameter := range item.TypeParameters {
+								member.TypeParameters = append(member.TypeParameters, parameter.Name)
+							}
+							exported.Members[item.Name] = member
+						}
 					}
 				}
 				result[node.Name] = exported

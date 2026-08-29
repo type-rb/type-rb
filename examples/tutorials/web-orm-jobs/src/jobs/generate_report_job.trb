@@ -1,6 +1,6 @@
-import { Report } from models/report
+import models/report
 import { Job, JobError, JobResult, maximum_attempts, queue } from trb/jobs
-import { Unit } from trb/std/unit
+import trb/std/unit
 
 class GenerateReportJob < Job
 	queue("reports")

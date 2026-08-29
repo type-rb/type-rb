@@ -251,7 +251,7 @@ end
 }
 
 func TestNestedTypesStayQualifiedInTypeScriptJSONCodecs(t *testing.T) {
-	source := []byte(`import { JsonError, decode, encode } from trb/std/json
+	source := []byte(`import { JSON, JsonError } from trb/std/json
 import { Result } from trb/std/result
 
 module Services
@@ -265,15 +265,15 @@ module Services
 end
 
 def decode_box(source: String): Result<Box, JsonError>
-	return decode<Box>(source)
+	return JSON.decode<Box>(source)
 end
 
 def encode_box(box: Box): Result<String, JsonError>
-	return encode(box)
+	return JSON.encode(box)
 end
 
 def decode_status(source: String): Result<Status, JsonError>
-	return decode<Status>(source)
+	return JSON.decode<Status>(source)
 end
 `)
 	artifacts, err := CompileProject([]SourceUnit{{
@@ -477,7 +477,7 @@ end
 	}
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
-		Source: []byte(`import models/box as models
+		Source: []byte(`import { Box as ModelBox } from models/box
 
 module Services
 	record Box<T>
@@ -487,7 +487,7 @@ end
 
 def main()
 	local := Services::Box<String>.new(value: "local")
-	remote := models::Box<String>.new(value: "remote")
+	remote := ModelBox<String>.new(value: "remote")
 	puts(local.value)
 	puts(remote.value)
 	return
@@ -501,7 +501,7 @@ end
 		t.Fatal(err)
 	}
 	output := string(artifactForModule(artifacts, "main").Output)
-	for _, expected := range []string{"const local: Services.Box<string>", "const remote: models.Box<string>"} {
+	for _, expected := range []string{"const local: Services.Box<string>", "const remote: ModelBox<string>"} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript is missing distinct qualified annotation %q:\n%s", expected, output)
 		}
@@ -574,7 +574,7 @@ end
 	}
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
-		Source: []byte(`import models/box as models
+		Source: []byte(`import { Box as ModelBox, Wrapper as ModelWrapper } from models/box
 import { Result } from trb/std/result
 
 module Services
@@ -589,13 +589,13 @@ enum Toggle
 end
 
 def main()
-	boxes := [models::Box.new()]
-	mut mutable_boxes := [models::Box.new()]
-	mutable_boxes = [models::Box.new()]
-	by_name := {"remote" => models::Box.new()}
-	combined := boxes.concat([models::Box.new()])
-	merged := by_name.merge({"second" => models::Box.new()})
-	_nullable: Box? := models::Box.new()
+	boxes := [ModelBox.new()]
+	mut mutable_boxes := [ModelBox.new()]
+	mutable_boxes = [ModelBox.new()]
+	by_name := {"remote" => ModelBox.new()}
+	combined := boxes.concat([ModelBox.new()])
+	merged := by_name.merge({"second" => ModelBox.new()})
+	_nullable: ModelBox? := ModelBox.new()
 	first := boxes.first()
 	mutable_first := mutable_boxes.first()
 	mapped := boxes.map do |box|
@@ -610,33 +610,33 @@ def main()
 		box.remote == "remote"
 	end
 	fetched := boxes.try_fetch(0)
-	wrapped := Result<Box, String>::Ok(models::Box.new())
-	failed := Result<String, Box>::Err(models::Box.new())
-	generic := models::Wrapper<Box>.new(value: models::Box.new())
+	wrapped := Result<ModelBox, String>::Ok(ModelBox.new())
+	failed := Result<String, ModelBox>::Err(ModelBox.new())
+	generic := ModelWrapper<ModelBox>.new(value: ModelBox.new())
 	conditional := if true
-		models::Box.new()
+		ModelBox.new()
 	else
-		models::Box.new()
+		ModelBox.new()
 	end
 	conditional_local := if true
-		inside := models::Box.new()
+		inside := ModelBox.new()
 		inside
 	else
-		fallback := models::Box.new()
+		fallback := ModelBox.new()
 		fallback
 	end
 	selected := case Toggle::On
 	when Toggle::On
-		models::Box.new()
+		ModelBox.new()
 	when Toggle::Off
-		models::Box.new()
+		ModelBox.new()
 	end
 	selected_local := case Toggle::On
 	when Toggle::On
-		inside := models::Box.new()
+		inside := ModelBox.new()
 		inside
 	when Toggle::Off
-		fallback := models::Box.new()
+		fallback := ModelBox.new()
 		fallback
 	end
 	selected_payload := case fetched
@@ -644,7 +644,7 @@ def main()
 		copied := value
 		copied
 	when Result::Err(_error)
-		models::Box.new()
+		ModelBox.new()
 	end
 	boxes.each do |box|
 		each_copy := box
@@ -698,33 +698,33 @@ end
 	}
 	output := string(artifactForModule(artifacts, "main").Output)
 	for _, expected := range []string{
-		"const boxes: Array<models.Box>",
-		"const by_name: Record<string, models.Box>",
-		"const combined: Array<models.Box>",
-		"const merged: Record<string, models.Box>",
-		"const _nullable: models.Box | null",
-		"const first: models.Box",
-		"const mutable_first: models.Box",
-		"const mapped: Array<models.Box>",
-		"const concurrent: Array<models.Box>",
-		"const found: models.Box | null",
-		"const fetched: Result<models.Box, IndexLookupError>",
-		"const wrapped: Result<models.Box, string>",
-		"Result.Ok<models.Box, string>",
-		"const failed: Result<string, models.Box>",
-		"Result.Err<string, models.Box>",
-		"const generic: models.Wrapper<models.Box>",
-		"models.__trbRecordNewWrapper<models.Box>",
-		"const conditional: models.Box",
-		"const conditional_local: models.Box",
-		"const selected: models.Box",
-		"const selected_local: models.Box",
-		"const selected_payload: models.Box",
-		"const copied: models.Box",
-		"const each_copy: models.Box",
-		"const statement_copy: models.Box",
-		"values: Array<models.Box>",
-		"values: Record<string, models.Box>",
+		"const boxes: Array<ModelBox>",
+		"const by_name: Record<string, ModelBox>",
+		"const combined: Array<ModelBox>",
+		"const merged: Record<string, ModelBox>",
+		"const _nullable: ModelBox | null",
+		"const first: ModelBox",
+		"const mutable_first: ModelBox",
+		"const mapped: Array<ModelBox>",
+		"const concurrent: Array<ModelBox>",
+		"const found: ModelBox | null",
+		"const fetched: Result<ModelBox, IndexLookupError>",
+		"const wrapped: Result<ModelBox, string>",
+		"Result.Ok<ModelBox, string>",
+		"const failed: Result<string, ModelBox>",
+		"Result.Err<string, ModelBox>",
+		"const generic: ModelWrapper<ModelBox>",
+		"__trbRecordNewModelWrapper<ModelBox>",
+		"const conditional: ModelBox",
+		"const conditional_local: ModelBox",
+		"const selected: ModelBox",
+		"const selected_local: ModelBox",
+		"const selected_payload: ModelBox",
+		"const copied: ModelBox",
+		"const each_copy: ModelBox",
+		"const statement_copy: ModelBox",
+		"values: Array<ModelBox>",
+		"values: Record<string, ModelBox>",
 	} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("generated TypeScript lost exact nested identity %q:\n%s", expected, output)
@@ -748,7 +748,7 @@ end
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import { User } from models/user
-import { JsonError, decode } from trb/std/json
+import { JSON, JsonError } from trb/std/json
 import { Result } from trb/std/result
 
 module Services
@@ -758,7 +758,7 @@ module Services
 end
 
 def decode_user(source: String): Result<User, JsonError>
-	return decode<User>(source)
+	return JSON.decode<User>(source)
 end
 `),
 	}
@@ -828,11 +828,11 @@ end
 	}
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
-		Source: []byte(`import models/config as configs
+		Source: []byte(`import { Config, Required } from models/config
 
 def main()
-	puts(configs::Config.new().values[0].to_s())
-	puts(configs::Required.new(value: 42).value.to_s())
+	puts(Config.new().values[0].to_s())
+	puts(Required.new(value: 42).value.to_s())
 	return
 end
 `),

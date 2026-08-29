@@ -1,6 +1,6 @@
 import { EnqueueError, EnqueueRequest, JobAdapter, JobReference } from trb/jobs
 import trb/internal/jobs/sql as native_jobs
-import { Result } from trb/std/result
+import trb/std/result
 import { Duration, Instant } from trb/std/time
 
 enum SQLDialect

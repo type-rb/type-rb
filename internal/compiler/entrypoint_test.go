@@ -57,7 +57,7 @@ end
 }
 
 func TestRubyNativeNestedMainIsNotTheRunnableEntrypoint(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 begin
 	def main(value: Integer)

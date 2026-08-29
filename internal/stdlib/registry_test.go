@@ -71,11 +71,23 @@ func TestPublicPortablePackagesExcludeInternalContracts(t *testing.T) {
 		previous = definition.Path
 		paths[definition.Path] = true
 	}
-	if !paths["trb/std/math"] || !paths["trb/std/random"] || !paths["trb/std/hash"] {
+	if !paths["trb/std/math"] || !paths["trb/std/random"] || !paths["trb/std/digest"] {
 		t.Fatalf("public package catalog is missing REPL candidates: %#v", paths)
 	}
 	if paths["trb/internal/arrays"] || paths["trb/internal/hashes"] {
 		t.Fatalf("internal collection contracts are public: %#v", paths)
+	}
+}
+
+func TestPublicBuiltinRootsRequireAnExplicitCompilerOwnedExtension(t *testing.T) {
+	for packagePath, definition := range registry {
+		if definition == nil || definition.Internal || definition.Root == "" {
+			continue
+		}
+		builtin := types.FromName(definition.Root).Kind != types.Named
+		if builtin != definition.BuiltinRoot {
+			t.Errorf("package %s root %s: builtin=%v, BuiltinRoot=%v", packagePath, definition.Root, builtin, definition.BuiltinRoot)
+		}
 	}
 }
 
@@ -255,7 +267,7 @@ func TestPortableURLContract(t *testing.T) {
 }
 
 func TestPortableHashContract(t *testing.T) {
-	definition, ok := Lookup("trb/std/hash")
+	definition, ok := Lookup("trb/std/digest")
 	if !ok {
 		t.Fatal("hash package is missing")
 	}

@@ -240,8 +240,8 @@ func TestCompletionPTYChild(t *testing.T) {
 			}},
 		},
 		{
-			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/hash",
-			Import: &languageservice.Import{Path: "trb/std/hash", ModulePath: "trb/std/hash/index", Symbol: "sha256"},
+			Name: "sha256", Kind: languageservice.CompletionFunction, Detail: "sha256(value: Bytes): Bytes — trb/std/digest",
+			Import: &languageservice.Import{Path: "trb/std/digest", ModulePath: "trb/std/digest/index", Symbol: "sha256"},
 			Call:   &languageservice.CallInfo{ParameterCount: 1},
 		},
 		{

@@ -1,6 +1,7 @@
 package typescript
 
 import (
+	pathpkg "path"
 	"strconv"
 	"strings"
 
@@ -42,7 +43,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	unicodeAlias := "unicode"
 	pathAlias := "path"
 	reference := expressionReference(call.Callee)
-	if reference != nil && reference.Alias != "" {
+	compilerRootRuntime := reference != nil && (reference.Package == "trb/std/path/index" || reference.Package == "trb/std/unicode/index")
+	if compilerRootRuntime {
+		pathAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
+		unicodeAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
+	}
+	if reference != nil && reference.Alias != "" && !compilerRootRuntime {
 		unicodeAlias = reference.Alias
 		pathAlias = reference.Alias
 	}
@@ -182,17 +188,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/json/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONParse(call, arguments[0], false)
+		return g.tsJSONParse(call, arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/jsonc/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONParse(call, arguments[0], true)
+		return g.tsJSONParse(call, arguments[0], true)
 	case "trb.internal.json.stringify":
 		if runtimeCall, ok := g.importedJSONCall(call, "trb/std/json/index", arguments); ok {
 			return runtimeCall
 		}
-		return tsJSONStringify(call, arguments[0])
+		return g.tsJSONStringify(call, arguments[0])
 	case "trb.internal.json.decode":
 		return g.tsJSONDecode(call, arguments[0])
 	case "trb.internal.json.encode":
@@ -554,7 +560,8 @@ func (g *generator) tsWebContextFetch(call *ir.Call, arguments []string) string 
 	valueType := g.tsTypeWithIdentity(call.ExprType().Args[0], identityArgument(identity, 0))
 	errorType := g.tsTypeWithIdentity(call.ExprType().Args[1], identityArgument(identity, 1))
 	resultType := g.tsTypeWithIdentity(call.ExprType(), identity)
-	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return Result.Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return Result.Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
+	result := g.runtimeName("Result")
+	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return " + result + ".Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return " + result + ".Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
 }
 
 func portableArrayString(value string, typ types.Type) string {
@@ -599,10 +606,11 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	decoded := g.tsJSONDecode(&decodeCall, "source")
 	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.RequestError"
+	result := g.runtimeName("Result")
 	errResult := func(value string) string {
-		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+		return result + ".Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
-	okResult := "Result.Ok<" + valueType + ", " + errorType + ">"
+	okResult := result + ".Ok<" + valueType + ", " + errorType + ">"
 	missing := "__trb_web.RequestError.MissingContentType"
 	duplicate := "__trb_web.RequestError.DuplicateContentType"
 	unsupported := "__trb_web.RequestError.UnsupportedContentType(contentTypes[0]!)"
@@ -617,14 +625,15 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 	}
 	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.ParameterError"
-	resultType := "Result<" + valueType + ", " + errorType + ">"
+	result := g.runtimeName("Result")
+	resultType := result + "<" + valueType + ", " + errorType + ">"
 	sourceName := "Path"
 	if source == "query" {
 		sourceName = "Query"
 	}
 	sourceValue := "__trb_web.ParameterSource." + sourceName
 	errResult := func(value string) string {
-		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+		return result + ".Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
 	missing := func(name string) string {
 		return errResult("__trb_web.ParameterError.Missing({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
@@ -673,7 +682,7 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 		}
 		constructor = append(constructor, field.Name+": "+variable)
 	}
-	body.WriteString("return Result.Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
+	body.WriteString("return " + result + ".Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
 	return "((): " + resultType + " => { const parameterReceiver = " + receiver + "; " + body.String() + " })()"
 }
 

@@ -43,6 +43,7 @@ func Program(checked checker.Result) *ir.Program {
 		RubyLoader:        checked.Program.RubyLoader,
 		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
 		UsesJSX:           l.usesJSX,
+		NativeSyntax:      checked.Resolution.NativeSyntax,
 		Declarations:      checked.Resolution.Declarations,
 		Statements:        statements,
 	}
@@ -197,7 +198,7 @@ func contractTypeSymbols(imported *resolver.Import, native bool) []string {
 
 func contractTypeExport(kind resolver.ExportKind) bool {
 	switch kind {
-	case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.NewtypeExport, resolver.InterfaceExport:
+	case resolver.ClassExport, resolver.RecordExport, resolver.EnumExport, resolver.TypeAliasExport, resolver.NewtypeExport, resolver.ModuleExport, resolver.InterfaceExport:
 		return true
 	default:
 		return false
@@ -431,6 +432,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			Path:                      n.Path,
 			DeclaredPath:              n.Path,
 			Symbols:                   append([]string(nil), n.Symbols...),
+			SymbolAliases:             map[string]string{},
 			Alias:                     n.Alias,
 			SymbolKinds:               map[string]string{},
 			SymbolTypes:               map[string]types.Type{},
@@ -445,6 +447,9 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		if resolved := l.checked.Resolution.Imports[n]; resolved != nil {
 			result.Path = resolved.RuntimePath()
 			result.Symbols = append([]string(nil), resolved.Symbols...)
+			for name, alias := range resolved.SymbolAliases {
+				result.SymbolAliases[name] = alias
+			}
 			result.Alias = resolved.Alias
 			result.Namespace = len(n.Symbols) == 0 && resolved.Alias != ""
 			result.Kind = string(resolved.Kind)
@@ -487,6 +492,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			result.GeneratedTypeSymbols = contractTypeSymbols(resolved, resolved.Kind == resolver.NativeImport)
 			result.TypeContracts = typeContracts(resolved, result.GeneratedTypeSymbols)
 			if resolved.Definition != nil {
+				result.QualifiedRoot = resolved.Definition.Root
 				for name, symbol := range resolved.Definition.Symbols {
 					if result.SymbolTypes[name].Kind == "" {
 						result.SymbolKinds[name] = "function"
@@ -518,10 +524,14 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 					}
 				}
 				for name := range l.checked.ImportUses[n] {
-					if name != "" && !result.RuntimeIndependentSymbols[name] {
+					if name != "" {
+						result.UsedSymbols = append(result.UsedSymbols, name)
+					}
+					if name != "" && name != result.QualifiedRoot && !result.RuntimeIndependentSymbols[name] {
 						result.RuntimeRequired = true
 					}
 				}
+				sort.Strings(result.UsedSymbols)
 			}
 		}
 		return result
@@ -1359,6 +1369,7 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
 		result.ClassMember = binding.Member.Class
+		result.PackageRoot = binding.Member.Generated == "package_root"
 		if binding.Export != nil {
 			result.Owner = binding.Export.Name
 		}
@@ -1388,6 +1399,7 @@ func referenceFromBinding(binding *resolver.Binding) *ir.Reference {
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)
 		result.ClassMember = binding.Member.Class
+		result.PackageRoot = binding.Member.Generated == "package_root"
 		if binding.Export != nil {
 			result.Owner = binding.Export.Name
 		}

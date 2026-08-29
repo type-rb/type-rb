@@ -152,12 +152,22 @@ func activeProviderNames(programs []*ast.Program) []string {
 	active := map[string]bool{}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
-			if imported, ok := statement.(*ast.ImportStatement); ok {
-				if definition, exists := stdlib.Lookup(imported.Path); exists && definition.TypeProvider != "" {
-					active[definition.TypeProvider] = true
-				} else if bundled, exists := official.Lookup(imported.Path); exists && bundled.Definition.TypeProvider != "" {
-					active[bundled.Definition.TypeProvider] = true
+			var importPath string
+			switch imported := statement.(type) {
+			case *ast.ImportStatement:
+				if program.CompilerGeneratedStart > 0 && imported.Span().Start.Offset >= program.CompilerGeneratedStart {
+					continue
 				}
+				importPath = imported.Path
+			case *ast.ActivateStatement:
+				importPath = imported.Path
+			default:
+				continue
+			}
+			if definition, exists := stdlib.Lookup(importPath); exists && definition.TypeProvider != "" {
+				active[definition.TypeProvider] = true
+			} else if bundled, exists := official.Lookup(importPath); exists && bundled.Definition.TypeProvider != "" {
+				active[bundled.Definition.TypeProvider] = true
 			}
 		}
 	}
@@ -174,11 +184,19 @@ func activeDeclarationProviderSources(programs []*ast.Program, context Context) 
 	for _, program := range programs {
 		aliases := context.PackageAliasesByModule[program.ModulePath]
 		for _, statement := range program.Statements {
-			imported, ok := statement.(*ast.ImportStatement)
-			if !ok {
+			var importPath string
+			switch imported := statement.(type) {
+			case *ast.ImportStatement:
+				if program.CompilerGeneratedStart > 0 && imported.Span().Start.Offset >= program.CompilerGeneratedStart {
+					continue
+				}
+				importPath = imported.Path
+			case *ast.ActivateStatement:
+				importPath = imported.Path
+			default:
 				continue
 			}
-			clean := pathpkg.Clean(strings.TrimSuffix(imported.Path, "/index"))
+			clean := pathpkg.Clean(strings.TrimSuffix(importPath, "/index"))
 			canonical := resolver.CanonicalPackageImport(clean, aliases)
 			active[canonical] = true
 		}
@@ -222,6 +240,16 @@ func mergeExternalDeclarations(target, provided *declaration.Catalog, provider s
 		}
 		if _, exists := target.Types[name]; exists {
 			return fmt.Errorf("declaration provider %s module %s conflicts with an existing type", provider, name)
+		}
+	}
+	for _, declared := range provided.Types {
+		if declared != nil {
+			declared.Provider = provider
+		}
+	}
+	for _, declared := range provided.Modules {
+		if declared != nil {
+			declared.Provider = provider
 		}
 	}
 	target.Merge(provided)

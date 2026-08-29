@@ -83,7 +83,7 @@ end
 		"Status202(response: Response<CreateReportResponse>)",
 		"Status204(response: Response<NoBody>)",
 		"def create_report(input: CreateReportInput, *, headers: Headers = Headers.new(), timeout_milliseconds: Integer? = nil): Result<CreateReportEndpointResult, RequestError>",
-		`path := "/" + "reports" + "/" + encode_component(input.params.id.value().to_s())`,
+		`path := "/" + "reports" + "/" + URL.encode_component(input.params.id.value().to_s())`,
 		"if query_value_0 != nil",
 		`QueryParameter.new(name: "page", value: query_value_0.to_s())`,
 		"input.query.tag.each do |query_item_1|",

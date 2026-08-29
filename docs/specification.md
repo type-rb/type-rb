@@ -1216,15 +1216,15 @@ pair := Box<Integer>.new(1).pair<String>("one")
 ### 4.1 Standard Result
 
 - `trb/std/result` exports the portable `Result<T, E>` payload enum with
-  `Ok(value: T)` and `Err(error: E)` variants. It is imported explicitly with
-  `import { Result } from trb/std/result`.
+  `Ok(value: T)` and `Err(error: E)` variants. Its declaration root is imported
+  explicitly with `import trb/std/result`.
 - Construction and handling use the ordinary generic enum rules. The baseline
   keeps both control-flow paths visible with explicit constructors and
   exhaustive pattern matching:
 
 <!-- trb-doc-test: specification-result-baseline -->
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 
 def unwrap(result: Result<Integer, String>): Integer
 	case result

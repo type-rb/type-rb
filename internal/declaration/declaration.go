@@ -78,7 +78,10 @@ type Member struct {
 }
 
 type Type struct {
-	Name           string
+	Name string
+	// Provider identifies the package-owned declaration provider that supplied
+	// this type. Built-in and project-derived declarations leave it empty.
+	Provider       string
 	TypeParameters []string
 	Superclass     string
 	// SourceModule identifies a provider declaration backed by a project
@@ -91,7 +94,10 @@ type Type struct {
 }
 
 type Module struct {
-	Name            string
+	Name string
+	// Provider identifies the package-owned declaration provider that supplied
+	// this module. Built-in and project-derived declarations leave it empty.
+	Provider        string
 	InstanceMembers map[string]Member
 }
 

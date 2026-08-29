@@ -48,7 +48,7 @@ end
 	source := projectGenerationSource(t, first, projectDispatchSourceID)
 	for _, expected := range []string{
 		"def __trb_jobs_dispatch(job_name: String, payload: String, payload_version: Integer): JobResult",
-		"argument0 := as_integer(payload_values[0]) catch |error|",
+		"argument0 := JSON.as_integer(payload_values[0]) catch |error|",
 		"argument1 := __trb_jobs_as_float(payload_values[1]) catch |error|",
 		"return SendReceiptJob.new().perform(argument0, argument1)",
 	} {
@@ -63,7 +63,7 @@ end
 	for _, expected := range []string{
 		"def __trb_jobs_SendReceiptJob_request(order_id: OrderId, ratio: Float): Result<EnqueueRequest, EnqueueError>",
 		"payload_values: Array<JsonValue> := [JsonValue::Integer(order_id), JsonValue::Float(ratio)]",
-		"stringify(JsonValue::Array(payload_values))",
+		"JSON.stringify(JsonValue::Array(payload_values))",
 		"maximum_attempts: nil",
 		"return JOBS_ADAPTER.enqueue(request)",
 		"if delay.before?(Duration.seconds(0))",
@@ -76,6 +76,9 @@ end
 	}
 	if !hasProjectGenerationImport(enqueue.RequiredImports, "config/jobs", "JOBS_ADAPTER") {
 		t.Fatalf("generated enqueue source did not request the configuration import: %#v", enqueue.RequiredImports)
+	}
+	if !hasProjectGenerationImport(enqueue.RequiredImports, "contracts/index", "OrderId") {
+		t.Fatalf("generated enqueue source did not request the imported alias type: %#v", enqueue.RequiredImports)
 	}
 }
 

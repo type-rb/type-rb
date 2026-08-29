@@ -139,7 +139,11 @@ func discoverDeclarationJob(modulePath string, class packageextension.ProjectCla
 		if newtype && parameter.Type.Authored.Definition != nil {
 			newtypeModule = parameter.Type.Authored.Definition.ModulePath
 		}
-		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ, WireType: wireType, Newtype: newtype, NewtypeModule: newtypeModule})
+		typeModule := ""
+		if parameter.Type.Authored.Definition != nil {
+			typeModule = parameter.Type.Authored.Definition.ModulePath
+		}
+		job.Parameters = append(job.Parameters, Parameter{Name: parameter.Name, Type: typ, WireType: wireType, TypeModule: typeModule, Newtype: newtype, NewtypeModule: newtypeModule})
 	}
 	return job, nil
 }

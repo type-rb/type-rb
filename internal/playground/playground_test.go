@@ -113,9 +113,9 @@ func TestFormatUsesCommentPreservingFormatter(t *testing.T) {
 
 func TestRunRejectsHostAndPlatformPackages(t *testing.T) {
 	for _, source := range []string{
-		"import trb/std/filesystem\n_found := filesystem.exists(\".\") catch |_error|\n\tfalse\nend\n",
-		"import trb/std/process\nprocess.argv()\n",
-		"import trb/platform/go/http\nhttp.router()\n",
+		"import trb/std/filesystem\n_found := FileSystem.exists(\".\") catch |_error|\n\tfalse\nend\n",
+		"import trb/std/process\nProcess.argv()\n",
+		"import trb/platform/go/http\nHTTP.router()\n",
 	} {
 		result := post(t, Handler(Options{Mode: "go"}), "/api/run", Request{Source: source, Mode: "go"})
 		if result.OK || len(result.Diagnostics) == 0 || !strings.Contains(result.Diagnostics[0].Message, "not available in the browser playground") {

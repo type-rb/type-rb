@@ -16,12 +16,12 @@ func TestRubyFixedDeclarationProviderTypesMixinAndKeepsRuntimeLoader(t *testing.
 	packageSource := SourceUnit{
 		Filename: "/project/packages/pagy/src/index.trb", ModulePath: "github.com/acme/pagy/index", Package: "pagy",
 		ExternalPackage: true, DeclarationProvider: true,
-		Source: []byte("import trb/platform/ruby/native\n\nrequire \"pagy\"\n"),
+		Source: []byte("activate trb/platform/ruby/native\n\nrequire \"pagy\"\n"),
 	}
 	application := SourceUnit{
 		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import github.com/acme/pagy
-import trb/platform/ruby/native
+activate trb/platform/ruby/native
 
 class PageExample
 	include Pagy::Method
@@ -86,12 +86,12 @@ func TestDeclarationProviderRejectsDuplicateNamedArguments(t *testing.T) {
 	packageSource := SourceUnit{
 		Filename: "/project/packages/pagy/src/index.trb", ModulePath: "github.com/acme/pagy/index", Package: "pagy",
 		ExternalPackage: true, DeclarationProvider: true,
-		Source: []byte("import trb/platform/ruby/native\n\nrequire \"pagy\"\n"),
+		Source: []byte("activate trb/platform/ruby/native\n\nrequire \"pagy\"\n"),
 	}
 	application := SourceUnit{
 		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import github.com/acme/pagy
-import trb/platform/ruby/native
+activate trb/platform/ruby/native
 class PageExample
 	include Pagy::Method
 	def page()

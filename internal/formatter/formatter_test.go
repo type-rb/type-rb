@@ -5,8 +5,97 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/lexer"
 )
+
+func TestFormatCanonicalizesOnlyProvenDeclarationRootImports(t *testing.T) {
+	source := []byte("import { JSON } from trb/std/json\nimport { Parser } from vendor/parser\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		switch node.Path {
+		case "trb/std/json":
+			return ImportMetadata{CanonicalPath: node.Path, Root: "JSON", RootStable: true, Resolved: true}
+		case "vendor/parser":
+			return ImportMetadata{CanonicalPath: node.Path, Root: "Parser", RootStable: false, Resolved: true}
+		default:
+			return ImportMetadata{CanonicalPath: node.Path}
+		}
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import trb/std/json\nimport { Parser } from vendor/parser\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted imports\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatMergesNamedImportsAndPreservesAliases(t *testing.T) {
+	source := []byte("import { JSON } from vendor/json\nimport { Json as LegacyJson } from vendor/json\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		return ImportMetadata{CanonicalPath: node.Path, Root: "", RootStable: false, Resolved: true}
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import { JSON, Json as LegacyJson } from vendor/json\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted imports\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatCombinesBareRootWithNamedImportsOnlyWhenStable(t *testing.T) {
+	source := []byte("import trb/std/json\nimport { Parser } from trb/std/json\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		return ImportMetadata{CanonicalPath: node.Path, Root: "JSON", RootStable: true, Resolved: true}
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import { JSON, Parser } from trb/std/json\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted imports\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
+func TestFormatPreservesQuotedPathsWhileCanonicalizingImports(t *testing.T) {
+	source := []byte("import { UseQueryOptions } from \"@tanstack/react-query\"\nimport { QueryClient } from \"@tanstack/react-query\"\nimport { Widget } from \"@scope/widget-kit/index\"\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		if node.Path == "@scope/widget-kit/index" {
+			return ImportMetadata{CanonicalPath: "@scope/widget-kit", Root: "Widget", RootStable: true, Resolved: true}
+		}
+		return ImportMetadata{CanonicalPath: node.Path, Resolved: true}
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import { QueryClient, UseQueryOptions } from \"@tanstack/react-query\"\nimport \"@scope/widget-kit\"\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted quoted imports\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := FormatWithOptions(formatted, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		return ImportMetadata{CanonicalPath: node.Path, Root: map[string]string{"@scope/widget-kit": "Widget"}[node.Path], RootStable: node.Path == "@scope/widget-kit", Resolved: true}
+	}})
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("quoted import formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatCanonicalizesActivatePathLikeImportPath(t *testing.T) {
+	source := []byte("activate vendor/native/index\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{CanonicalImportPath: func(path string) string {
+		if path == "vendor/native/index" {
+			return "vendor/native"
+		}
+		return path
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	if want := "activate vendor/native\n"; string(formatted) != want {
+		t.Fatalf("formatted activation\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
 
 func TestFormatDoesNotFuseSeparateTokensIntoAnotherOperator(t *testing.T) {
 	tokens, diagnostics := lexer.Lex([]byte("value & .member\n"))

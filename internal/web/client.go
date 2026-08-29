@@ -34,6 +34,7 @@ type browserClientGenerator struct {
 	schema        *openAPIGenerator
 	name          string
 	imports       map[string]map[string]bool
+	rootImports   map[string]bool
 	generated     map[string]bool
 	methodNames   map[string]string
 	issues        []BrowserClientIssue
@@ -91,7 +92,7 @@ func BuildBrowserClient(catalog EndpointCatalog, input packageextension.ProjectD
 
 	generator := &browserClientGenerator{
 		schema: newOpenAPIGenerator(input), name: name,
-		imports: map[string]map[string]bool{}, generated: map[string]bool{name: true}, methodNames: map[string]string{}, issueKeys: map[string]bool{},
+		imports: map[string]map[string]bool{}, rootImports: map[string]bool{}, generated: map[string]bool{name: true}, methodNames: map[string]string{}, issueKeys: map[string]bool{},
 	}
 	endpoints := append([]EndpointContract(nil), catalog.Endpoints...)
 	sort.Slice(endpoints, func(left, right int) bool {
@@ -152,7 +153,7 @@ func BuildBrowserClient(catalog EndpointCatalog, input packageextension.ProjectD
 		generator.requireImport("trb/std/url", "QueryParameter")
 	}
 	if generator.usesPathValue {
-		generator.requireImport("trb/std/url", "encode_component")
+		generator.requireRootImport("trb/std/url")
 	}
 	for generated := range generator.generated {
 		for path, symbols := range generator.imports {
@@ -316,7 +317,7 @@ func (g *browserClientGenerator) pathSource(endpoint EndpointContract, input bro
 			g.usesPathValue = true
 			name := strings.TrimPrefix(segment, ":")
 			field := fields[name]
-			parts = append(parts, "encode_component("+g.parameterValue(input.paramsModule, field.Type, "input.params."+field.Name)+")")
+			parts = append(parts, "URL.encode_component("+g.parameterValue(input.paramsModule, field.Type, "input.params."+field.Name)+")")
 		} else {
 			parts = append(parts, strconv.Quote(segment))
 		}
@@ -431,21 +432,39 @@ func (g *browserClientGenerator) typeSource(endpoint EndpointContract, modulePat
 }
 
 func (g *browserClientGenerator) importSource() string {
-	paths := make([]string, 0, len(g.imports))
+	paths := make([]string, 0, len(g.imports)+len(g.rootImports))
+	seen := map[string]bool{}
 	for path := range g.imports {
 		paths = append(paths, path)
+		seen[path] = true
+	}
+	for path := range g.rootImports {
+		if !seen[path] {
+			paths = append(paths, path)
+		}
 	}
 	sort.Strings(paths)
 	var source strings.Builder
 	for _, path := range paths {
+		if g.rootImports[path] {
+			source.WriteString("import " + path + "\n")
+		}
 		symbols := make([]string, 0, len(g.imports[path]))
 		for symbol := range g.imports[path] {
 			symbols = append(symbols, symbol)
 		}
 		sort.Strings(symbols)
-		source.WriteString("import { " + strings.Join(symbols, ", ") + " } from " + path + "\n")
+		if len(symbols) > 0 {
+			source.WriteString("import { " + strings.Join(symbols, ", ") + " } from " + path + "\n")
+		}
 	}
 	return source.String()
+}
+
+func (g *browserClientGenerator) requireRootImport(path string) {
+	if path != "" {
+		g.rootImports[path] = true
+	}
 }
 
 func (g *browserClientGenerator) requireImport(path, symbol string) {

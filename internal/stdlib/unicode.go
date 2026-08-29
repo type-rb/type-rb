@@ -92,7 +92,7 @@ class Unicode
 	end
 
 	def self.from_codepoint(value: Integer): String
-		mut builder := string_builder.new()
+		mut builder := StringBuilder.new()
 		builder.append_codepoint(value)
 		return builder.to_s()
 	end

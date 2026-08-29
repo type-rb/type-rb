@@ -2,7 +2,9 @@ package typescript
 
 import (
 	"fmt"
+	"maps"
 	pathpkg "path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,6 +42,7 @@ type generator struct {
 	lexicalNames     map[string]string
 	exactTypes       map[string]*typescriptTypeIdentity
 	runtimeImports   map[string]bool
+	emittedImports   map[string]bool
 	standardResult   bool
 	browserRuntime   string
 	httpRuntime      bool
@@ -167,7 +170,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -181,7 +184,8 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		}
 	}
 	g.integrationImports(program.Extensions)
-	for i, statement := range program.Statements {
+	statements := mergeTypeScriptImports(program.Statements)
+	for i, statement := range statements {
 		if i > 0 {
 			g.b.WriteByte('\n')
 		}
@@ -217,6 +221,92 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
 	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
+}
+
+func mergeTypeScriptImports(statements []ir.Statement) []ir.Statement {
+	result := make([]ir.Statement, 0, len(statements))
+	byKey := map[string]int{}
+	for _, statement := range statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok {
+			result = append(result, statement)
+			continue
+		}
+		key := imported.Path + "\x00" + imported.QualifiedRoot + "\x00" + strconv.FormatBool(imported.Namespace) + "\x00" + imported.Alias
+		if index, exists := byKey[key]; exists {
+			mergeTypeScriptImport(result[index].(*ir.Import), imported)
+			continue
+		}
+		clone := *imported
+		clone.Symbols = slices.Clone(imported.Symbols)
+		clone.UsedSymbols = slices.Clone(imported.UsedSymbols)
+		clone.GeneratedTypeSymbols = slices.Clone(imported.GeneratedTypeSymbols)
+		clone.SymbolAliases = maps.Clone(imported.SymbolAliases)
+		clone.IntrinsicSymbols = maps.Clone(imported.IntrinsicSymbols)
+		clone.RuntimeIndependentSymbols = maps.Clone(imported.RuntimeIndependentSymbols)
+		clone.SymbolKinds = maps.Clone(imported.SymbolKinds)
+		clone.SymbolTypes = maps.Clone(imported.SymbolTypes)
+		clone.SymbolParameters = maps.Clone(imported.SymbolParameters)
+		clone.SymbolTypeParameters = maps.Clone(imported.SymbolTypeParameters)
+		clone.RecordDefaults = maps.Clone(imported.RecordDefaults)
+		clone.TypeContracts = maps.Clone(imported.TypeContracts)
+		clone.RuntimeSymbols = maps.Clone(imported.RuntimeSymbols)
+		byKey[key] = len(result)
+		result = append(result, &clone)
+	}
+	return result
+}
+
+func mergeTypeScriptImport(target, source *ir.Import) {
+	target.Symbols = mergeImportNames(target.Symbols, source.Symbols)
+	target.UsedSymbols = mergeImportNames(target.UsedSymbols, source.UsedSymbols)
+	target.GeneratedTypeSymbols = mergeImportNames(target.GeneratedTypeSymbols, source.GeneratedTypeSymbols)
+	copyImportMap(&target.SymbolAliases, source.SymbolAliases)
+	copyImportMap(&target.IntrinsicSymbols, source.IntrinsicSymbols)
+	copyImportMap(&target.RuntimeIndependentSymbols, source.RuntimeIndependentSymbols)
+	copyImportMap(&target.SymbolKinds, source.SymbolKinds)
+	copyImportMap(&target.SymbolTypes, source.SymbolTypes)
+	copyImportMap(&target.SymbolParameters, source.SymbolParameters)
+	copyImportMap(&target.SymbolTypeParameters, source.SymbolTypeParameters)
+	copyImportMap(&target.RecordDefaults, source.RecordDefaults)
+	copyImportMap(&target.TypeContracts, source.TypeContracts)
+	copyImportMap(&target.RuntimeSymbols, source.RuntimeSymbols)
+	target.Runtime = target.Runtime || source.Runtime
+	target.RuntimeRequired = target.RuntimeRequired || source.RuntimeRequired
+	target.Standard = target.Standard || source.Standard
+	target.Official = target.Official || source.Official
+	target.Platform = target.Platform || source.Platform
+	target.Native = target.Native || source.Native
+	target.Implicit = target.Implicit && source.Implicit
+	if target.QualifiedRoot == "" {
+		target.QualifiedRoot = source.QualifiedRoot
+	}
+}
+
+func mergeImportNames(left, right []string) []string {
+	seen := make(map[string]bool, len(left)+len(right))
+	result := make([]string, 0, len(left)+len(right))
+	for _, names := range [][]string{left, right} {
+		for _, name := range names {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func copyImportMap[K comparable, V any](target *map[K]V, source map[K]V) {
+	if len(source) == 0 {
+		return
+	}
+	if *target == nil {
+		*target = make(map[K]V, len(source))
+	}
+	maps.Copy(*target, source)
 }
 
 func localNestedTypeOwners(statements []ir.Statement) map[string]string {
@@ -501,7 +591,16 @@ func (g *generator) statement(statement ir.Statement) {
 			values := make([]string, 0, len(n.Symbols))
 			types := make([]string, 0, len(n.Symbols))
 			intrinsicRuntime := false
+			for _, symbol := range n.UsedSymbols {
+				if n.IntrinsicSymbols[symbol] && !n.RuntimeIndependentSymbols[symbol] {
+					intrinsicRuntime = true
+				}
+			}
 			for _, symbol := range n.Symbols {
+				if symbol == n.QualifiedRoot {
+					continue
+				}
+				local := n.SymbolAliases[symbol]
 				if n.IntrinsicSymbols[symbol] {
 					if !n.RuntimeIndependentSymbols[symbol] {
 						intrinsicRuntime = true
@@ -510,17 +609,27 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface", "type_alias", "newtype":
-					types = append(types, symbol)
+					types = append(types, tsImportSpecifier(symbol, local))
 					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
-						values = append(values, tsRecordConstructorName(symbol))
+						constructor := tsRecordConstructorName(symbol)
+						localConstructor := ""
+						if local != "" {
+							localConstructor = tsRecordConstructorName(local)
+						}
+						values = append(values, tsImportSpecifier(constructor, localConstructor))
 						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
-							values = append(values, tsRecordSyncConstructorName(symbol))
+							syncConstructor := tsRecordSyncConstructorName(symbol)
+							localSyncConstructor := ""
+							if local != "" {
+								localSyncConstructor = tsRecordSyncConstructorName(local)
+							}
+							values = append(values, tsImportSpecifier(syncConstructor, localSyncConstructor))
 						}
 					}
 				case "function":
-					values = append(values, tsCallableName(symbol))
+					values = append(values, tsImportSpecifier(tsCallableName(symbol), tsCallableName(local)))
 				default:
-					values = append(values, symbol)
+					values = append(values, tsImportSpecifier(symbol, local))
 				}
 			}
 			for _, symbol := range n.GeneratedTypeSymbols {
@@ -541,6 +650,9 @@ func (g *generator) statement(statement ir.Statement) {
 				if jsonRuntime {
 					g.jsonRuntime = true
 				}
+			}
+			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime {
+				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
@@ -650,6 +762,29 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Newtype:
 		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 	case *ir.Module:
+		if methods, ok := functionOnlyModule(n); ok {
+			properties := make([]string, 0, len(methods))
+			for _, member := range n.Body {
+				if comment, ok := member.(*ir.Comment); ok {
+					g.statement(comment)
+				}
+			}
+			for _, method := range methods {
+				g.function(method)
+				target := method.Name
+				if method.TargetName != "" {
+					target = method.TargetName
+				}
+				target = tsCallableName(target)
+				property := tsMethodName(method.Name)
+				if property != target {
+					property += ": " + target
+				}
+				properties = append(properties, property)
+			}
+			g.line("export const " + n.Name + " = { " + strings.Join(properties, ", ") + " } as const;")
+			break
+		}
 		g.line("export namespace " + n.Name + " {")
 		g.indent++
 		g.statements(n.Body)
@@ -857,6 +992,20 @@ func (g *generator) statement(statement ir.Statement) {
 	}
 }
 
+func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
+	methods := make([]*ir.Method, 0, len(module.Body))
+	for _, member := range module.Body {
+		switch node := member.(type) {
+		case *ir.Comment:
+		case *ir.Method:
+			methods = append(methods, node)
+		default:
+			return nil, false
+		}
+	}
+	return methods, true
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -864,6 +1013,13 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func tsImportSpecifier(exported, local string) string {
+	if local == "" || local == exported {
+		return exported
+	}
+	return exported + " as " + local
 }
 
 func (g *generator) typeUnionCase(node *ir.Case) {
@@ -1615,6 +1771,10 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Reference != nil && n.Reference.PackageRoot {
+			alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Reference.Package))
+			return alias + "." + tsCallableName(n.Reference.Symbol)
+		}
 		if n.Reference != nil && n.Reference.Intrinsic == "trb.orm.column" {
 			return "__trbOrm.column(" + g.expr(n.Receiver) + ", " + strconv.Quote(n.Name) + ")"
 		}
@@ -3156,18 +3316,20 @@ func portableFloatString(value string) string {
 	return "((value: number): string => { if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })(" + value + ")"
 }
 
-func tsJSONParse(call *ir.Call, argument string, comments bool) string {
-	resultType := tsType(call.ExprType())
+func (g *generator) tsJSONParse(call *ir.Call, argument string, comments bool) string {
+	resultType := g.tsType(call.ExprType())
+	result := g.runtimeName("Result")
 	strip := ""
 	if comments {
 		strip = `const stripComments = (input: string): string => { const result = input.split(""); let inString = false; let escaped = false; for (let index = 0; index < result.length; index += 1) { const character = result[index]!; if (inString) { if (escaped) { escaped = false; continue; } if (character === "\\") { escaped = true; } else if (character === "\"") { inString = false; } continue; } if (character === "\"") { inString = true; continue; } if (character !== "/" || index + 1 >= result.length) { continue; } if (result[index + 1] === "/") { result[index] = " "; result[index + 1] = " "; index += 2; while (index < result.length && result[index] !== "\n") { if (result[index] !== "\r") { result[index] = " "; } index += 1; } index -= 1; } else if (result[index + 1] === "*") { result[index] = " "; result[index + 1] = " "; index += 2; while (index < result.length) { if (index + 1 < result.length && result[index] === "*" && result[index + 1] === "/") { result[index] = " "; result[index + 1] = " "; index += 1; break; } if (result[index] !== "\n" && result[index] !== "\r") { result[index] = " "; } index += 1; } } } return result.join(""); }; __trbSource = stripComments(__trbSource); `
 	}
-	return "((): " + resultType + " => { let __trbSource = " + argument + "; " + strip + "const syntaxError = (error: unknown): JsonError => { const message = error instanceof Error ? error.message : String(error); const lineMatch = message.match(/line (\\d+)/i); const columnMatch = message.match(/column (\\d+)/i); let line: number | null = lineMatch === null ? null : Number.parseInt(lineMatch[1]!, 10); let column: number | null = columnMatch === null ? null : Number.parseInt(columnMatch[1]!, 10); if (line === null || column === null) { const positionMatch = message.match(/position (\\d+)/i); if (positionMatch !== null) { const position = Number.parseInt(positionMatch[1]!, 10); const prefix = __trbSource.slice(0, position); const lines = prefix.split(\"\\n\"); line = lines.length; column = Array.from(lines[lines.length - 1]!).length + 1; } } return { kind: JsonErrorKind.Syntax, message, path: \"\", line, column }; }; let raw: unknown; try { raw = JSON.parse(__trbSource); } catch (error) { return Result.Err<JsonValue, JsonError>(syntaxError(error)); } const decodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: unknown, path: string): JsonValue => { if (value === null) { return JsonValue.Null; } if (typeof value === \"boolean\") { return JsonValue.Boolean(value); } if (typeof value === \"number\") { if (!Number.isFinite(value)) { return failure(decodeError(path, \"JSON number is not finite\")); } if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) { return failure(decodeError(path, \"JSON integer is outside the portable range\")); } return JsonValue.Integer(value); } return JsonValue.Float(value); } if (typeof value === \"string\") { return JsonValue.String(value); } if (Array.isArray(value)) { return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); } if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return JsonValue.Object(fields); } return failure(decodeError(path, \"unsupported JSON value\")); }; try { return Result.Ok<JsonValue, JsonError>(convert(raw, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return Result.Err<JsonValue, JsonError>((error as any).error as JsonError); } return Result.Err<JsonValue, JsonError>(syntaxError(error)); } })()"
+	return "((): " + resultType + " => { let __trbSource = " + argument + "; " + strip + "const syntaxError = (error: unknown): JsonError => { const message = error instanceof Error ? error.message : String(error); const lineMatch = message.match(/line (\\d+)/i); const columnMatch = message.match(/column (\\d+)/i); let line: number | null = lineMatch === null ? null : Number.parseInt(lineMatch[1]!, 10); let column: number | null = columnMatch === null ? null : Number.parseInt(columnMatch[1]!, 10); if (line === null || column === null) { const positionMatch = message.match(/position (\\d+)/i); if (positionMatch !== null) { const position = Number.parseInt(positionMatch[1]!, 10); const prefix = __trbSource.slice(0, position); const lines = prefix.split(\"\\n\"); line = lines.length; column = Array.from(lines[lines.length - 1]!).length + 1; } } return { kind: JsonErrorKind.Syntax, message, path: \"\", line, column }; }; let raw: unknown; try { raw = JSON.parse(__trbSource); } catch (error) { return " + result + ".Err<JsonValue, JsonError>(syntaxError(error)); } const decodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Decode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: unknown, path: string): JsonValue => { if (value === null) { return JsonValue.Null; } if (typeof value === \"boolean\") { return JsonValue.Boolean(value); } if (typeof value === \"number\") { if (!Number.isFinite(value)) { return failure(decodeError(path, \"JSON number is not finite\")); } if (Number.isInteger(value)) { if (!Number.isSafeInteger(value)) { return failure(decodeError(path, \"JSON integer is outside the portable range\")); } return JsonValue.Integer(value); } return JsonValue.Float(value); } if (typeof value === \"string\") { return JsonValue.String(value); } if (Array.isArray(value)) { return JsonValue.Array(value.map((item, index) => convert(item, path + \"/\" + String(index)))); } if (typeof value === \"object\") { const fields: Record<string, JsonValue> = {}; for (const [key, item] of Object.entries(value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return JsonValue.Object(fields); } return failure(decodeError(path, \"unsupported JSON value\")); }; try { return " + result + ".Ok<JsonValue, JsonError>(convert(raw, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return " + result + ".Err<JsonValue, JsonError>((error as any).error as JsonError); } return " + result + ".Err<JsonValue, JsonError>(syntaxError(error)); } })()"
 }
 
-func tsJSONStringify(call *ir.Call, argument string) string {
-	resultType := tsType(call.ExprType())
-	return "((): " + resultType + " => { const encodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Encode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: JsonValue, path: string): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) { return failure(encodeError(path, \"JSON integer is outside the portable range\")); } return value.value; case \"Float\": if (!Number.isFinite(value.value)) { return failure(encodeError(path, \"JSON Float must be finite\")); } return value.value; case \"String\": return value.value; case \"Array\": return value.value.map((item, index) => convert(item, path + \"/\" + String(index))); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return fields; } } }; try { return Result.Ok<string, JsonError>(JSON.stringify(convert(" + argument + ", \"\"))); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return Result.Err<string, JsonError>((error as any).error as JsonError); } const message = error instanceof Error ? error.message : String(error); return Result.Err<string, JsonError>(encodeError(\"\", message)); } })()"
+func (g *generator) tsJSONStringify(call *ir.Call, argument string) string {
+	resultType := g.tsType(call.ExprType())
+	result := g.runtimeName("Result")
+	return "((): " + resultType + " => { const encodeError = (path: string, message: string): JsonError => ({ kind: JsonErrorKind.Encode, message, path, line: null, column: null }); const failure = (error: JsonError): never => { throw { __trbJSONError: true, error }; }; const convert = (value: JsonValue, path: string): unknown => { switch (value.kind) { case \"Null\": return null; case \"Boolean\": return value.value; case \"Integer\": if (!Number.isSafeInteger(value.value)) { return failure(encodeError(path, \"JSON integer is outside the portable range\")); } return value.value; case \"Float\": if (!Number.isFinite(value.value)) { return failure(encodeError(path, \"JSON Float must be finite\")); } return value.value; case \"String\": return value.value; case \"Array\": return value.value.map((item, index) => convert(item, path + \"/\" + String(index))); case \"Object\": { const fields: Record<string, unknown> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); fields[key] = convert(item, path + \"/\" + escaped); } return fields; } } }; try { return " + result + ".Ok<string, JsonError>(JSON.stringify(convert(" + argument + ", \"\"))); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONError === true) { return " + result + ".Err<string, JsonError>((error as any).error as JsonError); } const message = error instanceof Error ? error.message : String(error); return " + result + ".Err<string, JsonError>(encodeError(\"\", message)); } })()"
 }
 
 func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
@@ -3182,7 +3344,8 @@ func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
 	errorType := tsJSONQualified(jsonAlias, "JsonError")
 	jsonErrorKind := tsJSONQualified(jsonAlias, "JsonErrorKind.Decode")
 	parse := tsJSONQualified(jsonAlias, "parse")
-	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return Result.Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
+	result := g.runtimeName("Result")
+	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return " + result + ".Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return " + result + ".Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return " + result + ".Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
 }
 
 func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {
@@ -3445,7 +3608,7 @@ func (g *generator) importedJSONCall(call *ir.Call, packagePath string, argument
 	case *ir.Identifier:
 		name = callee.Name
 	case *ir.Member:
-		name = g.expr(callee.Receiver) + "." + callee.Name
+		name = g.expr(callee)
 	}
 	return name + "(" + strings.Join(arguments, ", ") + ")", true
 }
@@ -4076,6 +4239,12 @@ func classMethods(statements []ir.Statement) map[string]*ir.Method {
 }
 
 func (g *generator) line(text string) {
+	if g.indent == 0 && strings.HasPrefix(text, "import ") {
+		if g.emittedImports[text] {
+			return
+		}
+		g.emittedImports[text] = true
+	}
 	g.b.WriteString(strings.Repeat("  ", g.indent))
 	g.b.WriteString(text)
 	g.b.WriteByte('\n')

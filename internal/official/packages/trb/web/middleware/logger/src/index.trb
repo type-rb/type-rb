@@ -1,14 +1,10 @@
 import { Context, Next, Response } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 import trb/internal/web/logger as native_logger
 
 record LoggerOptions
 	stderr: Boolean
 	exclude_paths: Array<String>
-end
-
-def default_options(): LoggerOptions
-	return LoggerOptions.new(stderr: false, exclude_paths: [])
 end
 
 class LoggerMiddleware implements Middleware
@@ -24,12 +20,18 @@ class LoggerMiddleware implements Middleware
 	end
 end
 
-def middleware(options: LoggerOptions = default_options()): Middleware
-	return LoggerMiddleware.new(options)
-end
+module Logger
+	def self.default_options(): LoggerOptions
+		return LoggerOptions.new(stderr: false, exclude_paths: [])
+	end
 
-def call(context: Context, next_handler: Next, options: LoggerOptions = default_options()): Response
-	return _invoke(context, next_handler, options)
+	def self.middleware(options: LoggerOptions = Logger.default_options()): Middleware
+		return LoggerMiddleware.new(options)
+	end
+
+	def self.call(context: Context, next_handler: Next, options: LoggerOptions = Logger.default_options()): Response
+		return _invoke(context, next_handler, options)
+	end
 end
 
 def _invoke(context: Context, next_handler: Next, options: LoggerOptions): Response

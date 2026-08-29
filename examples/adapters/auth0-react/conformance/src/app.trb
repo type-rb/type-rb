@@ -1,6 +1,6 @@
 import { ReactNode } from trb/platform/typescript/react
-import { Result } from trb/std/result
-import { Unit } from trb/std/unit
+import trb/std/result
+import trb/std/unit
 import { Auth0ContextInterface, Auth0Provider, AuthorizationParams, useAuth0 } from "@auth0/auth0-react"
 
 def access_token(auth: Auth0ContextInterface): Result<String, String>

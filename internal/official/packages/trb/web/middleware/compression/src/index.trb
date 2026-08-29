@@ -1,16 +1,12 @@
 import { Body } from trb/http
 import { Context, Next, Response } from trb/web
-import { Middleware } from trb/web/middleware
-import { Result } from trb/std/result
+import trb/web/middleware
+import trb/std/result
 import trb/internal/runtime
 import trb/internal/web/compression as native_compression
 
 record CompressionOptions
 	minimum_size_bytes: Integer
-end
-
-def default_options(): CompressionOptions
-	return CompressionOptions.new(minimum_size_bytes: 1024)
 end
 
 class CompressionMiddleware implements Middleware
@@ -26,17 +22,23 @@ class CompressionMiddleware implements Middleware
 	end
 end
 
-def middleware(options: CompressionOptions = default_options()): Middleware
-	return CompressionMiddleware.new(options)
-end
+module Compression
+	def self.default_options(): CompressionOptions
+		return CompressionOptions.new(minimum_size_bytes: 1024)
+	end
 
-def call(context: Context, next_handler: Next, options: CompressionOptions = default_options()): Response
-	return _invoke(context, next_handler, options)
+	def self.middleware(options: CompressionOptions = Compression.default_options()): Middleware
+		return CompressionMiddleware.new(options)
+	end
+
+	def self.call(context: Context, next_handler: Next, options: CompressionOptions = Compression.default_options()): Response
+		return _invoke(context, next_handler, options)
+	end
 end
 
 def _invoke(context: Context, next_handler: Next, options: CompressionOptions): Response
 	if options.minimum_size_bytes < 0
-		return runtime.fail<Response>("trb/web compression minimum_size_bytes must be non-negative")
+		return Runtime.fail<Response>("trb/web compression minimum_size_bytes must be non-negative")
 	end
 	response := next_handler.call(context)
 	if !_compressible?(context, response, options)

@@ -16,7 +16,7 @@ import {
 	json_body,
 } from trb/platform/typescript/browser
 import { Header, Headers, HttpMethod } from trb/http
-import { Result } from trb/std/result
+import trb/std/result
 import { QueryParameter } from trb/std/url
 
 record Todo
@@ -109,7 +109,7 @@ The generated TypeRB class accepts an ordinary `HttpClient`, so base URL and
 application composition remain explicit:
 
 ```trb
-import { ApiClient } from generated/api_client
+import generated/api_client
 import { HttpClient } from trb/platform/typescript/browser
 
 api := ApiClient.new(HttpClient.new("https://api.example.com"))

@@ -179,7 +179,7 @@ func TestBuildRunsRubyPackageWithFixedDeclarationProvider(t *testing.T) {
 		},
 		DeclarationProviders: map[string]string{"ruby": "declarations.json"},
 	})
-	if err := os.WriteFile(filepath.Join(packageRoot, "src", "index.trb"), []byte("import trb/platform/ruby/native\n\nrequire \"pagy\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(packageRoot, "src", "index.trb"), []byte("activate trb/platform/ruby/native\n\nrequire \"pagy\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeCLIJSONFile(t, filepath.Join(packageRoot, "declarations.json"), pagyDeclarationCatalog())
@@ -195,7 +195,7 @@ func TestBuildRunsRubyPackageWithFixedDeclarationProvider(t *testing.T) {
 		t.Fatal(err)
 	}
 	application := `import acme/pagy
-import trb/platform/ruby/native
+activate trb/platform/ruby/native
 
 class PageExample
 	include Pagy::Method

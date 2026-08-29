@@ -1,6 +1,6 @@
 import { HttpClient, RequestError } from trb/platform/typescript/browser
 import { ReactNode } from trb/platform/typescript/react
-import { Result } from trb/std/result
+import trb/std/result
 import {
 	QueryClient,
 	QueryClientProvider,

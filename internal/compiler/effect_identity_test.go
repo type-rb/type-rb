@@ -768,7 +768,7 @@ end
 	}
 }
 
-func TestFileAndIndexModulesKeepSeparateEffectIdentities(t *testing.T) {
+func TestFileAndIndexModulesCannotDefineTheSameImportRoot(t *testing.T) {
 	effectful := SourceUnit{
 		Filename: "models.trb", ModulePath: "models", Package: "main",
 		Source: []byte(`def map_values(values: Array<Integer>): Array<Integer>
@@ -811,20 +811,12 @@ def main()
 end
 `),
 	}
-	for _, mode := range []string{"go"} {
-		t.Run(mode, func(t *testing.T) {
-			requireEffectRuntime(t, mode)
-			artifacts, err := CompileProject([]SourceUnit{effectful, pure, main}, Options{
-				Mode: mode, GoModule: "example.com/exact-module-effect", RubyLoader: "require_relative",
-				SourceRoot: "/project", ProjectRoot: "/project",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/exact-module-effect")); got != "1\n2" {
-				t.Fatalf("unexpected exact module identity output for %s: got %q, want %q", mode, got, "1\n2")
-			}
-		})
+	_, err := CompileProject([]SourceUnit{effectful, pure, main}, Options{
+		Mode: "go", GoModule: "example.com/exact-module-effect", RubyLoader: "require_relative",
+		SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err == nil || !strings.Contains(err.Error(), "module paths models/index and models define the same import root") {
+		t.Fatalf("expected a direct file/index import-root conflict, got %v", err)
 	}
 }
 
@@ -1010,7 +1002,7 @@ end
 }
 
 func TestQualifiedNativeConstructorDoesNotUseLocalLeafTypeInRuby(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 module Services
 	class Worker
@@ -1042,7 +1034,7 @@ end
 }
 
 func TestQualifiedNativeMemberDoesNotUseRootLeafTypeInRuby(t *testing.T) {
-	source := []byte(`import trb/platform/ruby/native
+	source := []byte(`activate trb/platform/ruby/native
 
 class Stat
 	def size(): Array<Integer>

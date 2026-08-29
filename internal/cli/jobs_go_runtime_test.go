@@ -48,14 +48,14 @@ def main()
 end
 `
 	jobSource := `import { Job, priority, queue } from trb/jobs
-import { puts } from trb/std/io
+import trb/std/io
 
 class SendReceiptJob < Job
 	queue("mail")
 	priority(10)
 
 	def perform(order_id: Integer, destination: String)
-		puts("performed " + order_id.to_s() + " for " + destination)
+		IO.puts("performed " + order_id.to_s() + " for " + destination)
 		return
 	end
 end

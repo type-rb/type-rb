@@ -27,6 +27,7 @@ type Program struct {
 	RubyLoader        string
 	TypeScriptRuntime string
 	UsesJSX           bool
+	NativeSyntax      bool
 	Declarations      *declaration.Catalog
 	Extensions        []Extension
 	Statements        []Statement
@@ -62,14 +63,19 @@ type Import struct {
 	// canonical module identity. Language tooling uses it to link imports.
 	DeclaredPath string
 	Symbols      []string
-	Alias        string
-	Namespace    bool
-	Kind         string
-	Standard     bool
-	Official     bool
-	Platform     bool
-	Native       bool
-	Runtime      bool
+	// SymbolAliases maps exported declaration names to their source-local
+	// bindings for named imports and aliased bare roots.
+	SymbolAliases map[string]string
+	Alias         string
+	QualifiedRoot string
+	UsedSymbols   []string
+	Namespace     bool
+	Kind          string
+	Standard      bool
+	Official      bool
+	Platform      bool
+	Native        bool
+	Runtime       bool
 	// RuntimeRequired records that generated code must load the source module
 	// for compiler-owned runtime behavior. Fully lowered intrinsics can leave
 	// this false.
@@ -864,6 +870,7 @@ type Reference struct {
 	// package function and preserve the source class/instance member kind.
 	Owner          string
 	ClassMember    bool
+	PackageRoot    bool
 	ExportKind     string
 	Intrinsic      string
 	ReceiverMethod bool

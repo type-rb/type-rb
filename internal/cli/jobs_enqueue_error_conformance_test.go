@@ -35,7 +35,7 @@ func TestNegativeJobDelayReturnsPortableErrorAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			source := `import { EnqueueErrorKind, Job } from trb/jobs
-import { puts } from trb/std/io
+import trb/std/io
 import { Result } from trb/std/result
 import { Duration } from trb/std/time
 
@@ -48,12 +48,12 @@ end
 def main()
 	case RejectedJob.perform_in(Duration.seconds(-1), 7)
 	when Result::Ok(_reference)
-		puts("unexpected success")
+		IO.puts("unexpected success")
 	when Result::Err(error)
 		if error.kind == EnqueueErrorKind::InvalidArgument
-			puts("invalid: " + error.message)
+			IO.puts("invalid: " + error.message)
 		else
-			puts("unexpected error")
+			IO.puts("unexpected error")
 		end
 	end
 	return
@@ -103,7 +103,7 @@ func TestSQLJobAdapterReturnsPortableErrorAcrossBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			source := `import { EnqueueErrorKind, Job } from trb/jobs
-import { puts } from trb/std/io
+import trb/std/io
 import { Result } from trb/std/result
 
 class RejectedJob < Job
@@ -115,12 +115,12 @@ end
 def main()
 	case RejectedJob.perform_later(7)
 	when Result::Ok(_reference)
-		puts("unexpected success")
+		IO.puts("unexpected success")
 	when Result::Err(error)
 		if error.kind == EnqueueErrorKind::Adapter
-			puts("adapter")
+			IO.puts("adapter")
 		else
-			puts("unexpected error")
+			IO.puts("unexpected error")
 		end
 	end
 	return

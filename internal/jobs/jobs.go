@@ -25,6 +25,7 @@ type Parameter struct {
 	Name          string
 	Type          types.Type
 	WireType      types.Type
+	TypeModule    string
 	Newtype       bool
 	NewtypeModule string
 }
