@@ -1008,6 +1008,11 @@ func standardExportSymbol(exported resolver.Export) Symbol {
 		}
 		result.Members = append(result.Members, standardExportMemberSymbol(name, member))
 	}
+	for name, nested := range exported.Nested {
+		member := standardExportSymbol(nested)
+		member.Name = name
+		result.Members = append(result.Members, member)
+	}
 	sortSymbols(result.Members)
 	return result
 }

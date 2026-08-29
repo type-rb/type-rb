@@ -237,7 +237,7 @@ func TestCompletionIncludesExplicitImportedNamesAndDeclarationRoots(t *testing.T
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/user.trb", ModulePath: "models/user", Source: []byte("record User\n\tname: String\nend\n")},
 		{Filename: "models/state.trb", ModulePath: "models/state", Source: []byte("enum State\n\tOpen\n\tClosed\nend\n")},
-		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport { State as WorkflowState } from models/state\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\n")},
+		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport { State as WorkflowState } from models/state\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\nimport trb/std/json\n")},
 	}, compiler.Options{Mode: "go", Package: "main", ModulePath: "repl", AllowUnusedImports: true})
 	if err != nil {
 		t.Fatal(err)
@@ -263,6 +263,9 @@ func TestCompletionIncludesExplicitImportedNamesAndDeclarationRoots(t *testing.T
 	}
 	if _, ok := findCompletion(service.Complete("Date.pa", len("Date.pa")), "parse"); !ok {
 		t.Fatal("imported standard type member was not completed")
+	}
+	if _, ok := findCompletion(service.Complete("JSON::E", len("JSON::E")), "Error"); !ok {
+		t.Fatal("imported owned nested declaration was not completed")
 	}
 	if _, ok := findCompletion(service.Complete("WorkflowState::O", len("WorkflowState::O")), "Open"); !ok {
 		t.Fatal("aliased project declaration member was not completed")
@@ -436,8 +439,14 @@ func TestCompletionAddsCanonicalStandardImport(t *testing.T) {
 }
 
 func TestCompletionOffersStandardPackageRootsAndNamedFunctions(t *testing.T) {
+	candidates := languageservice.StandardImportCandidates("go")
+	for _, symbol := range candidates.Symbols {
+		if strings.Contains(symbol.Name, "::") {
+			t.Fatalf("owned nested declaration %s was offered as a top-level import", symbol.Name)
+		}
+	}
 	service := languageservice.New("go")
-	service.SetCandidates(languageservice.StandardImportCandidates("go"))
+	service.SetCandidates(candidates)
 
 	math, ok := findCompletion(service.Complete("Mat", len("Mat")), "Math")
 	if !ok || len(math.AdditionalEdits) != 1 || math.AdditionalEdits[0].NewText != "import trb/std/math\n" {
@@ -454,6 +463,10 @@ func TestCompletionOffersStandardPackageRootsAndNamedFunctions(t *testing.T) {
 	date, ok := findCompletion(service.Complete("Dat", len("Dat")), "Date")
 	if !ok || len(date.AdditionalEdits) != 1 || date.AdditionalEdits[0].NewText != "import { Date } from trb/std/time\n" {
 		t.Fatalf("Date completion=%#v, ok=%v", date, ok)
+	}
+	jsonError, ok := findCompletion(service.Complete("JSON::Er", len("JSON::Er")), "Error")
+	if !ok || len(jsonError.AdditionalEdits) != 1 || jsonError.AdditionalEdits[0].NewText != "import trb/std/json\n" {
+		t.Fatalf("JSON::Error completion=%#v, ok=%v", jsonError, ok)
 	}
 }
 
