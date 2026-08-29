@@ -351,7 +351,9 @@ end
 	if expected := `const event: ServicesEvent = ServicesEvent.Value("ok");`; !strings.Contains(output, expected) {
 		t.Fatalf("generated TypeScript is missing qualified payload enum construction %q:\n%s", expected, output)
 	}
-	checkTypeScriptArtifacts(t, []*Artifact{artifact}, "qualified_payload_enum")
+	t.Run("typescript syntax", func(t *testing.T) {
+		checkTypeScriptArtifacts(t, []*Artifact{artifact}, "qualified_payload_enum")
+	})
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			runEffectSource(t, mode, "qualified_payload_enum.trb", source, "ok")

@@ -1859,7 +1859,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[index] = g.expr(argument.Value)
 		}
 		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
-		name := "New" + goIdentifier(n.EnumName, true) + goIdentifier(n.Member, true)
+		owner := n.EnumName
+		if n.Declaration.Name != "" {
+			owner = n.Declaration.Name
+		} else if canonical := g.typeNames[owner]; canonical != "" {
+			owner = canonical
+		}
+		name := "New" + goIdentifier(owner, true) + goIdentifier(n.Member, true)
 		if alias := g.referenceAlias(n.Reference); alias != "" {
 			name = alias + "." + name
 		}
