@@ -30,6 +30,7 @@ type projectInputResolver struct {
 	newtypes               map[string]map[string]*ast.NewtypeStatement
 	definitions            map[string]map[string]bool
 	imports                map[string]map[string]projectImportBinding
+	generatedImports       map[string]map[string]projectImportBinding
 	knownModules           map[string]bool
 	packageAliasesByModule map[string]map[string]string
 }
@@ -118,6 +119,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		newtypes:               map[string]map[string]*ast.NewtypeStatement{},
 		definitions:            map[string]map[string]bool{},
 		imports:                map[string]map[string]projectImportBinding{},
+		generatedImports:       map[string]map[string]projectImportBinding{},
 		knownModules:           map[string]bool{},
 		packageAliasesByModule: options.PackageAliasesByModule,
 	}
@@ -137,6 +139,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		result.newtypes[program.ModulePath] = map[string]*ast.NewtypeStatement{}
 		result.definitions[program.ModulePath] = map[string]bool{}
 		result.imports[program.ModulePath] = map[string]projectImportBinding{}
+		result.generatedImports[program.ModulePath] = map[string]projectImportBinding{}
 	}
 	for _, program := range programs {
 		result.collectStatements(program.ModulePath, "", program.Statements)
@@ -153,8 +156,12 @@ func (r projectInputResolver) collectStatements(modulePath, namespace string, st
 			if namespace != "" {
 				continue
 			}
+			imports := r.imports[modulePath]
+			if r.compilerGenerated(modulePath, node.Span()) {
+				imports = r.generatedImports[modulePath]
+			}
 			for _, symbol := range node.Symbols {
-				r.imports[modulePath][symbol] = projectImportBinding{
+				imports[symbol] = projectImportBinding{
 					importPath: node.Path, modulePath: r.importModulePath(modulePath, node.Path),
 				}
 			}
@@ -334,7 +341,7 @@ func (r projectInputResolver) exportProjectValue(modulePath, namespace string, e
 	if result.Kind != "reference" {
 		return result
 	}
-	if reference, ok := r.reference(modulePath, namespace, result.Name); ok {
+	if reference, ok := r.reference(modulePath, namespace, result.Name, r.compilerGenerated(modulePath, expression.Span())); ok {
 		copy := reference
 		result.Reference = &copy
 	}
@@ -360,28 +367,29 @@ func exportStandaloneProjectValue(expression ast.Expression, negativeInteger boo
 
 func (r projectInputResolver) typeUse(modulePath, namespace string, ref ast.TypeRef, typeParameters map[string]bool) packageextension.ProjectTypeUse {
 	authored := exportType(projectInputTypeRef(ref))
-	r.attachDefinitions(modulePath, namespace, &authored, typeParameters)
-	resolved, path := r.resolveType(modulePath, namespace, authored, map[string]bool{})
+	generated := r.compilerGenerated(modulePath, ref.Span())
+	r.attachDefinitions(modulePath, namespace, &authored, typeParameters, generated)
+	resolved, path := r.resolveType(modulePath, namespace, authored, map[string]bool{}, generated)
 	result := packageextension.ProjectTypeUse{
 		Authored: authored, Resolved: resolved, ResolutionPath: path, Span: exportSourceSpan(ref.Span()),
 	}
-	if representation, newtype := r.resolveRepresentation(modulePath, namespace, authored, map[string]bool{}); newtype {
+	if representation, newtype := r.resolveRepresentation(modulePath, namespace, authored, map[string]bool{}, generated); newtype {
 		result.Representation = &representation
 	}
 	return result
 }
 
-func (r projectInputResolver) resolveRepresentation(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, bool) {
+func (r projectInputResolver) resolveRepresentation(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool, generated bool) (packageextension.Type, bool) {
 	foundNewtype := false
 	for index := range typ.Arguments {
-		resolved, found := r.resolveRepresentation(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting))
+		resolved, found := r.resolveRepresentation(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting), generated)
 		typ.Arguments[index] = resolved
 		foundNewtype = foundNewtype || found
 	}
 	if typ.Kind != "named" || len(typ.Arguments) != 0 {
 		return typ, foundNewtype
 	}
-	reference, ok := r.reference(modulePath, namespace, typ.Name)
+	reference, ok := r.reference(modulePath, namespace, typ.Name, generated)
 	if !ok {
 		return typ, foundNewtype
 	}
@@ -394,15 +402,17 @@ func (r projectInputResolver) resolveRepresentation(modulePath, namespace string
 	if alias := r.aliases[reference.Identity.ModulePath][reference.Identity.Name]; alias != nil && len(alias.TypeParameters) == 0 {
 		target := exportType(projectInputTypeRef(alias.Target))
 		target.Nullable = target.Nullable || typ.Nullable
-		r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil)
-		resolved, found := r.resolveRepresentation(reference.Identity.ModulePath, targetNamespace, target, visiting)
+		targetGenerated := r.compilerGenerated(reference.Identity.ModulePath, alias.Target.Span())
+		r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil, targetGenerated)
+		resolved, found := r.resolveRepresentation(reference.Identity.ModulePath, targetNamespace, target, visiting, targetGenerated)
 		return resolved, foundNewtype || found
 	}
 	if newtype := r.newtypes[reference.Identity.ModulePath][reference.Identity.Name]; newtype != nil {
 		target := exportType(projectInputTypeRef(newtype.Target))
 		target.Nullable = target.Nullable || typ.Nullable
-		r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil)
-		resolved, _ := r.resolveRepresentation(reference.Identity.ModulePath, targetNamespace, target, visiting)
+		targetGenerated := r.compilerGenerated(reference.Identity.ModulePath, newtype.Target.Span())
+		r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil, targetGenerated)
+		resolved, _ := r.resolveRepresentation(reference.Identity.ModulePath, targetNamespace, target, visiting, targetGenerated)
 		return resolved, true
 	}
 	return typ, foundNewtype
@@ -436,28 +446,28 @@ func projectInputTypeRef(ref ast.TypeRef) types.Type {
 	return result
 }
 
-func (r projectInputResolver) attachDefinitions(modulePath, namespace string, typ *packageextension.Type, typeParameters map[string]bool) {
+func (r projectInputResolver) attachDefinitions(modulePath, namespace string, typ *packageextension.Type, typeParameters map[string]bool, generated bool) {
 	if typ.Kind == "named" && !typeParameters[typ.Name] {
-		if reference, ok := r.reference(modulePath, namespace, typ.Name); ok {
+		if reference, ok := r.reference(modulePath, namespace, typ.Name, generated); ok {
 			typ.Definition = &packageextension.Definition{
 				ModulePath: reference.Identity.ModulePath, Name: reference.Identity.Name, ImportPath: reference.ImportPath,
 			}
 		}
 	}
 	for index := range typ.Arguments {
-		r.attachDefinitions(modulePath, namespace, &typ.Arguments[index], typeParameters)
+		r.attachDefinitions(modulePath, namespace, &typ.Arguments[index], typeParameters, generated)
 	}
 }
 
-func (r projectInputResolver) resolveType(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool) (packageextension.Type, []packageextension.ProjectDeclarationReference) {
+func (r projectInputResolver) resolveType(modulePath, namespace string, typ packageextension.Type, visiting map[string]bool, generated bool) (packageextension.Type, []packageextension.ProjectDeclarationReference) {
 	for index := range typ.Arguments {
-		resolved, _ := r.resolveType(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting))
+		resolved, _ := r.resolveType(modulePath, namespace, typ.Arguments[index], cloneBoolMap(visiting), generated)
 		typ.Arguments[index] = resolved
 	}
 	if typ.Kind != "named" {
 		return typ, nil
 	}
-	reference, ok := r.reference(modulePath, namespace, typ.Name)
+	reference, ok := r.reference(modulePath, namespace, typ.Name, generated)
 	if !ok {
 		return typ, nil
 	}
@@ -476,15 +486,23 @@ func (r projectInputResolver) resolveType(modulePath, namespace string, typ pack
 	visiting[key] = true
 	targetNamespace := projectDeclarationOwner(reference.Identity.Name)
 	target := exportType(projectInputTypeRef(alias.Target))
-	r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil)
-	resolved, nestedPath := r.resolveType(reference.Identity.ModulePath, targetNamespace, target, visiting)
+	targetGenerated := r.compilerGenerated(reference.Identity.ModulePath, alias.Target.Span())
+	r.attachDefinitions(reference.Identity.ModulePath, targetNamespace, &target, nil, targetGenerated)
+	resolved, nestedPath := r.resolveType(reference.Identity.ModulePath, targetNamespace, target, visiting, targetGenerated)
 	return resolved, append(path, nestedPath...)
 }
 
-func (r projectInputResolver) reference(modulePath, namespace, name string) (packageextension.ProjectDeclarationReference, bool) {
+func (r projectInputResolver) reference(modulePath, namespace, name string, generated bool) (packageextension.ProjectDeclarationReference, bool) {
 	for _, candidate := range projectNameCandidates(namespace, name) {
 		if r.definitions[modulePath][candidate] {
 			return packageextension.ProjectDeclarationReference{Identity: projectDeclarationIdentity(modulePath, candidate)}, true
+		}
+	}
+	if generated {
+		if imported, ok := r.generatedImports[modulePath][name]; ok {
+			return packageextension.ProjectDeclarationReference{
+				Identity: projectDeclarationIdentity(imported.modulePath, name), ImportPath: imported.importPath,
+			}, true
 		}
 	}
 	if imported, ok := r.imports[modulePath][name]; ok {
@@ -493,6 +511,11 @@ func (r projectInputResolver) reference(modulePath, namespace, name string) (pac
 		}, true
 	}
 	return packageextension.ProjectDeclarationReference{}, false
+}
+
+func (r projectInputResolver) compilerGenerated(modulePath string, span token.Span) bool {
+	program := r.programs[modulePath]
+	return program != nil && program.CompilerGeneratedStart > 0 && span.Start.Offset >= program.CompilerGeneratedStart
 }
 
 func (r projectInputResolver) modulePath(importPath string) string {
