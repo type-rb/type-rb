@@ -17,6 +17,11 @@ func TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 			program := &ir.Program{
 				Mode: "typescript", Package: "orm", ModulePath: "trb/orm/index", TypeScriptRuntime: "bun",
 				Extensions: []ir.Extension{manifest}, Statements: []ir.Statement{
+					&ir.Import{
+						Path: "trb/std/result/index", Standard: true, Runtime: true, RuntimeRequired: true,
+						Namespace: true, Alias: "__trb_result", Symbols: []string{"Result"},
+						SymbolKinds: map[string]string{"Result": "enum"},
+					},
 					&ir.Enum{Name: "DbErrorKind", Body: []ir.Statement{
 						&ir.EnumMember{Name: "Connection"}, &ir.EnumMember{Name: "Constraint"},
 						&ir.EnumMember{Name: "InvalidData"}, &ir.EnumMember{Name: "Query"},
@@ -39,10 +44,14 @@ func TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary(t *testing.T) {
 				"export async function transaction", `database().begin("immediate", run)`, "result.affectedRows ?? result.count",
 				`Number.isSafeInteger(integer)`, `database Integer is outside the portable range`,
 				`const __trbOrmAdapter: TrbOrmAdapter = "` + adapter + `";`,
+				`function resultOk<T>(value: T): DbResult<T> { return __trb_result.Result.Ok<T, DbError>(value); }`,
 			} {
 				if !strings.Contains(pool, expected) {
 					t.Fatalf("generated %s TypeScript ORM pool is missing %q:\n%s", adapter, expected, pool)
 				}
+			}
+			if strings.Contains(pool, "$Result") || strings.Contains(pool, "return Result.") {
+				t.Fatalf("generated %s TypeScript ORM runtime bypasses the resolved Result binding:\n%s", adapter, pool)
 			}
 			if adapter == "mysql" {
 				for _, expected := range []string{

@@ -33,7 +33,8 @@ func (g *generator) ormCoreRuntime(manifest *ormintegration.Manifest) {
 	for _, line := range strings.Split(strings.TrimSpace(typeScriptSQLConnectionRuntime), "\n") {
 		g.line(line)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(typescriptORMRuntime), "\n") {
+	runtime := strings.ReplaceAll(typescriptORMRuntime, "$Result", g.runtimeName("Result"))
+	for _, line := range strings.Split(strings.TrimSpace(runtime), "\n") {
 		g.line(line)
 	}
 }
@@ -582,8 +583,8 @@ export function range(start: unknown, end: unknown, exclusive: boolean): TrbOrmR
   return { __trbRange: true, start, end, exclusive };
 }
 
-function resultOk<T>(value: T): DbResult<T> { return Result.Ok<T, DbError>(value); }
-function resultErr<T>(kind: DbErrorKind, message: string): DbResult<T> { return Result.Err<T, DbError>({ kind, message }); }
+function resultOk<T>(value: T): DbResult<T> { return $Result.Ok<T, DbError>(value); }
+function resultErr<T>(kind: DbErrorKind, message: string): DbResult<T> { return $Result.Err<T, DbError>({ kind, message }); }
 function errorKind(error: unknown): DbErrorKind {
   if (error instanceof TrbOrmExecutionError) return error.kind;
   const code = String((error as any)?.code ?? "");
