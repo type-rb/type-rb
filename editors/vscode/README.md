@@ -11,8 +11,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
 - Project-wide diagnostics and quick fixes
 - Checked completion for declarations, instantiated generic and transparent
   alias members, and call arguments
-- Auto-imports for unambiguous project declarations and compiler-owned
-  standard types such as `Result`
+- Auto-imports for unambiguous declaration roots and exact named declarations
 - Hover information and signature help
 - Go to definition from declarations, uses, and complete project-import paths;
   implementation navigation, references, symbol rename, and project-wide
@@ -46,8 +45,8 @@ sibling files are not compiled, and Go is the default target mode.
 
 Use Visual Studio Code 1.130 or newer.
 
-Use TypeRB 0.3.46 or newer. Earlier compilers do not provide the complete
-language-server and test-runner contracts expected by this extension release.
+Use TypeRB 0.4.0 or newer. Earlier compilers do not provide declaration-root
+imports and the language-service contracts expected by this extension release.
 
 Install the TypeRB compiler and make `trb` available on `PATH`:
 

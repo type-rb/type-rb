@@ -114,6 +114,26 @@ test("scopes representative portable TypeRB syntax", async () => {
   assert.equal(ruleStack.depth, 1, "representative fixture left an open TextMate rule");
 });
 
+test("scopes declaration-root imports and contextual activation", () => {
+  const { tokens, ruleStack } = tokenize(`import trb/std/json
+import { Date as CalendarDate } from trb/std/time
+activate trb/platform/ruby/native
+activate(user)
+receiver.activate(user)`);
+
+  assertScope(tokens, "trb/std/json", "string.unquoted.import-path.trb");
+  assertScope(tokens, "from", "keyword.control.import.trb");
+  assertScope(tokens, "trb/std/time", "string.unquoted.import-path.trb");
+  assertScope(tokens, "as", "keyword.control.import.trb");
+  assertScope(tokens, "trb/platform/ruby/native", "string.unquoted.import-path.trb");
+  const activations = tokens.filter((token) => token.text === "activate");
+  assert.equal(activations.length, 3);
+  assert.equal(activations[0].scopes.includes("keyword.control.import.trb"), true);
+  assert.equal(activations[1].scopes.includes("keyword.control.import.trb"), false);
+  assert.equal(activations[2].scopes.includes("keyword.control.import.trb"), false);
+  assert.equal(ruleStack.depth, 1, "import and activation fixture left an open TextMate rule");
+});
+
 test("keeps ambiguous and multiline constructs bounded", async () => {
   const { tokens, ruleStack } = tokenize(await fixture("ambiguous.trb"));
 
