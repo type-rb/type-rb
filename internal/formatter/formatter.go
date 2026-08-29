@@ -5,6 +5,7 @@ package formatter
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -60,6 +61,7 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 type canonicalImport struct {
 	node     *ast.ImportStatement
 	metadata ImportMetadata
+	path     string
 }
 
 func canonicalImportSource(source []byte, program *ast.Program, resolve func(*ast.ImportStatement) ImportMetadata) []byte {
@@ -73,7 +75,10 @@ func canonicalImportSource(source []byte, program *ast.Program, resolve func(*as
 		if metadata.CanonicalPath == "" {
 			metadata.CanonicalPath = node.Path
 		}
-		imports = append(imports, canonicalImport{node: node, metadata: metadata})
+		imports = append(imports, canonicalImport{
+			node: node, metadata: metadata,
+			path: canonicalImportPath(source, node, metadata.CanonicalPath),
+		})
 	}
 	if len(imports) == 0 {
 		return source
@@ -134,7 +139,7 @@ func canonicalImportGroup(group []canonicalImport) (string, bool) {
 	if len(group) == 0 {
 		return "", false
 	}
-	path := group[0].metadata.CanonicalPath
+	path := group[0].path
 	root := group[0].metadata.Root
 	rootStable := group[0].metadata.Resolved && group[0].metadata.RootStable && root != ""
 	allNamed := true
@@ -194,6 +199,22 @@ func canonicalBareImportWithAlias(path, alias string) string {
 		result += " as " + alias
 	}
 	return result
+}
+
+func canonicalImportPath(source []byte, node *ast.ImportStatement, canonical string) string {
+	start := node.PathSpan.Start.Offset
+	end := node.PathSpan.End.Offset
+	if start < 0 || end < start || end > len(source) {
+		return canonical
+	}
+	original := string(source[start:end])
+	if len(original) < 2 || original[0] != original[len(original)-1] || original[0] != '\'' && original[0] != '"' {
+		return canonical
+	}
+	if canonical == node.Path {
+		return original
+	}
+	return strconv.Quote(canonical)
 }
 
 func opaqueNativeTokens(source []byte, tokens []token.Token, islands []ast.NativeIsland) []token.Token {
