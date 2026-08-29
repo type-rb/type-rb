@@ -114,9 +114,15 @@ trb fmt src test.trb
 `trb fmt` is deterministic and idempotent. It emits one tab per nesting level,
 preserves comments and opaque literal contents, and removes a terminal
 `/index` from a project import when the shorter path resolves to the same
-module. It retains `/index` when a direct file would otherwise win or when the
-import cannot be resolved. Stdin formatting has no project snapshot and
-therefore does not remove `/index`.
+module. A direct `name.trb` and `name/index.trb` cannot coexist in one resolved
+source graph. The formatter retains `/index` when the import cannot be resolved;
+stdin formatting has no project snapshot and therefore does not remove it.
+
+Project-aware formatting also combines compatible named imports. For a
+root-stable target, it uses the bare declaration-root shorthand for a matching
+singleton named import and may expand a bare root when combining it with other
+named declarations. It preserves exact forms for non-root-stable or unresolved
+targets and never converts between `import` and `activate`.
 
 ## Lint
 
@@ -484,7 +490,7 @@ Public declarations with a name unique across the project and public types
 from portable standard packages are available without typing an import in the
 REPL. The session adds deterministic hidden imports while ordinary project
 source continues to require explicit imports. Completion offers types such as
-`Date` and `Result`, package namespaces such as `math`, and functions such as
+`Date` and `Result`, declaration roots such as `Math`, and functions such as
 `md5` in a scratch session. Accepting an import candidate inserts its ordinary
 import visibly into the input. If more than one package exports the same name,
 the menu shows each origin and accepting one inserts the selected import.
@@ -492,7 +498,7 @@ When the input consists only of that candidate, Tab keeps even a unique match
 as a cancellable selection. Escape, Backspace, or Delete restores the original
 input without confirming the candidate. Enter confirms the selection by
 replacing the editable input with only the import; a later Enter submits that
-import. Typing `.` for a selected package namespace or `(` for a selected
+import. Typing `.` for a selected declaration root or `(` for a selected
 parameterized function instead confirms the candidate as an expression: the
 visible import is prepended, the character is inserted after the candidate,
 and editing continues. Other ordinary characters cancel the selection and edit

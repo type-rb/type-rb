@@ -1,6 +1,6 @@
 # 0011: Declaration-root imports
 
-Status: accepted design; implementation pending
+Status: accepted and implemented in TypeRB 0.4.0
 
 ## Context
 
