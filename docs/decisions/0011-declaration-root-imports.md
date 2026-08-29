@@ -1,6 +1,6 @@
-# 0005: Declaration-root imports
+# 0011: Declaration-root imports
 
-Status: accepted design; implementation deferred
+Status: accepted design; implementation pending
 
 ## Context
 
@@ -45,7 +45,8 @@ declaration properties without copying Ruby file loading, Go's lowercase
 package identifiers, or general JavaScript side-effect imports.
 
 The import path cannot mechanically determine capitalization. In particular,
-`json` may intentionally expose `JSON`, not `Json`. The rule must handle
+`json` may intentionally expose `JSON`, not `Json`, and `request_id` may expose
+`RequestID`, not `RequestId`. The rule must handle snake-case paths and
 acronyms without an inflector, acronym registry, or package-specific override.
 
 ## Decision
@@ -130,15 +131,19 @@ The resolver determines the root as follows:
    module is a directory `index`, use the parent directory name rather than
    `index` as its final segment.
 2. Consider only root-eligible public top-level declarations.
-3. Fold ASCII `A` through `Z` to lowercase in both the final path segment and
-   every candidate declaration name.
-4. Select the declaration whose complete folded name equals the folded path
-   segment.
-5. Bind the selected declaration under its exact authored name.
+3. Form the path root key by removing ASCII `_` from the final path segment
+   and folding ASCII `A` through `Z` to lowercase.
+4. Form each declaration root key by folding ASCII `A` through `Z` to
+   lowercase without removing characters from the declaration name.
+5. Select the declaration whose complete key equals the path root key.
+6. Bind the selected declaration under its exact authored name.
 
-Only ASCII letter case is ignored. Underscores, hyphens, digits, and all other
-characters remain significant. The rule compares existing declarations; it
-does not synthesize a PascalCase name from the path.
+Only ASCII letter case and underscores in the path segment receive special
+treatment. Declaration underscores, path hyphens, digits, and all other
+characters remain significant. The asymmetric rule maps a snake-case path to
+an existing identifier without making declaration underscores invisible. It
+compares existing declarations and never synthesizes a PascalCase or acronym
+spelling from the path.
 
 Examples include:
 
@@ -150,8 +155,11 @@ Examples include:
 | `hmac` | `HMAC` | yes |
 | `base64` | `Base64` | yes |
 | `filesystem` | `FileSystem` | yes |
-| `secure_random` | `SecureRandom` | no |
-| `string_builder` | `StringBuilder` | no |
+| `file_system` | `FileSystem` | yes |
+| `secure_random` | `SecureRandom` | yes |
+| `string_builder` | `StringBuilder` | yes |
+| `request_id` | `RequestID` | yes |
+| `secure_random` | `SECURE_RANDOM` | no |
 
 If there is no match, the bare declaration import is an error and the
 diagnostic lists available top-level declarations that can be imported by
@@ -159,9 +167,9 @@ name. A module is not required to provide a matching root. For example, an
 `encoding` module may intentionally expose only the peer declarations `Hex`
 and `Base64`.
 
-If more than one declaration matches after ASCII case folding, the bare import
-is ambiguous. Exact named imports remain available when the declaration source
-is allowed to contain the collision:
+If more than one declaration has the same root key as the path, the bare
+import is ambiguous. Exact named imports remain available when the declaration
+source is allowed to contain the collision:
 
 ```trb
 import { JSON, Json as LegacyJson } from some/json
@@ -175,6 +183,25 @@ import trb/std/json as WireJSON
 
 WireJSON.encode(value)
 ```
+
+### Canonical directory entry paths
+
+A direct TypeRB module `name.trb` and a directory entry module
+`name/index.trb` define the same authored import root and cannot coexist in one
+resolved TypeRB source graph. The conflict is a project or package error rather
+than a precedence rule. Other files below the `name` directory remain valid;
+only its `index.trb` conflicts with the peer `name.trb`.
+
+When only `name/index.trb` exists, both `name` and an explicit `name/index`
+resolve to that module identity. The shorter `name` form is canonical, and
+project-aware formatting removes the terminal `/index`. When only `name.trb`
+exists, `name` resolves directly to it. An unresolved import or source-only
+formatting without a project snapshot preserves its authored path rather than
+guessing.
+
+This invariant prevents a formatter-shortened import from silently changing
+identity when a direct peer file is added later: the new file creates a module
+graph conflict until the source layout and imports are changed explicitly.
 
 ### Root stability and declaration provenance
 
@@ -192,7 +219,7 @@ rule. Contributions include authored TypeRB source, compiler-generated
 declarations, attached provider catalogs, and native declaration data.
 
 For a root-stable target, at most one root-eligible declaration may match the
-final path segment after ASCII case folding. The compiler validates the rule
+final path segment under the root-key rule. The compiler validates the rule
 after assembling all effective declaration contributions. Publishing a second
 matching root is an authoring error. This restriction applies only to
 declarations competing for that target root; it is not a global ban on all
@@ -413,16 +440,14 @@ bare forms.
 
 For a non-root-stable target, `trb fmt` preserves an authored exact named
 import even when the current effective catalog has one matching root. A future
-package version may add a case-fold-equivalent declaration that TypeRB cannot
-forbid, while the exact named import remains valid. This includes mixed targets
-whose TypeRB source is augmented by an unconstrained native provider. Tooling
-may offer an explicit code action to adopt the shorter bare form.
+package version may add another declaration with the same root key that TypeRB
+cannot forbid, while the exact named import remains valid. This includes mixed
+targets whose TypeRB source is augmented by an unconstrained native provider.
 
 An already-authored bare import is preserved for a non-root-stable target when
 the current effective catalog has one matching root. The formatter does not
-expand it back to an exact named import; a dependency migration may offer that
-change as an explicit code action. Automatic conversion between exact named
-and bare forms in either direction is outside the formatter's scope when
+expand it back to an exact named import. Automatic conversion between exact
+named and bare forms in either direction is outside the formatter's scope when
 continued root uniqueness cannot be proven.
 
 Formatting never converts between `import` and `activate`; they express
@@ -463,7 +488,7 @@ Likewise, `Hex` and `Base64` are peer capability modules selected from the
 This is an API ownership rule, not an exception table maintained by the
 compiler.
 
-### Implementation order and migration
+### Implementation order
 
 The `activate` source contract is accepted here, but its implementation is
 deferred with the rest of the declaration-root import work. It need not ship
@@ -489,35 +514,17 @@ metadata. If any declaration contributor is not subject to the root-collision
 rule, the entire target is non-root-stable for formatter canonicalization even
 when the selected declaration itself came from TypeRB source.
 
-Existing activation-only imports retain their current behavior until that
-migration. The dedicated `activate` form must be available before any existing
-activation-only import is rejected. During a published compatibility window,
-the compiler may continue to accept the legacy spelling for already-recognized
-capability targets with a non-fatal deprecation diagnostic and a migration code
-action. The exception remains narrow and does not make new arbitrary targets
-activatable through `import`.
+The implementation introduces the new import and activation semantics as one
+source-model change. It does not retain lowercase package namespaces, legacy
+activation-only imports, wildcard project imports, deprecation aliases, a
+compatibility mode, or migration tooling. Compiler-owned and official source
+is updated in the same change. Other source using an old form must be rewritten
+to the declaration binding or `activate` form required by the new model.
 
-Workspace-owned source can be migrated directly. Locked dependency source must
-continue to compile during that compatibility window because the application
-author cannot edit it in place. Hard zero-match rejection for the legacy form
-requires a declared breaking compatibility boundary after bundled and official
-packages have migrated; users of an affected external package then need an
-updated package release. The legacy spelling does not remain as a permanent
-alias.
-
-Migration must also account for the current project-wide provider catalog. If
-a source module uses module-local syntax, an unbound provider declaration, or
-a framework rule without its own declaration import or activation edge, the
-compiler diagnoses that module and offers a code action to add the appropriate
-normal import or `activate` form. This does not apply to the effective public
-members of a nominal declaration reached through an already-valid declaration
-or contract edge. Replacing only the legacy import that originally enabled the
-provider is not sufficient.
-
-Declaration-bearing root imports may be implemented incrementally, but any
-temporary zero-binding exception remains limited to existing registered
-compiler integrations and already-supported fixed-provider roots. It is not a
-public extension mechanism for arbitrary package activation.
+Declaration-bearing root imports may be implemented in reviewable stacked
+changes, but no intermediate compatibility behavior becomes part of the
+public language contract. Each implementation stage must test the final
+semantics it owns.
 
 ## Consequences
 
@@ -541,15 +548,17 @@ public extension mechanism for arbitrary package activation.
 - Provider-generated public members follow their nominal declaration identity
   through resolved contracts without implicitly exposing the declaration name
   or activating its provider.
-- Packages whose path contains a separator that is absent from the root name
-  use an explicit named import in the initial model.
+- Snake-case module paths bind matching declarations such as `SecureRandom`,
+  `StringBuilder`, and `RequestID` without synthesizing their capitalization.
+- A direct module and directory `index` cannot compete for the same canonical
+  authored import path, so formatter shortening cannot silently rebind later.
 - Capability-only source remains rare and explicit without synthetic marker
   declarations or a metadata-dependent meaning for ordinary imports.
 - Supporting types can arrive with their owner through one root import, while
   frequently used independent types remain concise in annotations.
-- Existing package imports that currently create lowercase namespaces, import
-  all project exports, or activate an integration require migration when this
-  decision is implemented.
+- Existing package imports that create lowercase namespaces, import all
+  project exports, or activate an integration are invalid under the new model
+  and must be rewritten with the source change that adopts it.
 - The compiler must support imported modules with public methods and nested
   declarations, including namespace-stable type identity across modules and
   backends. Current implementation limitations do not alter the source model.
@@ -577,8 +586,12 @@ public extension mechanism for arbitrary package activation.
   knowledge depend on an invisible per-package policy.
 - Selecting declaration import style by the number or kind of used symbols
   makes small source edits trigger unrelated import and use-site rewrites.
-- Converting snake case to PascalCase and maintaining acronym exceptions adds
-  an inflection system where comparison with actual exports is sufficient.
+- Synthesizing PascalCase from snake case and maintaining acronym exceptions
+  adds an inflection system where normalized comparison with actual exports is
+  sufficient.
+- Allowing both `name.trb` and `name/index.trb` and selecting one by precedence
+  lets a later file addition silently change a formatter-shortened import's
+  module identity.
 - Banning every case-fold-equivalent declaration globally would reject or
   force adapters to rename valid native APIs unrelated to a module root.
 - Preserving every matching singleton named import avoids formatter-induced
@@ -594,8 +607,8 @@ public extension mechanism for arbitrary package activation.
 - Direct imports of members such as `Math.sqrt`. This is distinct from
   importing a top-level function and would require separate syntax and
   justification.
-- Separator-insensitive root matching, such as matching `secure_random` to
-  `SecureRandom`. The initial rule ignores ASCII letter case only.
+- Additional path-separator normalization, such as matching `react-query` to
+  `ReactQuery`. The initial rule removes ASCII `_` only.
 - Wildcard imports and general public re-export syntax.
 - Capability-specific selectors for a target that declares more than one
   capability.
@@ -607,6 +620,3 @@ public extension mechanism for arbitrary package activation.
   package-supplied executable compiler extensions.
 - A general third-party executable activation protocol. Existing validated
   data-only provider manifests remain the maximum external activation scope.
-- The standard-library and project-module migration, diagnostics, formatter,
-  completion, compiler, and backend changes required to implement this
-  decision.
