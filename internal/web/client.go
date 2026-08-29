@@ -148,7 +148,7 @@ func BuildBrowserClient(catalog EndpointCatalog, input packageextension.ProjectD
 	if generator.usesJSONBody {
 		generator.requireImport("trb/platform/typescript/browser", "json_body")
 	}
-	generator.requireImport("trb/std/result", "Result")
+	generator.requireRootImport("trb/std/result")
 	if generator.usesQuery {
 		generator.requireRootImport("trb/std/url")
 	}

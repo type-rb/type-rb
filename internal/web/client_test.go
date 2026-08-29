@@ -79,6 +79,7 @@ end
 	for _, fragment := range []string{
 		"import { CreateReportInput, CreateReportResponse, ErrorResponse } from contracts/reports",
 		"import { HttpClient, NoBody, RequestError, RequestErrorKind, Response, json_body } from trb/platform/typescript/browser",
+		"import trb/std/result",
 		"enum CreateReportEndpointResult",
 		"Status202(response: Response<CreateReportResponse>)",
 		"Status204(response: Response<NoBody>)",
