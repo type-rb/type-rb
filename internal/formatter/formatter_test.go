@@ -103,6 +103,18 @@ func TestFormatFunctionValuesAndSemicolonForm(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesTerminalVoidReturn(t *testing.T) {
+	source := []byte("def stop()\n  return\nend\n")
+	want := "def stop()\n\treturn\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("formatter changed terminal return semantics\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+}
+
 func TestFormatCanonicalizesStructuredJSXAndIsIdempotent(t *testing.T) {
 	source := []byte(`import { ReactNode } from trb/platform/typescript/react
 def AnnouncementDetail():ReactNode
@@ -474,6 +486,23 @@ func TestFormatPortableCollectionTransformations(t *testing.T) {
 	}
 }
 
+func TestFormatIterationBlockPostfixChains(t *testing.T) {
+	source := []byte("def total(ids:Array<Integer>):Integer\ncount:=ids.map do |id|\nid*2\nend.size()\nreturn ids.map{|id| id*2}.reduce(0) do |sum,value|\nsum+value\nend\nend\n")
+	want := "def total(ids: Array<Integer>): Integer\n\tcount := ids.map do |id|\n\t\tid * 2\n\tend.size()\n\treturn ids.map { |id| id * 2 }.reduce(0) do |sum, value|\n\t\tsum + value\n\tend\nend\n"
+
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected iteration chain formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("iteration chain formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatEnumCaseUsesTabsAndPreservesComments(t *testing.T) {
 	source := []byte("enum  State # enum\nOpen # open\nClosed\nend\ndef label(value:State):String\ncase value # select\nwhen State::Open # branch\nreturn \"open\" # result\nwhen State::Closed\nreturn \"closed\"\nend\nend\n")
 	formatted, diagnostics := Format(source)
@@ -551,12 +580,12 @@ func TestFormatConditionalExpressionAndTransfers(t *testing.T) {
 }
 
 func TestFormatPayloadEnumAndPatternBindings(t *testing.T) {
-	source := []byte("enum  Token # token\nText(value:String) # text\nPair(left:Integer,right:Integer)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Pair(left,right)\nreturn \"pair\"\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
+	source := []byte("enum  Token # token\nText(value:String) # text\nSpan(id:Integer,*,before:String,after:String)\nEOF\nend\ndef render(value:Token):String\ncase value\nwhen Token::Text(text) # bind\nreturn text\nwhen Token::Span(id,after:current,before:previous)\nreturn previous+current+id.to_s()\nwhen Token::EOF\nreturn \"eof\"\nend\nend\n")
 	formatted, diagnostics := Format(source)
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "enum Token # token\n\tText(value: String) # text\n\tPair(left: Integer, right: Integer)\n\tEOF\nend\ndef render(value: Token): String\n\tcase value\n\twhen Token::Text(text) # bind\n\t\treturn text\n\twhen Token::Pair(left, right)\n\t\treturn \"pair\"\n\twhen Token::EOF\n\t\treturn \"eof\"\n\tend\nend\n"
+	want := "enum Token # token\n\tText(value: String) # text\n\tSpan(id: Integer, *, before: String, after: String)\n\tEOF\nend\ndef render(value: Token): String\n\tcase value\n\twhen Token::Text(text) # bind\n\t\treturn text\n\twhen Token::Span(id, after: current, before: previous)\n\t\treturn previous + current + id.to_s()\n\twhen Token::EOF\n\t\treturn \"eof\"\n\tend\nend\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected payload enum formatting:\n%s", formatted)
 	}
@@ -676,6 +705,22 @@ func TestFormatTypedHashAndNestedGenericsPreservesComments(t *testing.T) {
 	formattedAgain, diagnostics := Format(formatted)
 	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
 		t.Fatalf("Hash formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
+func TestFormatMutableParameters(t *testing.T) {
+	source := []byte("def advance(mut value:Integer,*,mut amount:Integer=1):Integer\nvalue+=amount\nreturn value\nend\n")
+	want := "def advance(mut value: Integer, *, mut amount: Integer = 1): Integer\n\tvalue += amount\n\treturn value\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %v", diagnostics)
+	}
+	if string(formatted) != want {
+		t.Fatalf("unexpected mutable parameter formatting\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := Format(formatted)
+	if len(diagnostics) > 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("mutable parameter formatting is not idempotent:\n%s\ndiagnostics=%v", formattedAgain, diagnostics)
 	}
 }
 

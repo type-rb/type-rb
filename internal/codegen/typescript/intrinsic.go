@@ -10,6 +10,8 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	callIdentity := g.expressionTypeIdentity(call.ExprType(), call)
+	callType := g.tsTypeWithIdentity(call.ExprType(), callIdentity)
 	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
 		return generated
 	}
@@ -29,7 +31,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return generated
 	}
 	if name == "trb.internal.runtime.fail" {
-		return "((): " + g.tsType(call.ExprType()) + " => { throw new Error(" + arguments[0] + "); })()"
+		return "((): " + callType + " => { throw new Error(" + arguments[0] + "); })()"
 	}
 	if name == "trb.jobs.perform_later" || name == "trb.jobs.perform_in" || name == "trb.jobs.perform_at" {
 		return g.jobsPerformLater(call, arguments)
@@ -59,9 +61,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	filesystemResultType := func() (string, string, string) {
 		result := call.ExprType()
 		if len(result.Args) != 2 {
-			return g.tsType(result), "unknown", "unknown"
+			return callType, "unknown", "unknown"
 		}
-		return g.tsType(result), g.tsType(result.Args[0]), g.tsType(result.Args[1])
+		return callType,
+			g.tsTypeWithIdentity(result.Args[0], identityArgument(callIdentity, 0)),
+			g.tsTypeWithIdentity(result.Args[1], identityArgument(callIdentity, 1))
 	}
 	filesystemOK := func(value string) string {
 		_, successType, errorType := filesystemResultType()
@@ -204,7 +208,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.web.context_with_request":
 		return tsWebContextWithRequest(call, arguments)
 	case "trb.web.context_fetch":
-		return tsWebContextFetch(call, arguments)
+		return g.tsWebContextFetch(call, arguments)
 	case "trb.web.json":
 		return g.tsWebJSON(call, arguments)
 	case "trb.web.configure_server":
@@ -385,7 +389,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbRequested = " + arguments[1] + "; let __trbIndex = __trbRequested; if (__trbIndex < 0) __trbIndex += __trbValues.length; if (__trbIndex < 0 || __trbIndex >= __trbValues.length) { return " + indexLookupError("__trbRequested", "__trbValues.length", "Array index is out of bounds") + "; } return " + filesystemOK("__trbValues[__trbIndex]!") + "; })()"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		safe := name == "trb.std.arrays.try_slice"
-		returnType := g.tsType(call.ExprType())
+		returnType := callType
 		invalid := "throw new RangeError(\"Array slice range is out of bounds\");"
 		success := "return __trbValues.slice(__trbStart, __trbStop);"
 		if safe {
@@ -395,9 +399,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "((): " + returnType + " => { const __trbValues = " + arguments[0] + "; const [__trbStart, __trbEnd, __trbExclusive] = " + arguments[1] + "; const __trbValid = __trbStart >= 0 && __trbEnd >= 0 && __trbStart <= __trbEnd && (__trbExclusive ? __trbEnd <= __trbValues.length : __trbEnd < __trbValues.length); if (!__trbValid) { " + invalid + " } const __trbStop = __trbExclusive ? __trbEnd : __trbEnd + 1; " + success + " })()"
 	case "trb.std.arrays.first":
-		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
+		return "((): " + callType + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[0]!; })()"
 	case "trb.std.arrays.last":
-		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
+		return "((): " + callType + " => { const __trbValues = " + arguments[0] + "; if (__trbValues.length === 0) { throw new Error(\"Array is empty\"); } return __trbValues[__trbValues.length - 1]!; })()"
 	case "trb.std.arrays.copy":
 		return "[..." + arguments[0] + "]"
 	case "trb.std.arrays.contains":
@@ -407,15 +411,17 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.count":
 		return "((values: Array<unknown>, target: unknown): number => { let count = 0; for (const value of values) { if (value === target) { count++; } } return count; })(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.uniq":
-		return "((values: " + g.tsType(call.ExprType()) + "): " + g.tsType(call.ExprType()) + " => { const result: " + g.tsType(call.ExprType()) + " = []; for (const value of values) { if (result.indexOf(value) < 0) { result.push(value); } } return result; })(" + arguments[0] + ")"
+		return "((values: " + callType + "): " + callType + " => { const result: " + callType + " = []; for (const value of values) { if (result.indexOf(value) < 0) { result.push(value); } } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.concat":
 		return "[..." + arguments[0] + ", ..." + arguments[1] + "]"
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
-		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".pop(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		valueType := g.tsType(call.ExprType())
+		return "((values: Array<" + valueType + ">): " + valueType + " => { const result = values.pop(); if (result === undefined) { throw new Error(\"Array is empty\"); } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.shift":
-		return "((): " + g.tsType(call.ExprType()) + " => { const value = " + arguments[0] + ".shift(); if (value === undefined) { throw new Error(\"Array is empty\"); } return value; })()"
+		valueType := g.tsType(call.ExprType())
+		return "((values: Array<" + valueType + ">): " + valueType + " => { const result = values.shift(); if (result === undefined) { throw new Error(\"Array is empty\"); } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
 		return arguments[0] + ".push(" + arguments[1] + ")"
 	case "trb.std.arrays.unshift":
@@ -432,7 +438,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.empty":
 		return "Object.keys(" + arguments[0] + ").length === 0"
 	case "trb.std.hashes.fetch":
-		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
+		return "((): " + callType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } return __trbValues[__trbKey]; })()"
 	case "trb.std.hashes.try_fetch":
 		resultType, _, _ := filesystemResultType()
 		return "((): " + resultType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { return " + keyLookupError("__trbKey", "Hash key is missing") + "; } return " + filesystemOK("__trbValues[__trbKey]") + "; })()"
@@ -448,7 +454,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.copy":
 		return "({ ..." + arguments[0] + " })"
 	case "trb.std.hashes.delete":
-		return "((): " + g.tsType(call.ExprType()) + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } const __trbValue = __trbValues[__trbKey]; Reflect.deleteProperty(__trbValues, __trbKey); return __trbValue; })()"
+		return "((): " + callType + " => { const __trbValues = " + arguments[0] + "; const __trbKey = " + arguments[1] + "; if (!Object.prototype.hasOwnProperty.call(__trbValues, __trbKey)) { throw new Error(\"Hash key is missing\"); } const __trbValue = __trbValues[__trbKey]; Reflect.deleteProperty(__trbValues, __trbKey); return __trbValue; })()"
 	case "trb.std.hashes.merge":
 		return "({ ..." + arguments[0] + ", ..." + arguments[1] + " })"
 	case "trb.std.hashes.update":
@@ -540,13 +546,14 @@ func tsWebContextWithRequest(call *ir.Call, arguments []string) string {
 	return "((): " + tsType(call.ExprType()) + " => { const contextValue = " + arguments[0] + "; const result = contextValue.with_request(" + arguments[1] + "); (result as any).__trb_trb_context_state = (contextValue as any).__trb_trb_context_state; return result; })()"
 }
 
-func tsWebContextFetch(call *ir.Call, arguments []string) string {
+func (g *generator) tsWebContextFetch(call *ir.Call, arguments []string) string {
 	if len(arguments) != 2 || len(call.ExprType().Args) != 2 {
 		return "undefined"
 	}
-	valueType := tsType(call.ExprType().Args[0])
-	errorType := tsType(call.ExprType().Args[1])
-	resultType := tsType(call.ExprType())
+	identity := g.expressionTypeIdentity(call.ExprType(), call)
+	valueType := g.tsTypeWithIdentity(call.ExprType().Args[0], identityArgument(identity, 0))
+	errorType := g.tsTypeWithIdentity(call.ExprType().Args[1], identityArgument(identity, 1))
+	resultType := g.tsTypeWithIdentity(call.ExprType(), identity)
 	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return Result.Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return Result.Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
 }
 
@@ -590,7 +597,7 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	decodeCall := *call
 	decodeCall.ExprBase.Type = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{call.ExprType().Args[0], types.FromName("JsonError")}}
 	decoded := g.tsJSONDecode(&decodeCall, "source")
-	valueType := tsCodecType(call.Codec)
+	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.RequestError"
 	errResult := func(value string) string {
 		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
@@ -608,7 +615,7 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 	if call.Codec == nil || call.Codec.Kind != "record" || len(call.ExprType().Args) != 2 {
 		return "undefined"
 	}
-	valueType := tsCodecType(call.Codec)
+	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.ParameterError"
 	resultType := "Result<" + valueType + ", " + errorType + ">"
 	sourceName := "Path"
@@ -620,13 +627,13 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
 	missing := func(name string) string {
-		return errResult("__trb_web.ParameterError.Missing(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult("__trb_web.ParameterError.Missing({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
 	}
 	duplicate := func(name string) string {
-		return errResult("__trb_web.ParameterError.Duplicate(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult("__trb_web.ParameterError.Duplicate({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
 	}
 	invalid := func(name, value, expected string) string {
-		return errResult("__trb_web.ParameterError.Invalid(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + ")")
+		return errResult("__trb_web.ParameterError.Invalid({ source: " + sourceValue + ", name: " + strconv.Quote(name) + ", value: " + value + ", expected: " + strconv.Quote(expected) + " })")
 	}
 	var body strings.Builder
 	body.WriteString("const parameterValues = new Map<string, Array<string>>(); ")
@@ -641,7 +648,7 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 	for index, field := range call.Codec.Fields {
 		variable := "field" + strconv.Itoa(index)
 		values := "values" + strconv.Itoa(index)
-		body.WriteString("const " + values + " = parameterValues.get(" + strconv.Quote(field.Name) + ") ?? []; let " + variable + ": " + tsCodecType(field.Schema) + "; ")
+		body.WriteString("const " + values + " = parameterValues.get(" + strconv.Quote(field.Name) + ") ?? []; let " + variable + ": " + g.tsCodecType(field.Schema) + "; ")
 		if field.Schema.Kind == "array" {
 			parser := g.tsWebParameterParser(field.Schema.Element)
 			body.WriteString("if (" + values + ".length === 0) { ")
@@ -650,7 +657,7 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 			} else {
 				body.WriteString(variable + " = [];")
 			}
-			body.WriteString(" } else { const parsedValues: Array<" + tsCodecType(field.Schema.Element) + "> = []; for (const rawValue of " + values + ") { const parsedValue = " + parser + "(rawValue); if (parsedValue === undefined) return " + invalid(field.Name, "rawValue", tsParameterExpected(field.Schema.Element)) + "; parsedValues.push(parsedValue); } " + variable + " = parsedValues; } ")
+			body.WriteString(" } else { const parsedValues: Array<" + g.tsCodecType(field.Schema.Element) + "> = []; for (const rawValue of " + values + ") { const parsedValue = " + parser + "(rawValue); if (parsedValue === undefined) return " + invalid(field.Name, "rawValue", tsParameterExpected(field.Schema.Element)) + "; parsedValues.push(parsedValue); } " + variable + " = parsedValues; } ")
 		} else {
 			body.WriteString("if (" + values + ".length === 0) { ")
 			if field.Schema.Type.Nullable {
@@ -680,7 +687,7 @@ func tsParameterExpected(schema *ir.CodecSchema) string {
 }
 
 func (g *generator) tsWebParameterParser(schema *ir.CodecSchema) string {
-	valueType := tsCodecType(schema)
+	valueType := g.tsCodecType(schema)
 	body := "return value;"
 	switch schema.Kind {
 	case "string":
@@ -692,20 +699,14 @@ func (g *generator) tsWebParameterParser(schema *ir.CodecSchema) string {
 	case "float":
 		body = "if (!/^[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(value)) return undefined; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined;"
 	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
-		owner := schema.Type.Name
-		if schema.Reference != nil && schema.Reference.Alias != "" {
-			owner = schema.Reference.Alias + "." + owner
-		}
+		owner := g.tsCodecRuntimeTypeName(schema)
 		method := "try_parse"
 		if schema.Kind == "time_zone" {
 			method = "try_get"
 		}
 		body = "const parsed = " + owner + "." + method + "(value); return parsed.kind === \"Ok\" ? parsed.value : undefined;"
 	case "raw_enum":
-		owner := schema.Type.Name
-		if schema.Reference != nil && schema.Reference.Alias != "" {
-			owner = schema.Reference.Alias + "." + owner
-		}
+		owner := g.tsCodecRuntimeTypeName(schema)
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
 			raw := item.Raw

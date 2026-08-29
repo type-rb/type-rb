@@ -81,13 +81,107 @@ func TestResolveRejectsUnknownRulesAndSupportsErrorLevel(t *testing.T) {
 	if _, err := Resolve(Options{Rules: map[string]string{"trb/unknown": "warning"}}); err == nil || !strings.Contains(err.Error(), "unknown lint rule") {
 		t.Fatalf("unknown rule error=%v", err)
 	}
-	options, err := Resolve(Options{Rules: map[string]string{PreferConditionalTransferRuleID: "error"}})
+	options, err := Resolve(Options{Rules: map[string]string{
+		PreferConditionalTransferRuleID: "error",
+		OmitTerminalVoidReturnRuleID:    "off",
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := []byte("def stop(enabled: Boolean)\n\tif enabled\n\t\treturn\n\tend\n\treturn\nend\n")
 	program, _ := parser.Parse(source)
 	items := Analyze(program, source, "main.trb", options)
+	if len(items) != 1 || items[0].Severity != diagnostic.Error {
+		t.Fatalf("diagnostics=%#v", items)
+	}
+}
+
+func TestOmitTerminalVoidReturnReportsAndFixesDefsAndFunctionValues(t *testing.T) {
+	source := []byte(`def log_value(value: String)
+	puts(value)
+	return
+	# Keep this closing comment.
+end
+
+callback := fn()
+	puts("callback")
+	return
+end
+`)
+	program, parseDiagnostics := parser.Parse(source)
+	if len(parseDiagnostics) != 0 {
+		t.Fatalf("parse diagnostics=%v", parseDiagnostics)
+	}
+	options, err := Resolve(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := Analyze(program, source, "/project/main.trb", options)
+	if len(items) != 2 {
+		t.Fatalf("diagnostics=%#v", items)
+	}
+	for _, item := range items {
+		if item.Code != diagnostic.Code(OmitTerminalVoidReturnRuleID) || item.Severity != diagnostic.Warning || len(item.Fixes) != 1 {
+			t.Fatalf("diagnostic=%#v", item)
+		}
+	}
+	fixed, count, err := ApplyFixes(source, "/project/main.trb", items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `def log_value(value: String)
+	puts(value)
+	# Keep this closing comment.
+end
+
+callback := fn()
+	puts("callback")
+end
+`
+	if count != 2 || string(fixed) != want {
+		t.Fatalf("count=%d\nwant:\n%s\ngot:\n%s", count, want, fixed)
+	}
+}
+
+func TestOmitTerminalVoidReturnKeepsSemanticAndCommentedReturns(t *testing.T) {
+	source := []byte(`def stop_if(should_stop: Boolean)
+	return if should_stop
+	puts("continued")
+end
+
+def described()
+	return # documents an intentional boundary
+end
+
+def label(): String
+	return "ready"
+end
+`)
+	program, diagnostics := parser.Parse(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("parse diagnostics=%v", diagnostics)
+	}
+	options, _ := Resolve(Options{})
+	if items := Analyze(program, source, "main.trb", options); len(items) != 0 {
+		t.Fatalf("diagnostics=%#v", items)
+	}
+}
+
+func TestOmitTerminalVoidReturnHonorsConfiguration(t *testing.T) {
+	source := []byte("def stop()\n\treturn\nend\n")
+	program, _ := parser.Parse(source)
+	disabled, err := Resolve(Options{Rules: map[string]string{OmitTerminalVoidReturnRuleID: "off"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items := Analyze(program, source, "main.trb", disabled); len(items) != 0 {
+		t.Fatalf("disabled diagnostics=%#v", items)
+	}
+	errors, err := Resolve(Options{Preset: NoRulesPreset, Rules: map[string]string{OmitTerminalVoidReturnRuleID: "error"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := Analyze(program, source, "main.trb", errors)
 	if len(items) != 1 || items[0].Severity != diagnostic.Error {
 		t.Fatalf("diagnostics=%#v", items)
 	}

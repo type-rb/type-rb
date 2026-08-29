@@ -64,6 +64,48 @@ func TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration(t *testing.T
 	}
 }
 
+func TestFileAndIndexFunctionValuesUseExactEffectModuleIdentity(t *testing.T) {
+	void := types.FromName("Void")
+	function := types.FunctionOf(nil, void)
+	effectCall := &ir.Call{
+		ExprBase: ir.NewExprBase(token.Span{}, void),
+		Callee: &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, function), Name: "operation",
+			Reference: &ir.Reference{Runtime: &ir.RuntimeBinding{Identity: "test#operation", PropagatesExecutionScope: true}},
+		},
+	}
+	effectful := &ir.Method{Name: "perform", ReturnType: void, Body: []ir.Statement{
+		&ir.ExpressionStatement{Expression: effectCall},
+	}}
+	pure := &ir.Method{Name: "perform", ReturnType: void}
+	consumer := func(module string) *ir.Program {
+		identifier := &ir.Identifier{
+			ExprBase: ir.NewExprBase(token.Span{}, function), Name: "perform",
+			Reference: &ir.Reference{Package: module, Symbol: "perform", ExportKind: "function"},
+		}
+		return &ir.Program{Mode: "typescript", ModulePath: "consumer/" + strings.ReplaceAll(module, "/", "_"), Statements: []ir.Statement{
+			&ir.Import{Path: module, Symbols: []string{"perform"}, SymbolKinds: map[string]string{"perform": "function"}, IntrinsicSymbols: map[string]bool{}, RuntimeIndependentSymbols: map[string]bool{}},
+			&ir.Variable{Name: "callback", Type: function, Value: identifier},
+		}}
+	}
+	programs := []*ir.Program{
+		{Mode: "typescript", ModulePath: "helpers", Statements: []ir.Statement{effectful}},
+		{Mode: "typescript", ModulePath: "helpers/index", Statements: []ir.Statement{pure}},
+		consumer("helpers"),
+		consumer("helpers/index"),
+	}
+	generated, err := GenerateProject(programs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(generated[2], "perform.bind(undefined, undefined)") {
+		t.Fatalf("effectful direct-file function value is missing its execution scope binding:\n%s", generated[2])
+	}
+	if strings.Contains(generated[3], "perform.bind") {
+		t.Fatalf("pure index-file function value inherited the direct-file effect:\n%s", generated[3])
+	}
+}
+
 func TestPureTypeScriptFunctionsRemainSynchronous(t *testing.T) {
 	integer := types.FromName("Integer")
 	value := &ir.Method{Name: "value", ReturnType: integer, Body: []ir.Statement{

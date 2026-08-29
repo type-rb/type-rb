@@ -128,7 +128,7 @@ end
 	wants := map[string][]string{
 		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(-2.75)`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
 		"ruby":       {`123.to_s`, `raw = value.to_s`, `(2).to_f`, `value.truncate`, `$stdout.puts(->(value)`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
-		"typescript": {`String(123)`, `const raw = String(value)`, `Number(2)`, `Math.trunc(value)`, `console.log(((): string`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
+		"typescript": {`String(123)`, `const raw = String(value)`, `Number(2)`, `Math.trunc(value)`, `console.log(((value: number): string`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifact, err := CompileWithOptions("methods.trb", source, Options{Mode: mode, Package: "methods", RubyLoader: "require_relative"})
@@ -1592,7 +1592,7 @@ end
 
 def array_state(): Boolean
 	values := [1]
-	return values.size() == 1 and not values.empty?()
+	return values.size() == 1 && !values.empty?()
 end
 
 def grow()
@@ -1613,7 +1613,7 @@ end
 
 def query_values(): Integer
 	values := [1, 2, 1]
-	if values.include?(2) and values.include?(1)
+	if values.include?(2) && values.include?(1)
 		return values.count(1) + values.count(2)
 	end
 	return 0
@@ -1669,11 +1669,11 @@ end
 
 def hash_state(): Boolean
 	labels: Hash<Integer, String> := {1 => "one"}
-	return labels.size() == 1 and not labels.empty?() and labels.key?(1)
+	return labels.size() == 1 && !labels.empty?() && labels.key?(1)
 end
 
 def string_state(): Boolean
-	return "TypeRB".start_with?("Type") and "TypeRB".end_with?("RB")
+	return "TypeRB".start_with?("Type") && "TypeRB".end_with?("RB")
 end
 
 def string_parts(): String
@@ -2020,7 +2020,7 @@ def joined(): String
 end
 
 def inspected(): Boolean
-	return path.absolute("/srv/app") and path.base("/srv/app/main.trb") == "main.trb" and path.directory("/srv/app/main.trb") == "/srv/app"
+	return path.absolute("/srv/app") && path.base("/srv/app/main.trb") == "main.trb" && path.directory("/srv/app/main.trb") == "/srv/app"
 end
 
 def parts(): Array<String>
@@ -2277,11 +2277,11 @@ func TestCompilerOwnedUnicodePackageLowersSameTablesAcrossBackends(t *testing.T)
 		Source: []byte(`import trb/std/unicode
 
 def classified(): Boolean
-	return unicode.letter(65) and unicode.letter(12354) and unicode.digit(1632) and unicode.uppercase(65) and unicode.lowercase(97) and unicode.whitespace(12288)
+	return unicode.letter(65) && unicode.letter(12354) && unicode.digit(1632) && unicode.uppercase(65) && unicode.lowercase(97) && unicode.whitespace(12288)
 end
 
 def identifiers(): Boolean
-	return unicode.identifier_start(64) and unicode.identifier_start(12354) and unicode.identifier_part(1632)
+	return unicode.identifier_start(64) && unicode.identifier_start(12354) && unicode.identifier_part(1632)
 end
 
 def scalar(): String
@@ -2289,7 +2289,7 @@ def scalar(): String
 end
 
 def string_methods(): Boolean
-	return "A😀".codepoints().size() == 2 and "".empty?() and "TypeRB".include?("RB") and "ada".upcase() == "ADA"
+	return "A😀".codepoints().size() == 2 && "".empty?() && "TypeRB".include?("RB") && "ada".upcase() == "ADA"
 end
 `),
 	}
@@ -2515,7 +2515,7 @@ def bad(): Result<Integer, String>
 	return Result<Integer, String>::Ok("not an integer")
 end
 `)
-	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "enum payload argument 1 has type String, expected Integer") {
+	if _, err := Compile("bad.trb", wrongPayload, "typescript"); err == nil || !strings.Contains(err.Error(), "argument 1 to Result::Ok() has type String, expected Integer") {
 		t.Fatalf("expected standard Result payload diagnostic, got %v", err)
 	}
 }

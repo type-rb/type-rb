@@ -2,6 +2,158 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.3.48 - 2026-08-28
+
+### Language and compiler
+
+- Mutable nullable bindings now retain the precise flow type of their latest
+  assignment while all later assignments continue to be checked against the
+  binding's declared nullable type. Editor hover information reflects the
+  narrowed flow type. ([#595](https://github.com/type-rb/type-rb/pull/595))
+- Postfix calls and portable iteration blocks chained after `do...end` or
+  brace collection blocks are now parsed, type-checked, formatted, and
+  compiled instead of being silently discarded or diagnosed against the
+  wrong receiver. ([#598](https://github.com/type-rb/type-rb/pull/598))
+
+### Tooling
+
+- The recommended `trb/omit-terminal-void-return` lint rule now reports and
+  safely removes redundant final bare `return` statements from Void functions.
+  The language and formatter continue to accept and preserve this syntax.
+  ([#597](https://github.com/type-rb/type-rb/pull/597))
+- `trb compiler bootstrap-snapshot --snapshot-version 4` now represents
+  strings, supported arrays, first-class functions, lexical captures, and
+  managed record and tagged fields while retaining the version 2 and 3
+  envelopes. ([#594](https://github.com/type-rb/type-rb/pull/594))
+
+## 0.3.47 - 2026-08-28
+
+### Compiler
+
+- Go generation now retains the standard `Result` runtime when source type
+  annotations expand through imported aliases. This fixes undefined `Result`
+  build failures for nullable cross-module aliases and typed Result test
+  helpers. ([#591](https://github.com/type-rb/type-rb/pull/591))
+
+## 0.3.46 - 2026-08-28
+
+### Breaking changes
+
+- `trb test` now accepts one or more `_test.trb` files or directories as
+  positional paths. Directories are searched recursively, multiple paths form
+  a union, and shell-expanded globs work as separate paths. Replace `--file`
+  with a positional path and replace `--filter` with `-t` or
+  `--test-name-pattern`, which matches full test names with a Go regular
+  expression. Focused runs compile all production files and only the selected
+  test files. ([#584](https://github.com/type-rb/type-rb/pull/584))
+
+### Standard library
+
+- `trb/std/test` adds typed `expect_ok(Result<T, E>) -> T` and
+  `expect_err(Result<T, E>) -> E` assertions. They accept standard Result type
+  aliases, return the expected payload, and report the helper call site when
+  the opposite variant is returned. Complete Result values remain directly
+  comparable with `expect(...).to_equal(...)`.
+  ([#586](https://github.com/type-rb/type-rb/pull/586))
+
+## 0.3.45 - 2026-08-28
+
+### Breaking changes
+
+- Project Declaration Input advances from version 6 to 7. Strict consumers
+  must accept version 7 and read canonical declaration identities separately
+  from source display names. Nested records and enums now expose structured
+  owner identities, while the set of visible declaration categories remains
+  unchanged. ([#581](https://github.com/type-rb/type-rb/pull/581))
+
+### CLI
+
+- Single-binary CLI applications now use `trb/cli` as their canonical import.
+  The `trb/platform/go/cli` spelling introduced in 0.3.44 remains a compatible
+  alias. Building currently requires the Go toolchain, but TypeRB application
+  source does not expose Go APIs.
+  ([#580](https://github.com/type-rb/type-rb/pull/580))
+
+## 0.3.44 - 2026-08-28
+
+### Breaking changes
+
+- Function and method parameters are now immutable bindings by default. Add
+  `mut` before a parameter that its implementation reassigns or uses for a
+  destructive operation. This marker does not change calls, interfaces,
+  overrides, or caller bindings. ([#572](https://github.com/type-rb/type-rb/pull/572))
+- Portable logical expressions now use only `&&`, `||`, and `!`. Replace the
+  removed `and`, `or`, and prefix `not` spellings with their symbolic forms.
+  ([#569](https://github.com/type-rb/type-rb/pull/569))
+- String interpolation now requires each embedded expression to already be a
+  non-nullable `String`. Convert numbers, Booleans, nullable values, and other
+  types explicitly, for example with `value.to_s()`.
+  ([#570](https://github.com/type-rb/type-rb/pull/570))
+- The `trb/web` `ParameterError::Missing`, `Duplicate`, and `Invalid` payloads
+  now use named-only fields. Add labels such as `source:` and `name:` when
+  constructing or matching these variants.
+  ([#571](https://github.com/type-rb/type-rb/pull/571))
+- Project Declaration Input advances from version 5 to 6. Strict consumers
+  must accept version 6; record fields now expose `hasDefault`, enum members
+  expose attributes, and nested records and enums retain qualified identities.
+  ([#567](https://github.com/type-rb/type-rb/pull/567))
+
+### Language and compiler
+
+- Record fields can declare per-construction defaults with
+  `field: Type = expression`. Defaults may reference earlier fields, distinguish
+  omission from explicit `nil`, and behave consistently across Go, Ruby,
+  TypeScript, imports, and the REPL. JSON, ORM, and web decoding continue to
+  apply their own missing-field policies.
+  ([#567](https://github.com/type-rb/type-rb/pull/567))
+- Payload enum variants can place a bare `*` between positional and named-only
+  fields. Constructors and exhaustive patterns bind named-only payload fields
+  by label across every backend.
+  ([#571](https://github.com/type-rb/type-rb/pull/571))
+- Nested, imported, aliased, and same-leaf declarations now retain canonical
+  identity through checking and generation, preventing unrelated declarations
+  from sharing effect behavior and preserving qualified TypeScript types.
+  ([#573](https://github.com/type-rb/type-rb/pull/573))
+- TypeScript generation no longer lets compiler temporaries shadow source
+  bindings named `value` in Float conversions, Array removal operations, or
+  raw-value enum lookup.
+  ([#568](https://github.com/type-rb/type-rb/pull/568))
+
+### CLI
+
+- Go projects can build typed command-line applications as one native binary
+  with `trb/platform/go/cli`. Records define positional arguments and options,
+  payload enums define subcommands, and static `@cli` metadata controls names
+  and help. The generated standard-library parser supports defaults, nullable
+  scalar fields, aliases, Unicode option names, help, version output, and
+  source-located schema diagnostics without runtime reflection.
+  ([#575](https://github.com/type-rb/type-rb/pull/575))
+
+## 0.3.43 - 2026-08-26
+
+### Web
+
+- Go projects can now run `_test.trb` files colocated with web routes when the
+  tests call ordinary functions in the route package. Generated test runners
+  retain the route-package import while also building the project dispatcher.
+  ([#564](https://github.com/type-rb/type-rb/pull/564))
+
+## 0.3.42 - 2026-08-26
+
+### Standard library
+
+- `Array#concurrent_map` now rejects mutation of mutable containers borrowed
+  from enclosing scope, including through aliases, nested iteration, derived
+  containers, and control-flow values. Read-only access and task-owned local
+  mutation remain valid. ([#557](https://github.com/type-rb/type-rb/pull/557))
+
+### Web
+
+- File-route discovery now ignores colocated files ending in `_test.trb` under
+  `src/routes`, so project checks and tests no longer require those test files
+  to declare HTTP handlers.
+  ([#561](https://github.com/type-rb/type-rb/pull/561))
+
 ## 0.3.41 - 2026-08-26
 
 ### Tooling

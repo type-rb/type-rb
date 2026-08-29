@@ -28,3 +28,25 @@ func TestNamedOnlyBoundaryAppearsInSourceSignatures(t *testing.T) {
 		t.Fatalf("method call metadata lost named-only presence: %#v", call.Parameters)
 	}
 }
+
+func TestNamedOnlyBoundaryAppearsInEnumMemberSignatures(t *testing.T) {
+	enum := &ir.Enum{
+		Name: "Change",
+		Body: []ir.Statement{&ir.EnumMember{
+			Name: "Renamed",
+			Fields: []ir.Parameter{
+				{Name: "id", Type: types.FromName("Integer")},
+				{Name: "before", Type: types.FromName("String"), NamedOnly: true},
+				{Name: "after", Type: types.FromName("String"), NamedOnly: true},
+			},
+		}},
+	}
+	_, namespace := enumMembers(enum, "Change", "/project/change.trb", nil)
+	if len(namespace) != 1 || namespace[0].Detail != "Renamed(id: Integer, *, before: String, after: String)" {
+		t.Fatalf("enum member signature lost named-only boundary: %#v", namespace)
+	}
+	call := namespace[0].Call
+	if call == nil || len(call.Parameters) != 3 || call.Parameters[0].NamedOnly || !call.Parameters[1].NamedOnly || !call.Parameters[1].Keyword || call.Parameters[1].Optional {
+		t.Fatalf("enum member call metadata lost named-only fields: %#v", call)
+	}
+}

@@ -43,6 +43,159 @@ end
 	}
 }
 
+func TestNamedOnlyEnumPayloadsCompileAcrossModes(t *testing.T) {
+	source := []byte(`enum Change
+	Renamed(id: Integer, *, before: String, after: String)
+end
+
+def describe(change: Change): String
+	case change
+	when Change::Renamed(id, after: current, before: previous)
+		return id.to_s() + ":" + previous + ":" + current
+	end
+end
+
+def sample(): Change
+	return Change::Renamed(7, after: "new", before: "old")
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifact, err := Compile("named_only_enum_payload.trb", source, mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			enum := artifact.IR.Statements[0].(*ir.Enum)
+			member := enum.Body[0].(*ir.EnumMember)
+			if len(member.Fields) != 3 || member.Fields[0].NamedOnly || !member.Fields[1].NamedOnly || !member.Fields[2].NamedOnly {
+				t.Fatalf("enum payload parameter regions were lost: %#v", member.Fields)
+			}
+			pattern := artifact.IR.Statements[1].(*ir.Method).Body[0].(*ir.Case).Branches[0]
+			if len(pattern.Bindings) != 3 || pattern.Bindings[1].Field != "after" || pattern.Bindings[1].Name != "current" || pattern.Bindings[2].Field != "before" || pattern.Bindings[2].Name != "previous" {
+				t.Fatalf("named enum pattern mapping was lost: %#v", pattern.Bindings)
+			}
+			returned := artifact.IR.Statements[2].(*ir.Method).Body[0].(*ir.Return)
+			constructed := returned.Value.(*ir.EnumConstruct)
+			if len(constructed.CallSignature) != 3 || constructed.CallSignature[1].Kind != callsignature.NamedOnly || constructed.CallSignature[1].Label != "before" || constructed.Arguments[1].Field != "after" || constructed.Arguments[2].Field != "before" {
+				t.Fatalf("named enum construction mapping was lost: %#v", constructed)
+			}
+
+			output := string(artifact.Output)
+			wants := map[string][]string{
+				"go": {
+					"func NewChangeRenamed(id int, __trbNamed map[string]any) Change",
+					`__trbValues["after"] = "new"`,
+					`__trbValues["before"] = "old"`,
+					"current := __trbCase1.RenamedAfter",
+					"previous := __trbCase1.RenamedBefore",
+				},
+				"ruby": {
+					"def new(id, before:, after:)",
+					`Change::Renamed.new(7, after: "new", before: "old")`,
+					"current = __trb_case1.after",
+					"previous = __trb_case1.before",
+				},
+				"typescript": {
+					"Renamed: (id: number, __trbNamed: { before: string; after: string }): Change => {",
+					`Change.Renamed(7, { after: "new", before: "old" })`,
+					"const current = __trbCase1.after;",
+					"const previous = __trbCase1.before;",
+				},
+			}[mode]
+			for _, want := range wants {
+				if !strings.Contains(output, want) {
+					t.Fatalf("generated %s named enum payload is missing %q:\n%s", mode, want, output)
+				}
+			}
+		})
+	}
+}
+
+func TestNamedOnlyEnumPayloadSignaturesSurviveProjectImports(t *testing.T) {
+	contract := SourceUnit{
+		Filename: "/project/src/contracts/change.trb", ModulePath: "contracts/change", Package: "contracts",
+		Source: []byte(`enum Change
+	Renamed(id: Integer, *, before: String, after: String)
+end
+`),
+	}
+	consumer := SourceUnit{
+		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import { Change } from contracts/change
+
+def recreate(change: Change): Change
+	case change
+	when Change::Renamed(id, after: current, before: previous)
+		return Change::Renamed(id, after: current, before: previous)
+	end
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifacts, err := CompileProject([]SourceUnit{contract, consumer}, Options{Mode: mode, GoModule: "example.com/named-enum", ProjectRoot: "/project", SourceRoot: "/project/src", RubyLoader: "require_relative"})
+		if err != nil {
+			t.Fatalf("%s: imported enum payload contract was lost: %v", mode, err)
+		}
+		artifact := artifactForModule(artifacts, "main")
+		method := artifact.IR.Statements[len(artifact.IR.Statements)-1].(*ir.Method)
+		constructed := method.Body[0].(*ir.Case).Branches[0].Body[0].(*ir.Return).Value.(*ir.EnumConstruct)
+		if len(constructed.CallSignature) != 3 || constructed.CallSignature[1].Kind != callsignature.NamedOnly || constructed.Arguments[1].Field != "after" || constructed.Arguments[2].Field != "before" {
+			t.Fatalf("%s: imported enum payload signature was lost: %#v", mode, constructed)
+		}
+	}
+}
+
+func TestNamedOnlyEnumPayloadDiagnostics(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		wanted string
+	}{
+		{name: "unknown constructor label", body: `value := Change::Renamed(7, prior: "old", after: "new")`, wanted: "Change::Renamed() has no named argument prior"},
+		{name: "duplicate constructor label", body: `value := Change::Renamed(7, before: "old", before: "older", after: "new")`, wanted: "Change::Renamed() receives argument before more than once"},
+		{name: "missing constructor label", body: `value := Change::Renamed(7, after: "new")`, wanted: "Change::Renamed() is missing required argument before"},
+		{name: "positional field used by label", body: `value := Change::Renamed(id: 7, before: "old", after: "new")`, wanted: "id is a positional-only parameter of Change::Renamed()"},
+		{name: "named field used by position", body: `value := Change::Renamed(7, "old", "new")`, wanted: "Change::Renamed() does not accept this positional argument"},
+		{name: "positional constructor after named", body: `value := Change::Renamed(7, before: "old", "new")`, wanted: "positional argument cannot follow a named argument"},
+		{name: "unknown pattern label", body: enumPatternBody(`Change::Renamed(id, prior: previous, after: current)`), wanted: "enum pattern Change::Renamed has no named payload field prior"},
+		{name: "positional pattern field used by label", body: enumPatternBody(`Change::Renamed(id: identifier, before: previous, after: current)`), wanted: "enum payload field id is positional-only in pattern Change::Renamed"},
+		{name: "named pattern field used by position", body: enumPatternBody(`Change::Renamed(identifier, previous, current)`), wanted: "enum pattern Change::Renamed requires named bindings for its remaining payload fields"},
+		{name: "duplicate pattern label", body: enumPatternBody(`Change::Renamed(identifier, before: previous, before: current)`), wanted: "enum pattern Change::Renamed binds payload field before more than once"},
+		{name: "positional pattern after named", body: enumPatternBody(`Change::Renamed(identifier, before: previous, current)`), wanted: "positional pattern binding cannot follow a named binding"},
+	}
+	declaration := `enum Change
+	Renamed(id: Integer, *, before: String, after: String)
+end
+`
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				_, err := Compile("invalid_named_enum_payload.trb", []byte(declaration+test.body+"\n"), mode)
+				if err == nil || !strings.Contains(err.Error(), test.wanted) {
+					t.Fatalf("%s: expected %q, got %v", mode, test.wanted, err)
+				}
+			}
+		})
+	}
+
+	withDefault := []byte(`enum Change
+	Renamed(*, before: String = "old")
+end
+`)
+	if _, err := Compile("default_named_enum_payload.trb", withDefault, "go"); err == nil || !strings.Contains(err.Error(), "enum payload fields must be required positional or named-only values") {
+		t.Fatalf("expected required enum payload diagnostic, got %v", err)
+	}
+}
+
+func enumPatternBody(pattern string) string {
+	return `def describe(change: Change): String
+	case change
+	when ` + pattern + `
+		return previous + current
+	end
+end`
+}
+
 func TestNamedOnlySignaturesSurviveProjectImports(t *testing.T) {
 	api := SourceUnit{Filename: "/project/src/app/api.trb", ModulePath: "app/api", Package: "api", Source: []byte(`def request(path: String, *, timeout: Integer, retries: Integer = 2): String
 	return path + timeout.to_s() + retries.to_s()

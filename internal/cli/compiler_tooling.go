@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/type-rb/type-rb/internal/bootstrapsnapshot"
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
@@ -16,14 +17,98 @@ import (
 
 func (c *CLI) runCompiler(args []string) error {
 	if len(args) == 0 {
-		return errors.New("compiler requires a subcommand: inspect")
+		return errors.New("compiler requires a subcommand: inspect or bootstrap-snapshot")
 	}
 	switch args[0] {
 	case "inspect":
 		return c.runCompilerInspect(args[1:])
+	case "bootstrap-snapshot":
+		return c.runCompilerBootstrapSnapshot(args[1:])
 	default:
 		return fmt.Errorf("unknown compiler command %q", args[0])
 	}
+}
+
+func (c *CLI) runCompilerBootstrapSnapshot(args []string) error {
+	flags := flag.NewFlagSet("compiler bootstrap-snapshot", flag.ContinueOnError)
+	flags.SetOutput(c.Stderr)
+	configPath := flags.String("config", "", "path to trbconfig.jsonc")
+	mode := flags.String("mode", "", "standalone mode; bootstrap snapshots require go")
+	snapshotVersion := flags.Int("snapshot-version", bootstrapsnapshot.Version2, "bootstrap snapshot version: 2, 3, or 4")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() > 1 {
+		return errors.New("compiler bootstrap-snapshot accepts at most one standalone .trb file")
+	}
+	if *snapshotVersion != bootstrapsnapshot.Version2 && *snapshotVersion != bootstrapsnapshot.Version3 && *snapshotVersion != bootstrapsnapshot.Version4 {
+		return fmt.Errorf("compiler bootstrap-snapshot does not support snapshot version %d", *snapshotVersion)
+	}
+
+	filename := ""
+	configStart := "."
+	if flags.NArg() == 1 {
+		if filepath.Ext(flags.Arg(0)) != ".trb" {
+			return errors.New("standalone bootstrap snapshot source must be a .trb file")
+		}
+		var err error
+		filename, err = filepath.Abs(flags.Arg(0))
+		if err != nil {
+			return err
+		}
+		configStart = filename
+	}
+
+	config, standalone, err := loadCommandConfig("compiler bootstrap-snapshot", *configPath, configStart, filename, *mode, "")
+	if err != nil {
+		return err
+	}
+	if config.Mode != "go" {
+		return errors.New("compiler bootstrap-snapshot requires go mode")
+	}
+
+	var (
+		units   []compiler.SourceUnit
+		options compiler.Options
+	)
+	if standalone {
+		graph, graphErr := loadFileRootSourceGraph(filename, os.ReadFile)
+		if graphErr != nil {
+			return graphErr
+		}
+		units, options, err = projectCompilationSources(config, graph.Sources)
+	} else {
+		files, collectErr := collectTRB([]string{config.SourcePath()}, config.OutputPath())
+		if collectErr != nil {
+			return collectErr
+		}
+		if len(files) == 0 {
+			return errors.New("no .trb files found")
+		}
+		units, options, err = projectCompilation(config, files)
+	}
+	if err != nil {
+		return err
+	}
+	artifacts, err := compiler.AnalyzeProject(units, options)
+	if err != nil {
+		return err
+	}
+	var snapshot any
+	if *snapshotVersion == bootstrapsnapshot.Version4 {
+		snapshot, err = bootstrapsnapshot.BuildV4(artifacts, options.SourceRoot)
+	} else if *snapshotVersion == bootstrapsnapshot.Version3 {
+		snapshot, err = bootstrapsnapshot.BuildV3(artifacts, options.SourceRoot)
+	} else {
+		snapshot, err = bootstrapsnapshot.BuildV2(artifacts, options.SourceRoot)
+	}
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(c.Stdout)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(snapshot)
 }
 
 func (c *CLI) runCompilerInspect(args []string) error {

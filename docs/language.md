@@ -14,18 +14,17 @@ A runnable project contains exactly one top-level `main()` function:
 ```trb
 def main()
 	puts("Hello from TypeRB")
-	return
 end
 ```
 
 Functions and methods use `def` and `end`. Calls include parentheses. A
 function that returns no value omits the return annotation and may either fall
-through or use a bare `return`:
+through or use a bare `return`. The recommended terminal style is fallthrough;
+`trb lint --fix` removes a redundant final bare `return`:
 
 ```trb
 def print_name(name: String)
 	puts(name)
-	return
 end
 ```
 
@@ -70,12 +69,28 @@ end
 connect(port: 8443, host: "example.com")
 ```
 
+Function and method parameters are immutable bindings by default. Add `mut`
+before a parameter name only when its implementation reassigns that binding or
+uses it for a destructive operation:
+
+```trb
+def advance(mut value: Integer, *, amount: Integer = 1): Integer
+	value += amount
+	return value
+end
+```
+
+`mut` here is not `inout`: assigning another value to `value` does not assign
+that value to the caller's binding. It is not part of the function's call
+signature, so callers, interfaces, and overrides do not repeat it.
+
 Parameters before `*` cannot be supplied by name, and positional arguments
 cannot follow a named argument. Positional defaults remain available for
 naturally ordered APIs. Explicit argument expressions run left to right;
 omitted defaults run at the selected callee's entry in declaration order.
-Record construction labels are field labels and follow their existing record
-rules.
+Payload enum variants use the same `positional-only | * | named-only` boundary,
+but every payload field is required. Record construction labels are field
+labels and follow their existing record rules.
 
 Writing `: Void` on a `def` or `fn` declaration is an error; omit the return
 annotation instead. `Void` appears in function types when a stored callable
@@ -96,8 +111,10 @@ end
 
 Each `fn` parameter has a type. A function value with no result omits its
 return annotation, just like `def`. Its `return` exits the function value, not
-the enclosing method. A function value that may return a recoverable error uses
-the same ordinary Result return in its declaration and type:
+the enclosing method. A parameter is immutable unless written with `mut`, for
+example `fn(mut value: Integer): Integer`. A function value that may return a
+recoverable error uses the same ordinary Result return in its declaration and
+type:
 
 ```trb
 loader: () -> Result<String, LoadError> := fn(): Result<String, LoadError>
@@ -180,6 +197,11 @@ names.push("Grace")
 An immutable reference cannot become mutable by assigning it to a new `mut`
 binding.
 
+The same default applies to `def` and `fn` parameters. Parameter `mut` changes
+only the binding inside that implementation and does not add caller-side
+writeback. Iterator and call-block bindings keep their current behavior while
+explicit mutable block patterns and element ownership remain under design.
+
 Compare a nullable binding with `nil` to narrow its non-`nil` path. A returning
 guard also narrows the statements that follow it:
 
@@ -194,8 +216,22 @@ end
 
 The same narrowing is available in the matching branch of `name != nil`, in
 the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
-right side of a compatible short-circuit `and` or `or`. Reassigning the binding
-invalidates the narrowed type.
+right side of a compatible short-circuit `&&` or `||`. A plain assignment is
+still checked against the binding's declared nullable type, but subsequent
+statements in that path use the assigned value's more precise type:
+
+```trb
+def normalized(mut name: String?): String
+	if name == nil
+		return "anonymous"
+	end
+	name = name.strip().downcase()
+	return name
+end
+```
+
+An assignment that occurs only inside a conditional, loop, or callback does
+not narrow the binding after that construct, because the path may not execute.
 
 A direct nullable record field or `readonly` class field follows the same
 rule when its receiver is a lexical binding:
@@ -212,6 +248,19 @@ end
 Reassigning `profile` invalidates the field narrowing. Mutable class fields,
 indexes, calls, and chained member paths must be read into a local binding
 before narrowing.
+
+Double-quoted Strings support interpolation with `#{expression}`. The embedded
+expression must already be a non-nullable `String`; TypeRB does not inherit a
+backend's implicit conversion rules. Convert other values explicitly:
+
+<!-- trb-doc-test: language-string-interpolation -->
+```trb
+radius := 2.5
+description := "circle r=#{radius.to_s()}"
+```
+
+A nullable String must be narrowed or converted to a non-nullable String before
+it can be interpolated.
 
 Identifiers beginning with an uppercase letter are immutable constants. They
 are allowed at top level or directly inside a module or class:
@@ -363,7 +412,6 @@ class User implements Named
 	def initialize(id: Integer, name: String)
 		@id = id
 		@_name = name
-		return
 	end
 
 	def name(): String
@@ -400,15 +448,20 @@ invariant and conformance remains explicit.
 record Message
 	id: Integer
 	text: String
-	delivered: Boolean
+	delivered: Boolean = false
+	tags: Array<String> = []
 end
 
-message := Message.new(id: 1, text: "Hello", delivered: false)
+message := Message.new(id: 1, text: "Hello")
 ```
 
-Construction is keyword-only and checks the complete field set. Records cannot
-inherit. Go emits a value struct, Ruby emits `Data`, and TypeScript emits an
-interface.
+Construction is keyword-only. A required field must precede fields with
+defaults. Defaults are checked against their field type, evaluated for each
+construction in declaration order, and may refer to earlier fields. Explicit
+arguments are evaluated in source order; explicit `nil` is different from an
+omitted field. Constructor defaults do not automatically apply to JSON, ORM,
+or web decoding. Records cannot inherit. Go emits a value struct, Ruby emits
+`Data`, and TypeScript emits an interface.
 
 ## Enums, raw values, and sum types
 
@@ -454,7 +507,7 @@ different typed data, and it may mix payload-bearing and payloadless variants:
 ```trb
 enum Token
 	Text(value: String)
-	Integer(value: Integer)
+	Renamed(id: Integer, *, before: String, after: String)
 	EOF
 end
 
@@ -462,18 +515,28 @@ def describe(token: Token): String
 	case token
 	when Token::Text(value)
 		return value
-	when Token::Integer(value)
-		return value.to_s()
+	when Token::Renamed(id, after: current, before: previous)
+		return id.to_s() + ": " + previous + " -> " + current
 	when Token::EOF
 		return "eof"
 	end
 end
+
+renamed := Token::Renamed(7, after: "new", before: "old")
+describe(renamed)
 ```
 
+Enum members may carry postfix attributes after their payload or raw value.
+Attributes are inert language metadata until a compiler-integrated package
+defines their meaning. `trb/cli`, for example, uses them for
+subcommand names and descriptions.
+
 A `case` without `else` must handle every member. Payload patterns introduce
-immutable bindings with types from the variant declaration. A payload enum
-cannot also declare raw values. `Result<T, E>` is the standard generic payload
-enum, with `Ok(value: T)` and `Err(error: E)` variants.
+immutable bindings with types from the variant declaration. Positional fields
+are matched in order; named-only fields are matched by label and may be
+reordered after the positional bindings. Every field must currently be bound.
+A payload enum cannot also declare raw values. `Result<T, E>` is the standard
+generic payload enum, with `Ok(value: T)` and `Err(error: E)` variants.
 
 Ordinary, raw-value, and payload enums all remain nominal, use qualified member
 names, support exhaustive `case`, and may define instance methods after their
@@ -496,7 +559,6 @@ class Box<T>
 
 	def initialize(value: T)
 		@value = value
-		return
 	end
 
 	def echo<U>(value: U): U
@@ -766,7 +828,7 @@ labels := [1, 2, 3].map do |value|
 end
 
 visible := labels.select.with_index do |label, index|
-	!label.empty?() and index < 2
+	!label.empty?() && index < 2
 end
 
 total := [1, 2, 3].reduce(0) do |sum, value|

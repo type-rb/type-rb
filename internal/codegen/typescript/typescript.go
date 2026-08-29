@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
@@ -33,6 +34,11 @@ type generator struct {
 	records          map[string]bool
 	typeAliases      map[string]string
 	typeMappings     map[string]string
+	localTypeOwners  map[string]string
+	namedImportTypes map[string]bool
+	typeParameters   map[string]int
+	lexicalNames     map[string]string
+	exactTypes       map[string]*typescriptTypeIdentity
 	runtimeImports   map[string]bool
 	standardResult   bool
 	browserRuntime   string
@@ -55,6 +61,15 @@ type generator struct {
 	sourceRecorder   *sourcemap.Recorder
 	sourcePath       string
 	checkedInteger   bool
+}
+
+// typescriptTypeIdentity keeps the declaration owner that the portable type
+// representation intentionally erases. Its argument tree mirrors types.Type
+// so exact owners survive collection and result wrappers without applying one
+// leaf-name mapping to every occurrence in a generated annotation.
+type typescriptTypeIdentity struct {
+	name      string
+	arguments []*typescriptTypeIdentity
 }
 
 func Generate(program *ir.Program) string {
@@ -152,7 +167,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, runtimeImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -202,6 +217,119 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
 	return sourcemap.Generated{Output: output, Map: g.sourceRecorder.Build(output)}
+}
+
+func localNestedTypeOwners(statements []ir.Statement) map[string]string {
+	result := map[string]string{}
+	var collect func([]ir.Statement, string)
+	collect = func(items []ir.Statement, owner string) {
+		for _, statement := range items {
+			switch node := statement.(type) {
+			case *ir.Module:
+				nested := node.Name
+				if owner != "" {
+					nested = owner + "::" + node.Name
+				}
+				collect(node.Body, nested)
+			case *ir.Class:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			case *ir.Record:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			case *ir.Enum:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			case *ir.Interface:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			case *ir.TypeAlias:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			case *ir.Newtype:
+				if owner != "" {
+					result[node.Name] = strings.ReplaceAll(owner+"::"+node.Name, "::", ".")
+				}
+			}
+		}
+	}
+	collect(statements, "")
+	return result
+}
+
+func namedImportedTypes(statements []ir.Statement) map[string]bool {
+	result := map[string]bool{}
+	for _, statement := range statements {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Namespace {
+			continue
+		}
+		for _, name := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
+			switch imported.SymbolKinds[name] {
+			case "class", "record", "enum", "interface", "type_alias", "newtype", "enum_alias":
+				result[name] = true
+			}
+		}
+	}
+	return result
+}
+
+func (g *generator) pushTypeParameters(parameters []string) func() {
+	for _, parameter := range parameters {
+		g.typeParameters[parameter]++
+	}
+	return func() {
+		for _, parameter := range parameters {
+			g.typeParameters[parameter]--
+		}
+	}
+}
+
+func cloneTypeScriptTypeIdentity(identity *typescriptTypeIdentity) *typescriptTypeIdentity {
+	if identity == nil {
+		return nil
+	}
+	result := &typescriptTypeIdentity{name: identity.name, arguments: make([]*typescriptTypeIdentity, len(identity.arguments))}
+	for index, argument := range identity.arguments {
+		result.arguments[index] = cloneTypeScriptTypeIdentity(argument)
+	}
+	return result
+}
+
+func cloneTypeScriptTypeIdentities(identities map[string]*typescriptTypeIdentity) map[string]*typescriptTypeIdentity {
+	result := make(map[string]*typescriptTypeIdentity, len(identities))
+	for name, identity := range identities {
+		result[name] = cloneTypeScriptTypeIdentity(identity)
+	}
+	return result
+}
+
+func (g *generator) pushExactTypeScope(parameters []ir.Parameter) func() {
+	previous := g.exactTypes
+	g.exactTypes = cloneTypeScriptTypeIdentities(previous)
+	for _, parameter := range parameters {
+		delete(g.exactTypes, parameter.Name)
+	}
+	return func() { g.exactTypes = previous }
+}
+
+func (g *generator) observeExactTypeStatements(statements []ir.Statement) {
+	for _, statement := range statements {
+		switch node := statement.(type) {
+		case *ir.Variable:
+			g.exactTypes[node.Name] = g.expressionTypeIdentity(node.Type, node.Value)
+		case *ir.Assignment:
+			identifier, ok := node.Target.(*ir.Identifier)
+			if ok && identifier.Lexical && node.Operator == "=" {
+				g.exactTypes[identifier.Name] = g.expressionTypeIdentity(node.Target.ExprType(), node.Value)
+			}
+		}
+	}
 }
 
 func importsWebTestingDispatch(program *ir.Program) bool {
@@ -258,7 +386,7 @@ func topLevelMethod(statements []ir.Statement, name string) *ir.Method {
 
 func (g *generator) statements(statements []ir.Statement) {
 	if g.executionActive && len(statements) > 0 {
-		g.line(`{ const __trbDeadline = (__trbScope as (AbortSignal & { __trbDeadline?: number; __trbCancel?: () => void }) | undefined)?.__trbDeadline; if (__trbDeadline !== undefined && performance.now() >= __trbDeadline) (__trbScope as AbortSignal & { __trbCancel?: () => void }).__trbCancel?.(); if (__trbScope?.aborted) throw new DOMException("TypeRB execution was cancelled", "AbortError"); }`)
+		g.line(`{ const __trbDeadline = (__trbScope as (AbortSignal & { __trbDeadline?: number; __trbCancel?: () => void }) | undefined)?.__trbDeadline; if (performance.now() >= (__trbDeadline ?? Number.POSITIVE_INFINITY)) (__trbScope as AbortSignal & { __trbCancel?: () => void }).__trbCancel?.(); if (__trbScope?.aborted) throw new DOMException("TypeRB execution was cancelled", "AbortError"); }`)
 	}
 	for _, statement := range statements {
 		g.statement(statement)
@@ -383,6 +511,12 @@ func (g *generator) statement(statement ir.Statement) {
 				switch n.SymbolKinds[symbol] {
 				case "record", "interface", "type_alias", "newtype":
 					types = append(types, symbol)
+					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
+						values = append(values, tsRecordConstructorName(symbol))
+						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
+							values = append(values, tsRecordSyncConstructorName(symbol))
+						}
+					}
 				case "function":
 					values = append(values, tsCallableName(symbol))
 				default:
@@ -429,6 +563,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.External {
 			return
 		}
+		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
 			header += " extends " + g.expr(n.Superclass)
@@ -452,7 +587,9 @@ func (g *generator) statement(statement ir.Statement) {
 		g.inClass--
 		g.indent--
 		g.line("}")
+		popTypeParameters()
 	case *ir.Record:
+		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
 		g.indent++
 		for _, member := range n.Body {
@@ -465,9 +602,16 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.indent--
 		g.line("}")
+		fields := tsRecordFields(n.Body)
+		if tsRecordFieldsHaveDefaults(fields) {
+			g.recordDefaultConstructor(n, fields)
+		}
+		popTypeParameters()
 	case *ir.Enum:
+		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
+			popTypeParameters()
 			break
 		}
 		brand := "__trb" + n.Name + "Brand"
@@ -494,12 +638,15 @@ func (g *generator) statement(statement ir.Statement) {
 		g.enumMethodProperties(n)
 		g.indent--
 		g.line("});")
+		popTypeParameters()
 	case *ir.TypeAlias:
+		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		parameters := tsTypeParameterDeclarations(n.TypeParameters)
 		g.line("export type " + n.Name + parameters + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 		if len(n.Variants) > 0 {
 			g.line("export const " + n.Name + " = " + g.runtimeName(n.Target.Name) + ";")
 		}
+		popTypeParameters()
 	case *ir.Newtype:
 		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 	case *ir.Module:
@@ -509,17 +656,21 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("}")
 	case *ir.Interface:
+		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
 		g.indent++
 		for _, method := range n.Methods {
+			popMethodTypeParameters := g.pushTypeParameters(method.TypeParameters)
 			returnType := g.tsType(method.ReturnType)
 			if g.suspension.Methods[method] {
 				returnType = "Promise<" + returnType + ">"
 			}
 			g.line(tsMethodName(method.Name) + "(" + g.methodParameters(method) + "): " + returnType + ";")
+			popMethodTypeParameters()
 		}
 		g.indent--
 		g.line("}")
+		popTypeParameters()
 	case *ir.Field:
 		name := strings.TrimPrefix(n.Name, "@")
 		prefix := ""
@@ -550,12 +701,14 @@ func (g *generator) statement(statement ir.Statement) {
 			g.function(n)
 		}
 	case *ir.Variable:
-		variableType := g.tsType(n.Type)
+		identity := g.expressionTypeIdentity(n.Type, n.Value)
+		variableType := g.tsTypeWithIdentity(n.Type, identity)
 		if lambda, ok := n.Value.(*ir.Lambda); ok && g.suspension.Lambdas[lambda] {
 			variableType = g.tsSuspendingFunctionType(n.Type)
 		}
 		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
 			g.line("static readonly " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
+			g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(identity)
 			break
 		}
 		keyword := "const"
@@ -570,6 +723,7 @@ func (g *generator) statement(statement ir.Statement) {
 			prefix = "export "
 		}
 		g.line(prefix + keyword + " " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
+		g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(identity)
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
 			g.line("void " + n.Name + ";")
 		}
@@ -581,6 +735,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line(target + " = " + g.checkedIntegerBinary(strings.TrimSuffix(n.Operator, "="), target, g.expr(n.Value)) + ";")
 		} else {
 			g.line(target + " " + n.Operator + " " + g.expr(n.Value) + ";")
+		}
+		if identifier, ok := n.Target.(*ir.Identifier); ok && identifier.Lexical && n.Operator == "=" {
+			g.exactTypes[identifier.Name] = g.expressionTypeIdentity(n.Target.ExprType(), n.Value)
 		}
 	case *ir.Return:
 		if n.Value == nil {
@@ -627,7 +784,12 @@ func (g *generator) statement(statement ir.Statement) {
 			g.typeUnionCase(n)
 			break
 		}
+		outerExactTypes := g.exactTypes
+		g.exactTypes = cloneTypeScriptTypeIdentities(outerExactTypes)
 		g.statements(n.Leading)
+		branchExactTypes := cloneTypeScriptTypeIdentities(g.exactTypes)
+		selectorType := n.Value.ExprType()
+		selectorIdentity := g.expressionTypeIdentity(selectorType, n.Value)
 		g.temporary++
 		value := "__trbCase" + strconv.Itoa(g.temporary)
 		g.line("{")
@@ -635,6 +797,8 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("const " + value + " = " + g.expr(n.Value) + ";" + tsTrailingComment(n.TrailingComment))
 		narrowingName, narrowingTemp := g.caseNarrowingCapture(n)
 		for index, branch := range n.Branches {
+			g.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
+			g.bindCaseTypeIdentities(branch.Bindings, selectorType, selectorIdentity)
 			header := "if ("
 			if index > 0 {
 				header = "} else if ("
@@ -662,6 +826,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.indent--
 		}
 		if n.HasElse {
+			g.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
 			g.line("} else {")
 			g.indent++
 			g.caseNarrowings(n.ElseNarrowings, narrowingName, narrowingTemp)
@@ -678,6 +843,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.indent--
 		g.line("}")
+		g.exactTypes = outerExactTypes
 	case *ir.While:
 		g.line("while (" + g.expr(n.Condition) + ") {")
 		g.indent++
@@ -769,6 +935,15 @@ func (g *generator) caseNarrowings(narrowings []ir.CaseBinding, name, temporary 
 	}
 }
 
+func (g *generator) bindCaseTypeIdentities(bindings []ir.CaseBinding, selectorType types.Type, selectorIdentity *typescriptTypeIdentity) {
+	for _, binding := range bindings {
+		if binding.Name == "_" {
+			continue
+		}
+		g.exactTypes[binding.Name] = projectTypeScriptTypeIdentity(binding.Type, selectorType, selectorIdentity)
+	}
+}
+
 func tsTypePattern(value string, typ types.Type) string {
 	switch typ.Kind {
 	case types.Bool:
@@ -793,9 +968,18 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		}
 		return ir.IterationBinding{Name: "_", Type: types.Type{Kind: types.Any, Name: "Any"}}
 	}
+	previousExactTypes := g.exactTypes
+	g.exactTypes = cloneTypeScriptTypeIdentities(previousExactTypes)
+	defer func() { g.exactTypes = previousExactTypes }()
+	sourceType := iteration.Source.ExprType()
+	sourceIdentity := g.expressionTypeIdentity(sourceType, iteration.Source)
 	if iteration.Source.ExprType().Kind == types.Hash {
 		keyBinding := binding(0)
 		valueBinding := binding(1)
+		if len(sourceType.Args) == 2 {
+			g.exactTypes[keyBinding.Name] = projectTypeScriptTypeIdentity(keyBinding.Type, sourceType.Args[0], identityArgument(sourceIdentity, 0))
+			g.exactTypes[valueBinding.Name] = projectTypeScriptTypeIdentity(valueBinding.Type, sourceType.Args[1], identityArgument(sourceIdentity, 1))
+		}
 		key := keyBinding.Name
 		loopKey := key
 		if keyBinding.Type.Kind == types.Int && key != "_" {
@@ -816,6 +1000,10 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	}
 	itemBinding := binding(0)
 	if iteration.Operation == "each_slice" {
+		if len(sourceType.Args) == 1 && len(itemBinding.Type.Args) == 1 {
+			itemIdentity := projectTypeScriptTypeIdentity(itemBinding.Type.Args[0], sourceType.Args[0], identityArgument(sourceIdentity, 0))
+			g.exactTypes[itemBinding.Name] = identityWithArgument(itemBinding.Type, 0, itemIdentity)
+		}
 		g.temporary++
 		suffix := strconv.Itoa(g.temporary)
 		items := "__trbItems" + suffix
@@ -843,6 +1031,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		return
 	}
 	indexBinding := binding(1)
+	if len(sourceType.Args) == 1 {
+		g.exactTypes[itemBinding.Name] = projectTypeScriptTypeIdentity(itemBinding.Type, sourceType.Args[0], identityArgument(sourceIdentity, 0))
+	}
 	if iteration.WithIndex {
 		g.line("for (let [" + indexBinding.Name + ", " + itemBinding.Name + "] of " + g.iterableExpr(iteration.Source) + ".entries()) {")
 	} else {
@@ -907,7 +1098,16 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			for _, field := range member.Fields {
 				fields = append(fields, field.Name)
 			}
-			g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			if hasNamedOnlyParameters(member.Fields) {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => {" + tsTrailingComment(member.TrailingComment))
+				g.indent++
+				g.enumPayloadBindings(member.Fields)
+				g.line("return { " + strings.Join(fields, ", ") + " };")
+				g.indent--
+				g.line("},")
+			} else {
+				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => ({ " + strings.Join(fields, ", ") + " })," + tsTrailingComment(member.TrailingComment))
+			}
 		}
 	}
 	g.enumMethodProperties(enum)
@@ -921,6 +1121,7 @@ func (g *generator) enumMethodProperties(enum *ir.Enum) {
 		if !ok || method.External {
 			continue
 		}
+		popTypeParameters := g.pushTypeParameters(method.TypeParameters)
 		parameters := g.methodParameters(method)
 		if parameters != "" {
 			parameters = ", " + parameters
@@ -937,18 +1138,21 @@ func (g *generator) enumMethodProperties(enum *ir.Enum) {
 		}
 		g.line("__trb_" + tsCallableName(method.Name) + ": " + prefix + generic + "(self: " + enum.Name + tsTypeParameterArguments(enum.TypeParameters) + parameters + "): " + returnType + " => {")
 		g.indent++
+		popExactTypes := g.pushExactTypeScope(method.Parameters)
 		previous := g.enumReceiver
 		g.enumReceiver = "self"
 		g.functionDepth++
 		previousExecution := g.executionActive
 		g.executionActive = g.methodUsesExecutionScope(method)
-		g.parameterDefaults(method.Parameters)
+		g.parameterDefaults(method)
 		g.statements(method.Body)
 		g.executionActive = previousExecution
 		g.functionDepth--
 		g.enumReceiver = previous
+		popExactTypes()
 		g.indent--
 		g.line("},")
+		popTypeParameters()
 	}
 }
 
@@ -964,6 +1168,8 @@ func tsTypeParameterArguments(parameters []string) string {
 }
 
 func (g *generator) method(method *ir.Method) {
+	popTypeParameters := g.pushTypeParameters(method.TypeParameters)
+	defer popTypeParameters()
 	suspends := g.suspension.Methods[method]
 	if method.Name == "initialize" {
 		g.line("constructor(" + g.methodParameters(method) + ") {")
@@ -987,18 +1193,22 @@ func (g *generator) method(method *ir.Method) {
 		g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + g.methodParameters(method) + "): " + returnType + " {")
 	}
 	g.indent++
+	popExactTypes := g.pushExactTypeScope(method.Parameters)
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
-	g.parameterDefaults(method.Parameters)
+	g.parameterDefaults(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
+	popExactTypes()
 	g.indent--
 	g.line("}")
 }
 
 func (g *generator) function(method *ir.Method) {
+	popTypeParameters := g.pushTypeParameters(method.TypeParameters)
+	defer popTypeParameters()
 	name := method.Name
 	if method.TargetName != "" {
 		name = method.TargetName
@@ -1020,16 +1230,18 @@ func (g *generator) function(method *ir.Method) {
 	}
 	g.line(prefix + name + tsTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + "): " + returnType + " {")
 	g.indent++
+	popExactTypes := g.pushExactTypeScope(method.Parameters)
 	g.functionDepth++
 	previousExecution := g.executionActive
 	g.executionActive = g.methodUsesExecutionScope(method)
 	if component && g.executionActive {
 		g.line("let __trbScope: AbortSignal | undefined;")
 	}
-	g.parameterDefaults(method.Parameters)
+	g.parameterDefaults(method)
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
+	popExactTypes()
 	g.indent--
 	g.line("}")
 }
@@ -1039,7 +1251,11 @@ func isReactComponent(method *ir.Method) bool {
 }
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
-	if hasNamedOnlyParameters(parameters) {
+	return g.parameterList(parameters, false)
+}
+
+func (g *generator) parameterList(parameters []ir.Parameter, lowerDefaults bool) string {
+	if hasNamedOnlyParameters(parameters) || lowerDefaults {
 		parts := []string{}
 		optionalPositional := false
 		named := []string{}
@@ -1061,7 +1277,9 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 		if optionalPositional {
 			parts = append(parts, "__trbOptional: unknown[]")
 		}
-		parts = append(parts, "__trbNamed: { "+strings.Join(named, "; ")+" }")
+		if hasNamedOnlyParameters(parameters) {
+			parts = append(parts, "__trbNamed: { "+strings.Join(named, "; ")+" }")
+		}
 		return strings.Join(parts, ", ")
 	}
 	parts := make([]string, len(parameters))
@@ -1088,8 +1306,17 @@ func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
 	return false
 }
 
-func (g *generator) parameterDefaults(parameters []ir.Parameter) {
-	if !hasNamedOnlyParameters(parameters) {
+func (g *generator) enumPayloadBindings(parameters []ir.Parameter) {
+	for _, parameter := range parameters {
+		if parameter.NamedOnly {
+			g.line("let " + parameter.Name + ": " + g.tsType(parameter.Type) + " = __trbNamed." + parameter.Name + ";")
+		}
+	}
+}
+
+func (g *generator) parameterDefaults(method *ir.Method) {
+	parameters := method.Parameters
+	if !hasNamedOnlyParameters(parameters) && (g.suspension == nil || !g.suspension.ParameterDefaults[method]) {
 		return
 	}
 	optionalIndex := 0
@@ -1133,7 +1360,10 @@ func (g *generator) methodUsesExecutionScope(method *ir.Method) bool {
 }
 
 func (g *generator) methodParameters(method *ir.Method) string {
-	parameters := g.parameters(method.Parameters)
+	previousExecution := g.executionActive
+	g.executionActive = g.methodUsesExecutionScope(method)
+	parameters := g.parameterList(method.Parameters, g.suspension != nil && g.suspension.ParameterDefaults[method])
+	g.executionActive = previousExecution
 	if !g.methodUsesExecutionScope(method) {
 		return parameters
 	}
@@ -1153,7 +1383,14 @@ func (g *generator) executionArguments(call *ir.Call, arguments []string) []stri
 	if g.isReactComponentCall(call) {
 		return arguments
 	}
-	return append([]string{"__trbScope"}, arguments...)
+	return append([]string{g.executionScopeArgument()}, arguments...)
+}
+
+func (g *generator) executionScopeArgument() string {
+	if g.executionActive {
+		return "__trbScope"
+	}
+	return "undefined"
 }
 
 func (g *generator) isReactComponentCall(call *ir.Call) bool {
@@ -1177,9 +1414,21 @@ func (g *generator) awaitCall(call *ir.Call, value string) string {
 	return value
 }
 
+func (g *generator) awaitRecordConstruct(construction *ir.RecordConstruct, value string) string {
+	if g.suspension != nil && g.suspension.RecordConstructDefaults[construction] {
+		return "(await " + value + ")"
+	}
+	return value
+}
+
 func (g *generator) identifierName(identifier *ir.Identifier) string {
 	if identifier == nil {
 		return ""
+	}
+	if identifier.Lexical {
+		if name := g.lexicalNames[identifier.Name]; name != "" {
+			return name
+		}
 	}
 	if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
 		return "this." + tsMethodName(identifier.Name)
@@ -1234,18 +1483,7 @@ func (g *generator) importedFunctionUsesExecutionScope(reference *ir.Reference) 
 	if name == "" {
 		return false
 	}
-	modules := []string{reference.Package}
-	if strings.HasSuffix(reference.Package, "/index") {
-		modules = append(modules, strings.TrimSuffix(reference.Package, "/index"))
-	} else {
-		modules = append(modules, strings.TrimSuffix(reference.Package, "/")+"/index")
-	}
-	for _, module := range modules {
-		if g.execution.Method(module, "", name) {
-			return true
-		}
-	}
-	return false
+	return g.execution.Method(reference.Package, "", name)
 }
 
 func (g *generator) expr(expression ir.Expression) string {
@@ -1266,6 +1504,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.b = strings.Builder{}
 		child.sourceRecorder = nil
 		child.indent = g.indent + 1
+		child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
+		for _, parameter := range n.Parameters {
+			delete(child.exactTypes, parameter.Name)
+		}
 		child.statements(n.Body)
 		prefix := ""
 		returnType := g.tsType(n.ReturnType)
@@ -1302,7 +1544,8 @@ func (g *generator) expr(expression ir.Expression) string {
 				value.WriteString(g.expr(part.Expression))
 				value.WriteByte('}')
 			} else {
-				value.WriteString(strings.ReplaceAll(part.Text, "`", "\\`"))
+				text := strings.ReplaceAll(part.Text, "`", "\\`")
+				value.WriteString(strings.ReplaceAll(text, "${", "\\${"))
 			}
 		}
 		value.WriteByte('`')
@@ -1325,7 +1568,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.jsxElement(n)
 	case *ir.Unary:
 		op := n.Operator
-		if op == "not" || op == "!" {
+		if op == "!" {
 			return "!(" + g.expr(n.Operand) + ")"
 		}
 		if op == "-" && n.ExprType().Kind == types.Int {
@@ -1357,11 +1600,6 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 	case *ir.Binary:
 		op := n.Operator
-		if op == "and" {
-			op = "&&"
-		} else if op == "or" {
-			op = "||"
-		}
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
 		if n.ExprType().Kind == types.Int && isCheckedIntegerOperator(op) {
@@ -1389,6 +1627,17 @@ func (g *generator) expr(expression ir.Expression) string {
 			return receiver + op + "__trb_" + n.Name
 		}
 		return receiver + op + tsMethodName(n.Name)
+	case *ir.RecordConstruct:
+		target, record := g.typescriptRecordTarget(n.Target)
+		if !record {
+			return ""
+		}
+		target.typeArguments = append([]types.Type(nil), n.TypeArguments...)
+		if tsRecordContractHasDefaults(n.Fields) {
+			return g.awaitRecordConstruct(n, g.recordDefaultTargetCall(n, target, n.Arguments))
+		}
+		identity := g.expressionTypeIdentity(n.ExprType(), n)
+		return g.recordTargetLiteral(target, n.Arguments, identity)
 	case *ir.Call:
 		parts := make([]string, len(n.Arguments))
 		for i, argument := range n.Arguments {
@@ -1415,17 +1664,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return g.awaitCall(n, generated)
 		}
-		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
-			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "record" {
-				if identifier, named := application.Receiver.(*ir.Identifier); named {
-					return g.awaitCall(n, g.recordLiteralApplied(identifier, application.Arguments, n.Arguments))
-				}
-			}
-			if identifier, ok := member.Receiver.(*ir.Identifier); ok && (g.records[identifier.Name] || identifier.Reference != nil && identifier.Reference.ExportKind == "record") {
-				return g.awaitCall(n, g.recordLiteral(identifier, n.Arguments))
-			}
-		}
-		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.CallParameterDefaults[n])
 		parts = g.executionArguments(n, parts)
 		args := strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
@@ -1456,8 +1695,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		case "from_raw":
 			return g.rawEnumFromValue(n, parts[0])
 		default:
-			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
-			owner := g.runtimeName(n.EnumName)
+			parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, g.suspension != nil && g.suspension.EnumCallDefaults[n])
+			owner := g.enumCallOwner(n)
 			parts = append([]string{g.expr(n.Receiver)}, parts...)
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append(parts[:1], append([]string{"__trbScope"}, parts[1:]...)...)
@@ -1471,13 +1710,16 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
-			parts[index] = g.expr(argument)
+			parts[index] = g.expr(argument.Value)
 		}
-		name := n.EnumName + "." + n.Member
+		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts, false)
+		owner := g.enumConstructOwner(n)
+		name := owner + "." + n.Member
 		if len(n.TypeArguments) > 0 {
+			identity := g.expressionTypeIdentity(n.ExprType(), n)
 			arguments := make([]string, len(n.TypeArguments))
 			for index, argument := range n.TypeArguments {
-				arguments[index] = g.tsType(argument)
+				arguments[index] = g.tsTypeWithIdentity(argument, identityArgument(identity, index))
 			}
 			name += "<" + strings.Join(arguments, ", ") + ">"
 		}
@@ -1502,13 +1744,16 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Index:
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
-			return "((values: " + g.tsType(hashType) + ", key: " + g.tsType(hashType.Args[0]) + "): " + g.tsType(hashType.Args[1]) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			hashIdentity := g.expressionTypeIdentity(hashType, n.Receiver)
+			return "((values: " + g.tsTypeWithIdentity(hashType, hashIdentity) + ", key: " + g.tsTypeWithIdentity(hashType.Args[0], identityArgument(hashIdentity, 0)) + "): " + g.tsTypeWithIdentity(hashType.Args[1], identityArgument(hashIdentity, 1)) + " => { if (!Object.prototype.hasOwnProperty.call(values, key)) { throw new Error(\"Hash key is missing\"); } return values[key]; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.String {
 			return "((value: string, index: number): string => { const characters = Array.from(value); if (index < 0) index += characters.length; if (index < 0 || index >= characters.length) throw new RangeError(\"String index is out of bounds\"); return characters[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
-			return "((values: " + g.tsType(n.Receiver.ExprType()) + ", index: number): " + g.tsType(n.ExprType()) + " => { if (index < 0) index += values.length; if (index < 0 || index >= values.length) throw new RangeError(\"Array index is out of bounds\"); return values[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+			arrayType := n.Receiver.ExprType()
+			arrayIdentity := g.expressionTypeIdentity(arrayType, n.Receiver)
+			return "((values: " + g.tsTypeWithIdentity(arrayType, arrayIdentity) + ", index: number): " + g.tsTypeWithIdentity(n.ExprType(), identityArgument(arrayIdentity, 0)) + " => { if (index < 0) index += values.length; if (index < 0 || index >= values.length) throw new RangeError(\"Array index is out of bounds\"); return values[index]!; })(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		return g.expr(n.Receiver) + "[" + g.expr(n.Index) + "]"
 	default:
@@ -1516,8 +1761,8 @@ func (g *generator) expr(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature []callsignature.Parameter, authored []string) []string {
-	if !callsignature.HasNamedOnly(signature) {
+func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature []callsignature.Parameter, authored []string, lowerDefaults bool) []string {
+	if !callsignature.HasNamedOnly(signature) && !lowerDefaults {
 		return authored
 	}
 	positional := []string{}
@@ -1549,7 +1794,9 @@ func (g *generator) sourceCallArguments(arguments []ir.CallArgument, signature [
 		}
 		result = append(result, "["+strings.Join(optional, ", ")+"]")
 	}
-	result = append(result, "{ "+strings.Join(named, ", ")+" }")
+	if callsignature.HasNamedOnly(signature) {
+		result = append(result, "{ "+strings.Join(named, ", ")+" }")
+	}
 	return result
 }
 
@@ -1646,54 +1893,96 @@ func (g *generator) promiseRejectionToResult(conversion *ir.Conversion) string {
 }
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
-	valueType := g.tsType(types.FromName(call.EnumName))
+	valueType := g.rawEnumValueType(call)
 	errorType := g.tsType(types.FromName("EnumValueError"))
-	resultType := g.tsType(call.ExprType())
+	resultType := g.rawEnumResultType(call)
 	result := g.runtimeName("Result")
-	owner := g.runtimeName(call.EnumName)
-	parts := []string{"((): " + resultType + " => { const value = " + argument + "; switch (value) {"}
+	owner := g.enumCallOwner(call)
+	parts := []string{"((value: " + g.tsType(call.RawType) + "): " + resultType + " => { switch (value) {"}
 	for _, item := range call.RawValues {
 		parts = append(parts, "case "+item.Raw+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
 	}
 	message := strconv.Quote("unknown raw value for " + call.EnumName)
-	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })()")
+	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })("+argument+")")
 	return strings.Join(parts, " ")
 }
 
-func (g *generator) ifExpression(node *ir.If) string {
-	child := &generator{
-		inClass:         g.inClass,
-		functionDepth:   g.functionDepth,
-		methods:         g.methods,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		records:         g.records,
-		typeAliases:     g.typeAliases,
-		temporary:       g.temporary,
-		suspension:      g.suspension,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		enumReceiver:    g.enumReceiver,
+func (g *generator) enumCallOwner(call *ir.EnumCall) string {
+	owner := g.runtimeName(call.EnumName)
+	if call.Reference == nil {
+		if semantic := g.localDeclarationName(call.OwnerIdentity); semantic != "" {
+			return semantic
+		}
+		if call.Owner != "" {
+			owner = strings.ReplaceAll(call.Owner, "::", ".")
+		}
 	}
+	return owner
+}
+
+func (g *generator) enumConstructOwner(node *ir.EnumConstruct) string {
+	owner := g.runtimeName(node.EnumName)
+	if node.Reference == nil {
+		if semantic := g.localDeclarationName(node.Declaration); semantic != "" {
+			return semantic
+		}
+		if node.Owner != "" {
+			owner = strings.ReplaceAll(node.Owner, "::", ".")
+		}
+	}
+	return owner
+}
+
+func (g *generator) localDeclarationName(declaration identity.Declaration) string {
+	if declaration.Empty() || declaration.Module != g.modulePath {
+		return ""
+	}
+	return strings.ReplaceAll(declaration.Name, "::", ".")
+}
+
+func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
+	var arguments []types.Type
+	result := call.ExprType()
+	if result.Name == "Result" && len(result.Args) == 2 {
+		arguments = result.Args[0].Args
+	}
+	return g.qualifiedNamedType(g.enumCallOwner(call), arguments, false)
+}
+
+func (g *generator) rawEnumResultType(call *ir.EnumCall) string {
+	errorType := g.tsType(types.FromName("EnumValueError"))
+	result := g.runtimeName("Result") + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
+	if call.ExprType().Nullable {
+		result += " | null"
+	}
+	return result
+}
+
+func (g *generator) ifExpression(node *ir.If) string {
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.sourceRecorder = nil
+	child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
+	resultType := child.tsTypeWithIdentity(node.ExprType(), child.expressionTypeIdentity(node.ExprType(), node))
 	if suspends {
-		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
+		child.line("(async (): Promise<" + resultType + "> => {")
 	} else {
-		child.line("((): " + child.tsType(node.ExprType()) + " => {")
+		child.line("((): " + resultType + " => {")
 	}
 	child.indent++
+	branchExactTypes := cloneTypeScriptTypeIdentities(child.exactTypes)
 	child.line("if (" + child.expr(node.Condition) + ") {" + tsTrailingComment(node.TrailingComment))
 	child.indent++
+	child.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
 	child.statements(node.Then)
 	if !node.ThenDiverges {
 		child.line("return " + child.expr(node.ThenResult) + ";")
 	}
 	child.indent--
 	for _, branch := range node.ElseIf {
+		child.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
 		child.line("} else if (" + child.expr(branch.Condition) + ") {")
 		child.indent++
 		child.statements(branch.Body)
@@ -1704,6 +1993,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 	}
 	child.line("} else {")
 	child.indent++
+	child.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
 	child.statements(node.Else)
 	if !node.ElseDiverges {
 		child.line("return " + child.expr(node.ElseResult) + ";")
@@ -1721,37 +2011,30 @@ func (g *generator) ifExpression(node *ir.If) string {
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
-	child := &generator{
-		inClass:         g.inClass,
-		functionDepth:   g.functionDepth,
-		methods:         g.methods,
-		modulePath:      g.modulePath,
-		topFunctions:    g.topFunctions,
-		records:         g.records,
-		typeAliases:     g.typeAliases,
-		temporary:       g.temporary,
-		suspension:      g.suspension,
-		execution:       g.execution,
-		executionActive: g.executionActive,
-		jobs:            g.jobs,
-		jobsSQL:         g.jobsSQL,
-		orm:             g.orm,
-		breakTarget:     g.breakTarget,
-		enumReceiver:    g.enumReceiver,
-	}
+	child := *g
+	child.b = strings.Builder{}
+	child.indent = 0
+	child.sourceRecorder = nil
+	child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
 	suspends := child.suspension != nil && child.suspension.Expressions[node]
+	resultType := child.tsTypeWithIdentity(node.ExprType(), child.expressionTypeIdentity(node.ExprType(), node))
 	if suspends {
-		child.line("(async (): Promise<" + child.tsType(node.ExprType()) + "> => {")
+		child.line("(async (): Promise<" + resultType + "> => {")
 	} else {
-		child.line("((): " + child.tsType(node.ExprType()) + " => {")
+		child.line("((): " + resultType + " => {")
 	}
 	child.indent++
 	child.statements(node.Leading)
+	branchExactTypes := cloneTypeScriptTypeIdentities(child.exactTypes)
+	selectorType := node.Value.ExprType()
+	selectorIdentity := child.expressionTypeIdentity(selectorType, node.Value)
 	child.temporary++
 	value := "__trbCase" + strconv.Itoa(child.temporary)
 	child.line("const " + value + " = " + child.expr(node.Value) + ";" + tsTrailingComment(node.TrailingComment))
 	narrowingName, narrowingTemp := child.caseNarrowingCapture(node)
 	for index, branch := range node.Branches {
+		child.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
+		child.bindCaseTypeIdentities(branch.Bindings, selectorType, selectorIdentity)
 		header := "if ("
 		if index > 0 {
 			header = "} else if ("
@@ -1789,6 +2072,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	}
 	child.line("} else {")
 	child.indent++
+	child.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
 	if node.HasElse {
 		child.caseNarrowings(node.ElseNarrowings, narrowingName, narrowingTemp)
 		child.statements(node.Else)
@@ -1879,6 +2163,7 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	child.b = strings.Builder{}
 	child.sourceRecorder = nil
 	child.indent = 0
+	child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
 	child.temporary++
 	suffix := strconv.Itoa(child.temporary)
 	items := "__trbItems" + suffix
@@ -1903,15 +2188,22 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	if item == "" || item == "_" {
 		item = "__trbItem" + suffix
 	}
+	sourceType := transform.Source.ExprType()
+	sourceIdentity := child.expressionTypeIdentity(sourceType, transform.Source)
+	itemIdentity := projectTypeScriptTypeIdentity(transform.ItemType, sourceType, sourceIdentity)
+	child.exactTypes[item] = cloneTypeScriptTypeIdentity(itemIdentity)
 	limit := "8"
 	if transform.Limit != nil {
 		limit = child.expr(transform.Limit)
 	}
+	emissionExactTypes := cloneTypeScriptTypeIdentities(child.exactTypes)
+	child.observeExactTypeStatements(transform.Body)
 	itemResultType := "unknown"
 	if transform.Result != nil {
-		itemResultType = child.tsType(transform.Result.ExprType())
+		itemResultType = child.expressionType(transform.Result.ExprType(), transform.Result)
 	}
-	child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+	child.exactTypes = emissionExactTypes
+	child.line("(async (): Promise<" + child.expressionType(transform.ExprType(), transform) + "> => {")
 	child.indent++
 	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
 	child.line("const " + requested + " = " + limit + ";")
@@ -2010,7 +2302,17 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 	child.b = strings.Builder{}
 	child.sourceRecorder = nil
 	child.indent = 0
-	child.line("((): " + child.tsType(transform.Result.ExprType()) + " => {")
+	child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
+	sourceType := transform.Source.ExprType()
+	sourceIdentity := child.expressionTypeIdentity(sourceType, transform.Source)
+	if transform.Item != "" && transform.Item != "_" {
+		child.exactTypes[transform.Item] = projectTypeScriptTypeIdentity(transform.ItemType, sourceType, sourceIdentity)
+	}
+	emissionExactTypes := cloneTypeScriptTypeIdentities(child.exactTypes)
+	child.observeExactTypeStatements(transform.Body)
+	resultType := child.expressionType(transform.Result.ExprType(), transform.Result)
+	child.exactTypes = emissionExactTypes
+	child.line("((): " + resultType + " => {")
 	child.indent++
 	child.statements(transform.Body)
 	child.line("return " + child.expr(transform.Result) + ";")
@@ -2029,6 +2331,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	child.b = strings.Builder{}
 	child.sourceRecorder = nil
 	child.indent = 0
+	child.exactTypes = cloneTypeScriptTypeIdentities(g.exactTypes)
 	child.temporary++
 	suffix := strconv.Itoa(child.temporary)
 	items := "__trbItems" + suffix
@@ -2038,12 +2341,17 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	if item == "" {
 		item = "__trbItem" + suffix
 	}
+	sourceType := transform.Source.ExprType()
+	sourceIdentity := child.expressionTypeIdentity(sourceType, transform.Source)
+	itemIdentity := projectTypeScriptTypeIdentity(transform.ItemType, sourceType, sourceIdentity)
+	child.exactTypes[item] = cloneTypeScriptTypeIdentity(itemIdentity)
 	success := transform.ExprType()
+	successIdentity := child.expressionTypeIdentity(success, transform)
 	complete := func(value string) string { return value }
 	if suspends {
-		child.line("(async (): Promise<" + child.tsType(transform.ExprType()) + "> => {")
+		child.line("(async (): Promise<" + child.tsTypeWithIdentity(success, successIdentity) + "> => {")
 	} else {
-		child.line("((): " + child.tsType(transform.ExprType()) + " => {")
+		child.line("((): " + child.tsTypeWithIdentity(success, successIdentity) + " => {")
 	}
 	child.indent++
 	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
@@ -2065,8 +2373,8 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
-		keyType := child.tsType(transform.Result.ExprType())
-		itemType := child.tsType(transform.ItemType)
+		keyType := child.expressionType(transform.Result.ExprType(), transform.Result)
+		itemType := child.tsTypeWithIdentity(transform.ItemType, itemIdentity)
 		decorated := "__trbDecorated" + suffix
 		child.line("const " + decorated + ": Array<{ value: " + itemType + "; key: " + keyType + "; index: number }> = [];")
 		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
@@ -2080,7 +2388,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		child.line(decorated + ".sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; });")
 		child.line("return " + complete(decorated+".map((entry) => entry.value)") + ";")
 	case "map", "select":
-		child.line("const " + result + ": " + child.tsType(success) + " = [];")
+		child.line("const " + result + ": " + child.tsTypeWithIdentity(success, successIdentity) + " = [];")
 		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
 		child.indent++
 		emitBindings(transform.WithIndex)
@@ -2205,18 +2513,510 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 	}
 }
 
-func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgument) string {
-	fields := make([]string, 0, len(arguments))
-	for _, argument := range arguments {
-		if argument.Name == "" {
-			continue
-		}
-		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
-	}
-	return "({" + strings.Join(fields, ", ") + "} satisfies " + record.Name + ")"
+type typescriptRecordConstructionTarget struct {
+	typeName      string
+	helperName    string
+	typeArguments []types.Type
 }
 
-func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []types.Type, arguments []ir.CallArgument) string {
+func (target typescriptRecordConstructionTarget) typeString(g *generator) string {
+	return target.typeStringWithIdentity(g, nil)
+}
+
+func (target typescriptRecordConstructionTarget) typeStringWithIdentity(g *generator, identity *typescriptTypeIdentity) string {
+	result := target.typeName
+	if len(target.typeArguments) == 0 {
+		return result
+	}
+	items := make([]string, len(target.typeArguments))
+	for index, argument := range target.typeArguments {
+		items[index] = g.tsTypeWithIdentity(argument, identityArgument(identity, index))
+	}
+	return result + "<" + strings.Join(items, ", ") + ">"
+}
+
+func (g *generator) expressionType(typ types.Type, expression ir.Expression) string {
+	return g.tsTypeWithIdentity(typ, g.expressionTypeIdentity(typ, expression))
+}
+
+func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeIdentity) string {
+	if !typeScriptTypeIdentityPresent(identity) {
+		return g.tsType(typ)
+	}
+	nullable := typ.Nullable
+	typ.Nullable = false
+	argument := func(index int) *typescriptTypeIdentity {
+		if identity == nil || index >= len(identity.arguments) {
+			return nil
+		}
+		return identity.arguments[index]
+	}
+	var result string
+	switch typ.Kind {
+	case types.Array, types.Iterable:
+		element := "unknown"
+		if len(typ.Args) > 0 {
+			element = g.tsTypeWithIdentity(typ.Args[0], argument(0))
+		}
+		result = "Array<" + element + ">"
+	case types.Hash:
+		key := "string"
+		value := "unknown"
+		if len(typ.Args) == 2 {
+			key = g.tsTypeWithIdentity(typ.Args[0], argument(0))
+			if typ.Args[0].Kind == types.Bool {
+				key = "string"
+			}
+			value = g.tsTypeWithIdentity(typ.Args[1], argument(1))
+		}
+		result = "Record<" + key + ", " + value + ">"
+	case types.Union:
+		parts := make([]string, len(typ.Args))
+		for index, alternative := range typ.Args {
+			parts[index] = g.tsTypeWithIdentity(alternative, argument(index))
+		}
+		result = strings.Join(parts, " | ")
+	case types.Function:
+		parameters, returned, ok := types.FunctionSignature(typ)
+		if !ok {
+			result = g.tsTypeWithoutSemanticIdentity(typ)
+			break
+		}
+		parts := make([]string, len(parameters))
+		for index, parameter := range parameters {
+			parts[index] = "arg" + strconv.Itoa(index) + ": " + g.tsTypeWithIdentity(parameter, argument(index))
+		}
+		returnedIdentity := argument(len(parameters))
+		resultType := g.tsTypeWithIdentity(returned, returnedIdentity)
+		if g.standardResult && !returned.Nullable && returned.Name == "Result" && len(returned.Args) == 2 {
+			resultType += " | Promise<" + resultType + ">"
+		}
+		result = "(" + strings.Join(parts, ", ") + ") => " + resultType
+	case types.Named:
+		if typ.Name == "Callback" && identity.name == "" {
+			result = g.tsTypeWithoutSemanticIdentity(typ)
+			break
+		}
+		result = identity.name
+		if result == "" {
+			base := typ
+			base.Args = nil
+			result = g.tsType(base)
+		}
+		if len(typ.Args) > 0 {
+			parts := make([]string, len(typ.Args))
+			for index, item := range typ.Args {
+				parts[index] = g.tsTypeWithIdentity(item, argument(index))
+			}
+			result += "<" + strings.Join(parts, ", ") + ">"
+		}
+	default:
+		result = g.tsTypeWithoutSemanticIdentity(typ)
+	}
+	if nullable && result != "null" {
+		result += " | null"
+	}
+	return result
+}
+
+func typeScriptTypeIdentityPresent(identity *typescriptTypeIdentity) bool {
+	if identity == nil {
+		return false
+	}
+	if identity.name != "" {
+		return true
+	}
+	for _, argument := range identity.arguments {
+		if typeScriptTypeIdentityPresent(argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func typeScriptTypeShapeEqual(left, right types.Type) bool {
+	if left.Kind != right.Kind || left.Name != right.Name || len(left.Args) != len(right.Args) {
+		return false
+	}
+	if !left.Declaration.Empty() && !right.Declaration.Empty() && left.Declaration != right.Declaration {
+		return false
+	}
+	for index := range left.Args {
+		if !typeScriptTypeShapeEqual(left.Args[index], right.Args[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeTypeScriptTypeIdentity(left, right *typescriptTypeIdentity) *typescriptTypeIdentity {
+	if !typeScriptTypeIdentityPresent(left) {
+		return cloneTypeScriptTypeIdentity(right)
+	}
+	if !typeScriptTypeIdentityPresent(right) {
+		return cloneTypeScriptTypeIdentity(left)
+	}
+	result := cloneTypeScriptTypeIdentity(left)
+	if result.name == "" {
+		result.name = right.name
+	}
+	if len(result.arguments) < len(right.arguments) {
+		result.arguments = append(result.arguments, make([]*typescriptTypeIdentity, len(right.arguments)-len(result.arguments))...)
+	}
+	for index, argument := range right.arguments {
+		result.arguments[index] = mergeTypeScriptTypeIdentity(result.arguments[index], argument)
+	}
+	return result
+}
+
+func projectTypeScriptTypeIdentity(expected, observed types.Type, identity *typescriptTypeIdentity) *typescriptTypeIdentity {
+	if !typeScriptTypeIdentityPresent(identity) {
+		return nil
+	}
+	if extracted := extractTypeScriptTypeIdentity(observed, identity, expected); extracted != nil {
+		return extracted
+	}
+	result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+	for index, argument := range expected.Args {
+		result.arguments[index] = projectTypeScriptTypeIdentity(argument, observed, identity)
+	}
+	if !typeScriptTypeIdentityPresent(result) {
+		return nil
+	}
+	return result
+}
+
+func identityWithArgument(typ types.Type, index int, argument *typescriptTypeIdentity) *typescriptTypeIdentity {
+	if index < 0 || index >= len(typ.Args) || !typeScriptTypeIdentityPresent(argument) {
+		return nil
+	}
+	result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(typ.Args))}
+	result.arguments[index] = cloneTypeScriptTypeIdentity(argument)
+	return result
+}
+
+// mergeUniqueGenericArgumentIdentities projects an observed payload or record
+// field into a generic result only when its semantic shape identifies exactly
+// one type argument. When two arguments have the same erased TypeRB shape, the
+// declaration IR does not retain enough information to choose between them,
+// so keeping the identity unknown is safer than assigning the wrong owner.
+func mergeUniqueGenericArgumentIdentities(result *typescriptTypeIdentity, generic, observed types.Type, identity *typescriptTypeIdentity) {
+	if result == nil || !typeScriptTypeIdentityPresent(identity) {
+		return
+	}
+	if len(result.arguments) < len(generic.Args) {
+		result.arguments = append(result.arguments, make([]*typescriptTypeIdentity, len(generic.Args)-len(result.arguments))...)
+	}
+	for index, argument := range generic.Args {
+		matches := 0
+		for _, candidate := range generic.Args {
+			if typeScriptTypeShapeEqual(candidate, argument) {
+				matches++
+			}
+		}
+		if matches != 1 {
+			continue
+		}
+		projected := projectTypeScriptTypeIdentity(argument, observed, identity)
+		result.arguments[index] = mergeTypeScriptTypeIdentity(result.arguments[index], projected)
+	}
+}
+
+func (g *generator) intrinsicCallTypeIdentity(expected types.Type, call *ir.Call, name string) *typescriptTypeIdentity {
+	member, ok := call.Callee.(*ir.Member)
+	if !ok {
+		return nil
+	}
+	receiverType := member.Receiver.ExprType()
+	receiverIdentity := g.expressionTypeIdentity(receiverType, member.Receiver)
+	switch name {
+	case "trb.std.arrays.first", "trb.std.arrays.last", "trb.std.arrays.pop", "trb.std.arrays.shift":
+		if len(receiverType.Args) == 1 {
+			return projectTypeScriptTypeIdentity(expected, receiverType.Args[0], identityArgument(receiverIdentity, 0))
+		}
+	case "trb.std.arrays.try_fetch":
+		if len(expected.Args) == 2 && len(receiverType.Args) == 1 {
+			success := projectTypeScriptTypeIdentity(expected.Args[0], receiverType.Args[0], identityArgument(receiverIdentity, 0))
+			return identityWithArgument(expected, 0, success)
+		}
+	case "trb.std.arrays.try_slice":
+		if len(expected.Args) == 2 {
+			success := projectTypeScriptTypeIdentity(expected.Args[0], receiverType, receiverIdentity)
+			return identityWithArgument(expected, 0, success)
+		}
+	case "trb.std.arrays.slice", "trb.std.arrays.copy", "trb.std.arrays.uniq", "trb.std.arrays.concat", "trb.std.arrays.reverse", "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
+		return projectTypeScriptTypeIdentity(expected, receiverType, receiverIdentity)
+	case "trb.std.hashes.fetch", "trb.std.hashes.delete":
+		if len(receiverType.Args) == 2 {
+			return projectTypeScriptTypeIdentity(expected, receiverType.Args[1], identityArgument(receiverIdentity, 1))
+		}
+	case "trb.std.hashes.try_fetch":
+		if len(expected.Args) == 2 && len(receiverType.Args) == 2 {
+			success := projectTypeScriptTypeIdentity(expected.Args[0], receiverType.Args[1], identityArgument(receiverIdentity, 1))
+			return identityWithArgument(expected, 0, success)
+		}
+	case "trb.std.hashes.keys":
+		if len(receiverType.Args) == 2 {
+			return projectTypeScriptTypeIdentity(expected, receiverType.Args[0], identityArgument(receiverIdentity, 0))
+		}
+	case "trb.std.hashes.values":
+		if len(receiverType.Args) == 2 {
+			return projectTypeScriptTypeIdentity(expected, receiverType.Args[1], identityArgument(receiverIdentity, 1))
+		}
+	case "trb.std.hashes.copy", "trb.std.hashes.merge":
+		return projectTypeScriptTypeIdentity(expected, receiverType, receiverIdentity)
+	case "trb.web.context_fetch":
+		if len(expected.Args) == 2 && len(call.Arguments) > 0 {
+			key := call.Arguments[0].Value
+			success := projectTypeScriptTypeIdentity(expected.Args[0], key.ExprType(), g.expressionTypeIdentity(key.ExprType(), key))
+			return identityWithArgument(expected, 0, success)
+		}
+	}
+	return nil
+}
+
+func extractTypeScriptTypeIdentity(container types.Type, identity *typescriptTypeIdentity, target types.Type) *typescriptTypeIdentity {
+	if !typeScriptTypeIdentityPresent(identity) {
+		return nil
+	}
+	if typeScriptTypeShapeEqual(container, target) {
+		return cloneTypeScriptTypeIdentity(identity)
+	}
+	for index, argument := range container.Args {
+		if index >= len(identity.arguments) {
+			continue
+		}
+		if result := extractTypeScriptTypeIdentity(argument, identity.arguments[index], target); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
+func (g *generator) expressionTypeIdentity(expected types.Type, expression ir.Expression) *typescriptTypeIdentity {
+	if expression == nil {
+		return nil
+	}
+	mergeObserved := func(result *typescriptTypeIdentity, observed ir.Expression) *typescriptTypeIdentity {
+		if observed == nil {
+			return result
+		}
+		observedType := observed.ExprType()
+		identity := g.expressionTypeIdentity(observedType, observed)
+		return mergeTypeScriptTypeIdentity(result, projectTypeScriptTypeIdentity(expected, observedType, identity))
+	}
+	branchIdentity := func(statements []ir.Statement, result ir.Expression) *typescriptTypeIdentity {
+		previous := g.exactTypes
+		g.exactTypes = cloneTypeScriptTypeIdentities(previous)
+		g.observeExactTypeStatements(statements)
+		identity := mergeObserved(nil, result)
+		g.exactTypes = previous
+		return identity
+	}
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		return cloneTypeScriptTypeIdentity(g.exactTypes[node.Name])
+	case *ir.Conversion:
+		return mergeObserved(nil, node.Value)
+	case *ir.Array:
+		if len(expected.Args) == 0 {
+			return nil
+		}
+		result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+		for _, element := range node.Elements {
+			identity := g.expressionTypeIdentity(expected.Args[0], element)
+			result.arguments[0] = mergeTypeScriptTypeIdentity(result.arguments[0], identity)
+		}
+		if typeScriptTypeIdentityPresent(result) {
+			return result
+		}
+	case *ir.Hash:
+		if len(expected.Args) != 2 {
+			return nil
+		}
+		result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, 2)}
+		for _, entry := range node.Entries {
+			result.arguments[0] = mergeTypeScriptTypeIdentity(result.arguments[0], g.expressionTypeIdentity(expected.Args[0], entry.Key))
+			result.arguments[1] = mergeTypeScriptTypeIdentity(result.arguments[1], g.expressionTypeIdentity(expected.Args[1], entry.Value))
+		}
+		if typeScriptTypeIdentityPresent(result) {
+			return result
+		}
+	case *ir.RecordConstruct:
+		if target, ok := g.typescriptRecordTarget(node.Target); ok {
+			result := &typescriptTypeIdentity{name: target.typeName, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+			fields := make(map[string]ir.RecordFieldContract, len(node.Fields))
+			for _, field := range node.Fields {
+				fields[field.Name] = field
+			}
+			for _, argument := range node.Arguments {
+				field, ok := fields[argument.Name]
+				if !ok {
+					continue
+				}
+				identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
+				fieldIdentity := projectTypeScriptTypeIdentity(field.Type, argument.Value.ExprType(), identity)
+				mergeUniqueGenericArgumentIdentities(result, expected, field.Type, fieldIdentity)
+			}
+			return result
+		}
+		return nil
+	case *ir.Call:
+		reference := expressionReference(node.Callee)
+		if reference != nil && reference.Intrinsic != "" {
+			return g.intrinsicCallTypeIdentity(expected, node, reference.Intrinsic)
+		}
+		return nil
+	case *ir.EnumCall:
+		if node.Method == "from_raw" && len(expected.Args) > 0 {
+			result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+			result.arguments[0] = &typescriptTypeIdentity{name: g.enumCallOwner(node), arguments: make([]*typescriptTypeIdentity, len(expected.Args[0].Args))}
+			return result
+		}
+		return mergeObserved(nil, node.Receiver)
+	case *ir.EnumConstruct:
+		owner := g.enumConstructOwner(node)
+		result := &typescriptTypeIdentity{name: owner, arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+		for _, argument := range node.Arguments {
+			identity := g.expressionTypeIdentity(argument.Value.ExprType(), argument.Value)
+			mergeUniqueGenericArgumentIdentities(result, expected, argument.Value.ExprType(), identity)
+		}
+		return result
+	case *ir.Member:
+		if node.Namespace && node.Receiver != nil && node.Receiver.ExprType().Name == expected.Name {
+			return &typescriptTypeIdentity{name: g.expr(node.Receiver), arguments: make([]*typescriptTypeIdentity, len(expected.Args))}
+		}
+		return mergeObserved(nil, node.Receiver)
+	case *ir.Index:
+		receiverType := node.Receiver.ExprType()
+		receiverIdentity := g.expressionTypeIdentity(receiverType, node.Receiver)
+		if receiverType.Kind == types.Array && len(receiverType.Args) > 0 {
+			return extractTypeScriptTypeIdentity(receiverType.Args[0], identityArgument(receiverIdentity, 0), expected)
+		}
+		if receiverType.Kind == types.Hash && len(receiverType.Args) == 2 {
+			return extractTypeScriptTypeIdentity(receiverType.Args[1], identityArgument(receiverIdentity, 1), expected)
+		}
+	case *ir.Transform:
+		sourceType := node.Source.ExprType()
+		sourceIdentity := g.expressionTypeIdentity(sourceType, node.Source)
+		itemIdentity := projectTypeScriptTypeIdentity(node.ItemType, sourceType, sourceIdentity)
+		previousExactTypes := g.exactTypes
+		g.exactTypes = cloneTypeScriptTypeIdentities(previousExactTypes)
+		if node.Item != "" && node.Item != "_" {
+			g.exactTypes[node.Item] = cloneTypeScriptTypeIdentity(itemIdentity)
+		}
+		g.observeExactTypeStatements(node.Body)
+		resultIdentity := g.expressionTypeIdentity(node.Result.ExprType(), node.Result)
+		g.exactTypes = previousExactTypes
+		switch node.Operation {
+		case "map", "concurrent_map":
+			if len(expected.Args) == 0 {
+				return nil
+			}
+			return &typescriptTypeIdentity{arguments: []*typescriptTypeIdentity{projectTypeScriptTypeIdentity(expected.Args[0], node.Result.ExprType(), resultIdentity)}}
+		case "select", "sort_by", "sort_by_descending", "find":
+			return projectTypeScriptTypeIdentity(expected, sourceType, sourceIdentity)
+		case "reduce":
+			return projectTypeScriptTypeIdentity(expected, node.Result.ExprType(), resultIdentity)
+		}
+	case *ir.If:
+		var result *typescriptTypeIdentity
+		if !node.ThenDiverges {
+			result = mergeTypeScriptTypeIdentity(result, branchIdentity(node.Then, node.ThenResult))
+		}
+		for _, branch := range node.ElseIf {
+			if !branch.Diverges {
+				result = mergeTypeScriptTypeIdentity(result, branchIdentity(branch.Body, branch.Result))
+			}
+		}
+		if !node.ElseDiverges {
+			result = mergeTypeScriptTypeIdentity(result, branchIdentity(node.Else, node.ElseResult))
+		}
+		return result
+	case *ir.Case:
+		previousExactTypes := g.exactTypes
+		g.exactTypes = cloneTypeScriptTypeIdentities(previousExactTypes)
+		g.observeExactTypeStatements(node.Leading)
+		branchExactTypes := cloneTypeScriptTypeIdentities(g.exactTypes)
+		selectorType := node.Value.ExprType()
+		selectorIdentity := g.expressionTypeIdentity(selectorType, node.Value)
+		var result *typescriptTypeIdentity
+		for _, branch := range node.Branches {
+			if !branch.Diverges {
+				g.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
+				g.bindCaseTypeIdentities(branch.Bindings, selectorType, selectorIdentity)
+				g.observeExactTypeStatements(branch.Body)
+				result = mergeTypeScriptTypeIdentity(result, mergeObserved(nil, branch.Result))
+			}
+		}
+		if node.HasElse && !node.ElseDiverges {
+			g.exactTypes = cloneTypeScriptTypeIdentities(branchExactTypes)
+			g.observeExactTypeStatements(node.Else)
+			result = mergeTypeScriptTypeIdentity(result, mergeObserved(nil, node.ElseResult))
+		}
+		g.exactTypes = previousExactTypes
+		return result
+	}
+	return nil
+}
+
+func identityArgument(identity *typescriptTypeIdentity, index int) *typescriptTypeIdentity {
+	if identity == nil || index >= len(identity.arguments) {
+		return nil
+	}
+	return identity.arguments[index]
+}
+
+func (g *generator) enumConstructType(node *ir.EnumConstruct) string {
+	return g.qualifiedNamedType(g.enumConstructOwner(node), node.TypeArguments, node.ExprType().Nullable)
+}
+
+func (g *generator) qualifiedNamedType(name string, arguments []types.Type, nullable bool) string {
+	if len(arguments) > 0 {
+		items := make([]string, len(arguments))
+		for index, argument := range arguments {
+			items[index] = g.tsType(argument)
+		}
+		name += "<" + strings.Join(items, ", ") + ">"
+	}
+	if nullable {
+		name += " | null"
+	}
+	return name
+}
+
+func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescriptRecordConstructionTarget, bool) {
+	switch node := expression.(type) {
+	case *ir.Identifier:
+		target := typescriptRecordConstructionTarget{
+			typeName:   g.runtimeName(node.Name),
+			helperName: tsRecordConstructorName(node.Name),
+		}
+		if alias := g.typeAliases[node.Name]; alias != "" {
+			target.helperName = alias + "." + target.helperName
+		}
+		return target, true
+	case *ir.Member:
+		if !node.Namespace {
+			return typescriptRecordConstructionTarget{}, false
+		}
+		return typescriptRecordConstructionTarget{
+			typeName:   g.expr(node),
+			helperName: g.expr(node.Receiver) + "." + tsRecordConstructorName(node.Name),
+		}, true
+	case *ir.TypeApply:
+		target, ok := g.typescriptRecordTarget(node.Receiver)
+		if !ok {
+			return typescriptRecordConstructionTarget{}, false
+		}
+		target.typeArguments = append([]types.Type(nil), node.Arguments...)
+		return target, true
+	default:
+		return typescriptRecordConstructionTarget{}, false
+	}
+}
+
+func (g *generator) recordTargetLiteral(target typescriptRecordConstructionTarget, arguments []ir.CallArgument, identity *typescriptTypeIdentity) string {
 	fields := make([]string, 0, len(arguments))
 	for _, argument := range arguments {
 		if argument.Name == "" {
@@ -2224,20 +3024,136 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 		}
 		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
 	}
-	items := make([]string, len(typeArguments))
-	for index, argument := range typeArguments {
-		items[index] = g.tsType(argument)
+	typeName := target.typeStringWithIdentity(g, identity)
+	return "({" + strings.Join(fields, ", ") + "} satisfies " + typeName + ")"
+}
+
+func (g *generator) recordDefaultConstructor(record *ir.Record, fields []*ir.RecordField) {
+	g.emitRecordDefaultConstructor(record, fields, tsRecordConstructorName(record.Name), false)
+	if g.suspension != nil && g.suspension.RecordDefaultFor(record) {
+		g.emitRecordDefaultConstructor(record, fields, tsRecordSyncConstructorName(record.Name), true)
 	}
-	name := g.runtimeName(record.Name) + "<" + strings.Join(items, ", ") + ">"
-	return "({" + strings.Join(fields, ", ") + "} satisfies " + name + ")"
+}
+
+func (g *generator) emitRecordDefaultConstructor(record *ir.Record, fields []*ir.RecordField, name string, synchronous bool) {
+	properties := make([]string, len(fields))
+	for index, field := range fields {
+		optional := ""
+		if field.Default != nil && (!synchronous || g.suspension == nil || !g.suspension.RecordFieldDefaultFor(field)) {
+			optional = "?"
+		}
+		properties[index] = field.Name + optional + ": " + g.tsType(field.Type)
+	}
+	parameters := tsTypeParameterDeclarations(record.TypeParameters)
+	result := record.Name + tsTypeParameterArguments(record.TypeParameters)
+	execution := g.execution != nil && g.execution.RecordDefaultFor(record)
+	suspends := !synchronous && g.suspension != nil && g.suspension.RecordDefaultFor(record)
+	arguments := "__trbArgs: { " + strings.Join(properties, "; ") + " }"
+	if execution {
+		arguments = "__trbScope: AbortSignal | undefined, " + arguments
+	}
+	prefix := "export function "
+	returnType := result
+	if suspends {
+		prefix = "export async function "
+		returnType = "Promise<" + result + ">"
+	}
+	g.line(prefix + name + parameters + "(" + arguments + "): " + returnType + " {")
+	g.indent++
+	previousExecution := g.executionActive
+	previousLexicalNames := g.lexicalNames
+	g.lexicalNames = make(map[string]string, len(previousLexicalNames)+len(fields))
+	for name, target := range previousLexicalNames {
+		g.lexicalNames[name] = target
+	}
+	g.executionActive = execution
+	values := make([]string, len(fields))
+	for index, field := range fields {
+		value := "__trbArgs." + field.Name
+		if field.Default != nil && (!synchronous || g.suspension == nil || !g.suspension.RecordFieldDefaultFor(field)) {
+			value = "Object.prototype.hasOwnProperty.call(__trbArgs, " + strconv.Quote(field.Name) + ") ? __trbArgs." + field.Name + " as " + g.tsType(field.Type) + " : " + g.expr(field.Default)
+		}
+		local := "__trbField" + strconv.Itoa(index)
+		g.line("const " + local + " = " + value + ";")
+		g.lexicalNames[field.Name] = local
+		values[index] = field.Name + ": " + local
+	}
+	g.executionActive = previousExecution
+	g.lexicalNames = previousLexicalNames
+	g.line("return { " + strings.Join(values, ", ") + " };")
+	g.indent--
+	g.line("}")
+}
+
+func tsRecordFields(statements []ir.Statement) []*ir.RecordField {
+	fields := make([]*ir.RecordField, 0, len(statements))
+	for _, statement := range statements {
+		if field, ok := statement.(*ir.RecordField); ok {
+			fields = append(fields, field)
+		}
+	}
+	return fields
+}
+
+func tsRecordFieldsHaveDefaults(fields []*ir.RecordField) bool {
+	for _, field := range fields {
+		if field.Default != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func tsRecordContractHasDefaults(fields []ir.RecordFieldContract) bool {
+	for _, field := range fields {
+		if field.HasDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func tsRecordConstructorName(name string) string {
+	return "__trbRecordNew" + name
+}
+
+func tsRecordSyncConstructorName(name string) string {
+	return tsRecordConstructorName(name) + "Sync"
+}
+
+func (g *generator) recordDefaultTargetCall(construction *ir.RecordConstruct, target typescriptRecordConstructionTarget, arguments []ir.CallArgument) string {
+	name := target.helperName
+	if g.suspension != nil && g.suspension.RecordConstructSync[construction] {
+		name += "Sync"
+	}
+	if len(target.typeArguments) > 0 {
+		identity := g.expressionTypeIdentity(construction.ExprType(), construction)
+		items := make([]string, len(target.typeArguments))
+		for index, argument := range target.typeArguments {
+			items[index] = g.tsTypeWithIdentity(argument, identityArgument(identity, index))
+		}
+		name += "<" + strings.Join(items, ", ") + ">"
+	}
+	fields := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		if argument.Name == "" {
+			continue
+		}
+		fields = append(fields, argument.Name+": "+g.expr(argument.Value))
+	}
+	values := []string{"{ " + strings.Join(fields, ", ") + " }"}
+	if g.execution != nil && (g.execution.RecordConstructDefaults[construction] || g.execution.RecordConstructSync[construction]) {
+		values = append([]string{g.executionScopeArgument()}, values...)
+	}
+	return name + "(" + strings.Join(values, ", ") + ")"
 }
 
 func portableFloatInteger(value, operation string) string {
-	return "((): number => { const value = " + value + "; if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = " + operation + "; if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })()"
+	return "((value: number): number => { if (!Number.isFinite(value)) { throw new RangeError(\"Float cannot be converted to Integer\"); } const integer = " + operation + "; if (!Number.isSafeInteger(integer)) { throw new RangeError(\"Integer is outside the portable range\"); } return integer; })(" + value + ")"
 }
 
 func portableFloatString(value string) string {
-	return "((): string => { const value = " + value + "; if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })()"
+	return "((value: number): string => { if (Number.isNaN(value)) return \"NaN\"; if (value === Infinity) return \"Infinity\"; if (value === -Infinity) return \"-Infinity\"; if (value === 0) return \"0.0\"; const raw = String(value); if (!/[eE]/.test(raw)) return raw.includes(\".\") ? raw : raw + \".0\"; const [mantissa, exponentText] = raw.toLowerCase().split(\"e\"); const negative = mantissa!.startsWith(\"-\"); const unsigned = negative ? mantissa!.slice(1) : mantissa!; const [whole, fraction = \"\"] = unsigned.split(\".\"); const digits = whole! + fraction; const decimal = whole!.length + Number(exponentText); let text: string; if (decimal <= 0) text = \"0.\" + \"0\".repeat(-decimal) + digits; else if (decimal >= digits.length) text = digits + \"0\".repeat(decimal - digits.length) + \".0\"; else text = digits.slice(0, decimal) + \".\" + digits.slice(decimal); text = text.replace(/(\\.\\d*?)0+$/, \"$1\").replace(/\\.$/, \".0\"); return negative ? \"-\" + text : text; })(" + value + ")"
 }
 
 func tsJSONParse(call *ir.Call, argument string, comments bool) string {
@@ -2259,10 +3175,10 @@ func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	jsonAlias := tsJSONRuntimeAlias(call)
-	builder := &tsJSONCodecBuilder{jsonAlias: jsonAlias}
+	builder := g.jsonCodecBuilder(jsonAlias)
 	decoder := builder.decoder(call.Codec)
-	resultType := tsType(call.ExprType())
-	valueType := tsCodecType(call.Codec)
+	resultType := g.tsType(call.ExprType())
+	valueType := builder.codecType(call.Codec)
 	errorType := tsJSONQualified(jsonAlias, "JsonError")
 	jsonErrorKind := tsJSONQualified(jsonAlias, "JsonErrorKind.Decode")
 	parse := tsJSONQualified(jsonAlias, "parse")
@@ -2274,9 +3190,9 @@ func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {
 		return "undefined"
 	}
 	jsonAlias := tsJSONRuntimeAlias(call)
-	builder := &tsJSONCodecBuilder{jsonAlias: jsonAlias}
+	builder := g.jsonCodecBuilder(jsonAlias)
 	encoder := builder.encoder(call.Codec)
-	return "((): " + tsType(call.ExprType()) + " => { " + builder.source.String() + " return " + tsJSONQualified(jsonAlias, "stringify") + "(" + encoder + "(" + argument + ")); })()"
+	return "((): " + g.tsType(call.ExprType()) + " => { " + builder.source.String() + " return " + tsJSONQualified(jsonAlias, "stringify") + "(" + encoder + "(" + argument + ")); })()"
 }
 
 func tsJSONRuntimeAlias(call *ir.Call) string {
@@ -2290,17 +3206,74 @@ func tsJSONRuntimeAlias(call *ir.Call) string {
 	return "__trb_json"
 }
 
-func tsCodecType(schema *ir.CodecSchema) string {
-	if schema == nil {
-		return "unknown"
+func (g *generator) tsCodecType(schema *ir.CodecSchema) string {
+	builder := g.jsonCodecBuilder("")
+	return builder.codecType(schema)
+}
+
+func (g *generator) tsCodecRuntimeTypeName(schema *ir.CodecSchema) string {
+	builder := g.jsonCodecBuilder("")
+	return builder.runtimeTypeName(schema)
+}
+
+func (g *generator) jsonCodecBuilder(jsonAlias string) *tsJSONCodecBuilder {
+	return &tsJSONCodecBuilder{
+		jsonAlias: jsonAlias, modulePath: g.modulePath, typeName: g.tsType, localTypeOwners: g.localTypeOwners,
 	}
-	return tsType(schema.Type)
 }
 
 type tsJSONCodecBuilder struct {
-	jsonAlias string
-	source    strings.Builder
-	next      int
+	jsonAlias       string
+	modulePath      string
+	typeName        func(types.Type) string
+	localTypeOwners map[string]string
+	source          strings.Builder
+	next            int
+}
+
+func (b *tsJSONCodecBuilder) typeString(typ types.Type) string {
+	if b.typeName != nil {
+		return b.typeName(typ)
+	}
+	return tsType(typ)
+}
+
+func (b *tsJSONCodecBuilder) codecType(schema *ir.CodecSchema) string {
+	if schema == nil {
+		return "unknown"
+	}
+	if schema.Reference == nil || schema.Reference.Alias == "" || schema.Reference.Alias == "$named" || schema.Type.Kind != types.Named {
+		return b.typeString(schema.Type)
+	}
+	name := schema.Reference.Alias + "." + schema.Type.Name
+	if len(schema.Type.Args) > 0 {
+		arguments := make([]string, len(schema.Type.Args))
+		for index, argument := range schema.Type.Args {
+			arguments[index] = b.typeString(argument)
+		}
+		name += "<" + strings.Join(arguments, ", ") + ">"
+	}
+	if schema.Type.Nullable {
+		name += " | null"
+	}
+	return name
+}
+
+func (b *tsJSONCodecBuilder) runtimeTypeName(schema *ir.CodecSchema) string {
+	name := schema.Type.Name
+	if schema.Reference != nil && schema.Reference.Package != "" {
+		if schema.Reference.Alias != "" && schema.Reference.Alias != "$named" {
+			return schema.Reference.Alias + "." + name
+		}
+		return name
+	}
+	if declaration := schema.Type.Declaration; declaration.Kind.IsType() && declaration.Module == b.modulePath {
+		return strings.ReplaceAll(declaration.Name, "::", ".")
+	}
+	if owner := b.localTypeOwners[name]; owner != "" {
+		return owner
+	}
+	return name
 }
 
 func (b *tsJSONCodecBuilder) name(prefix string) string {
@@ -2310,7 +3283,7 @@ func (b *tsJSONCodecBuilder) name(prefix string) string {
 
 func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 	name := b.name("Decode")
-	valueType := tsCodecType(schema)
+	valueType := b.codecType(schema)
 	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
 	if schema.Type.Nullable {
 		nonnull := *schema
@@ -2331,10 +3304,7 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 	case "string":
 		body = "if (value.kind !== \"String\") { " + expected("String") + "; } return value.value;"
 	case "time_date", "time_of_day", "time_datetime", "time_instant", "time_duration", "time_zone":
-		owner := schema.Type.Name
-		if schema.Reference != nil && schema.Reference.Alias != "" {
-			owner = schema.Reference.Alias + "." + owner
-		}
+		owner := b.runtimeTypeName(schema)
 		method := "try_parse"
 		if schema.Kind == "time_zone" {
 			method = "try_get"
@@ -2345,10 +3315,7 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		if schema.RawType.Kind == types.Int {
 			kind = "Integer"
 		}
-		owner := schema.Type.Name
-		if schema.Reference != nil && schema.Reference.Alias != "" {
-			owner = schema.Reference.Alias + "." + owner
-		}
+		owner := b.runtimeTypeName(schema)
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
 			branches = append(branches, "case "+item.Raw+": return "+owner+"."+item.Member+";")
@@ -2359,7 +3326,7 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		body = "if (value.kind !== \"Array\") { " + expected("Array") + "; } return value.value.map((item, index) => " + child + "(item, path + \"/\" + String(index)));"
 	case "hash":
 		child := b.decoder(schema.Element)
-		body = "if (value.kind !== \"Object\") { " + expected("Object") + "; } const decoded: Record<string, " + tsCodecType(schema.Element) + "> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); decoded[key] = " + child + "(item, path + \"/\" + escaped); } return decoded;"
+		body = "if (value.kind !== \"Object\") { " + expected("Object") + "; } const decoded: Record<string, " + b.codecType(schema.Element) + "> = {}; for (const [key, item] of Object.entries(value.value)) { const escaped = key.replaceAll(\"~\", \"~0\").replaceAll(\"/\", \"~1\"); decoded[key] = " + child + "(item, path + \"/\" + escaped); } return decoded;"
 	case "record":
 		var fields strings.Builder
 		fields.WriteString("if (value.kind !== \"Object\") { " + expected(schema.Type.Name) + "; } ")
@@ -2368,7 +3335,7 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 			child := b.decoder(field.Schema)
 			variable := "field" + strconv.Itoa(index)
 			path := "path + " + strconv.Quote("/"+tsJSONPointerEscape(field.WireName))
-			fields.WriteString("let " + variable + ": " + tsCodecType(field.Schema) + "; if (Object.prototype.hasOwnProperty.call(value.value, " + strconv.Quote(field.WireName) + ")) { " + variable + " = " + child + "(value.value[" + strconv.Quote(field.WireName) + "]!, " + path + "); }")
+			fields.WriteString("let " + variable + ": " + b.codecType(field.Schema) + "; if (Object.prototype.hasOwnProperty.call(value.value, " + strconv.Quote(field.WireName) + ")) { " + variable + " = " + child + "(value.value[" + strconv.Quote(field.WireName) + "]!, " + path + "); }")
 			if field.Schema.Type.Nullable {
 				fields.WriteString(" else { " + variable + " = null; }")
 			} else {
@@ -2397,7 +3364,7 @@ func tsJSONQualified(alias, name string) string {
 
 func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 	name := b.name("Encode")
-	valueType := tsCodecType(schema)
+	valueType := b.codecType(schema)
 	jsonValue := tsJSONQualified(b.jsonAlias, "JsonValue")
 	if schema.Type.Nullable {
 		nonnull := *schema
@@ -2425,7 +3392,7 @@ func (b *tsJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		if schema.RawType.Kind == types.Int {
 			kind = "Integer"
 		}
-		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue."+kind) + "(value as " + tsType(schema.RawType) + ");"
+		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue."+kind) + "(value as " + b.typeString(schema.RawType) + ");"
 	case "array":
 		child := b.encoder(schema.Element)
 		body = "return " + tsJSONQualified(b.jsonAlias, "JsonValue.Array") + "(value.map((item) => " + child + "(item)));"
@@ -2591,8 +3558,16 @@ func tsType(t types.Type) string {
 }
 
 func (g *generator) tsType(t types.Type) string {
+	if semantic := g.semanticTypeIdentity(t); typeScriptTypeIdentityPresent(semantic) {
+		return g.tsTypeWithIdentity(t, semantic)
+	}
+	return g.tsTypeWithoutSemanticIdentity(t)
+}
+
+func (g *generator) tsTypeWithoutSemanticIdentity(t types.Type) string {
+	mappings := g.typeNameMappings()
 	if g.orm == nil || g.modulePath == "trb/orm/index" {
-		return tsTypeWithMappings(t, g.typeAliases, g.typeMappings, g.standardResult)
+		return tsTypeWithMappings(t, g.typeAliases, mappings, g.standardResult)
 	}
 	aliases := make(map[string]string, len(g.typeAliases)+3)
 	for name, alias := range g.typeAliases {
@@ -2603,7 +3578,37 @@ func (g *generator) tsType(t types.Type) string {
 			aliases[name] = "__trbOrm"
 		}
 	}
-	return tsTypeWithMappings(t, aliases, g.typeMappings, g.standardResult)
+	return tsTypeWithMappings(t, aliases, mappings, g.standardResult)
+}
+
+func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity {
+	result := &typescriptTypeIdentity{arguments: make([]*typescriptTypeIdentity, len(typ.Args))}
+	for index, argument := range typ.Args {
+		result.arguments[index] = g.semanticTypeIdentity(argument)
+	}
+	if typ.Kind == types.Named && typ.Declaration.Kind.IsType() && typ.Declaration.Module == g.modulePath {
+		result.name = strings.ReplaceAll(typ.Declaration.Name, "::", ".")
+	}
+	if !typeScriptTypeIdentityPresent(result) {
+		return nil
+	}
+	return result
+}
+
+func (g *generator) typeNameMappings() map[string]string {
+	if len(g.localTypeOwners) == 0 {
+		return g.typeMappings
+	}
+	result := make(map[string]string, len(g.typeMappings)+len(g.localTypeOwners))
+	for name, target := range g.typeMappings {
+		result[name] = target
+	}
+	for name, owner := range g.localTypeOwners {
+		if g.typeParameters[name] == 0 && !g.namedImportTypes[name] {
+			result[name] = owner
+		}
+	}
+	return result
 }
 
 func (g *generator) tsSuspendingFunctionType(t types.Type) string {

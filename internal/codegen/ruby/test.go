@@ -12,6 +12,13 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 	case "trb.std.test.expect":
 		position := call.SourceSpan().Start
 		return "Expectation.new(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")", true
+	case "trb.std.test.expect_ok", "trb.std.test.expect_err":
+		position := call.SourceSpan().Start
+		method := "ok"
+		if name == "trb.std.test.expect_err" {
+			method = "err"
+		}
+		return "ResultExpectation.new(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")." + method, true
 	case "trb.std.test.describe":
 		return "trb_test_describe(" + strings.Join(arguments, ", ") + ")", true
 	case "trb.std.test.test":
@@ -21,6 +28,10 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 		return "trb_test_finish()", true
 	case "trb.internal.test.assert_equal", "trb.internal.test.assert_not_equal", "trb.internal.test.assert_true", "trb.internal.test.assert_false", "trb.internal.test.assert_nil":
 		return "trb_test_" + strings.TrimPrefix(name, "trb.internal.test.") + "(" + strings.Join(arguments, ", ") + ")", true
+	case "trb.internal.test.assert_result_ok":
+		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Ok, got Err(#{actual.error.inspect})\") unless actual.is_a?(Result::Ok); actual.value }).call(" + arguments[0] + ")", true
+	case "trb.internal.test.assert_result_err":
+		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Err, got Ok(#{actual.value.inspect})\") unless actual.is_a?(Result::Err); actual.error }).call(" + arguments[0] + ")", true
 	default:
 		return "", false
 	}
@@ -37,6 +48,8 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`$trb_test_suites = []`, "")
 	g.line(`$trb_test_total = 0`, "")
 	g.line(`$trb_test_failed = 0`, "")
+	g.line(`trb_test_names_json = ENV["TRB_TEST_NAMES"]`, "")
+	g.line(`$trb_test_names = trb_test_names_json && !trb_test_names_json.empty? ? JSON.parse(trb_test_names_json) : []`, "")
 	g.line(`def trb_test_equal(left, right)`, "")
 	g.indent++
 	g.line(`return true if left.equal?(right)`, "")
@@ -83,7 +96,7 @@ func (g *generator) testRuntimeSupport() {
 	g.indent++
 	g.line(`full_name = ($trb_test_suites + [name]).join(" / ")`, "")
 	g.line(`selected_file = ENV["TRB_TEST_FILE"]; return if selected_file && !selected_file.empty? && selected_file != file`, "")
-	g.line(`return if ENV["TRB_TEST_FILTER"] && !full_name.include?(ENV["TRB_TEST_FILTER"])`, "")
+	g.line(`return if !$trb_test_names.empty? && !$trb_test_names.include?(full_name)`, "")
 	g.line(`$trb_test_total += 1`, "")
 	g.line(`trb_test_event("test_started", full_name, file, file, line, column)`, "")
 	g.line(`begin`, "")

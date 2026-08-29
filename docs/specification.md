@@ -63,7 +63,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   Known TypeRB expressions do not gain implicit return behavior from that
   import.
 - No explicit `void` type notation (Go-like). Methods with no return value omit
-  the return type and may fall through or use a bare `return`.
+  the return type and may fall through or use a bare `return`. Fallthrough is
+  the recommended terminal style; `trb/omit-terminal-void-return` reports and
+  safely removes a redundant final bare `return` without changing language
+  validity or formatter output.
 - Parameters have the two regions `positional-only | * | named-only`. A bare
   `*` begins the named-only region. Named argument syntax binds only that
   region; it cannot name an ordinary positional parameter.
@@ -84,8 +87,20 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   positional order/type/presence and the unordered named-only
   label/type/presence set must match. Positional source names, named-only
   declaration order, and default expressions do not participate.
+- A `def` or `fn` parameter is an immutable binding by default. Prefix its
+  name with `mut`, such as `def advance(mut value: Integer)`, when the
+  implementation must reassign it or use it for a destructive operation.
+  Parameter mutability is local to the implementation: it is not `inout`, is
+  not part of a function type or call signature, and does not participate in
+  interface or override matching. Interfaces reject `mut` because they declare
+  no implementation binding.
 - Portable parameter rest forms and call splats are not supported. `fn`
   values and first-class function types remain required-positional only.
+- Payload enum variant declarations use the same
+  `positional-only | * | named-only` regions. Every payload field is required,
+  and variant construction follows the same positional and label binding and
+  source evaluation-order rules as an ordinary call. Payload fields are data
+  rather than implementation bindings and cannot be declared with `mut`.
 - Record construction labels are field labels and remain separate from method
   parameters.
 - Outside `()`, `[]`, and `{}`, `;` is equivalent to a newline between
@@ -128,7 +143,8 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   continue to apply to captured values.
 - Function values take required positional parameters in the initial syntax;
   defaults, named-only parameters, rest parameters, call blocks, and generic
-  lambda parameters are not accepted.
+  lambda parameters are not accepted. Their parameter bindings are immutable
+  by default and may use the same `mut name: Type` spelling as `def`.
 - The compact spelling uses the ordinary statement separator rather than a
   second lambda syntax: `double := fn(value: Integer): Integer; return value *
   2; end`. `trb fmt` expands it to the canonical multiline form.
@@ -197,6 +213,12 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   Runtime arithmetic may produce positive or negative infinity and NaN. These
   values are ordinary `Float` values, not `Integer` values, and have no source
   literal spelling in the current grammar.
+- A double-quoted String may embed `#{expression}`. Every interpolation
+  expression must have the non-nullable `String` type after transparent alias
+  expansion. Nullable Strings, `Any`, numeric and Boolean values, collections,
+  enums, newtypes, and other user-defined values are rejected rather than
+  inheriting a target runtime's implicit String conversion. Convert a value
+  explicitly, for example with `value.to_s()`, before interpolation.
 
 #### Aliases and nominal newtypes
 
@@ -312,9 +334,13 @@ end
 - A guard without `else` narrows the following statements when every matching
   branch returns. For example, after `if value == nil; return fallback; end`,
   `value` has its non-nullable type.
-- Reassignment invalidates the narrowing immediately. The assignment itself is
-  checked against the binding's declared nullable type, and subsequent uses
-  must narrow again.
+- Plain reassignment is checked against the binding's declared nullable type,
+  then gives subsequent statements in that control-flow path the assigned
+  value's precise flow type. Assigning a non-null value of the declared base
+  type therefore preserves non-nullability without another `nil` check;
+  assigning `nil` gives the path type `Nil`. A conditional, loop, or callback
+  does not export that assignment fact to a parent path that may not execute it.
+  Compound assignment does not establish a new nullable flow fact.
 - A direct nullable data field may also narrow when its receiver is a stable
   lexical binding and the field cannot change: record fields are always
   stable, and class fields must be declared `readonly`. Reassigning the
@@ -324,6 +350,9 @@ end
   assumed to produce the same value when evaluated again. Typed IR records
   each nullable unwrap explicitly so Go, Ruby, TypeScript, and the REPL use the
   same checked flow facts.
+
+See [ADR 0010](decisions/0010-assignment-based-nullable-narrowing.md) for the
+declared-type and flow-type split.
 
 #### Literal types and discriminated unions
 
@@ -442,9 +471,12 @@ switches.
   records this widening explicitly and typed IR lowers it in initializers,
   assignments, arguments, record and enum payloads, defaults, and returns.
   `Float` does not narrow implicitly to `Integer`.
-- Method parameters and iterator block parameters are mutable bindings in the
-  current language. Class fields use their existing `readonly` modifier
-  instead of `mut`.
+- Function and method parameters are immutable bindings unless their
+  declaration uses `mut`. The marker controls the implementation binding only;
+  it does not write a reassigned value back to the caller. Iterator and call
+  block parameters retain their current mutable binding behavior until an
+  explicit block-pattern and ownership decision is made. Class fields use
+  their existing `readonly` modifier instead of `mut`.
 - `@ivar := expr` is disallowed; instance variables use declared fields and `=` updates.
 - The REPL appends ` [mut]` to the displayed value and type when a submission
   directly declares, assigns, or evaluates a mutable binding. The marker is
@@ -668,7 +700,7 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 
 ### 3.10 Operators
 
-- `!` and `not` accept non-nullable `Boolean`; unary `+` and `-` accept a
+- `!` accepts non-nullable `Boolean`; unary `+` and `-` accept a
   non-nullable `Integer` or `Float` and preserve that type.
 - `+` accepts numeric values or two `String` values. `-`, `*`, `/`, and `**`
   accept numeric values. When one numeric operand is `Float`, an `Integer`
@@ -680,7 +712,7 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   or a nullable value with `nil`. Equality for payload-bearing enums is
   reserved until one structural rule can be implemented identically by every
   backend.
-- `&&`, `||`, `and`, and `or` accept two non-nullable `Boolean` values and
+- `&&` and `||` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.
 - Integer `/` truncates toward zero, `%` is its corresponding remainder, and a
@@ -905,13 +937,29 @@ type of each named field. `Array<Integer | String>[0]` therefore remains
 The complete public collection receiver API belongs to the
 [standard-library reference](standard-library.md).
 
-### 3.13 Enums, raw values, and sum types
+### 3.13 Records
+
+- A record is a closed nominal product with immutable named fields.
+- Construction is keyword-only. Every required field is supplied exactly once;
+  unknown and duplicate field labels are errors.
+- A field may use `name: Type = expression`. Required fields must precede
+  fields with defaults. A default is checked against its declared type and may
+  reference only earlier fields.
+- Explicit argument expressions are evaluated left to right in authored order.
+  Omitted defaults are then evaluated once per construction, in declaration
+  order and in the defining module. Explicit `nil` is not omission.
+- Constructor defaults are not a wire-decoding policy. JSON, ORM, web, and
+  other decoders apply only their explicitly declared missing-field behavior.
+- The canonical annotated spelling is
+  `name: Type = expression @attribute(...)`.
+
+### 3.14 Enums, raw values, and sum types
 
 An `enum` declaration defines a closed nominal set of uppercase variants. It
 is allowed at top level or directly inside a module. TypeRB uses the shared
 variant and exhaustive-case model for two related but distinct purposes.
 
-#### 3.13.1 Enumerated values and raw values
+#### 3.14.1 Enumerated values and raw values
 
 - An ordinary member is a payloadless value such as `Ready`.
 - A raw-value enum assigns every payloadless member an explicit String or
@@ -945,23 +993,27 @@ Typed JSON codecs encode a raw-value enum as its raw String or Integer and
 decode only declared raw values. Unknown input produces `JsonError`; the
 target-language object representation never determines the wire value.
 
-#### 3.13.2 Payload enums as sum types
+#### 3.14.2 Payload enums as sum types
 
 - A payload enum has at least one payload-bearing variant such as
   `Value(value: String)`. It may also contain payloadless variants. Payload
-  variants use one or more required, positional, typed fields; default,
-  keyword, rest, and untyped fields are rejected.
+  variants use one or more required typed fields in the
+  `positional-only | * | named-only` regions. Defaults, rest fields, native
+  keyword syntax, and untyped fields are rejected.
 - A payload enum cannot also be a raw-value enum. The payload is variant data,
   not the external representation of an enumerated constant.
-- A payload value is constructed with `EnumName::Member(value, ...)`.
-  Payloadless members are values and are not callable.
+- A payload value is constructed with `EnumName::Member(value, ...)`, using
+  labels for fields declared after `*`. Named-only arguments may be reordered
+  after all positional arguments. Unknown or duplicate labels, missing fields,
+  and using the wrong region are compile-time errors. Payloadless members are
+  values and are not callable.
 - A separate `sum` declaration is not introduced. Payload-bearing enum
   variants provide TypeRB's closed sum-type model.
 
 ```trb
 enum Token
 	Text(value: String)
-	Integer(value: Integer)
+	Renamed(id: Integer, *, before: String, after: String)
 	EOF
 end
 
@@ -969,15 +1021,17 @@ def describe(token: Token): String
 	case token
 	when Token::Text(value)
 		return value
-	when Token::Integer(value)
-		return value.to_s()
+	when Token::Renamed(id, after: current, before: previous)
+		return id.to_s() + ": " + previous + " -> " + current
 	when Token::EOF
 		return "eof"
 	end
 end
+
+renamed := Token::Renamed(7, after: "new", before: "old")
 ```
 
-#### 3.13.3 Shared enum behavior
+#### 3.14.3 Shared enum behavior
 
 - Members are explicitly qualified with `EnumName::Member`. They infer the
   enum's nominal type and cannot be mixed with members of another enum even
@@ -987,14 +1041,22 @@ end
   and payload enums. Enum class methods are not yet user-definable.
 - Portable `case` dispatches on variants. A payload pattern such as
   `when Token::Text(value)` introduces immutable bindings whose types come from
-  the variant declaration. Current patterns bind every payload field
-  positionally; partial patterns, guards, nested patterns, and wildcard syntax
-  are reserved. Duplicate branches and duplicate bindings are errors.
+  the variant declaration. Positional payload fields are bound in order;
+  named-only payload fields use their labels and may be reordered after all
+  positional bindings, such as
+  `when Token::Renamed(id, after: current, before: previous)`. Current patterns
+  bind every payload field; partial patterns, guards, nested patterns, and
+  wildcard syntax are reserved. Unknown or duplicate field labels, duplicate
+  branches, and duplicate bindings are errors.
 - Without `else`, a case must list every member. With `else`, omitted members
   are handled by that branch. The selector is evaluated exactly once in every
   backend and the REPL.
+- An enum member may carry postfix attributes after its name, payload, or raw
+  value. The core language preserves and type-checks attribute arguments but
+  assigns no behavior to an attribute name; a compiler-integrated package owns
+  that contract.
 
-### 3.14 Value-producing control flow
+### 3.15 Value-producing control flow
 
 - `if` and `case` retain their statement forms and may also appear wherever an
   expression is accepted.
@@ -1048,7 +1110,7 @@ when Result::Err(error)
 end
 ```
 
-### 3.15 Class member model and deferred design
+### 3.16 Class member model and deferred design
 
 - Instance fields and instance methods are accessed through an instance. A
   method declared with `def self.name()` is a class member and is accessed
@@ -1141,7 +1203,6 @@ class Box<T>
 
 	def initialize(value: T)
 		@value = value
-		return
 	end
 
 	def pair<U>(other: U): Pair<T, U>
@@ -1243,18 +1304,21 @@ end
   and `trb test` validate them with the complete project. A config-free
   file-root closure excludes imported test modules, while a test file selected
   as the language-server entry is still analyzed.
-- The portable `trb/std/test` package exports `describe`, `test`, and `expect`.
-  Test DSL functions are available only through explicit named imports.
+- The portable `trb/std/test` package exports `describe`, `test`, `expect`,
+  `expect_ok`, and `expect_err`. Test DSL functions are available only through
+  explicit named imports.
 - A test file has one or more top-level `describe("literal") do ... end`
   declarations. A suite contains only nested `describe` and `test`
   declarations. A `test` must be nested inside a suite.
 - Suite and test names are nonempty String literals. Their slash-separated
-  nesting path is the stable full test name used by filters and tools.
+  nesting path is the stable full test name used by name patterns and tools.
   Duplicate full names in one file are an error.
 - Suite and test blocks take no parameters. Test bodies otherwise use ordinary
-  statements, helpers, Results, and imports. Expected errors are inspected with
-  exhaustive `case`; the test package does not add an implicit Result boundary,
-  change language scoping, or introduce implicit setup state.
+  statements, helpers, Results, and imports. Tests may compare a complete
+  Result with `expect`, extract its payload with `expect_ok` or `expect_err`, or
+  inspect branches with exhaustive `case`. The test package does not add an
+  implicit Result boundary, change language scoping, or introduce implicit
+  setup state.
 - `return`, `break`, and `next` cannot transfer control across a `describe()` or
   `test()` block boundary. A nested function still owns its own `return`, and
   a `while` or iteration inside a test body still owns its local `break` and
@@ -1262,6 +1326,17 @@ end
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.
-- `trb test` creates a temporary entrypoint, invokes each test module in
-  deterministic module order, and returns a nonzero status when a case fails.
-  It suppresses application `main()` entrypoints for this compilation only.
+- `expect_ok<T, E>(actual: Result<T, E>)` returns the `Ok` payload and fails the
+  current case if `actual` is `Err`. `expect_err<T, E>(actual: Result<T, E>)`
+  returns the `Err` payload and fails if `actual` is `Ok`. Standard Result type
+  aliases are accepted. A failure records the helper call's `.trb` location.
+- `trb test` accepts zero or more `_test.trb` file and directory paths below
+  the configured `sourceDir`. Directories select test files recursively,
+  multiple paths form a union, and no paths select every project test. Shell
+  expansion may supply multiple paths; the CLI does not interpret glob syntax.
+  A focused run compiles all production files and only the selected test files.
+  `-t` and `--test-name-pattern` apply a Go regular expression to full test
+  names after path selection. The command creates a temporary entrypoint,
+  invokes each selected test module in deterministic module order, and returns
+  a nonzero status when a case fails. It suppresses application `main()`
+  entrypoints for this compilation only.

@@ -6,6 +6,7 @@ package ir
 import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/declaration"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -92,6 +93,10 @@ type Import struct {
 	SymbolTypes          map[string]types.Type
 	SymbolParameters     map[string][]callsignature.Parameter
 	SymbolTypeParameters map[string][]string
+	// RecordDefaults identifies imported records whose generated constructor
+	// owns one or more source defaults. TypeScript uses this to retain a value
+	// import for construction while ordinary records remain type-only imports.
+	RecordDefaults map[string]bool
 	// TypeContracts retain the structural declarations referenced by native
 	// package signatures so editor tooling can instantiate their members.
 	TypeContracts map[string]TypeContract
@@ -135,18 +140,28 @@ type RuntimeBinding struct {
 
 type Class struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	External       bool
 	Superclass     Expression
 	Implements     []types.Type
-	Body           []Statement
+	// ResolvedImplements is parallel to Implements and expands transparent
+	// aliases for semantic dispatch without changing generated source types.
+	ResolvedImplements []types.Type
+	// ImplementReferences is parallel to Implements and retains the resolved
+	// module identity for imported interfaces.
+	ImplementReferences []*Reference
+	// ResolvedImplementReferences is parallel to ResolvedImplements.
+	ResolvedImplementReferences []*Reference
+	Body                        []Statement
 }
 
 func (*Class) irStatement() {}
 
 type Record struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Body           []Statement
@@ -163,6 +178,7 @@ type RecordField struct {
 	Base
 	Name       string
 	Type       types.Type
+	Default    Expression
 	Attributes []Attribute
 }
 
@@ -170,6 +186,7 @@ func (*RecordField) irStatement() {}
 
 type Enum struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Body           []Statement
@@ -180,41 +197,53 @@ func (*Enum) irStatement() {}
 
 type EnumMember struct {
 	Base
-	Name     string
-	Fields   []Parameter
-	RawValue Expression
+	Name       string
+	Fields     []Parameter
+	RawValue   Expression
+	Attributes []Attribute
 }
 
 func (*EnumMember) irStatement() {}
 
 type TypeAlias struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
-	Target         types.Type
-	Variants       []EnumMember
+	AuthoredTarget types.Type
+	// AuthoredTargetReference identifies the declaration named directly in
+	// source, independently of the fully expanded semantic target.
+	AuthoredTargetReference *Reference
+	Target                  types.Type
+	// TargetReference retains the declaration that owns the semantically
+	// expanded target so transparent aliases share one declaration identity.
+	TargetReference *Reference
+	Variants        []EnumMember
 }
 
 func (*TypeAlias) irStatement() {}
 
 type Newtype struct {
 	Base
-	Name   string
-	Target types.Type
+	Declaration identity.Declaration
+	Name        string
+	Target      types.Type
 }
 
 func (*Newtype) irStatement() {}
 
 type Module struct {
 	Base
-	Name string
-	Body []Statement
+	Declaration identity.Declaration
+	Name        string
+	Body        []Statement
 }
 
 func (*Module) irStatement() {}
 
 type Interface struct {
 	Base
+	Declaration    identity.Declaration
 	Name           string
 	TypeParameters []string
 	Methods        []*Method
@@ -236,6 +265,7 @@ type Parameter struct {
 	Name                 string
 	Type                 types.Type
 	Default              Expression
+	Mutable              bool
 	NamedOnly            bool
 	Keyword              bool
 	Rest                 bool
@@ -253,6 +283,8 @@ type MethodSignature struct {
 
 type Method struct {
 	Base
+	Declaration    identity.Declaration
+	Dispatch       identity.Dispatch
 	Name           string
 	External       bool
 	TargetName     string
@@ -502,11 +534,13 @@ func (e ExprBase) ExprType() types.Type { return e.Type }
 
 type Identifier struct {
 	ExprBase
-	Name      string
-	Owner     string
-	Lexical   bool // Resolved to a lexical binding rather than a same-named member.
-	Generated bool // Compiler-owned name that must bypass source identifier rewriting.
-	Reference *Reference
+	Name        string
+	Owner       string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
+	Lexical     bool // Resolved to a lexical binding rather than a same-named member.
+	Generated   bool // Compiler-owned name that must bypass source identifier rewriting.
+	Reference   *Reference
 }
 
 func (*Identifier) irExpression() {}
@@ -640,6 +674,9 @@ type CallArgument struct {
 	Name  string
 	Value Expression
 	Splat string
+	// Field is populated for enum construction after positional and named-only
+	// arguments have been bound to their declared payload fields.
+	Field string
 }
 type Call struct {
 	ExprBase
@@ -652,6 +689,28 @@ type Call struct {
 }
 
 func (*Call) irExpression() {}
+
+// RecordConstruct preserves checked record construction independently from an
+// ordinary callable invocation. Declaration owns semantic identity, while
+// Target retains only the authored/import projection needed by backends.
+// Arguments retain authored evaluation order and Fields retain declaration
+// order, because record defaults require both orders.
+type RecordConstruct struct {
+	ExprBase
+	Declaration   identity.Declaration
+	Target        Expression
+	TypeArguments []types.Type
+	Arguments     []CallArgument
+	Fields        []RecordFieldContract
+}
+
+func (*RecordConstruct) irExpression() {}
+
+type RecordFieldContract struct {
+	Name       string
+	Type       types.Type
+	HasDefault bool
+}
 
 // Lambda is a first-class lexical function. Parameters and result remain
 // target-independent so every backend can emit its native closure form.
@@ -690,9 +749,12 @@ type CodecField struct {
 type EnumConstruct struct {
 	ExprBase
 	EnumName      string
+	Owner         string
+	Declaration   identity.Declaration
 	Member        string
 	TypeArguments []types.Type
-	Arguments     []Expression
+	Arguments     []CallArgument
+	CallSignature []callsignature.Parameter
 	Reference     *Reference
 }
 
@@ -701,9 +763,12 @@ func (*EnumConstruct) irExpression() {}
 // EnumCall preserves source-level enum methods independently from backend
 // enum representations. Generated raw_value/from_raw operations use the same
 // node so every backend and the REPL share one checked semantic boundary.
+// Owner preserves the exact local declaration identity across namespaces.
 type EnumCall struct {
 	ExprBase
 	EnumName      string
+	Owner         string
+	OwnerIdentity identity.Declaration
 	Method        string
 	Receiver      Expression
 	Arguments     []CallArgument
@@ -723,6 +788,8 @@ func (*EnumCall) irExpression() {}
 type TypeApply struct {
 	ExprBase
 	Receiver       Expression
+	Declaration    identity.Declaration
+	Dispatch       identity.Dispatch
 	Arguments      []types.Type
 	Owner          string
 	OwnerArguments []types.Type
@@ -733,10 +800,12 @@ func (*TypeApply) irExpression() {}
 
 type Member struct {
 	ExprBase
-	Receiver  Expression
-	Name      string
-	Safe      bool
-	Namespace bool
+	Receiver    Expression
+	Name        string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
+	Safe        bool
+	Namespace   bool
 	// ClassField distinguishes storage-backed class properties from methods and
 	// record fields so backends can preserve both `value.name` and `value.name()`.
 	ClassField bool
@@ -786,9 +855,15 @@ func NewExprBase(span token.Span, typ types.Type) ExprBase {
 // project references use Package, Alias, Symbol, and ExportKind for
 // target-specific qualification.
 type Reference struct {
-	Package        string
-	Alias          string
-	Symbol         string
+	Package     string
+	Alias       string
+	Symbol      string
+	Declaration identity.Declaration
+	Dispatch    identity.Dispatch
+	// Owner and ClassMember distinguish imported type-member dispatch from a
+	// package function and preserve the source class/instance member kind.
+	Owner          string
+	ClassMember    bool
 	ExportKind     string
 	Intrinsic      string
 	ReceiverMethod bool

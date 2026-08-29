@@ -97,20 +97,19 @@ def _preflight_response(request: Request, origin: String, options: CORSOptions):
 	return _apply_max_age(response, options.max_age)
 end
 
-def _apply_actual_response(response: Response, origin: String, options: CORSOptions): Response
-	mut result := response
+def _apply_actual_response(mut response: Response, origin: String, options: CORSOptions): Response
 	if _varies_by_origin?(options)
-		result = result.vary("Origin")
+		response = response.vary("Origin")
 	end
 	allowed_origin := _allowed_origin(origin, options)
 	if allowed_origin == ""
-		return result
+		return response
 	end
-	result = _apply_origin(result, allowed_origin, options)
+	response = _apply_origin(response, allowed_origin, options)
 	if !options.expose_headers.empty?()
-		result = result.with_header("access-control-expose-headers", options.expose_headers.join(", "))
+		response = response.with_header("access-control-expose-headers", options.expose_headers.join(", "))
 	end
-	return result
+	return response
 end
 
 def _allowed_origin(origin: String, options: CORSOptions): String

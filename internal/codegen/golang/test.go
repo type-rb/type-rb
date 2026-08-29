@@ -24,15 +24,39 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 			typeArgument = g.goType(result.Args[0])
 		}
 		return g.testAlias(call) + ".NewExpectation[" + typeArgument + "](" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")", true
+	case "trb.std.test.expect_ok", "trb.std.test.expect_err":
+		position := call.SourceSpan().Start
+		method := "Ok"
+		if name == "trb.std.test.expect_err" {
+			method = "Err"
+		}
+		return g.testAlias(call) + ".NewResultExpectation(" + arguments[0] + ", " + strconv.Quote(g.sourcePath) + ", " + strconv.Itoa(position.Line) + ", " + strconv.Itoa(position.Column) + ")." + method + "()", true
 	case "trb.std.test.finish":
 		return g.testAlias(call) + ".TrbTestFinish()", true
 	case "trb.internal.test.assert_equal", "trb.internal.test.assert_not_equal", "trb.internal.test.assert_true", "trb.internal.test.assert_false", "trb.internal.test.assert_nil":
 		return "trbTest" + goMethodName(strings.TrimPrefix(name, "trb.internal.test.")) + "(" + strings.Join(arguments, ", ") + ")", true
+	case "trb.internal.test.assert_result_ok", "trb.internal.test.assert_result_err":
+		resultAlias := g.typeAliases["Result"]
+		if resultAlias == "" {
+			resultAlias = "__trb_result"
+		}
+		tag, field, message := "ResultOkTag", "OkValue", "expected Ok, got Err(%#v)"
+		if name == "trb.internal.test.assert_result_err" {
+			tag, field, message = "ResultErrTag", "ErrError", "expected Err, got Ok(%#v)"
+		}
+		return "func() " + g.goType(call.ExprType()) + " { actual := " + arguments[0] + "; if actual.Kind != " + resultAlias + "." + tag + " { panic(trbTestFailure{" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", fmt.Sprintf(" + strconv.Quote(message) + ", actual." + oppositeResultField(field) + ")}) }; return actual." + field + " }()", true
 	case "trb.std.test.describe", "trb.std.test.test":
 		return "", true
 	default:
 		return "", false
 	}
+}
+
+func oppositeResultField(field string) string {
+	if field == "OkValue" {
+		return "ErrError"
+	}
+	return "OkValue"
 }
 
 func (g *generator) testCallBlock(call *ir.Call) bool {
@@ -67,6 +91,7 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`var trbTestSuites []string`)
 	g.line(`var trbTestTotal int`)
 	g.line(`var trbTestFailed int`)
+	g.line(`var trbTestNames = func() map[string]bool { selected := map[string]bool{}; var names []string; _ = json.Unmarshal([]byte(os.Getenv("TRB_TEST_NAMES")), &names); for _, name := range names { selected[name] = true }; return selected }()`)
 	g.line(`func trbTestEvent(kind string, name string, testPath string, path string, line int, column int, message string) {`)
 	g.indent++
 	g.line(`if os.Getenv("TRB_TEST_REPORTER") == "json" {`)
@@ -87,7 +112,7 @@ func (g *generator) testRuntimeSupport() {
 	g.indent++
 	g.line(`fullName := strings.Join(append(append([]string{}, trbTestSuites...), name), " / ")`)
 	g.line(`if selected := os.Getenv("TRB_TEST_FILE"); selected != "" && selected != path { return }`)
-	g.line(`if filter := os.Getenv("TRB_TEST_FILTER"); filter != "" && !strings.Contains(fullName, filter) { return }`)
+	g.line(`if len(trbTestNames) > 0 && !trbTestNames[fullName] { return }`)
 	g.line(`trbTestTotal++`)
 	g.line(`trbTestEvent("test_started", fullName, path, path, line, column, "")`)
 	g.line(`failure := ""`)

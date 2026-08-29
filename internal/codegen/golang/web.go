@@ -23,6 +23,7 @@ func (g *generator) integrations(extensions []ir.Extension) {
 		g.webDispatcher(manifest)
 		g.webServer()
 	}
+	g.cliIntegrations()
 }
 
 func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
@@ -76,7 +77,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	sort.Strings(orderedDirectories)
 	for index, directory := range orderedDirectories {
 		directories[directory] = "trb_route_" + strconv.Itoa(index)
-		g.requireImport(pathpkg.Join(g.goModule, GeneratedSourceDirectory(directory)), directories[directory])
+		directories[directory] = g.requireSourceImport(pathpkg.Join(g.goModule, GeneratedSourceDirectory(directory)), directories[directory])
 	}
 	if len(manifest.Middlewares) > 0 {
 		g.webNext()

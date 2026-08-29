@@ -19,6 +19,8 @@ func Describe(name string) Descriptor {
 	}
 
 	switch name {
+	case "trb.cli.run":
+		return Descriptor{PropagatesExecutionScope: true}
 	case "trb.jobs.perform_later", "trb.jobs.perform_in", "trb.jobs.perform_at",
 		"trb.jobs.sql.enqueue", "trb.jobs.sql.enqueue_at",
 		"trb.web.testing.dispatch",

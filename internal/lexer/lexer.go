@@ -118,7 +118,7 @@ func (l *Lexer) canStartJSX() bool {
 			return true
 		}
 		switch previous.Lexeme {
-		case "(", "[", "{", ",", ";", "=", ":=", "=>", "return", "when", "if", "and", "or", "&&", "||":
+		case "(", "[", "{", ",", ";", "=", ":=", "=>", "return", "when", "if", "&&", "||":
 			return true
 		}
 		return false
@@ -462,7 +462,7 @@ func (l *Lexer) canStartRegex() bool {
 			continue
 		}
 		switch previous.Lexeme {
-		case "(", "[", "{", ",", ";", ":", "=", ":=", "=>", "return", "when", "if", "unless", "and", "or", "&&", "||", "!", "~":
+		case "(", "[", "{", ",", ";", ":", "=", ":=", "=>", "return", "when", "if", "unless", "&&", "||", "!", "~":
 			return true
 		}
 		return false

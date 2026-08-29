@@ -621,10 +621,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 }
 
 func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Base) ast.Statement {
-	blockAt := topLevelIndex(line, "do")
-	if blockAt <= 0 {
-		blockAt = topLevelIndex(line, "{")
-	}
+	blockAt, _ := firstIterationBlock(line)
 	if blockAt <= 0 {
 		return nil
 	}
@@ -646,55 +643,89 @@ func (p *Parser) tryIterationStatement(line []token.Token, next int, base ast.Ba
 	if !ok {
 		return nil
 	}
-	iteration = p.parseIterationBlock(line, next, base, iteration)
-	switch wrapper {
-	case "return":
-		return &ast.ReturnStatement{Base: iteration.Base, Value: iteration}
-	case "variable":
-		statement, ok := p.tryVariable(prefix, iteration.Base).(*ast.VariableStatement)
-		if !ok {
-			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-		}
-		statement.Value = iteration
-		return statement
-	case "assignment":
-		statement, ok := p.tryAssignment(prefix, iteration.Base).(*ast.AssignmentStatement)
-		if !ok {
-			return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-		}
-		statement.Value = iteration
-		return statement
-	default:
-		return &ast.ExpressionStatement{Base: iteration.Base, Expression: iteration}
-	}
+	expression := p.parseIterationChain(line, next, base, iteration)
+	base.SourceSpan.End = expression.Span().End
+	return p.wrapExpression(prefix, wrapper, base, expression)
 }
 
-func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) *ast.IterationExpression {
-	if doAt := topLevelIndex(line, "do"); doAt > 0 {
-		parameters, ok := p.blockParameters(line[doAt+1:])
+func firstIterationBlock(tokens []token.Token) (int, bool) {
+	doAt := topLevelIndex(tokens, "do")
+	braceAt := topLevelIndex(tokens, "{")
+	if braceAt > 0 && (doAt <= 0 || braceAt < doAt) {
+		return braceAt, true
+	}
+	if doAt > 0 {
+		return doAt, false
+	}
+	return -1, false
+}
+
+func (p *Parser) parseIterationChain(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) ast.Expression {
+	current, tail := p.parseIterationBlock(line, next, base, iteration)
+	for len(tail) > 0 {
+		blockAt, _ := firstIterationBlock(tail)
+		header := tail
+		if blockAt > 0 {
+			header = tail[:blockAt]
+		}
+		expression, ok := p.parseExpressionTail(current, header)
 		if !ok {
-			p.errorAt(spanOf(line[doAt:]), "iteration block parameters must be written as |name, ...|")
+			p.errorAt(spanOf(tail), "invalid expression after iteration block")
+			return current
+		}
+		if blockAt <= 0 {
+			return expression
+		}
+
+		nextIteration, ok := p.iterationFromExpression(expression)
+		if !ok {
+			p.errorAt(spanOf(tail[:blockAt]), "iteration block must follow a portable collection operation")
+			return current
+		}
+		chainedBase := ast.Base{SourceSpan: token.Span{Start: current.Span().Start, End: tail[len(tail)-1].Span.End}}
+		current, tail = p.parseIterationBlock(tail, p.pos, chainedBase, nextIteration)
+	}
+	return current
+}
+
+func (p *Parser) parseExpressionTail(receiver ast.Expression, tail []token.Token) (ast.Expression, bool) {
+	if len(tail) == 0 {
+		return receiver, true
+	}
+	marker := token.Token{Kind: token.Identifier, Lexeme: "__iteration_result__", Span: receiver.Span()}
+	tokens := make([]token.Token, 0, len(tail)+1)
+	tokens = append(tokens, marker)
+	tokens = append(tokens, tail...)
+	return p.parseExpressionWithEmbedded(tokens, map[int]ast.Expression{marker.Span.Start.Offset: receiver})
+}
+
+func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base, iteration *ast.IterationExpression) (*ast.IterationExpression, []token.Token) {
+	blockAt, brace := firstIterationBlock(line)
+	if blockAt <= 0 {
+		return iteration, nil
+	}
+	if !brace {
+		parameters, ok := p.blockParameters(line[blockAt+1:])
+		if !ok {
+			p.errorAt(spanOf(line[blockAt:]), "iteration block parameters must be written as |name, ...|")
 		}
 		p.pos = next
-		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[doAt:])}, Parameters: parameters}
+		block := &ast.BlockExpression{Base: ast.Base{SourceSpan: spanOf(line[blockAt:])}, Parameters: parameters}
 		block.Body = p.parseStatements(map[string]bool{"end": true})
-		_, closeSpan := p.consumeTerminator("end")
+		closeSpan, tail := p.consumeIterationTerminator()
 		block.SourceSpan.End = closeSpan.End
 		iteration.Base = base
 		iteration.SourceSpan.End = closeSpan.End
 		iteration.Block = block
-		return iteration
+		return iteration, tail
 	}
 
-	braceAt := topLevelIndex(line, "{")
-	if braceAt <= 0 {
-		return iteration
-	}
+	braceAt := blockAt
 	close := matchingIndex(line, braceAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[braceAt].Span, "unterminated iteration block; expected }")
 		p.pos = next
-		return iteration
+		return iteration, nil
 	}
 	parameterEnd := -1
 	for index := braceAt + 1; index < close; index++ {
@@ -736,9 +767,25 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 		}
 	}
 	iteration.Base = base
+	iteration.SourceSpan.End = line[close].Span.End
 	iteration.Block = block
 	p.pos = next
-	return iteration
+	return iteration, append([]token.Token(nil), line[close+1:]...)
+}
+
+func (p *Parser) consumeIterationTerminator() (token.Span, []token.Token) {
+	if p.atEOF() || p.current().Lexeme != "end" {
+		_, span := p.consumeTerminator("end")
+		return span, nil
+	}
+	start, end, next, _ := p.logicalLine(p.pos)
+	line := p.codeTokens(start, end)
+	if len(line) == 0 {
+		_, span := p.consumeTerminator("end")
+		return span, nil
+	}
+	p.pos = next
+	return line[0].Span, append([]token.Token(nil), line[1:]...)
 }
 
 func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
@@ -791,6 +838,10 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 	if !ok {
 		return nil, false
 	}
+	return p.iterationFromExpression(expression)
+}
+
+func (p *Parser) iterationFromExpression(expression ast.Expression) (*ast.IterationExpression, bool) {
 	withIndex := false
 	if member, ok := expression.(*ast.MemberExpression); ok && member.Name == "with_index" {
 		withIndex = true
@@ -1018,32 +1069,42 @@ func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.Enum
 	if len(parts) == 0 || parts[0].Kind != token.Identifier {
 		return nil
 	}
+	attributeAt := topLevelAttributeIndex(parts, 1)
+	core := parts
+	if attributeAt >= 0 {
+		core = parts[:attributeAt]
+	}
 	member := &ast.EnumMemberStatement{
 		Base: ast.Base{SourceSpan: spanOf(parts), TrailingComment: trailing},
 		Name: parts[0].Lexeme,
 	}
-	if len(parts) == 1 {
-		return member
-	}
-	if parts[1].Lexeme == "=" {
-		if len(parts) == 2 {
+	if len(core) == 1 {
+		// Payloadless member.
+	} else if core[1].Lexeme == "=" {
+		if len(core) == 2 {
 			return nil
 		}
-		value, ok := p.parseExpression(parts[2:])
+		value, ok := p.parseExpression(core[2:])
 		if !ok {
 			return nil
 		}
 		member.RawValue = value
-		return member
-	}
-	if parts[1].Lexeme != "(" {
+	} else if core[1].Lexeme != "(" {
 		return nil
+	} else {
+		close := matchingIndex(core, 1, "(", ")")
+		if close != len(core)-1 {
+			return nil
+		}
+		member.Parameters = p.parseParameters(core[2:close])
 	}
-	close := matchingIndex(parts, 1, "(", ")")
-	if close != len(parts)-1 {
-		return nil
+	if attributeAt >= 0 {
+		attributes, ok := p.parseAttributes(parts[attributeAt:])
+		if !ok {
+			return nil
+		}
+		member.Attributes = attributes
 	}
-	member.Parameters = p.parseParameters(parts[2:close])
 	return member
 }
 
@@ -1051,43 +1112,78 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 	if len(line) < 3 || line[0].Kind != token.Identifier || strings.HasPrefix(line[0].Lexeme, "@") || line[1].Lexeme != ":" {
 		return nil
 	}
-	attributeAt := len(line)
-	depth := 0
-	for index := 2; index < len(line); index++ {
-		switch line[index].Lexeme {
-		case "<", "[":
-			depth++
-		case ">", "]":
-			if depth > 0 {
-				depth--
-			}
-		}
-		if depth == 0 && strings.HasPrefix(line[index].Lexeme, "@") {
-			attributeAt = index
-			break
-		}
+	attributeAt := topLevelAttributeIndex(line, 2)
+	if attributeAt < 0 {
+		attributeAt = len(line)
 	}
-	if attributeAt == 2 {
+	equal := topLevelIndex(line[2:attributeAt], "=")
+	if equal >= 0 {
+		equal += 2
+	}
+	typeEnd := attributeAt
+	if equal >= 0 {
+		typeEnd = equal
+	}
+	if typeEnd == 2 {
 		return nil
 	}
 	field := &ast.RecordFieldStatement{
 		Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment},
 		Name: line[0].Lexeme,
-		Type: p.parseTypeRef(line[2:attributeAt]),
+		Type: p.parseTypeRef(line[2:typeEnd]),
 	}
-	for index := attributeAt; index < len(line); {
-		name := line[index]
-		if !strings.HasPrefix(name.Lexeme, "@") {
+	if equal >= 0 {
+		if equal+1 >= attributeAt {
 			return nil
+		}
+		field.Default, _ = p.parseExpression(line[equal+1 : attributeAt])
+		if field.Default == nil {
+			return nil
+		}
+	}
+	if attributeAt < len(line) {
+		attributes, ok := p.parseAttributes(line[attributeAt:])
+		if !ok {
+			return nil
+		}
+		field.Attributes = attributes
+	}
+	return field
+}
+
+func topLevelAttributeIndex(tokens []token.Token, start int) int {
+	depth := 0
+	for index := start; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth == 0 && strings.HasPrefix(tokens[index].Lexeme, "@") {
+			return index
+		}
+	}
+	return -1
+}
+
+func (p *Parser) parseAttributes(tokens []token.Token) ([]ast.Attribute, bool) {
+	attributes := []ast.Attribute{}
+	for index := 0; index < len(tokens); {
+		name := tokens[index]
+		if !strings.HasPrefix(name.Lexeme, "@") {
+			return nil, false
 		}
 		attribute := ast.Attribute{Base: ast.Base{SourceSpan: name.Span}, Name: strings.TrimPrefix(name.Lexeme, "@")}
 		index++
-		if index < len(line) && line[index].Lexeme == "(" {
-			close := matchingIndex(line, index, "(", ")")
+		if index < len(tokens) && tokens[index].Lexeme == "(" {
+			close := matchingIndex(tokens, index, "(", ")")
 			if close < 0 {
-				return nil
+				return nil, false
 			}
-			for _, part := range splitTopLevel(line[index+1:close], ",") {
+			for _, part := range splitTopLevel(tokens[index+1:close], ",") {
 				if len(part) == 0 {
 					continue
 				}
@@ -1098,16 +1194,16 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 				}
 				argument.Value, _ = p.parseExpression(part)
 				if argument.Value == nil {
-					return nil
+					return nil, false
 				}
 				attribute.Arguments = append(attribute.Arguments, argument)
 			}
-			attribute.SourceSpan.End = line[close].Span.End
+			attribute.SourceSpan.End = tokens[close].Span.End
 			index = close + 1
 		}
-		field.Attributes = append(field.Attributes, attribute)
+		attributes = append(attributes, attribute)
 	}
-	return field
+	return attributes, true
 }
 
 func (p *Parser) parseNativeLine() ast.Statement {
@@ -1390,12 +1486,36 @@ func (p *Parser) parseParameters(tokens []token.Token) []ast.Parameter {
 		}
 		param := ast.Parameter{Base: ast.Base{SourceSpan: spanOf(part)}, NamedOnly: namedOnly}
 		i := 0
+		if part[i].Lexeme == "mut" {
+			param.Mutable = true
+			i++
+			if i >= len(part) {
+				p.errorAt(part[0].Span, "mut parameter requires a name")
+				continue
+			}
+			if part[i].Lexeme == "mut" {
+				p.errorAt(part[i].Span, "parameter may declare mut only once")
+				for i < len(part) && part[i].Lexeme == "mut" {
+					i++
+				}
+				if i >= len(part) {
+					continue
+				}
+			}
+		}
 		if part[i].Lexeme == "*" || part[i].Lexeme == "**" {
 			param.Rest = part[i].Lexeme == "*"
 			param.KeywordRest = part[i].Lexeme == "**"
 			i++
 		}
 		if i >= len(part) {
+			if param.Mutable {
+				p.errorAt(param.Span(), "mut parameter requires a name")
+			}
+			continue
+		}
+		if part[i].Kind != token.Identifier {
+			p.errorAt(part[i].Span, "parameter name must be an identifier")
 			continue
 		}
 		param.Name = part[i].Lexeme
@@ -1548,16 +1668,24 @@ func (p *Parser) parseCase() ast.Statement {
 						p.errorAt(call.Span(), "union type pattern expects exactly one binding")
 						valid = false
 					}
+					seenNamed := false
 					for _, argument := range call.Arguments {
 						identifier, identifierOK := argument.Value.(*ast.Identifier)
-						if !identifierOK || argument.Name != "" || argument.Splat != "" {
+						if argument.Name != "" {
+							seenNamed = true
+						} else if seenNamed {
+							p.errorAt(argument.Value.Span(), "positional pattern binding cannot follow a named binding")
+							valid = false
+						}
+						if !identifierOK || argument.Splat != "" || typePattern && argument.Name != "" {
 							p.errorAt(argument.Value.Span(), "case pattern bindings must be identifiers")
 							valid = false
 							continue
 						}
 						branch.Bindings = append(branch.Bindings, ast.PatternBinding{
-							Base: ast.Base{SourceSpan: identifier.Span()},
-							Name: identifier.Name,
+							Base:  ast.Base{SourceSpan: identifier.Span()},
+							Name:  identifier.Name,
+							Label: argument.Name,
 						})
 					}
 					if valid {

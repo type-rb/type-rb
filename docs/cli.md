@@ -403,11 +403,14 @@ restores those caches. Cleaning never removes `.trb/repl_history`.
 # Discover and run colocated *_test.trb files.
 trb test
 
-# Run one suite or case by a substring of its full name.
-trb test --filter "Calculator / adds numbers"
+# Run tests below one directory.
+trb test src/domain
 
-# Restrict discovery to one colocated test file.
-trb test --file src/calculator_test.trb
+# Run one test file and tests whose full name matches a regular expression.
+trb test src/calculator_test.trb -t "Calculator / adds numbers$"
+
+# Shell-expanded globs become multiple positional paths.
+trb test src/domain/*_test.trb
 
 # Emit JSON Lines events for editors and automation.
 trb test --reporter json
@@ -416,12 +419,26 @@ trb test --reporter json
 trb test --compile --debug --outfile .trb/debug/tests
 ```
 
-`trb test` compiles the complete project together with its test files and a
-temporary test entrypoint. An application `main()` is not started during a
-test build. The selected target backend executes each case, preserves `.trb`
-assertion locations, and returns a nonzero status when any case fails.
+`trb test` accepts zero or more `_test.trb` files and directories below the
+configured `sourceDir`. Directories select matching test files recursively and
+multiple paths form a union. Paths are resolved from the working directory.
+The CLI does not interpret glob syntax itself; an unquoted shell glob works
+because the shell expands it into positional paths.
+
+Without paths, `trb test` selects every project test. With paths, it compiles
+the project's production sources together with only the selected test files,
+so errors in unrelated test files do not block a focused run. `-t` and
+`--test-name-pattern` apply a Go regular expression to each slash-separated
+full test name after path selection. A path or name pattern that selects no
+tests is an error.
+
+An application `main()` is not started during a test build. The selected
+target backend executes each case, preserves `.trb` assertion locations, and
+returns a nonzero status when any case fails.
 `--compile` produces a Go test executable instead of running it; `--debug`
-retains source mappings for debuggers such as Delve.
+retains source mappings for debuggers such as Delve. Positional selection,
+test-name selection, and non-human reporters are not available with
+`--compile`.
 
 The temporary target tree lives below `.trb/test`, uses the same process lease
 and signal handling as `trb run`, and is recovered by the next test or

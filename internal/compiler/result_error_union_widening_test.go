@@ -66,9 +66,9 @@ end
 			if !ok || len(failure.Arguments) != 1 {
 				t.Fatalf("%s Err branch return is unexpected: %#v", mode, returned.Value)
 			}
-			conversion, ok := failure.Arguments[0].(*ir.Conversion)
+			conversion, ok := failure.Arguments[0].Value.(*ir.Conversion)
 			if !ok || conversion.Kind != ir.IntegerToFloatConversion {
-				t.Fatalf("%s propagated error is %T %#v, want Integer-to-Float conversion", mode, failure.Arguments[0], failure.Arguments[0])
+				t.Fatalf("%s propagated error is %T %#v, want Integer-to-Float conversion", mode, failure.Arguments[0].Value, failure.Arguments[0].Value)
 			}
 			if conversion.ExprType().Kind != types.Float || conversion.Value.ExprType().Kind != types.Int {
 				t.Fatalf("%s propagated error conversion is %s from %s, want Float from Integer", mode, conversion.ExprType(), conversion.Value.ExprType())

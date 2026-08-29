@@ -10,6 +10,9 @@ import (
 )
 
 func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) string {
+	if name == "trb.cli.run" {
+		return g.cliRun(call)
+	}
 	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
 		return generated
 	}
@@ -1009,13 +1012,13 @@ func (g *generator) webParameterBinding(call *ir.Call, receiver, source string) 
 	}
 	sourceValue := webAlias + "." + goConstantIdentifier("ParameterSource", sourceName)
 	missing := func(name string) string {
-		return errResult(webAlias + ".NewParameterErrorMissing(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult(webAlias + ".NewParameterErrorMissing(map[string]any{\"source\": " + sourceValue + ", \"name\": " + strconv.Quote(name) + "})")
 	}
 	duplicate := func(name string) string {
-		return errResult(webAlias + ".NewParameterErrorDuplicate(" + sourceValue + ", " + strconv.Quote(name) + ")")
+		return errResult(webAlias + ".NewParameterErrorDuplicate(map[string]any{\"source\": " + sourceValue + ", \"name\": " + strconv.Quote(name) + "})")
 	}
 	invalid := func(name, value, expected string) string {
-		return errResult(webAlias + ".NewParameterErrorInvalid(" + sourceValue + ", " + strconv.Quote(name) + ", " + value + ", " + strconv.Quote(expected) + ")")
+		return errResult(webAlias + ".NewParameterErrorInvalid(map[string]any{\"source\": " + sourceValue + ", \"name\": " + strconv.Quote(name) + ", \"value\": " + value + ", \"expected\": " + strconv.Quote(expected) + "})")
 	}
 
 	var body strings.Builder

@@ -1041,8 +1041,11 @@ func recordMembers(statements []ir.Statement, owner, sourcePath string, ownerDef
 		definition := sourceDefinition(sourcePath, field.Name, field.SourceSpan())
 		instance = append(instance, Symbol{Name: field.Name, Kind: CompletionField, Detail: displayType(field.Type), Type: field.Type, Definition: definition})
 		label := field.Name + ": " + displayType(field.Type)
+		if field.Default != nil {
+			label += " = ..."
+		}
 		parameters = append(parameters, label)
-		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true, Definition: definition})
+		callParameters = append(callParameters, CallParameter{Name: field.Name, Label: label, Keyword: true, Optional: field.Default != nil, Definition: definition})
 	}
 	sortSymbols(instance)
 	namespace := []Symbol{{Name: "new", Kind: CompletionMethod, Detail: "new(" + strings.Join(parameters, ", ") + "): " + owner, Type: types.FromName(owner), Call: &CallInfo{ParameterCount: len(parameters), Parameters: callParameters}, Definition: ownerDefinition}}
@@ -1058,15 +1061,26 @@ func enumMembers(enum *ir.Enum, owner, sourcePath string, ownerDefinition *Defin
 			if privateName(member.Name) {
 				continue
 			}
-			parameters := make([]string, 0, len(member.Fields))
+			parameters := make([]string, 0, len(member.Fields)+1)
+			callParameters := make([]CallParameter, 0, len(member.Fields))
+			namedBoundary := false
 			for _, field := range member.Fields {
+				if field.NamedOnly && !namedBoundary {
+					parameters = append(parameters, "*")
+					namedBoundary = true
+				}
 				parameters = append(parameters, field.Name+": "+displayType(field.Type))
+				callParameters = append(callParameters, callParameter(field))
 			}
 			detail := member.Name
 			if len(parameters) > 0 {
 				detail += "(" + strings.Join(parameters, ", ") + ")"
 			}
-			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail, Definition: sourceDefinition(sourcePath, member.Name, member.SourceSpan())})
+			var call *CallInfo
+			if len(member.Fields) > 0 {
+				call = &CallInfo{ParameterCount: len(member.Fields), Parameters: callParameters}
+			}
+			namespace = append(namespace, Symbol{Name: member.Name, Kind: CompletionEnumMember, Detail: detail, Type: types.FromName(owner), Call: call, Definition: sourceDefinition(sourcePath, member.Name, member.SourceSpan())})
 		case *ir.Method:
 			if !privateName(member.Name) {
 				instance = append(instance, methodSymbol(member, CompletionMethod, sourcePath))

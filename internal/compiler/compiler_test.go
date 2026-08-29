@@ -1112,7 +1112,7 @@ func TestPortableOperatorRulesAndBackendSemantics(t *testing.T) {
   accumulated += 2
   mut enabled: Boolean := true
   enabled &&= false
-  words: Boolean := true and false
+  words: Boolean := true && false
   return grouped == 9 && quotient == -2 && remainder == -1 && power == 8 && float_power == 8.0 && ratio >= 4.0 && mixed_product == 25.0 && widened == 9.0 && accumulated == 3.0 && 1 == 1.0 && 1 < 1.5 && message == "typerb" && updated == 2 && !enabled && !words
 end
 `)
@@ -1263,11 +1263,11 @@ def branched(value: String?): Integer
 end
 
 def short_circuit(value: String?): Boolean
-	return value != nil and value.size() > 0
+	return value != nil && value.size() > 0
 end
 
 def inverse_short_circuit(value: String?): Boolean
-	return value == nil or value.size() == 0
+	return value == nil || value.size() == 0
 end
 
 def elsif_branch(value: String?): String
@@ -1280,7 +1280,7 @@ def elsif_branch(value: String?): String
 	end
 end
 
-def consume(mut_value: String?)
+def consume(mut mut_value: String?)
 	while mut_value != nil
 		puts(mut_value.size())
 		mut_value = nil
@@ -1313,8 +1313,34 @@ end
 	}
 }
 
-func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
-	source := []byte(`def invalid(value: String?): Integer
+func TestNullableAssignmentNarrowsToAssignedNonNullableValue(t *testing.T) {
+	source := []byte(`def display_name(mut name: String?): String
+	if name == nil
+		return "anonymous"
+	end
+	name = name.strip().downcase()
+	if name == ""
+		return "anonymous"
+	end
+	return name
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("nullable_assignment_narrowing.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected assignment-based nullable narrowing: %v", mode, err)
+		}
+		method := artifact.IR.Statements[0].(*ir.Method)
+		returned := method.Body[len(method.Body)-1].(*ir.Return).Value
+		conversion, ok := returned.(*ir.Conversion)
+		if !ok || conversion.Kind != ir.NullableToNonNullableConversion || conversion.ExprType().Nullable || !conversion.Value.ExprType().Nullable {
+			t.Fatalf("%s did not retain the assignment-based nullable unwrap in typed IR: %#v", mode, returned)
+		}
+	}
+}
+
+func TestNullableAssignmentUsesDeclaredTypeAndNarrowsToNil(t *testing.T) {
+	source := []byte(`def invalid(mut value: String?): Integer
 	if value == nil
 		return 0
 	end
@@ -1323,8 +1349,36 @@ func TestNullableNarrowingIsInvalidatedByAssignment(t *testing.T) {
 end
 `)
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
-			t.Fatalf("%s expected invalidated nullable narrowing diagnostic, got %v", mode, err)
+		if _, err := Compile("nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type Nil has no member size") {
+			t.Fatalf("%s expected assigned Nil flow-type diagnostic, got %v", mode, err)
+		}
+	}
+}
+
+func TestNullableAssignmentNarrowingStaysInsideItsControlFlowPath(t *testing.T) {
+	source := []byte(`def invalid(mut value: String?, ready: Boolean): Integer
+	if ready
+		value = "ready"
+		puts(value.size())
+	end
+	return value.size()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("branch_assignment_narrowing.trb", source, mode); err == nil || !strings.Contains(err.Error(), "type String? has no member size") {
+			t.Fatalf("%s expected the branch-local assignment fact to be unavailable after the branch, got %v", mode, err)
+		}
+	}
+}
+
+func TestNullableAssignmentRemainsCheckedAgainstDeclaredType(t *testing.T) {
+	source := []byte(`def invalid(mut value: String?)
+	value = 1
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if _, err := Compile("invalid_nullable_assignment.trb", source, mode); err == nil || !strings.Contains(err.Error(), "cannot assign Integer to String?") {
+			t.Fatalf("%s expected assignment to remain checked against String?, got %v", mode, err)
 		}
 	}
 }
@@ -1359,7 +1413,7 @@ def email_size(account: Account): Integer
 end
 
 def has_name(profile: Profile): Boolean
-	return profile.nickname != nil and profile.nickname.size() > 0
+	return profile.nickname != nil && profile.nickname.size() > 0
 end
 `)
 
@@ -1415,7 +1469,7 @@ end
 	nickname: String?
 end
 
-def invalid(profile: Profile): Integer
+def invalid(mut profile: Profile): Integer
 	if profile.nickname == nil
 		return 0
 	end
@@ -1963,6 +2017,24 @@ func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWordLogicalOperatorsAreRejectedAcrossModes(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{source: "def bad(): Boolean\n\treturn true and false\nend\n", want: "unexpected token and"},
+		{source: "def bad(): Boolean\n\treturn true or false\nend\n", want: "unexpected token or"},
+		{source: "def bad(): Boolean\n\treturn not false\nend\n", want: "unexpected token not"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			if _, err := Compile("word_logical_operator.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("%s expected %q, got %v", mode, test.want, err)
+			}
+		}
 	}
 }
 
@@ -3302,7 +3374,7 @@ def render(token: Token): String
 	when Token::Text(value)
 		return value
 	when Token::Pair(left, right)
-		return "#{left}:#{right}"
+		return "#{left.to_s()}:#{right.to_s()}"
 	when Token::EOF
 		return "eof"
 	end
@@ -3390,8 +3462,8 @@ func TestPayloadEnumDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{"missing payload type", "enum Token\n\tText(value)\nend\n", "enum payload value requires a name and type"},
-		{"constructor type", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text(1)\nend\n", "enum payload argument 1 has type Integer, expected String"},
-		{"constructor arity", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text()\nend\n", "expects 1 payload argument(s), got 0"},
+		{"constructor type", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text(1)\nend\n", "argument 1 to Token::Text() has type Integer, expected String"},
+		{"constructor arity", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text()\nend\n", "Token::Text() is missing required argument 1"},
 		{"payload member value", "enum Token\n\tText(value: String)\nend\ndef bad(): Token\n\treturn Token::Text\nend\n", "requires 1 payload argument(s)"},
 		{"payloadless call", "enum Token\n\tEOF\nend\ndef bad(): Token\n\treturn Token::EOF()\nend\n", "has no payload and is not callable"},
 		{"pattern arity", "enum Token\n\tText(value: String)\nend\ndef bad(token: Token): String\n\tcase token\n\twhen Token::Text\n\t\treturn \"bad\"\n\tend\nend\n", "expects 1 binding(s), got 0"},
@@ -3422,7 +3494,7 @@ end
 def render(result: Result<Integer, String>): String
 	case result
 	when Result::Ok(value)
-		return identity<String>("#{value}")
+		return identity<String>("#{value.to_s()}")
 	when Result::Err(error)
 		return error
 	end
@@ -3469,7 +3541,7 @@ end
 	}
 
 	rubyOutput := string(artifacts["ruby"].Output)
-	for _, want := range []string{"module Result", "Ok = Data.define(:value)", "def identity(value)", "Result::Ok.new(42)", "identity(\"#{value}\")"} {
+	for _, want := range []string{"module Result", "Ok = Data.define(:value)", "def identity(value)", "Result::Ok.new(42)", "identity(\"#{value.to_s}\")"} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
 		}
@@ -3877,7 +3949,7 @@ end
 		t.Fatal(err)
 	}
 	goOutput := string(goArtifact.Output)
-	if !strings.Contains(goOutput, `import "fmt"`) || !strings.Contains(goOutput, `fmt.Sprintf("Hello, %v!", name)`) {
+	if !strings.Contains(goOutput, `import "fmt"`) || !strings.Contains(goOutput, `fmt.Sprintf("Hello, %s!", name)`) {
 		t.Fatalf("unexpected Go interpolation:\n%s", goOutput)
 	}
 	if !strings.Contains(goOutput, `fmt.Println(Greet("World"))`) {
@@ -3892,15 +3964,82 @@ end
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, goOutput)
 	}
 
-	tsArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
+	rubyArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
   return "Hello, #{name}!"
+end
+`), "ruby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rubyArtifact.Output), `return "Hello, #{name}!"`) {
+		t.Fatalf("unexpected Ruby interpolation:\n%s", rubyArtifact.Output)
+	}
+
+	tsArtifact, err := Compile("greet.trb", []byte(`def greet(name: String): String
+  return "Hello, ${target} #{name}!"
 end
 `), "typescript")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(tsArtifact.Output), "return `Hello, ${name}!`;") {
+	if !strings.Contains(string(tsArtifact.Output), "return `Hello, \\${target} ${name}!`;") {
 		t.Fatalf("unexpected TypeScript interpolation:\n%s", tsArtifact.Output)
+	}
+}
+
+func TestStringInterpolationRequiresNonNullableStringAcrossModes(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "Integer", source: "def render(value: Integer): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Integer"},
+		{name: "Float", source: "def render(value: Float): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Float"},
+		{name: "Boolean", source: "def render(value: Boolean): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Boolean"},
+		{name: "nullable String", source: "def render(value: String?): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got String?"},
+		{name: "Any", source: "def render(value: Any): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Any"},
+		{name: "record", source: "record Point\n\tx: Integer\nend\ndef render(value: Point): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Point"},
+		{name: "enum", source: "enum Color\n\tRed\nend\ndef render(value: Color): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Color"},
+		{name: "String newtype", source: "newtype Label = String\ndef render(value: Label): String\n\treturn \"#{value}\"\nend\n", want: "string interpolation requires String, got Label"},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range tests {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				if _, err := Compile("invalid_interpolation.trb", []byte(test.source), mode); err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %q, got %v", test.want, err)
+				}
+			})
+		}
+	}
+}
+
+func TestStringInterpolationAcceptsExplicitStringsAcrossModes(t *testing.T) {
+	source := []byte(`import trb/std/strings
+
+alias Label = String
+
+def render(label: Label, ratio: Float): String
+	return "#{strings.uppercase(label)}:#{ratio.to_s()}"
+end
+
+def render_optional(label: Label?): String
+	if label == nil
+		return ""
+	end
+	return "#{label}"
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("valid_interpolation.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected String interpolation: %v", mode, err)
+		}
+		if mode == "ruby" {
+			output := string(artifact.Output)
+			if !strings.Contains(output, `return "#{label.upcase}:#{`) || strings.Contains(output, "strings.uppercase") || strings.Contains(output, "ratio.to_s()") {
+				t.Fatalf("Ruby interpolation did not lower its expressions:\n%s", output)
+			}
+		}
 	}
 }
 

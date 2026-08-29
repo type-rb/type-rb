@@ -859,7 +859,11 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			if err != nil {
 				return Value{}, err
 			}
-			output.WriteString(plain(value))
+			text, ok := value.Data.(string)
+			if !ok {
+				return Value{}, fmt.Errorf("string interpolation requires String, got %s", value.Type)
+			}
+			output.WriteString(text)
 		}
 		return Value{Type: node.ExprType(), Data: output.String()}, nil
 	case *ir.Symbol:
@@ -921,7 +925,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Operator {
-		case "!", "not":
+		case "!":
 			return Value{Type: node.ExprType(), Data: !truthy(value)}, nil
 		case "-":
 			switch number := value.Data.(type) {
@@ -983,12 +987,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if err != nil {
 			return Value{}, err
 		}
-		if node.Operator == "and" || node.Operator == "&&" {
+		if node.Operator == "&&" {
 			if !truthy(left) {
 				return Value{Type: node.ExprType(), Data: false}, nil
 			}
 		}
-		if node.Operator == "or" || node.Operator == "||" {
+		if node.Operator == "||" {
 			if truthy(left) {
 				return Value{Type: node.ExprType(), Data: true}, nil
 			}
@@ -1043,6 +1047,42 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{Type: node.ExprType(), Data: nil}, nil
 		}
 		return e.member(receiver, node.Name, module)
+	case *ir.RecordConstruct:
+		arguments := make([]evaluatedArgument, len(node.Arguments))
+		for index, argument := range node.Arguments {
+			value, err := e.expression(argument.Value, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			arguments[index] = evaluatedArgument{Name: argument.Name, Value: value}
+		}
+		var definition *recordDefinition
+		if !node.Declaration.Empty() {
+			for _, candidate := range e.definitions {
+				record, ok := candidate.(*recordDefinition)
+				if ok && record.Node.Declaration == node.Declaration {
+					definition = record
+					break
+				}
+			}
+		}
+		if definition == nil {
+			target, err := e.expression(node.Target, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			typeDefinition, ok := target.Data.(*typeValue)
+			if !ok || typeDefinition.Record == nil {
+				return Value{}, fmt.Errorf("%s is not a record", Inspect(target))
+			}
+			definition = typeDefinition.Record
+		}
+		value, err := e.constructRecord(definition, arguments)
+		if err != nil {
+			return Value{}, err
+		}
+		value.Type = node.ExprType()
+		return value, nil
 	case *ir.Call:
 		reference := expressionReference(node.Callee)
 		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
@@ -1116,12 +1156,16 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("enum %s has no member %s", node.EnumName, node.Member)
 		}
 		payload := map[string]Value{}
-		for index, field := range member.Fields {
-			value, err := e.expression(node.Arguments[index], module, sc)
+		for index, argument := range node.Arguments {
+			value, err := e.expression(argument.Value, module, sc)
 			if err != nil {
 				return Value{}, err
 			}
-			payload[field.Name] = value
+			field := argument.Field
+			if field == "" && index < len(member.Fields) {
+				field = member.Fields[index].Name
+			}
+			payload[field] = value
 		}
 		return Value{Type: node.ExprType(), Data: &enumValue{Definition: typeDefinition.Enum, Name: node.Member, Payload: payload}}, nil
 	case *ir.TypeApply:
@@ -1810,7 +1854,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 		}
 		if found >= 0 {
 			used[found] = true
-			sc.values[parameter.Name] = arguments[found].Value
+			sc.declare(parameter.Name, arguments[found].Value, parameter.Mutable)
 			continue
 		}
 		if parameter.Default != nil {
@@ -1818,7 +1862,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 			if err != nil {
 				return err
 			}
-			sc.values[parameter.Name] = value
+			sc.declare(parameter.Name, value, parameter.Mutable)
 			continue
 		}
 		if parameter.Rest || parameter.KeywordRest {
@@ -1829,7 +1873,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 					used[index] = true
 				}
 			}
-			sc.values[parameter.Name] = Value{Type: parameter.Type, Data: &arrayValue{Items: values}}
+			sc.declare(parameter.Name, Value{Type: parameter.Type, Data: &arrayValue{Items: values}}, parameter.Mutable)
 			continue
 		}
 		return fmt.Errorf("missing argument %s", parameter.Name)
@@ -1844,6 +1888,7 @@ func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evalu
 
 func (e *Evaluator) constructRecord(definition *recordDefinition, arguments []evaluatedArgument) (Value, error) {
 	fields := map[string]Value{}
+	recordScope := &scope{parent: e.global, values: fields}
 	for _, field := range definition.Fields {
 		found := false
 		for _, argument := range arguments {
@@ -1856,7 +1901,15 @@ func (e *Evaluator) constructRecord(definition *recordDefinition, arguments []ev
 			}
 		}
 		if !found {
-			return Value{}, fmt.Errorf("missing record field %s", field.Name)
+			if field.Default == nil {
+				return Value{}, fmt.Errorf("missing record field %s", field.Name)
+			}
+			value, err := e.expression(field.Default, definition.Module, recordScope)
+			if err != nil {
+				return Value{}, err
+			}
+			value.Type = field.Type
+			fields[field.Name] = value
 		}
 	}
 	return Value{Type: types.FromName(definition.Node.Name), Data: &recordInstance{Definition: definition, Fields: fields}}, nil
@@ -1964,9 +2017,9 @@ func (e *Evaluator) binary(left Value, operator string, right Value, typ types.T
 		return Value{Type: typ, Data: equal(left, right)}, nil
 	case "!=":
 		return Value{Type: typ, Data: !equal(left, right)}, nil
-	case "and", "&&":
+	case "&&":
 		return Value{Type: typ, Data: truthy(left) && truthy(right)}, nil
-	case "or", "||":
+	case "||":
 		return Value{Type: typ, Data: truthy(left) || truthy(right)}, nil
 	}
 	if leftString, ok := left.Data.(string); ok {

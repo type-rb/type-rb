@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/type-rb/type-rb/internal/identity"
 )
 
 func TestPortableFloatLiteralsAreFiniteBinary64Values(t *testing.T) {
@@ -56,6 +58,20 @@ func TestEquivalentComparesNestedGenericArguments(t *testing.T) {
 	right.Args[1] = Type{Kind: Hash, Name: "Hash", Args: []Type{stringType, stringType}}
 	if Equivalent(left, right) {
 		t.Fatal("different nested generic arguments must not be equivalent")
+	}
+}
+
+func TestEquivalentDistinguishesCanonicalDeclarationsWithSameDisplayName(t *testing.T) {
+	left := FromName("_Box")
+	left.Declaration = identity.Declaration{Module: "services/left", Name: "_Box", Kind: identity.Class}
+	right := FromName("_Box")
+	right.Declaration = identity.Declaration{Module: "services/right", Name: "_Box", Kind: identity.Class}
+	if Equivalent(left, right) {
+		t.Fatal("same display name from distinct declarations must not be equivalent")
+	}
+	right.Declaration = left.Declaration
+	if !Equivalent(left, right) {
+		t.Fatal("the same canonical declaration must remain equivalent")
 	}
 }
 

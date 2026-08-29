@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-08-26
+Last updated: 2026-08-28
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
@@ -13,6 +13,18 @@ project-wide checking, configurable built-in linting, source generation,
 temporary build-and-run, and Go executable compilation. Target-specific
 behavior remains behind explicit `trb/platform/<mode>/*` imports.
 
+Resolution, checking, and typed IR retain canonical declaration identities
+that distinguish module path, nested source owner, declaration kind, and
+class/instance dispatch. Portable display names and backend-generated names
+remain separate, so effect propagation and qualified type generation do not
+depend on reconstructing a declaration from its leaf name.
+
+Checked record construction is a dedicated typed-IR expression rather than an
+ordinary call with optional record metadata. It retains canonical declaration
+identity, generic arguments, authored argument order, and declaration-order
+field contracts, so every backend and the REPL share the same construction and
+omitted-default semantics.
+
 Short two-value choices use the typed conditional expression
 `condition ? value : alternative`. Simple early exits use conditional
 control-transfer statements such as `return value if condition`, `next if
@@ -22,10 +34,10 @@ share strict Boolean conditions, narrowing, lazy branches, and backend or REPL
 semantics.
 
 `trb lint` runs project checking before a small configurable built-in ruleset.
-The initial recommended rule, `trb/prefer-conditional-transfer`, reports and
-safely fixes simple one-transfer guard blocks. Built-in rules share the TypeRB
-version, while JSON reports carry independent `schemaVersion` and
-`toolVersion` fields. Third-party rule execution remains deferred until a
+The recommended rules safely rewrite simple one-transfer guard blocks and
+remove redundant terminal bare returns from Void callables. Built-in rules
+share the TypeRB version, while JSON reports carry independent `schemaVersion`
+and `toolVersion` fields. Third-party rule execution remains deferred until a
 deterministic, resource-bounded extension protocol is designed.
 
 The CLI can also run one self-contained `.trb` file without creating project
@@ -33,6 +45,16 @@ configuration. It defaults to Go, can explicitly select Ruby or TypeScript,
 and isolates generated target source in an operating-system temporary
 directory. A discoverable `trbconfig.jsonc` always restores project-wide
 compilation and owns mode and runtime selection.
+
+Projects can import `trb/cli` to generate a typed command-line parser from
+records and payload enums as one native executable.
+Unannotated fields are positional, `@cli(:option)` declares options, and
+`@cli(:subcommand)` selects a closed command enum. Generated help, version,
+scalar conversion, usage errors, record defaults, and payload construction use
+only the Go standard library internally and compile into the same single
+executable. The current build path requires `mode: "go"` and the Go toolchain;
+this is a toolchain constraint rather than a Go API exposed to the application.
+Ruby and TypeScript launcher generation is intentionally outside this package.
 
 The initial distributed package system resolves TypeRB source directly from
 Git repositories or explicit local paths. Short imports default to GitHub but
@@ -99,14 +121,17 @@ and `set(value)` members while generated TSX uses React `useState`.
 
 The implemented language includes functions, typed first-class function values
 with lexical capture and checked Result control flow, positional-only and
-bare-`*` named-only parameters with callee-owned defaults, and classes, modules and
-generic interfaces, records, ordinary and raw-value enums, payload enums as sum
-types, enum instance methods, transparent `alias` declarations, nominal
+bare-`*` named-only parameters with callee-owned defaults, immutable parameter
+bindings with explicit implementation-local `mut`, and classes, modules
+and generic interfaces, records with per-construction field defaults, ordinary
+and raw-value enums, payload enums as sum types with positional and named-only
+fields in constructors and patterns, enum instance methods, transparent
+`alias` declarations, nominal
 `newtype` declarations over concrete non-nullable representations, explicit
 generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
-and mutable bindings, first-constraint inference for fresh empty mutable Arrays
-and Hashes, typed collections and iteration, exhaustive pattern
+and mutable local bindings, first-constraint inference for fresh empty mutable
+Arrays and Hashes, typed collections and iteration, exhaustive pattern
 matching, value-producing `if` and `case` expressions, and explicit Result
 propagation and recovery with prefix `try` and postfix `catch`. See the
 [language guide](language.md) and [specification](specification.md) for the
@@ -120,6 +145,12 @@ expression. Their structured typed IR runs the same block scope in generated
 Go, Ruby, TypeScript, and the REPL. TypeScript lowers a transformation that
 reaches a suspending platform operation to a sequential async loop without
 adding `async` or `await` to TypeRB source.
+
+TypeScript also lowers suspending parameter defaults into the function body.
+Module constants and class initialization cannot currently suspend because
+JavaScript namespace and constructor initialization have no async evaluation
+boundary; the compiler reports these initializers instead of emitting invalid
+code.
 
 Arrays also provide import-free `concurrent_map` for bounded I/O fan-out. Its
 fixed portable default is 8, an explicit positive `limit` can replace or
@@ -434,14 +465,19 @@ Retry policy, SQL worker lifecycle, and the SQL adapter's final native
 persistence primitives remain a separate bundled runtime boundary. Jobs and
 ORM declaration discovery also
 consume versioned, JSON-serializable Project Declaration Input snapshots.
-Version 5 contains canonical module/import identity, aliases, newtypes and
+Version 7 separates canonical declaration identity from source/display names
+and gives nested records and enums structured owner identities without
+exposing generated backend identifiers or additional nested declaration
+categories. It contains canonical module/import identity, aliases, newtypes and
 their concrete boundary representations, record declarations and field
-attributes, enum and class declarations, top-level function and class method
+attributes, record-default presence, enum declarations and member attributes,
+class declarations, top-level function and class method
 signatures, authored and resolved types, resolved generic directive arguments,
 declarative call values, structural block summaries, and source spans. The ORM
-host combines that project snapshot with a separate versioned ORM schema snapshot containing
-only the adapter and table, column, foreign-key, and unique-constraint facts
-needed to derive its catalog. Database credentials, parser nodes, function,
+host combines that project snapshot with a separate versioned ORM schema
+snapshot containing only the adapter and table, column, foreign-key, and
+unique-constraint facts needed to derive its catalog. Database credentials,
+parser nodes, function,
 method, and block bodies, default expressions, resolver/checker state,
 filesystem access, and backend objects do
 not cross the declaration-provider input boundary. The ORM runtime manifest
@@ -474,10 +510,12 @@ target code, and browser tools.
 
 Nullable lexical bindings narrow through direct `nil` comparisons in
 conditional branches, loops, compatible short-circuit expressions, and
-returning guards. Direct record fields and `readonly` class fields narrow when
-their receiver is a stable lexical binding. Reassignment invalidates the flow
-fact, while typed IR keeps the required unwrap explicit for every backend and
-the REPL.
+returning guards. A plain assignment remains checked against the binding's
+declared nullable type and gives subsequent statements in that path the
+assigned value's precise flow type. Direct record fields and `readonly` class
+fields narrow when their receiver is a stable lexical binding. Reassigning a
+receiver invalidates its field facts, while typed IR keeps every required
+unwrap explicit for all backends and the REPL.
 
 Compiler artifacts carry a versioned, backend-independent mapping from
 generated statement ranges to original `.trb` paths and spans. Go mappings are
@@ -562,7 +600,8 @@ source-debugger adapters remain staged; both modes retain Run Without Debugging.
 Portable colocated tests use `*_test.trb`, nested `describe` suites, explicit
 `test` cases, and typed expectations from `trb/std/test`. `trb test` executes
 the same source through Go, Ruby, and TypeScript process backends, supports
-file/name filtering and JSON Lines events, preserves assertion locations, and
+positional file/directory selection, regular-expression name selection, and
+JSON Lines events, preserves assertion locations, and
 returns a nonzero failure status. The VS Code extension consumes compiler-owned
 LSP discovery through the native Test Explorer and test CodeLens. Go test
 selections can use the same Delve-backed TypeRB source debugger as application

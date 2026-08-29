@@ -616,10 +616,13 @@ explicit import is needed only when source code names `EnumValueError` itself.
 
 ## Tests
 
-`trb/std/test` exports `describe`, `test`, and `expect`. Suites and cases take
-literal names and parameterless blocks so the compiler, CLI, language server,
-and editor use one deterministic discovery model. `expect()` returns a typed
-`Expectation<T>` with equality, inequality, Boolean, and nil assertions.
+`trb/std/test` exports `describe`, `test`, `expect`, `expect_ok`, and
+`expect_err`. Suites and cases take literal names and parameterless blocks so
+the compiler, CLI, language server, and editor use one deterministic discovery
+model. `expect()` returns a typed `Expectation<T>` with equality, inequality,
+Boolean, and nil assertions. `expect_ok(Result<T, E>)` returns `T`, while
+`expect_err(Result<T, E>)` returns `E`; either helper fails the current case if
+the Result has the opposite variant.
 
 The package is portable compiler-owned source plus a small target runtime.
 Assertion failures retain their original `.trb` path, line, and column. The

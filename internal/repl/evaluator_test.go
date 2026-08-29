@@ -7,10 +7,43 @@ import (
 	"math"
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestEvaluateSemanticRecordConstruction(t *testing.T) {
+	integer := types.FromName("Integer")
+	declaration := identity.Declaration{Module: "models", Name: "Settings::Config", Kind: identity.Record}
+	recordType := types.Type{Kind: types.Named, Name: "Config", Declaration: declaration}
+	definition := &ir.Record{Declaration: declaration, Name: "Config", Body: []ir.Statement{
+		&ir.RecordField{Name: "value", Type: integer, Default: &ir.Literal{
+			ExprBase: ir.NewExprBase(token.Span{}, integer), Kind: "integer", Raw: "7",
+		}},
+	}}
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	evaluator.LoadDefinitions(&ir.Program{ModulePath: "models", Statements: []ir.Statement{
+		&ir.Module{Name: "Settings", Body: []ir.Statement{definition}},
+	}})
+	construction := &ir.RecordConstruct{
+		ExprBase:    ir.NewExprBase(token.Span{}, recordType),
+		Declaration: declaration,
+		Target:      &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Class")), Name: "Config"},
+		Fields:      []ir.RecordFieldContract{{Name: "value", Type: integer, HasDefault: true}},
+	}
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: construction}}, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, ok := result.Value.Data.(*recordInstance)
+	if !ok || instance.Fields["value"].Data != int64(7) {
+		t.Fatalf("semantic record construction result = %#v", result.Value)
+	}
+	if !types.Equivalent(result.Value.Type, recordType) {
+		t.Fatalf("semantic record construction type = %#v, want %#v", result.Value.Type, recordType)
+	}
+}
 
 func TestEvaluateFloatClassificationIntrinsics(t *testing.T) {
 	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
@@ -128,6 +161,26 @@ func TestEvaluateFirstClassFunctionClosure(t *testing.T) {
 	}
 	if result.Value.Data != int64(5) || Inspect(result.Value) != "5" {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+func TestBindRetainsParameterMutability(t *testing.T) {
+	integer := types.FromName("Integer")
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	callScope := &scope{values: map[string]Value{}}
+	parameters := []ir.Parameter{
+		{Name: "fixed", Type: integer},
+		{Name: "changeable", Type: integer, Mutable: true},
+	}
+	arguments := []evaluatedArgument{
+		{Value: Value{Type: integer, Data: int64(1)}},
+		{Value: Value{Type: integer, Data: int64(2)}},
+	}
+	if err := evaluator.bind(callScope, parameters, arguments, "repl"); err != nil {
+		t.Fatal(err)
+	}
+	if callScope.mutableBinding("fixed") || !callScope.mutableBinding("changeable") {
+		t.Fatalf("parameter mutability was not retained: %#v", callScope.mutable)
 	}
 }
 

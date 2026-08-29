@@ -39,19 +39,19 @@ def _in_ranges(value: Integer, ranges: Array<Array<Integer>>): Boolean
 end
 
 def _valid_scalar(value: Integer): Boolean
-	return value >= 0 and value <= 1114111 and not (value >= 55296 and value <= 57343)
+	return value >= 0 && value <= 1114111 && !(value >= 55296 && value <= 57343)
 end
 
 def _letter(value: Integer): Boolean
-	return _valid_scalar(value) and _in_ranges(value, LETTER_RANGES)
+	return _valid_scalar(value) && _in_ranges(value, LETTER_RANGES)
 end
 
 def _digit(value: Integer): Boolean
-	return _valid_scalar(value) and _in_ranges(value, DIGIT_RANGES)
+	return _valid_scalar(value) && _in_ranges(value, DIGIT_RANGES)
 end
 
 def _identifier_start(value: Integer): Boolean
-	return value == 95 or value == 64 or _letter(value)
+	return value == 95 || value == 64 || _letter(value)
 end
 
 class Unicode
@@ -72,15 +72,15 @@ class Unicode
 	end
 
 	def self.uppercase(value: Integer): Boolean
-		return _valid_scalar(value) and _in_ranges(value, UPPERCASE_RANGES)
+		return _valid_scalar(value) && _in_ranges(value, UPPERCASE_RANGES)
 	end
 
 	def self.lowercase(value: Integer): Boolean
-		return _valid_scalar(value) and _in_ranges(value, LOWERCASE_RANGES)
+		return _valid_scalar(value) && _in_ranges(value, LOWERCASE_RANGES)
 	end
 
 	def self.whitespace(value: Integer): Boolean
-		return _valid_scalar(value) and _in_ranges(value, WHITESPACE_RANGES)
+		return _valid_scalar(value) && _in_ranges(value, WHITESPACE_RANGES)
 	end
 
 	def self.identifier_start(value: Integer): Boolean
@@ -88,7 +88,7 @@ class Unicode
 	end
 
 	def self.identifier_part(value: Integer): Boolean
-		return _identifier_start(value) or _digit(value)
+		return _identifier_start(value) || _digit(value)
 	end
 
 	def self.from_codepoint(value: Integer): String

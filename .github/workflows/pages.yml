@@ -65,6 +65,10 @@ jobs:
             tools/textmate/package-lock.json
             tools/site/package-lock.json
 
+      - name: Install TypeScript compiler
+        if: steps.test-scope.outputs.full-tests == 'true'
+        run: npm install --global typescript@7.0.2
+
       - name: Verify compiler and tour
         if: steps.test-scope.outputs.full-tests == 'true'
         run: go test ./...

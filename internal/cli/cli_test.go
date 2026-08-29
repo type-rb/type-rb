@@ -85,22 +85,35 @@ func TestTestRunsPortableSuiteAcrossBackends(t *testing.T) {
 					"\treturn " + resultName + "::Err(" + errorName + "::Invalid(message))\n" +
 					"end\n"
 			}
+			resultSourcePath := filepath.Join(config.SourcePath(), "domain")
+			if err := os.MkdirAll(resultSourcePath, 0o755); err != nil {
+				t.Fatal(err)
+			}
 			for name, source := range map[string]string{
 				"alpha.trb": failureSource("AlphaResult", "AlphaError", "alpha_failure", "alpha"),
 				"beta.trb":  failureSource("BetaResult", "BetaError", "beta_failure", "beta"),
 			} {
-				if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(resultSourcePath, name), []byte(source), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
-			testSource := `import { AlphaError, AlphaResult, alpha_failure } from alpha
-import { BetaError, BetaResult, beta_failure } from beta
+			testSource := `import { AlphaError, AlphaResult, alpha_failure } from domain/alpha
+import { BetaError, BetaResult, beta_failure } from domain/beta
 import { add } from calculator
-import { describe, expect, test } from trb/std/test
+import { describe, expect, expect_err, expect_ok, test } from trb/std/test
 
 record Point
 	x: Integer
 	y: Integer
+end
+
+def expect_optional_alpha_failure(result: AlphaResult?)
+	if result == nil
+		expect(false).to_be_true()
+	else
+		expect(result).to_equal(AlphaResult::Err(AlphaError::Invalid("alpha")))
+	end
+	return
 end
 
 describe("Calculator") do
@@ -131,28 +144,12 @@ describe("Calculator") do
 	end
 
 	test("keeps private helpers isolated by source module") do
-		case alpha_failure()
-		when AlphaResult::Err(error)
-			case error
-			when AlphaError::Invalid(message)
-				expect(message).to_equal("alpha")
-			else
-				expect(false).to_be_true()
-			end
-		when AlphaResult::Ok(_value)
-			expect(false).to_be_true()
-		end
-		case beta_failure()
-		when BetaResult::Err(error)
-			case error
-			when BetaError::Invalid(message)
-				expect(message).to_equal("beta")
-			else
-				expect(false).to_be_true()
-			end
-		when BetaResult::Ok(_value)
-			expect(false).to_be_true()
-		end
+		expect_optional_alpha_failure(alpha_failure())
+		alpha_error := expect_err(alpha_failure())
+		expect(alpha_error).to_equal(AlphaError::Invalid("alpha"))
+		expect(expect_err(beta_failure())).to_equal(BetaError::Invalid("beta"))
+		expect(expect_ok(AlphaResult::Ok(7))).to_equal(7)
+		expect(expect_ok(BetaResult::Ok(8))).to_equal(8)
 	end
 end
 `
@@ -170,9 +167,94 @@ end
 			if strings.Contains(stdout.String(), "APPLICATION MAIN RAN") {
 				t.Fatalf("trb test executed the application main():\n%s", stdout.String())
 			}
+
+			stdout.Reset()
+			stderr.Reset()
+			if status := command.Run([]string{"test", "--config", config.Path, "-t", `keeps private helpers isolated by source module$`, "--reporter", "json"}); status != 0 {
+				t.Fatalf("filtered status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if strings.Count(stdout.String(), `"type":"test_started"`) != 1 || !strings.Contains(stdout.String(), `"name":"Calculator / keeps private helpers isolated by source module"`) {
+				t.Fatalf("name pattern did not select the expected test:\n%s", stdout.String())
+			}
 			entries, err := os.ReadDir(filepath.Join(root, ".trb", "test"))
 			if err != nil || len(entries) != 0 {
 				t.Fatalf("test workspace leaked: entries=%v err=%v", entries, err)
+			}
+		})
+	}
+}
+
+func TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends(t *testing.T) {
+	const source = `import { Result } from trb/std/result
+import { describe, expect_err, expect_ok, test } from trb/std/test
+
+alias SampleResult = Result<Integer, String>
+
+describe("Result expectations") do
+	test("requires Ok") do
+		expect_ok(SampleResult::Err("problem"))
+	end
+
+	test("requires Err") do
+		expect_err(SampleResult::Ok(7))
+	end
+end
+`
+
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			required := map[string]string{"go": "go", "ruby": "ruby", "typescript": "bun"}[mode]
+			if _, err := exec.LookPath(required); err != nil {
+				t.Skipf("%s is unavailable: %v", required, err)
+			}
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if mode == "go" {
+				config.Go.Module = "example.com/type-rb/test-result-expectations"
+			}
+			if mode == "typescript" {
+				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
+				config.TypeScript.PackageManager = "bun"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "go" {
+				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-result-expectations\n\ngo 1.27\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			testPath := filepath.Join(config.SourcePath(), "result_test.trb")
+			if err := os.WriteFile(testPath, []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"test", "--config", config.Path}); status != 1 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			for _, expected := range []string{
+				"PASS",
+				"expected Ok, got Err(\"problem\")",
+				"expected Err, got Ok(7)",
+				testPath + ":8:3:",
+				testPath + ":12:3:",
+				"2 test(s), 2 failure(s)",
+			} {
+				if expected == "PASS" {
+					if strings.Contains(stdout.String(), expected) {
+						t.Fatalf("failed Result expectation was reported as passing:\n%s", stdout.String())
+					}
+					continue
+				}
+				if !strings.Contains(stdout.String(), expected) {
+					t.Fatalf("%s output is missing %q:\n%s\nstderr:\n%s", mode, expected, stdout.String(), stderr.String())
+				}
 			}
 		})
 	}
@@ -291,7 +373,7 @@ func TestTestCompileCreatesDebuggableGoExecutable(t *testing.T) {
 	}
 }
 
-func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
+func TestTestPositionalFileDisambiguatesDuplicateNames(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skipf("go is unavailable: %v", err)
 	}
@@ -317,11 +399,113 @@ func TestTestFileFilterDisambiguatesDuplicateNames(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"test", "--config", config.Path, "--file", selected, "--reporter", "json"}); status != 0 {
+	if status := command.Run([]string{"test", "--config", config.Path, selected, "--reporter", "json"}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if strings.Count(stdout.String(), `"type":"test_started"`) != 1 || !strings.Contains(stdout.String(), `"test_file":`) {
-		t.Fatalf("file filter did not select one declaration:\n%s", stdout.String())
+		t.Fatalf("positional file did not select one declaration:\n%s", stdout.String())
+	}
+}
+
+func TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/test-path-selection"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "domain", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "application"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "unrelated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/type-rb/test-path-selection\n\ngo 1.27\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testSource := func(name string) []byte {
+		return []byte("import { describe, expect, test } from trb/std/test\n\ndescribe(\"" + name + "\") do\n\ttest(\"runs\") do\n\t\texpect(true).to_be_true()\n\tend\nend\n")
+	}
+	for filename, source := range map[string][]byte{
+		filepath.Join(config.SourcePath(), "domain", "account_test.trb"):          testSource("Account"),
+		filepath.Join(config.SourcePath(), "domain", "nested", "member_test.trb"): testSource("Member"),
+		filepath.Join(config.SourcePath(), "application", "order_test.trb"):       testSource("Order"),
+		filepath.Join(config.SourcePath(), "unrelated", "broken_test.trb"):        []byte("this is not valid TypeRB\n"),
+	} {
+		if err := os.WriteFile(filename, source, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	t.Chdir(root)
+	if status := command.Run([]string{
+		"test",
+		filepath.Join("src", "domain"),
+		"--config", config.Path,
+		filepath.Join("src", "application", "order_test.trb"),
+		"--reporter", "json",
+	}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if strings.Count(stdout.String(), `"type":"test_started"`) != 3 {
+		t.Fatalf("directory and file selection did not run three tests:\n%s", stdout.String())
+	}
+	for _, name := range []string{"Account / runs", "Member / runs", "Order / runs"} {
+		if !strings.Contains(stdout.String(), `"name":"`+name+`"`) {
+			t.Fatalf("selected output is missing %q:\n%s", name, stdout.String())
+		}
+	}
+}
+
+func TestTestSelectionRejectsInvalidInputs(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "ruby")
+	config.SourceDir = "src"
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testFile := filepath.Join(config.SourcePath(), "sample_test.trb")
+	if err := os.WriteFile(testFile, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ordinaryFile := filepath.Join(config.SourcePath(), "sample.trb")
+	if err := os.WriteFile(ordinaryFile, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyDirectory := filepath.Join(config.SourcePath(), "empty")
+	if err := os.MkdirAll(emptyDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside_test.trb")
+	if err := os.WriteFile(outside, []byte("sample"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, path := range map[string]string{
+		"ordinary file":     ordinaryFile,
+		"empty directory":   emptyDirectory,
+		"outside sourceDir": outside,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := selectProjectTestFiles(config, []string{testFile}, []string{path}); err == nil {
+				t.Fatalf("selectProjectTestFiles accepted %s", path)
+			}
+		})
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"test", "-t", "["}); status == 0 || !strings.Contains(stderr.String(), "invalid --test-name-pattern") {
+		t.Fatalf("invalid pattern status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 }
 
@@ -436,6 +620,34 @@ func TestLintReportsFixesAndVersionsDiagnostics(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(fixed), "\treturn \"enabled\" if enabled\n") || !strings.Contains(stdout.String(), "fixed 1 issue(s) in 1 file(s)") {
+		t.Fatalf("fixed source=%s\nstdout=%s", fixed, stdout.String())
+	}
+}
+
+func TestLintFixRemovesTerminalVoidReturn(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Go.Module = "example.com/type-rb/lint-terminal-return"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "main.trb")
+	source := "def log_value(value: String)\n\tputs(value)\n\treturn\nend\n"
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"lint", "--config", config.Path, "--fix"}); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	fixed, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "def log_value(value: String)\n\tputs(value)\nend\n"
+	if string(fixed) != want || !strings.Contains(stdout.String(), "fixed 1 issue(s) in 1 file(s)") {
 		t.Fatalf("fixed source=%s\nstdout=%s", fixed, stdout.String())
 	}
 }
@@ -2660,7 +2872,7 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 			t.Fatal(err)
 		}
 
-		input := "[1, 2, 3].map do |value|\ndoubled := value * 2\ndoubled\nend\n[1, 2, 3].select.with_index { |value, index| value > 1 and index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
+		input := "[1, 2, 3].map do |value|\ndoubled := value * 2\ndoubled\nend\n[1, 2, 3].select.with_index { |value, index| value > 1 && index < 2 }\n[1, 2, 3].reduce(10) { |sum, value| sum + value }\n[1, 2, 3].any? { |value| value > 2 }\n[1, 2, 3].all?() { |value| value > 0 }\n[1, 2, 3].none? { |value| value < 0 }\n[1, 2, 3].find { |value| value > 1 }\n[1, 2, 3].find_index() { |value| value == 3 }\n[1, 2, 3].find { |value| value > 9 }\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -5527,7 +5739,7 @@ def main()
 	end
 	selected := mapped.select.with_index do |value, index|
 		large_enough := value > 2
-		large_enough and index < 2
+		large_enough && index < 2
 	end
 	total := selected.reduce(10) do |sum, value|
 		next_sum := sum + value
@@ -5900,11 +6112,11 @@ def label(value: String?): String
 end
 
 def has_name(value: String?): Boolean
-	return value != nil and value.size() > 0
+	return value != nil && value.size() > 0
 end
 
 def missing_or_empty(value: String?): Boolean
-	return value == nil or value.size() == 0
+	return value == nil || value.size() == 0
 end
 
 def main()
@@ -6126,7 +6338,7 @@ func TestRunCompilerOwnedJSONAcrossAvailableBackends(t *testing.T) {
 			"import { Result } from trb/std/result\n\n" +
 			"def render(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); case stringify(item); when Result::Ok(source); return source; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
 			"def error_path(value: Result<JsonValue, JsonError>): String; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)); when Result::Err(error); return error.path; end; end\n\n" +
-			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() or !error.message.empty?(); end; end\n\n" +
+			"def valid(value: Result<JsonValue, JsonError>): Boolean; case value; when Result::Ok(item); return render(Result<JsonValue, JsonError>::Ok(item)).empty?(); when Result::Err(error); return error.message.empty?() || !error.message.empty?(); end; end\n\n" +
 			"def main()\n" +
 			"\tputs(render(jsonc.parse(\"{\\n  // comment\\n  \\\"items\\\": [1, 1.5, true, null]\\n}\")))\n" +
 			"\tputs(error_path(parse(\"{\\\"items\\\":[9007199254740992]}\")))\n" +
@@ -6640,11 +6852,11 @@ def parameter_error(error: ParameterError): Response
 	case error
 	when ParameterError::MalformedQuery(decode_error)
 		return text("malformed:" + decode_error.input, 400)
-	when ParameterError::Missing(source, name)
+	when ParameterError::Missing(source: source, name: name)
 		return text("missing:" + source_name(source) + ":" + name, 400)
-	when ParameterError::Duplicate(source, name)
+	when ParameterError::Duplicate(source: source, name: name)
 		return text("duplicate:" + source_name(source) + ":" + name, 400)
-	when ParameterError::Invalid(source, name, value, expected)
+	when ParameterError::Invalid(source: source, name: name, value: value, expected: expected)
 		return text("invalid:" + source_name(source) + ":" + name + ":" + value + ":" + expected, 400)
 	end
 end
@@ -6767,11 +6979,11 @@ def parameter_error_kind(error: ParameterError): String
 	case error
 	when ParameterError::MalformedQuery(_error)
 		return "malformed"
-	when ParameterError::Missing(_source, _name)
+	when ParameterError::Missing(source: _source, name: _name)
 		return "missing"
-	when ParameterError::Duplicate(_source, _name)
+	when ParameterError::Duplicate(source: _source, name: _name)
 		return "duplicate"
-	when ParameterError::Invalid(_source, _name, _value, _expected)
+	when ParameterError::Invalid(source: _source, name: _name, value: _value, expected: _expected)
 		return "invalid"
 	end
 end

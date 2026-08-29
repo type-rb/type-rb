@@ -112,10 +112,10 @@ func discoverDeclarationORMEnums(input packageextension.ProjectDeclarationInput)
 			result[source.ModulePath] = module
 		}
 		for _, enum := range source.Enums {
-			if module[enum.Name] != nil {
-				return nil, fmt.Errorf("trb/orm enum %s is declared more than once in %s", enum.Name, source.ModulePath)
+			if module[enum.Identity.Name] != nil {
+				return nil, fmt.Errorf("trb/orm enum %s is declared more than once in %s", enum.Identity.Name, source.ModulePath)
 			}
-			module[enum.Name] = &declarationORMEnumDefinition{module: source.ModulePath, enum: enum}
+			module[enum.Identity.Name] = &declarationORMEnumDefinition{module: enum.Identity.ModulePath, enum: enum}
 		}
 	}
 	return result, nil
@@ -148,11 +148,12 @@ func applyDeclarationEnumColumns(model *Model, class packageextension.ProjectCla
 		if columnIndex < 0 {
 			return fmt.Errorf("trb/orm model %s has no column %s for enum_column", model.Name, columnName)
 		}
-		enumName := declarationReferenceName(directive.Arguments[1].Value)
+		enumValue := directive.Arguments[1].Value
+		enumName := declarationReferenceName(enumValue)
 		if enumName == "" {
 			return fmt.Errorf("trb/orm %s.enum_column enum type must be an enum name", model.Name)
 		}
-		definition := resolveDeclarationORMEnum(module, enumName, enums)
+		definition := resolveDeclarationORMEnum(module, enumValue, enums)
 		if definition == nil {
 			return fmt.Errorf("trb/orm %s.enum_column references unknown enum %s", model.Name, enumName)
 		}
@@ -170,13 +171,17 @@ func applyDeclarationEnumColumns(model *Model, class packageextension.ProjectCla
 		copy := *definition.mapping
 		copy.StorageType.Nullable = column.Nullable
 		column.Enum = &copy
-		column.Type = types.FromName(definition.enum.Name)
+		column.Type = types.FromName(definition.enum.Identity.Name)
 		column.Type.Nullable = column.Nullable
 	}
 	return nil
 }
 
-func resolveDeclarationORMEnum(module packageextension.ProjectModule, name string, enums map[string]map[string]*declarationORMEnumDefinition) *declarationORMEnumDefinition {
+func resolveDeclarationORMEnum(module packageextension.ProjectModule, value packageextension.ProjectValue, enums map[string]map[string]*declarationORMEnumDefinition) *declarationORMEnumDefinition {
+	name := declarationReferenceName(value)
+	if value.Reference != nil {
+		return enums[value.Reference.Identity.ModulePath][value.Reference.Identity.Name]
+	}
 	if local := enums[module.ModulePath][name]; local != nil {
 		return local
 	}
@@ -208,7 +213,7 @@ func buildDeclarationORMEnumMapping(module string, enum packageextension.Project
 	if len(enum.Members) == 0 {
 		return nil, fmt.Errorf("enum %s has no members", enum.Name)
 	}
-	mapping := &EnumColumn{Name: enum.Name, ModulePath: module, StorageType: types.FromName("String")}
+	mapping := &EnumColumn{Name: enum.Identity.Name, ModulePath: module, StorageType: types.FromName("String")}
 	seen := map[string]string{}
 	for _, member := range enum.Members {
 		value := EnumColumnValue{Name: member.Name, StringValue: EnumMemberStorageName(member.Name)}

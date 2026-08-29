@@ -21,6 +21,7 @@ var packageFiles embed.FS
 
 type manifest struct {
 	Name                           string                                             `json:"name"`
+	Aliases                        []string                                           `json:"aliases,omitempty"`
 	Version                        string                                             `json:"version"`
 	Module                         string                                             `json:"module"`
 	Source                         string                                             `json:"source"`
@@ -116,7 +117,10 @@ func OwnsModule(modulePath string) bool {
 
 func Names() []string {
 	names := make([]string, 0, len(registry))
-	for name := range registry {
+	for name, definition := range registry {
+		if definition.Name != name {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -169,7 +173,7 @@ func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 		if err != nil {
 			return fmt.Errorf("%s: %w", filename, err)
 		}
-		result[descriptor.Name] = &Package{
+		packageDefinition := &Package{
 			ManifestPath:                   filename,
 			Name:                           descriptor.Name,
 			Version:                        descriptor.Version,
@@ -187,6 +191,16 @@ func loadFromFS(packageFS fs.FS) (map[string]*Package, error) {
 				JSX:          semanticJSX(descriptor.SemanticProvider),
 				Symbols:      semanticSymbols(descriptor.SemanticProvider),
 			},
+		}
+		result[descriptor.Name] = packageDefinition
+		for _, alias := range descriptor.Aliases {
+			if alias == "" {
+				return fmt.Errorf("%s: package aliases must not be empty", filename)
+			}
+			if _, exists := result[alias]; exists {
+				return fmt.Errorf("%s: package alias %s is already registered", filename, alias)
+			}
+			result[alias] = packageDefinition
 		}
 		return nil
 	})

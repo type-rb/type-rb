@@ -33,7 +33,6 @@ end
 
 def main()
 	mount(<App />, "root")
-	return
 end
 ```
 
@@ -85,7 +84,6 @@ def Counter(): ReactNode
 	count := use_state(0)
 	increment := fn(_event: MouseEvent)
 		count.set(count.value + 1)
-		return
 	end
 	return <button onClick={increment}>Count: {count.value}</button>
 end
@@ -143,11 +141,9 @@ import { ChangeEvent, FormEvent, ReactNode } from trb/platform/typescript/react
 def TodoForm(): ReactNode
 	on_change := fn(event: ChangeEvent)
 		puts(event.currentTarget.value)
-		return
 	end
 	on_submit := fn(event: FormEvent)
 		event.preventDefault()
-		return
 	end
 	return <form onSubmit={on_submit}>
 		<input onChange={on_change} />

@@ -45,7 +45,8 @@ When `trbconfig.jsonc` is discoverable, the configured project and mode win.
   "lint": {
     "preset": "recommended",
     "rules": {
-      "trb/prefer-conditional-transfer": "error"
+      "trb/prefer-conditional-transfer": "error",
+      "trb/omit-terminal-void-return": "warning"
     }
   }
 }
