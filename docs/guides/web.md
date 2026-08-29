@@ -23,7 +23,7 @@ functions determine HTTP methods. For example,
 <!-- trb-doc-test: web-update-todo -->
 ```trb
 import { Context, Response, json } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record UpdateTodo
 	title: String
@@ -69,7 +69,7 @@ runtime permission to reflect over application types:
 
 ```trb
 import { Context, Response, text } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record TodoParams
 	id: Integer
@@ -285,7 +285,7 @@ the producer and consumer:
 
 ```trb
 import { Context, ContextKey, Next, Response, text } from trb/web
-import { Result } from trb/std/result
+import trb/std/result
 
 record CurrentUser
 	id: Integer

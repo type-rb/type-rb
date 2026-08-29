@@ -67,7 +67,7 @@ func timeIntrinsicSymbols() map[string]Symbol {
 }
 
 func timeSource() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/internal/time as native_time
 
 enum DateTimeErrorKind

@@ -674,13 +674,13 @@ func TestCompileTypeScriptAuth0ReactAdapterExample(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		`import { Result } from "./trb/std/result/index.ts";`,
+		`import * as __trb_result from "./trb/std/result/index.ts";`,
 		`import type { Unit } from "./trb/std/unit/index.ts";`,
 		`import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";`,
 		`import type { Auth0ContextInterface, AuthorizationParams } from "@auth0/auth0-react";`,
-		`export async function access_token(auth: Auth0ContextInterface): Promise<Result<string, string>>`,
+		`export async function access_token(auth: Auth0ContextInterface): Promise<__trb_result.Result<string, string>>`,
 		`const __trbPromise: Promise<string> = auth.getAccessTokenSilently(); const __trbValue: string = await __trbPromise`,
-		`export async function login(auth: Auth0ContextInterface): Promise<Result<Unit, string>>`,
+		`export async function login(auth: Auth0ContextInterface): Promise<__trb_result.Result<Unit, string>>`,
 		`const __trbPromise: Promise<void> = auth.loginWithRedirect(); await __trbPromise; const __trbValue: Unit = ({} satisfies Unit)`,
 		`const __trbPromise: Promise<void> = auth.logout(); await __trbPromise; const __trbValue: Unit = ({} satisfies Unit)`,
 		`__trbError instanceof Error ? __trbError.message : String(__trbError)`,
@@ -720,10 +720,10 @@ func TestCompileTypeScriptAmplifyAuthAdapterExample(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		`import { Result } from "./trb/std/result/index.ts";`,
+		`import * as __trb_result from "./trb/std/result/index.ts";`,
 		`import { signIn } from "aws-amplify/auth";`,
 		`import type { SignInInput, SignInOutput } from "aws-amplify/auth";`,
-		`export async function attempt_sign_in(): Promise<Result<SignInOutput, string>>`,
+		`export async function attempt_sign_in(): Promise<__trb_result.Result<SignInOutput, string>>`,
 		`const input: SignInInput = ({username: "", password: ""} satisfies SignInInput);`,
 		`const __trbPromise: Promise<SignInOutput> = signIn(input); const __trbValue: SignInOutput = await __trbPromise`,
 		`__trbError instanceof Error ? __trbError.message : String(__trbError)`,

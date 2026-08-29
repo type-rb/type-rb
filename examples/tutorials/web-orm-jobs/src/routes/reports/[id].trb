@@ -1,5 +1,5 @@
 import { database_error_response, endpoint_input_error_response } from http/errors
-import { Report } from models/report
+import models/report
 import { Context, Response, json } from trb/web
 
 record ReportParams

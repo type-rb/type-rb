@@ -1,7 +1,7 @@
 package stdlib
 
 func base64Source() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/internal/encoding/base64 as native_base64
 
 module Base64

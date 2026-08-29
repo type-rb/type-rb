@@ -1,5 +1,5 @@
 import { Context, Next, Response } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 
 record SecureHeadersOptions
 	headers: Hash<String, String>

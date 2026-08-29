@@ -141,9 +141,9 @@ apply its retry policy.
 
 <!-- trb-doc-file: examples/tutorials/web-orm-jobs/src/jobs/generate_report_job.trb -->
 ```trb
-import { Report } from models/report
+import models/report
 import { Job, JobError, JobResult, maximum_attempts, queue } from trb/jobs
-import { Unit } from trb/std/unit
+import trb/std/unit
 
 class GenerateReportJob < Job
 	queue("reports")
@@ -174,11 +174,11 @@ need to know how the report is stored or how the Job is persisted.
 
 <!-- trb-doc-file: examples/tutorials/web-orm-jobs/src/services/create_report.trb -->
 ```trb
-import { GenerateReportJob } from jobs/generate_report_job
-import { Report } from models/report
+import jobs/generate_report_job
+import models/report
 import { EnqueueError } from trb/jobs
 import { Database, DbError } from trb/orm
-import { Result } from trb/std/result
+import trb/std/result
 
 enum CreateReportError
 	Database(error: DbError)
@@ -302,7 +302,7 @@ end
 <!-- trb-doc-file: examples/tutorials/web-orm-jobs/src/routes/reports/[id].trb -->
 ```trb
 import { database_error_response, endpoint_input_error_response } from http/errors
-import { Report } from models/report
+import models/report
 import { Context, Response, json } from trb/web
 
 record ReportParams

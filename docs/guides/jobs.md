@@ -28,7 +28,7 @@ The compiler derives typed enqueue methods from `perform`:
 
 ```trb
 import { EnqueueError, JobReference } from trb/jobs
-import { Result } from trb/std/result
+import trb/std/result
 import { Duration, Instant } from trb/std/time
 
 def enqueue_receipt(order_id: Integer): Result<JobReference, EnqueueError>
@@ -79,7 +79,7 @@ retry returns the exact `JobResult` contract instead:
 
 ```trb
 import { Job, JobError, JobResult } from trb/jobs
-import { Unit } from trb/std/unit
+import trb/std/unit
 
 class ImportReceiptJob < Job
 	def perform(source: String): JobResult

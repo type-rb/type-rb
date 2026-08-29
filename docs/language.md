@@ -142,7 +142,7 @@ Imports are explicit and resolved before type checking:
 
 ```trb
 import app/models/user
-import { UserRepo } from app/repos/user_repo
+import app/repos/user_repo
 import { Contract } from acme/contracts
 import trb/std/strings
 ```
@@ -901,7 +901,7 @@ unmatched Array returns `nil`.
 
 <!-- trb-doc-test: language-result-case -->
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 
 def unwrap(result: Result<Integer, String>): Integer
 	case result

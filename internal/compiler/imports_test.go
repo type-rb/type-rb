@@ -3165,7 +3165,7 @@ func TestPortableJSONPackagesCompileAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import trb/std/json
 import trb/std/jsonc
-import { Result } from trb/std/result
+import trb/std/result
 
 def strict(source: String): Result<JSON::Value, JSON::Error>
 	return JSON.parse(source)
@@ -3182,11 +3182,14 @@ end
 			t.Fatalf("%s rejected the JSON packages: %v", mode, err)
 		}
 		modules := map[string]bool{}
-		var consumerOutput string
+		var consumerOutput, jsonRuntimeOutput string
 		for _, artifact := range artifacts {
 			modules[artifact.IR.ModulePath] = true
 			if artifact.IR.ModulePath == "main" {
 				consumerOutput = string(artifact.Output)
+			}
+			if artifact.IR.ModulePath == "trb/std/json/index" {
+				jsonRuntimeOutput = string(artifact.Output)
 			}
 		}
 		for _, module := range []string{"main", "trb/std/json/index", "trb/std/jsonc/index", "trb/std/result/index"} {
@@ -3199,6 +3202,14 @@ end
 				if !strings.Contains(consumerOutput, want) {
 					t.Fatalf("TypeScript JSON root call is missing %q:\n%s", want, consumerOutput)
 				}
+			}
+			for _, want := range []string{"__trb_result.Result.Ok<JSONValue, JSONError>", "__trb_result.Result.Err<JSONValue, JSONError>"} {
+				if !strings.Contains(jsonRuntimeOutput, want) {
+					t.Fatalf("TypeScript JSON runtime is missing resolved Result binding %q:\n%s", want, jsonRuntimeOutput)
+				}
+			}
+			if strings.Contains(jsonRuntimeOutput, "return Result.") {
+				t.Fatalf("TypeScript JSON runtime bypasses the resolved Result binding:\n%s", jsonRuntimeOutput)
 			}
 		}
 	}

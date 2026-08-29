@@ -1,7 +1,7 @@
 package stdlib
 
 func jsoncSource() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/std/json
 import trb/internal/json as native_json
 
