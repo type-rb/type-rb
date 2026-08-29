@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/parser"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -50,6 +51,28 @@ func TestMatchesDeclarationRootUsesTheResolverKeyRule(t *testing.T) {
 		if got := MatchesDeclarationRoot(test.path, test.name); got != test.want {
 			t.Errorf("MatchesDeclarationRoot(%q, %q) = %v, want %v", test.path, test.name, got, test.want)
 		}
+	}
+}
+
+func TestEveryPublicStandardPackageRootResolvesBare(t *testing.T) {
+	for _, definition := range stdlib.PublicPortablePackages("go") {
+		if definition.Root == "" {
+			continue
+		}
+		t.Run(definition.Path, func(t *testing.T) {
+			program, diagnostics := parser.Parse([]byte("import " + definition.Path + "\n"))
+			if len(diagnostics) != 0 {
+				t.Fatal(diagnostics)
+			}
+			result, resolvedDiagnostics := Resolve(program, Options{Mode: "go"})
+			if len(resolvedDiagnostics) != 0 {
+				t.Fatalf("resolve diagnostics: %#v", resolvedDiagnostics)
+			}
+			binding, ok := result.Symbols[definition.Root]
+			if !ok || binding.Import == nil || binding.Import.Path != definition.Path {
+				t.Fatalf("root binding %s = %#v", definition.Root, binding)
+			}
+		})
 	}
 }
 
