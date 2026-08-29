@@ -2,6 +2,47 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.0 - 2026-08-30
+
+### Breaking changes
+
+- Imports now bind exact top-level declarations or one unique declaration root
+  selected from a package's exports. Replace legacy package-namespace imports
+  with bare root imports, use named imports for peer declarations and top-level
+  functions, and use `activate` only for bindingless compiler capabilities.
+  `trb fmt` and editor auto-imports emit the deterministic canonical form.
+  ([#603](https://github.com/type-rb/type-rb/pull/603))
+- Standard-library support declarations now belong to their public roots.
+  Replace peer-style imports and references with owner-qualified forms such as
+  `JSON::Error`, `FileSystem::Error`, `Process::Output`, and
+  `Hex::DecodeError`.
+  ([#604](https://github.com/type-rb/type-rb/pull/604))
+
+### Language and compiler
+
+- Exact named imports support aliases, declaration-root matching preserves
+  acronym spelling, and authored capability activation is isolated from
+  compiler-generated imports. Declaration ownership is preserved through
+  checking, lowering, completion, the REPL, and all generated backends.
+  ([#603](https://github.com/type-rb/type-rb/pull/603),
+  [#604](https://github.com/type-rb/type-rb/pull/604))
+- Go now emits payload enum constructor calls with the complete owner name for
+  nested declarations.
+  ([#606](https://github.com/type-rb/type-rb/pull/606))
+
+### Tooling
+
+- Bootstrap snapshot version 4 accepts registered arrays as array elements,
+  including nested literals, indexing, and mutation.
+  ([#601](https://github.com/type-rb/type-rb/pull/601))
+- Generated browser clients no longer emit a redundant terminal `return` in
+  their initializer, so recommended lint passes without editing generated
+  source. ([#605](https://github.com/type-rb/type-rb/pull/605))
+- The VS Code extension source is version 0.4.0, requires TypeRB 0.4.0, and
+  highlights declaration-root imports and explicit capability activation. The
+  extension is published separately from the compiler release.
+  ([#607](https://github.com/type-rb/type-rb/pull/607))
+
 ## 0.3.48 - 2026-08-28
 
 ### Language and compiler
