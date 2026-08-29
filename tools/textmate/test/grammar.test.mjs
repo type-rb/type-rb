@@ -88,7 +88,7 @@ test("scopes representative portable TypeRB syntax", async () => {
   const { tokens, ruleStack } = tokenize(await fixture("representative.trb"));
 
   assertScope(tokens, "import", "keyword.control.import.trb");
-  assertScope(tokens, "trb/std/result", "string.unquoted.import-path.trb");
+  assertScope(tokens, "trb/std/time", "string.unquoted.import-path.trb");
   assertScope(tokens, "module", "storage.type.trb");
   assertScope(tokens, "Demo", "entity.name.type.trb");
   assertScope(tokens, "API_VERSION", "constant.other.trb");
