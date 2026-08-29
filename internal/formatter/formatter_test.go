@@ -58,6 +58,29 @@ func TestFormatCombinesBareRootWithNamedImportsOnlyWhenStable(t *testing.T) {
 	}
 }
 
+func TestFormatPreservesQuotedPathsWhileCanonicalizingImports(t *testing.T) {
+	source := []byte("import { UseQueryOptions } from \"@tanstack/react-query\"\nimport { QueryClient } from \"@tanstack/react-query\"\nimport { Widget } from \"@scope/widget-kit/index\"\n")
+	formatted, diagnostics := FormatWithOptions(source, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		if node.Path == "@scope/widget-kit/index" {
+			return ImportMetadata{CanonicalPath: "@scope/widget-kit", Root: "Widget", RootStable: true, Resolved: true}
+		}
+		return ImportMetadata{CanonicalPath: node.Path, Resolved: true}
+	}})
+	if len(diagnostics) != 0 {
+		t.Fatal(diagnostics)
+	}
+	want := "import { QueryClient, UseQueryOptions } from \"@tanstack/react-query\"\nimport \"@scope/widget-kit\"\n"
+	if string(formatted) != want {
+		t.Fatalf("formatted quoted imports\nwant:\n%s\ngot:\n%s", want, formatted)
+	}
+	formattedAgain, diagnostics := FormatWithOptions(formatted, Options{ResolveImport: func(node *ast.ImportStatement) ImportMetadata {
+		return ImportMetadata{CanonicalPath: node.Path, Root: map[string]string{"@scope/widget-kit": "Widget"}[node.Path], RootStable: node.Path == "@scope/widget-kit", Resolved: true}
+	}})
+	if len(diagnostics) != 0 || !bytes.Equal(formatted, formattedAgain) {
+		t.Fatalf("quoted import formatting is not idempotent:\n%s\ndiags=%v", formattedAgain, diagnostics)
+	}
+}
+
 func TestFormatCanonicalizesActivatePathLikeImportPath(t *testing.T) {
 	source := []byte("activate vendor/native/index\n")
 	formatted, diagnostics := FormatWithOptions(source, Options{CanonicalImportPath: func(path string) string {
