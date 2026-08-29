@@ -167,6 +167,12 @@ name. A module is not required to provide a matching root. For example, an
 `encoding` module may intentionally expose only the peer declarations `Hex`
 and `Base64`.
 
+A root must also be a valid ordinary binding in the importing scope. Standard
+and official package authors must not choose a root that collides with a
+prelude declaration. In particular, the digest API uses
+`import trb/std/digest` and `Digest.sha256(...)`; it does not reuse `Hash`,
+which is already the built-in `Hash<K, V>` collection type.
+
 If more than one declaration has the same root key as the path, the bare
 import is ambiguous. Exact named imports remain available when the declaration
 source is allowed to contain the collision:
