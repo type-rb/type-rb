@@ -320,6 +320,15 @@ func copyImportMap[K comparable, V any](target *map[K]V, source map[K]V) {
 	maps.Copy(*target, source)
 }
 
+func typescriptQualifiedRootDeclaration(imported *ir.Import) bool {
+	switch imported.SymbolKinds[imported.QualifiedRoot] {
+	case "class", "record", "enum", "interface", "type_alias", "newtype", "enum_alias":
+		return true
+	default:
+		return false
+	}
+}
+
 func localNestedTypeOwners(statements []ir.Statement) map[string]string {
 	result := map[string]string{}
 	var collect func([]ir.Statement, string)
@@ -634,6 +643,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.ensureJSONRuntime()
 		}
 		jsonRuntime := n.Path == "trb/std/json/index" && n.RuntimeRequired
+		qualifiedRootDeclaration := typescriptQualifiedRootDeclaration(n)
 		if n.Namespace && n.Alias != "" {
 			for symbol, kind := range n.SymbolKinds {
 				switch kind {
@@ -652,7 +662,7 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			for _, symbol := range n.Symbols {
-				if symbol == n.QualifiedRoot {
+				if symbol == n.QualifiedRoot && !qualifiedRootDeclaration {
 					continue
 				}
 				if strings.Contains(symbol, "::") {
@@ -712,7 +722,7 @@ func (g *generator) statement(statement ir.Statement) {
 					g.jsonRuntime = true
 				}
 			}
-			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime {
+			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime && !qualifiedRootDeclaration {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
 			if len(values) > 0 {
@@ -3514,6 +3524,7 @@ func (g *generator) tsJSONStringify(call *ir.Call, argument string) string {
 
 func (g *generator) qualifyOwnedJSON(value string) string {
 	replacer := strings.NewReplacer(
+		"Result.", g.runtimeName("Result")+".",
 		"JSON.ErrorKind", g.runtimeName("JSON::ErrorKind"),
 		"JSON.Error", g.runtimeName("JSON::Error"),
 		"JSON.Value", g.runtimeName("JSON::Value"),
@@ -3533,7 +3544,8 @@ func (g *generator) tsJSONDecode(call *ir.Call, argument string) string {
 	errorType := tsJSONQualified(jsonAlias, "JSON.Error")
 	jsonErrorKind := tsJSONQualified(jsonAlias, "JSON.ErrorKind.Decode")
 	parse := tsJSONQualified(jsonAlias, "parse")
-	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return Result.Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return Result.Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return Result.Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
+	result := g.runtimeName("Result")
+	return "((): " + resultType + " => { const codecError = (path: string, message: string): " + errorType + " => ({ kind: " + jsonErrorKind + ", message, path, line: null, column: null }); const fail = (path: string, message: string): never => { throw { __trbJSONCodecError: true, error: codecError(path, message) }; }; " + builder.source.String() + " const parsed = " + parse + "(" + argument + "); if (parsed.kind === \"Err\") { return " + result + ".Err<" + valueType + ", " + errorType + ">(parsed.error); } try { return " + result + ".Ok<" + valueType + ", " + errorType + ">(" + decoder + "(parsed.value, \"\")); } catch (error) { if (typeof error === \"object\" && error !== null && (error as any).__trbJSONCodecError === true) { return " + result + ".Err<" + valueType + ", " + errorType + ">((error as any).error as " + errorType + "); } throw error; } })()"
 }
 
 func (g *generator) tsJSONEncode(call *ir.Call, argument string) string {

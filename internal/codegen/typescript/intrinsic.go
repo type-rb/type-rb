@@ -560,7 +560,8 @@ func (g *generator) tsWebContextFetch(call *ir.Call, arguments []string) string 
 	valueType := g.tsTypeWithIdentity(call.ExprType().Args[0], identityArgument(identity, 0))
 	errorType := g.tsTypeWithIdentity(call.ExprType().Args[1], identityArgument(identity, 1))
 	resultType := g.tsTypeWithIdentity(call.ExprType(), identity)
-	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return Result.Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return Result.Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
+	result := g.runtimeName("Result")
+	return "((): " + resultType + " => { const contextValue = " + arguments[0] + "; const contextKey = " + arguments[1] + "; const contextState = (contextValue as any).__trb_trb_context_state; if (contextState instanceof Map && contextState.has(contextKey)) return " + result + ".Ok<" + valueType + ", " + errorType + ">(contextState.get(contextKey) as " + valueType + "); return " + result + ".Err<" + valueType + ", " + errorType + ">({ key: contextKey.__trb_name }); })()"
 }
 
 func portableArrayString(value string, typ types.Type) string {
@@ -605,10 +606,11 @@ func (g *generator) tsWebRequestJSON(call *ir.Call, request string) string {
 	decoded := g.tsJSONDecode(&decodeCall, "source")
 	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.RequestError"
+	result := g.runtimeName("Result")
 	errResult := func(value string) string {
-		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+		return result + ".Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
-	okResult := "Result.Ok<" + valueType + ", " + errorType + ">"
+	okResult := result + ".Ok<" + valueType + ", " + errorType + ">"
 	missing := "__trb_web.RequestError.MissingContentType"
 	duplicate := "__trb_web.RequestError.DuplicateContentType"
 	unsupported := "__trb_web.RequestError.UnsupportedContentType(contentTypes[0]!)"
@@ -623,14 +625,15 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 	}
 	valueType := g.tsCodecType(call.Codec)
 	errorType := "__trb_web.ParameterError"
-	resultType := "Result<" + valueType + ", " + errorType + ">"
+	result := g.runtimeName("Result")
+	resultType := result + "<" + valueType + ", " + errorType + ">"
 	sourceName := "Path"
 	if source == "query" {
 		sourceName = "Query"
 	}
 	sourceValue := "__trb_web.ParameterSource." + sourceName
 	errResult := func(value string) string {
-		return "Result.Err<" + valueType + ", " + errorType + ">(" + value + ")"
+		return result + ".Err<" + valueType + ", " + errorType + ">(" + value + ")"
 	}
 	missing := func(name string) string {
 		return errResult("__trb_web.ParameterError.Missing({ source: " + sourceValue + ", name: " + strconv.Quote(name) + " })")
@@ -679,7 +682,7 @@ func (g *generator) tsWebParameterBinding(call *ir.Call, receiver, source string
 		}
 		constructor = append(constructor, field.Name+": "+variable)
 	}
-	body.WriteString("return Result.Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
+	body.WriteString("return " + result + ".Ok<" + valueType + ", " + errorType + ">({ " + strings.Join(constructor, ", ") + " } satisfies " + valueType + ");")
 	return "((): " + resultType + " => { const parameterReceiver = " + receiver + "; " + body.String() + " })()"
 }
 
