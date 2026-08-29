@@ -197,7 +197,7 @@ end
 			{Name: "ResultExpectation", Kind: "class"},
 		},
 		Source: `import { assert_equal, assert_false, assert_nil, assert_not_equal, assert_result_err, assert_result_ok, assert_true } from trb/internal/test
-import { Result } from trb/std/result
+import trb/std/result
 
 class Expectation<T>
 	readonly @actual: T

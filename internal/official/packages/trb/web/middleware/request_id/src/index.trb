@@ -1,7 +1,7 @@
 import { Context, Next, Response } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 import trb/std/encoding/hex
-import { Result } from trb/std/result
+import trb/std/result
 import trb/std/secure_random
 
 record RequestIDOptions

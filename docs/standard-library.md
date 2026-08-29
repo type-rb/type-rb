@@ -447,7 +447,7 @@ target OS or current directory.
 ```trb
 import trb/std/url
 import { PercentDecodeError, QueryParameter } from trb/std/url
-import { Result } from trb/std/result
+import trb/std/result
 
 encoded := URL.encode_component("todos/日本語")
 query := URL.build_query([
@@ -487,7 +487,7 @@ returns a `Result`:
 ```trb
 import trb/std/filesystem
 import { FileError } from trb/std/filesystem
-import { Result } from trb/std/result
+import trb/std/result
 
 def load_config(path: String): Result<String, FileError>
 	return FileSystem.read_text(path)
@@ -513,7 +513,7 @@ shell-free process operations:
 ```trb
 import trb/std/process
 import { ProcessError, ProcessResult } from trb/std/process
-import { Result } from trb/std/result
+import trb/std/result
 
 def run_formatter(files: Array<String>): Result<ProcessResult, ProcessError>
 	return Process.run("formatter", files)
@@ -531,7 +531,7 @@ stdout and stderr. A started process with any exit status is
 ```trb
 import trb/std/json
 import { JsonError } from trb/std/json
-import { Result } from trb/std/result
+import trb/std/result
 
 record User
 	id: Integer @json("user_id")
@@ -603,7 +603,7 @@ and injectable clocks are not part of the initial package.
 Import `Result<T, E>` explicitly:
 
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 ```
 
 Construct `Result::Ok(value)` or `Result::Err(error)` and handle it with an

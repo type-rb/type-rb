@@ -1,5 +1,5 @@
 import { Context, Next, Response, json } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 import trb/internal/runtime
 import trb/internal/web/timeout as native_timeout
 

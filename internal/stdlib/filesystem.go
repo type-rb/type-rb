@@ -1,8 +1,8 @@
 package stdlib
 
 func filesystemSource() string {
-	return `import { Result } from trb/std/result
-import { Unit } from trb/std/unit
+	return `import trb/std/result
+import trb/std/unit
 import trb/internal/filesystem as native_fs
 
 record FileError

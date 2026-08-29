@@ -103,7 +103,7 @@ target model available to ordinary expressions or type annotations. Import it
 normally when using it as a query root, constructor, parameter, or return type:
 
 ```trb
-import { Post } from models/post
+import models/post
 import { DbResult } from trb/orm
 
 def recent_posts(): DbResult<Array<Post>>

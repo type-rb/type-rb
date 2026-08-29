@@ -1,5 +1,5 @@
 import { Context, Next, Request, Response, empty } from trb/web
-import { Middleware } from trb/web/middleware
+import trb/web/middleware
 
 enum PreflightMaxAge
 	Disabled

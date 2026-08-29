@@ -76,14 +76,14 @@ var tourLessons = []Lesson{
 	{
 		ID: "result", Chapter: "Model data and errors", Title: "Enums and Result", Eyebrow: "09 · Model errors",
 		Description: "Result<T, E> is a standard generic payload enum. Safe standard-library operations return structured errors, while exhaustive case matching keeps both paths visible.",
-		Source:      "import { NumberParseError } from trb/std/errors\nimport { Result } from trb/std/result\n\ndef display(result: Result<Integer, NumberParseError>): String\n\tcase result\n\twhen Result::Ok(value)\n\t\treturn \"number: \" + value.to_s()\n\twhen Result::Err(error)\n\t\treturn \"error: \" + error.message\n\tend\nend\n\nputs(display(\"42\".try_to_i()))\nputs(display(\"nope\".try_to_i()))\n",
+		Source:      "import { NumberParseError } from trb/std/errors\nimport trb/std/result\n\ndef display(result: Result<Integer, NumberParseError>): String\n\tcase result\n\twhen Result::Ok(value)\n\t\treturn \"number: \" + value.to_s()\n\twhen Result::Err(error)\n\t\treturn \"error: \" + error.message\n\tend\nend\n\nputs(display(\"42\".try_to_i()))\nputs(display(\"nope\".try_to_i()))\n",
 		Expected:    "number: 42\nerror: invalid Integer\n",
 		Hint:        "Define your own payload enum and remove one when branch to see exhaustive checking.",
 	},
 	{
 		ID: "json", Chapter: "Model data and errors", Title: "JSON and typed codecs", Eyebrow: "10 · Model data",
 		Description: "Portable JSON and JSONC packages return Result values. Typed codecs decode checked records without passing untyped maps through the application.",
-		Source:      "import { JsonError } from trb/std/json\nimport trb/std/json\nimport { Result } from trb/std/result\n\nrecord User\n\tname: String\n\tactive: Boolean\nend\n\ndecoded: Result<User, JsonError> := JSON.decode<User>(\"{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true}\")\ncase decoded\nwhen Result::Ok(user)\n\tputs(user.name)\n\tputs(user.active)\nwhen Result::Err(error)\n\tputs(error.message)\nend\n",
+		Source:      "import { JsonError } from trb/std/json\nimport trb/std/json\nimport trb/std/result\n\nrecord User\n\tname: String\n\tactive: Boolean\nend\n\ndecoded: Result<User, JsonError> := JSON.decode<User>(\"{\\\"name\\\":\\\"Ada\\\",\\\"active\\\":true}\")\ncase decoded\nwhen Result::Ok(user)\n\tputs(user.name)\n\tputs(user.active)\nwhen Result::Err(error)\n\tputs(error.message)\nend\n",
 		Expected:    "Ada\ntrue\n",
 		Hint:        "Remove a JSON field to inspect its path-aware error, or import encode and serialize a User.",
 	},

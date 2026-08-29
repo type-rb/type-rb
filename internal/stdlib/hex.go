@@ -1,7 +1,7 @@
 package stdlib
 
 func hexSource() string {
-	return `import { Result } from trb/std/result
+	return `import trb/std/result
 import trb/internal/encoding/hex as native_hex
 
 enum HexDecodeErrorKind

@@ -41,7 +41,7 @@ in the immutable request context. Handlers retrieve it without sharing a
 string key or performing a cast:
 
 ```trb
-import { Result } from trb/std/result
+import trb/std/result
 import { Context, Response, text } from trb/web
 import trb/web/auth/bearer
 

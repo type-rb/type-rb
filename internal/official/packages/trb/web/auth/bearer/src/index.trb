@@ -1,5 +1,5 @@
 import { OidcAuthError, OidcAuthErrorKind, OidcBearerOptions, OidcPrincipal } from trb/auth/oidc
-import { Result } from trb/std/result
+import trb/std/result
 import { Body, Header, Headers } from trb/http
 import { Context, ContextKey, ContextValueError, Next, Request, Response } from trb/web
 import trb/internal/auth/oidc as native_oidc
