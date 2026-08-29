@@ -736,6 +736,9 @@ func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsBy
 	exports := exportsByPath[imported.Path]
 	if definition, ok := stdlib.Lookup(imported.Path); ok {
 		exports = append(exports, standardSymbols(definition)...)
+		if definition.Root != "" {
+			exports = append(exports, standardPackageRootSymbol(definition, standardSourceExports(definition)))
+		}
 	}
 	if len(exports) == 0 {
 		if program := programsByPath[imported.Path]; program != nil {
