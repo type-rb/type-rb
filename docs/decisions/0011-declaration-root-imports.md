@@ -18,10 +18,11 @@ A named form is more compact when one module exposes several independent
 declarations:
 
 ```trb
-import { Hex, Base64 } from trb/std/encoding
+import { Date, Duration } from trb/std/time
 
-hex_text := Hex.encode(payload)
-base64_text := Base64.encode(payload)
+def schedule(started_at: Date, timeout: Duration)
+	return
+end
 ```
 
 Treating these as two ways to import every member would make both
@@ -163,13 +164,18 @@ Examples include:
 
 If there is no match, the bare declaration import is an error and the
 diagnostic lists available top-level declarations that can be imported by
-name. A module is not required to provide a matching root. For example, an
-`encoding` module may intentionally expose only the peer declarations `Hex`
-and `Base64`.
+name. A module is not required to provide a matching root. For example, the
+`time` module intentionally exposes peer declarations such as `Date` and
+`Duration` without adding a `Time` root.
 
 A root must also be a valid ordinary binding in the importing scope. Standard
-and official package authors must not choose a root that collides with a
-prelude declaration. In particular, the digest API uses
+and official package authors must not choose a root that collides with an
+unrelated prelude declaration. A compiler-owned standard package may reuse a
+built-in type name only when it provides the canonical imported static API for
+that built-in rather than introducing a second meaning. This narrow rule
+allows `Bytes` and `StringBuilder` to gain their standard static operations
+through `trb/std/bytes` and `trb/std/string_builder`; it is not available to
+official or third-party packages. In particular, the digest API uses
 `import trb/std/digest` and `Digest.sha256(...)`; it does not reuse `Hash`,
 which is already the built-in `Hash<K, V>` collection type.
 
@@ -489,10 +495,21 @@ useful part of the program's vocabulary. Types such as `Instant`, `Duration`,
 import { Instant, Duration, TimeZone } from trb/std/time
 ```
 
-Likewise, `Hex` and `Base64` are peer capability modules selected from the
-`encoding` group, not implementation details nested under an `Encoding` root.
-This is an API ownership rule, not an exception table maintained by the
-compiler.
+Likewise, `Hex` and `Base64` are peer capability modules in the `encoding`
+group, not implementation details nested under an `Encoding` root. Each owns
+its operations and decode error family, so the standard library keeps them as
+separate canonical leaf modules:
+
+```trb
+import trb/std/encoding/hex
+import trb/std/encoding/base64
+```
+
+The standard library does not add an aggregator or re-export solely to reduce
+the number of import lines, because that would create synonymous import paths.
+A shared package is appropriate when it is itself the canonical owner of peer
+declarations, as with `trb/std/time`. This is an API ownership rule, not an
+exception table maintained by the compiler.
 
 ### Implementation order
 
