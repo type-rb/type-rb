@@ -178,7 +178,6 @@ func BuildBrowserClient(catalog EndpointCatalog, input packageextension.ProjectD
 	source.WriteString("\treadonly @_http: HttpClient\n\n")
 	source.WriteString("\tdef initialize(http: HttpClient)\n")
 	source.WriteString("\t\t@_http = http\n")
-	source.WriteString("\t\treturn\n")
 	source.WriteString("\tend\n")
 	source.WriteString(methods.String())
 	source.WriteString("end\n")

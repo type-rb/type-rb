@@ -81,6 +81,7 @@ end
 		"import { HttpClient, NoBody, RequestError, RequestErrorKind, Response, json_body } from trb/platform/typescript/browser",
 		"import trb/std/result",
 		"enum CreateReportEndpointResult",
+		"def initialize(http: HttpClient)\n\t\t@_http = http\n\tend",
 		"Status202(response: Response<CreateReportResponse>)",
 		"Status204(response: Response<NoBody>)",
 		"def create_report(input: CreateReportInput, *, headers: Headers = Headers.new(), timeout_milliseconds: Integer? = nil): Result<CreateReportEndpointResult, RequestError>",
@@ -99,6 +100,9 @@ end
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("generated source does not contain %q:\n%s", fragment, source)
 		}
+	}
+	if strings.Contains(source, "@_http = http\n\t\treturn\n") {
+		t.Fatalf("generated initializer contains a redundant terminal return:\n%s", source)
 	}
 
 	repeated, repeatedIssues, err := BuildBrowserClient(catalog, input, BrowserClientOptions{})
