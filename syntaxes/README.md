@@ -24,7 +24,8 @@ Visual Studio Code extension combine this grammar's immediate highlighting
 with semantic tokens from `trb lsp`.
 
 Target-specific packages do not change the portable TypeRB grammar. They
-expose target capabilities through explicit imports.
+expose target capabilities through declaration imports or explicit top-level
+`activate` statements.
 
 ## Maintenance
 

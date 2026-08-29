@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 - 2026-08-29
+
+- Require TypeRB 0.4.0 and support its declaration-root imports, exact named
+  imports, and explicit capability activation.
+- Highlight top-level `activate` statements and their package paths without
+  treating calls named `activate` as activation syntax.
+
 ## 0.3.6 - 2026-08-28
 
 - Require TypeRB 0.3.46 and run or debug Test Explorer selections with

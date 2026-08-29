@@ -255,6 +255,17 @@
               "name": "string.unquoted.import-path.trb"
             }
           }
+        },
+        {
+          "match": "^\\s*(activate)\\s+([\\p{L}_][\\p{L}\\p{N}_-]*(?:/[\\p{L}_][\\p{L}\\p{N}_-]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.trb"
+            },
+            "2": {
+              "name": "string.unquoted.import-path.trb"
+            }
+          }
         }
       ]
     },

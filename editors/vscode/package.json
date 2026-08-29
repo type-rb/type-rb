@@ -2,7 +2,7 @@
 	"name": "typerb",
 	"displayName": "TypeRB",
 	"description": "Language support for TypeRB",
-	"version": "0.3.6",
+	"version": "0.4.0",
 	"preview": true,
 	"publisher": "type-rb",
 	"license": "MIT",
