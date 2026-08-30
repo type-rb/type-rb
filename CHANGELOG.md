@@ -2,6 +2,16 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.2 - 2026-08-30
+
+### Packaging
+
+- The generated Homebrew Formula smoke test now uses the canonical `IO`
+  declaration root, so `brew test type-rb/tap/trb` builds its embedded TypeRB
+  project successfully. Pull-request and release workflows now render the
+  Formula and compile that project before publication.
+  ([#614](https://github.com/type-rb/type-rb/pull/614))
+
 ## 0.4.1 - 2026-08-30
 
 ### Breaking changes
