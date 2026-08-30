@@ -318,7 +318,7 @@ func (g *generator) ormInsertAll(call *ir.Call) string {
 	if !exists {
 		return "nil"
 	}
-	return g.ormModelQualifier(model) + goORMInsertAll(model) + "(" + g.expr(call.Arguments[0].Value) + ")"
+	return g.ormModelQualifier(model) + goORMInsertAll(model) + "(" + g.arrayValues(g.expr(call.Arguments[0].Value)) + ")"
 }
 
 func (g *generator) ormInsertIfAbsent(call *ir.Call) string {
@@ -338,7 +338,7 @@ func (g *generator) ormInsertIfAbsent(call *ir.Call) string {
 	for _, argument := range call.Arguments {
 		switch argument.Name {
 		case "unique_by":
-			uniqueBy = g.expr(argument.Value)
+			uniqueBy = g.arrayValues(g.expr(argument.Value))
 		case "":
 			if draft == "nil" {
 				draft = g.expr(argument.Value)
@@ -361,9 +361,9 @@ func (g *generator) ormUpsert(call *ir.Call) string {
 	for _, argument := range call.Arguments {
 		switch argument.Name {
 		case "unique_by":
-			uniqueBy = g.expr(argument.Value)
+			uniqueBy = g.arrayValues(g.expr(argument.Value))
 		case "update":
-			update = g.expr(argument.Value)
+			update = g.arrayValues(g.expr(argument.Value))
 		}
 	}
 	return g.ormModelQualifier(model) + goORMUpsert(model) + "(" + g.expr(member.Receiver) + ", " + uniqueBy + ", " + update + ")"
@@ -386,12 +386,12 @@ func (g *generator) ormUpsertAll(call *ir.Call) string {
 	for _, argument := range call.Arguments {
 		switch argument.Name {
 		case "unique_by":
-			uniqueBy = g.expr(argument.Value)
+			uniqueBy = g.arrayValues(g.expr(argument.Value))
 		case "update":
-			update = g.expr(argument.Value)
+			update = g.arrayValues(g.expr(argument.Value))
 		case "":
 			if drafts == "nil" {
-				drafts = g.expr(argument.Value)
+				drafts = g.arrayValues(g.expr(argument.Value))
 			}
 		}
 	}
@@ -481,6 +481,8 @@ func (g *generator) ormPredicateArguments(call *ir.Call) string {
 		operators[index] = strconv.Quote(string(predicate.Operator))
 		if predicate.Value.ExprType().Kind == types.Range {
 			values[index] = g.ormRangePredicateValue(predicate.Value)
+		} else if predicate.Value.ExprType().Kind == types.Array {
+			values[index] = g.arrayValues(g.expr(predicate.Value))
 		} else {
 			values[index] = g.expr(predicate.Value)
 		}
@@ -820,7 +822,8 @@ func (g *generator) ormLoadAssociation(call *ir.Call, reload bool) string {
 	}
 	result.WriteString(rawLoaded + " := " + load + "; if " + rawLoaded + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(valueType, rawLoaded+".ErrError") + " }; ")
 	if association.Kind == ormintegration.HasOne {
-		result.WriteString("if len(" + loadedValue + ") > 1 { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "database has_one association returned multiple rows")) + " }; var value " + g.goType(valueType) + "; if len(" + loadedValue + ") == 1 { value = " + loadedValue + "[0] }; ")
+		loadedValues := g.arrayValues(loadedValue)
+		result.WriteString("loadedValues := " + loadedValues + "; if len(loadedValues) > 1 { return " + g.ormResultErr(valueType, g.ormErrorValue("InvalidData", "database has_one association returned multiple rows")) + " }; var value " + g.goType(valueType) + "; if len(loadedValues) == 1 { value = loadedValues[0] }; ")
 	} else {
 		result.WriteString("value := " + loadedValue + "; ")
 	}
@@ -961,7 +964,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	}
 	g.indent--
 	g.line("}")
-	g.line(batch + " := " + loaded + ".OkValue")
+	g.line(batch + " := " + g.arrayValues(loaded+".OkValue"))
 	g.line("if len(" + batch + ") == 0 { break }")
 	g.line(done + " = len(" + batch + ") < " + size)
 	g.line(last + " := " + batch + "[len(" + batch + ")-1]." + goORMColumnGetter(batchKey.Name) + "()")
@@ -986,7 +989,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	} else {
 		g.line(processed + " += len(" + batch + ")")
 		if binding.Name != "_" {
-			g.line(g.bindingIdentifier(binding.Name) + " := " + batch)
+			g.line(g.bindingIdentifier(binding.Name) + " := " + loaded + ".OkValue")
 			g.line("_ = " + g.bindingIdentifier(binding.Name))
 		}
 		previousBreakTarget := g.breakTarget
@@ -2099,7 +2102,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if preloadError := preload.load(query.scope, query.transaction, result); preloadError != nil { return " + g.ormResultErr(modelsType, "*preloadError") + " }")
 	g.indent--
 	g.line("}")
-	g.line("return " + g.ormResultOK(modelsType, "result"))
+	g.line("return " + g.ormResultOK(modelsType, g.arrayReference("result")))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -2111,8 +2114,9 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.line("if query.limit == nil || *query.limit > 1 { count := 1; query.limit = &count }")
 	g.line("loaded := " + goORMLoader(model) + "(query)")
 	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(firstType, "loaded.ErrError") + " }")
-	g.line("if len(loaded.OkValue) == 0 { return " + g.ormResultOK(firstType, "nil") + " }")
-	g.line("return " + g.ormResultOK(firstType, "loaded.OkValue[0]"))
+	g.line("loadedValues := " + g.arrayValues("loaded.OkValue"))
+	g.line("if len(loadedValues) == 0 { return " + g.ormResultOK(firstType, "nil") + " }")
+	g.line("return " + g.ormResultOK(firstType, "loadedValues[0]"))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -2226,7 +2230,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	g.line("for _, value := range values {")
 	g.indent++
 	if association.Kind == ormintegration.HasMany {
-		g.line("value." + valueField + " = []" + targetType + "{}")
+		g.line("value." + valueField + " = " + g.arrayReference("[]"+targetType+"{}"))
 	}
 	g.line("value." + loadedField + " = true")
 	g.indent--
@@ -2243,7 +2247,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	} else {
 		g.line("related := map[" + g.goType(keyType) + "]" + targetType + "{}")
 	}
-	g.line("for _, relatedValue := range loaded.OkValue {")
+	g.line("for _, relatedValue := range " + g.arrayValues("loaded.OkValue") + " {")
 	g.indent++
 	if association.Kind == ormintegration.BelongsTo {
 		g.line("related[relatedValue." + goFieldName(targetColumn.Name) + "] = relatedValue")
@@ -2280,7 +2284,7 @@ func (g *generator) ormAssociationPreloader(manifest *ormintegration.Manifest, m
 	} else {
 		g.line("items := related[value." + goFieldName(sourceColumn.Name) + "]")
 		g.line("if items == nil { items = []" + targetType + "{} }")
-		g.line("value." + valueField + " = items")
+		g.line("value." + valueField + " = " + g.arrayReference("items"))
 	}
 	g.line("value." + loadedField + " = true")
 	g.indent--
@@ -2352,7 +2356,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.indent++
 	g.line("for _, value := range values { value." + loadedField + " = true")
 	if association.Kind == ormintegration.HasMany {
-		g.line("value." + valueField + " = []" + targetType + "{}")
+		g.line("value." + valueField + " = " + g.arrayReference("[]"+targetType+"{}"))
 	}
 	g.line("}")
 	g.line("return nil")
@@ -2364,7 +2368,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.line("if loadedMiddle.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loadedMiddle.ErrError }")
 	g.line("links := map[" + g.goType(parentKeyType) + "][]" + g.goType(targetKeyType) + "{}")
 	g.line("targetArguments := []any{}")
-	g.line("for _, middleValue := range loadedMiddle.OkValue {")
+	g.line("for _, middleValue := range " + g.arrayValues("loadedMiddle.OkValue") + " {")
 	g.indent++
 	parentExpression := "middleValue." + goFieldName(middleParentColumn.Name)
 	linkExpression := "middleValue." + goFieldName(middleTargetColumn.Name)
@@ -2396,7 +2400,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.line("targetQuery = " + targetQualifier + goORMQueryWhere(target) + "(targetQuery, []string{" + strconv.Quote(targetColumn.Name) + "}, []string{\"IN\"}, []any{targetArguments})")
 	g.line("loadedTargets := " + targetQualifier + goORMLoader(target) + "(targetQuery)")
 	g.line("if loadedTargets.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return &loadedTargets.ErrError }")
-	g.line("for _, relatedValue := range loadedTargets.OkValue {")
+	g.line("for _, relatedValue := range " + g.arrayValues("loadedTargets.OkValue") + " {")
 	g.indent++
 	targetExpression := "relatedValue." + goFieldName(targetColumn.Name)
 	if targetColumn.Nullable {
@@ -2414,7 +2418,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	if sourceColumn.Nullable {
 		g.line("if " + sourceExpression + " == nil { value." + loadedField + " = true")
 		if association.Kind == ormintegration.HasMany {
-			g.line("value." + valueField + " = []" + targetType + "{}")
+			g.line("value." + valueField + " = " + g.arrayReference("[]"+targetType+"{}"))
 		}
 		g.line("continue }")
 		sourceExpression = "*" + sourceExpression
@@ -2422,7 +2426,7 @@ func (g *generator) ormThroughAssociationPreloader(manifest *ormintegration.Mani
 	g.line("items := []" + targetType + "{}")
 	g.line("for _, key := range links[" + sourceExpression + "] { if relatedValue := related[key]; relatedValue != nil { items = append(items, relatedValue) } }")
 	if association.Kind == ormintegration.HasMany {
-		g.line("value." + valueField + " = items")
+		g.line("value." + valueField + " = " + g.arrayReference("items"))
 	} else {
 		g.line("if len(items) > 1 { databaseError := " + g.ormErrorValue("InvalidData", "database has_one through association returned multiple rows") + "; return &databaseError }")
 		g.line("if len(items) == 1 { value." + valueField + " = items[0] }")

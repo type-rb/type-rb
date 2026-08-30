@@ -22,9 +22,9 @@ end
 func TestRecordFieldDefaultsAreFirstClassAcrossPortableBackends(t *testing.T) {
 	expected := map[string][]string{
 		"go": {
-			"func Trb__RecordNew__Window(__trbField0 int, __trbField1 int, __trbField1Provided bool, __trbField2 []string, __trbField2Provided bool) Window",
+			"func Trb__RecordNew__Window(__trbField0 int, __trbField1 int, __trbField1Provided bool, __trbField2 *[]string, __trbField2Provided bool) Window",
 			"__trbField1 = trbIntegerAdd_",
-			"__trbField2 = []string{}",
+			"__trbField2 = trbArrayReference_",
 			"return Trb__RecordNew__Window(__trbRecordArg1, __trbRecordZero2, false, __trbRecordZero3, false)",
 		},
 		"ruby": {

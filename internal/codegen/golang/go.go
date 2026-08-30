@@ -59,6 +59,7 @@ type generator struct {
 	execution         *effectplan.Plan
 	executionActive   bool
 	oidcRuntime       bool
+	arrayRuntime      bool
 	arrayIndexRuntime bool
 	recordSources     bool
 	sourceMarker      int
@@ -180,6 +181,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	g.integrations(program.Extensions)
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.arrayRuntime {
+		g.arrayRuntimeSupport()
 	}
 	if g.arrayIndexRuntime {
 		g.arrayIndexRuntimeSupport()
@@ -665,7 +669,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.indent++
 		if itemBinding.Name != "_" {
 			g.line(end + " := min(" + offset + "+" + size + ", len(" + items + "))")
-			g.line(item + " := " + items + "[" + offset + ":" + end + "]")
+			g.line(item + " := " + g.arrayReference(items+"["+offset+":"+end+"]"))
 			g.line("_ = " + item)
 		}
 		if iteration.WithIndex {
@@ -707,6 +711,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 
 func (g *generator) iterableExpr(expression ir.Expression) string {
 	value := g.expr(expression)
+	if expression.ExprType().Kind == types.Array || expression.ExprType().Kind == types.Iterable {
+		return g.arrayValues(value)
+	}
 	if expression.ExprType().Kind != types.Range {
 		return value
 	}
@@ -715,7 +722,7 @@ func (g *generator) iterableExpr(expression ir.Expression) string {
 
 func (g *generator) exprExpected(expression ir.Expression, expected types.Type) string {
 	if array, ok := expression.(*ir.Array); ok && len(array.Elements) == 0 && expected.Kind == types.Array {
-		return g.goType(expected) + "{}"
+		return g.arrayReference(g.goArraySliceType(expected) + "{}")
 	}
 	if literal, ok := expression.(*ir.Literal); ok && literal.Kind == "nil" && expected.Nullable {
 		return "(" + g.goType(expected) + ")(nil)"
@@ -1618,7 +1625,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		for i, element := range n.Elements {
 			parts[i] = g.expr(element)
 		}
-		return g.goType(n.ExprType()) + "{" + strings.Join(parts, ", ") + "}"
+		return g.arrayReference(g.goArraySliceType(n.ExprType()) + "{" + strings.Join(parts, ", ") + "}")
 	case *ir.Hash:
 		parts := make([]string, len(n.Entries))
 		for i, entry := range n.Entries {
@@ -1641,7 +1648,7 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Conversion:
 		switch n.Kind {
 		case ir.RangeToIterableConversion:
-			return g.iterableExpr(n.Value)
+			return g.arrayReference(g.iterableExpr(n.Value))
 		case ir.IntegerToFloatConversion:
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -2237,7 +2244,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		decorated := "__trbDecorated" + suffix
 		index := "__trbIndex" + suffix
 		comparison := g.portableSortComparison("left.key", "right.key", keyType, transform.Operation == "sort_by_descending")
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; type " + decorated + " struct { value " + g.goType(transform.ItemType) + "; key " + g.goType(keyType) + " }; ordered := make([]" + decorated + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { _ = " + index + "; " + itemUse + "ordered = append(ordered, " + decorated + "{value: " + item + ", key: " + value + "}) }; slices.SortStableFunc(ordered, func(left, right " + decorated + ") int { return " + comparison + " }); " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(ordered)); for _, entry := range ordered { " + result + " = append(" + result + ", entry.value) }; return " + result + " }()"
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; type " + decorated + " struct { value " + g.goType(transform.ItemType) + "; key " + g.goType(keyType) + " }; ordered := make([]" + decorated + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { _ = " + index + "; " + itemUse + "ordered = append(ordered, " + decorated + "{value: " + item + ", key: " + value + "}) }; slices.SortStableFunc(ordered, func(left, right " + decorated + ") int { return " + comparison + " }); " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(ordered)); for _, entry := range ordered { " + result + " = append(" + result + ", entry.value) }; return " + g.arrayReference(result) + " }()"
 	case "map":
 		index := "_"
 		indexUse := ""
@@ -2250,7 +2257,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 				indexUse = "_ = " + index + "; "
 			}
 		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + result + " = append(" + result + ", " + value + ") }; return " + result + " }()"
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + result + " = append(" + result + ", " + value + ") }; return " + g.arrayReference(result) + " }()"
 	case "select":
 		index := "_"
 		indexUse := ""
@@ -2263,7 +2270,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 				indexUse = "_ = " + index + "; "
 			}
 		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + "if " + value + " { " + result + " = append(" + result + ", " + item + ") } }; return " + result + " }()"
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + "if " + value + " { " + result + " = append(" + result + ", " + item + ") } }; return " + g.arrayReference(result) + " }()"
 	case "any?", "all?", "none?":
 		initial := "false"
 		match := value
@@ -2341,6 +2348,7 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	}
 	value := g.transformResult(transform)
 	typeName := g.goType(transform.ExprType())
+	sliceType := g.goArraySliceType(transform.ExprType())
 	source := g.iterableExpr(transform.Source)
 	held := "__trbHeld" + suffix
 	return "func() " + typeName + " { " +
@@ -2349,10 +2357,10 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 		semaphore + " := " + group + "[\"semaphore\"].(chan struct{}); " + localLimit + " := cap(" + semaphore + "); " +
 		"func() { if " + strconv.FormatBool(explicit) + " && " + requested + " < " + localLimit + " { " + localLimit + " = " + requested + " } }(); " +
 		held + ", _ := __trbScope.Value(\"type-rb/concurrency-held\").(bool); if " + held + " { <-" + semaphore + "; defer func() { " + semaphore + " <- struct{}{} }() }; " +
-		childScope + ", " + cancel + " := trbcontext.WithCancel(" + concurrentScope + "); defer " + cancel + "(); " + result + " := make(" + typeName + ", len(" + items + ")); " +
+		childScope + ", " + cancel + " := trbcontext.WithCancel(" + concurrentScope + "); defer " + cancel + "(); " + result + " := make(" + sliceType + ", len(" + items + ")); " +
 		workerCount + " := " + localLimit + "; if len(" + items + ") < " + workerCount + " { " + workerCount + " = len(" + items + ") }; " + jobs + " := make(chan int); var " + waitGroup + " sync.WaitGroup; var " + panicOnce + " sync.Once; var " + panicValue + " any; " +
 		"for " + worker + " := 0; " + worker + " < " + workerCount + "; " + worker + "++ { " + waitGroup + ".Add(1); go func() { defer " + waitGroup + ".Done(); for " + index + " := range " + jobs + " { select { case " + semaphore + " <- struct{}{}: case <-" + childScope + ".Done(): return }; func() { defer func() { <-" + semaphore + " }(); defer func() { if recovered := recover(); recovered != nil { " + panicOnce + ".Do(func() { " + panicValue + " = recovered; " + cancel + "() }) } }(); __trbScope := trbcontext.WithValue(" + childScope + ", \"type-rb/concurrency-held\", true); _ = __trbScope; " + item + " := " + items + "[" + index + "]; " + itemUse + result + "[" + index + "] = " + value + " }() } }() }; " +
-		"func() { defer close(" + jobs + "); for " + index + " := range " + items + " { select { case " + jobs + " <- " + index + ": case <-" + childScope + ".Done(): return } } }(); " + waitGroup + ".Wait(); if " + panicValue + " != nil { panic(" + panicValue + ") }; if err := __trbScope.Err(); err != nil { panic(err) }; return " + result + " }()"
+		"func() { defer close(" + jobs + "); for " + index + " := range " + items + " { select { case " + jobs + " <- " + index + ": case <-" + childScope + ".Done(): return } } }(); " + waitGroup + ".Wait(); if " + panicValue + " != nil { panic(" + panicValue + ") }; if err := __trbScope.Err(); err != nil { panic(err) }; return " + g.arrayReference(result) + " }()"
 }
 
 func (g *generator) transformResult(transform *ir.Transform) string {
@@ -2440,7 +2448,7 @@ func (g *generator) assignmentTarget(expression ir.Expression) string {
 	if index, ok := expression.(*ir.Index); ok {
 		if index.Receiver.ExprType().Kind == types.Array {
 			g.arrayIndexRuntime = true
-			receiver := g.expr(index.Receiver)
+			receiver := g.arrayValues(g.expr(index.Receiver))
 			position := g.arrayIndexPositionName() + "(" + g.expr(index.Index) + ", len(" + receiver + "))"
 			return receiver + "[" + position + "]"
 		}
@@ -2449,9 +2457,34 @@ func (g *generator) assignmentTarget(expression ir.Expression) string {
 	return g.expr(expression)
 }
 
+func (g *generator) arrayRuntimeSupport() {
+	// Keep the slice header behind a pointer so aliases observe length and capacity
+	// changes when append or another destructive operation reallocates storage.
+	g.line("func " + g.arrayReferenceName() + "[T any](values []T) *[]T { return &values }")
+	g.line("func " + g.arrayValuesName() + "[T any](values *[]T) []T { return *values }")
+}
+
+func (g *generator) arrayReference(values string) string {
+	g.arrayRuntime = true
+	return g.arrayReferenceName() + "(" + values + ")"
+}
+
+func (g *generator) arrayValues(values string) string {
+	g.arrayRuntime = true
+	return g.arrayValuesName() + "(" + values + ")"
+}
+
+func (g *generator) arrayReferenceName() string {
+	return "trbArrayReference_" + naming.PrivateSuffix("array-reference:"+g.modulePath)
+}
+
+func (g *generator) arrayValuesName() string {
+	return "trbArrayValues_" + naming.PrivateSuffix("array-values:"+g.modulePath)
+}
+
 func (g *generator) arrayIndexRuntimeSupport() {
 	g.line("func " + g.arrayIndexPositionName() + `(index int, size int) int { if index < 0 { index += size }; if index < 0 || index >= size { panic("Array index is out of bounds") }; return index }`)
-	g.line("func " + g.arrayIndexName() + "[T any](values []T, index int) T { return values[" + g.arrayIndexPositionName() + "(index, len(values))] }")
+	g.line("func " + g.arrayIndexName() + "[T any](values *[]T, index int) T { items := *values; return items[" + g.arrayIndexPositionName() + "(index, len(items))] }")
 }
 
 func (g *generator) arrayIndexPositionName() string {
@@ -2698,7 +2731,7 @@ func (g *generator) jsonParse(call *ir.Call, argument string, comments bool) str
 		strip = `stripComments := func(input string) string { result := []byte(input); inString := false; escaped := false; for index := 0; index < len(result); index++ { if inString { if escaped { escaped = false; continue }; if result[index] == '\\' { escaped = true } else if result[index] == '"' { inString = false }; continue }; if result[index] == '"' { inString = true; continue }; if result[index] != '/' || index+1 >= len(result) { continue }; if result[index+1] == '/' { result[index], result[index+1] = ' ', ' '; index += 2; for index < len(result) && result[index] != '\n' { if result[index] != '\r' { result[index] = ' ' }; index++ }; index-- } else if result[index+1] == '*' { result[index], result[index+1] = ' ', ' '; index += 2; for index < len(result) { if index+1 < len(result) && result[index] == '*' && result[index+1] == '/' { result[index], result[index+1] = ' ', ' '; index++; break }; if result[index] != '\n' && result[index] != '\r' { result[index] = ' ' }; index++ } } }; return string(result) }; source = stripComments(source); `
 	}
 	conversionError := "func(path, message string) *" + errorType + " { value := " + errorType + "{Kind: " + prefix + "JSONErrorKindDecode, Message: message, Path: path}; return &value }"
-	convert := "var convert func(any, string) (" + valueType + ", *" + errorType + "); convert = func(input any, path string) (" + valueType + ", *" + errorType + ") { switch value := input.(type) { case nil: return " + prefix + "JSONValueNull, nil; case bool: return " + prefix + "NewJSONValueBoolean(value), nil; case stdjson.Number: number, parseErr := strconv.ParseFloat(string(value), 64); if parseErr != nil || math.IsInf(number, 0) || math.IsNaN(number) { return " + valueType + "{}, conversionError(path, \"JSON number is not finite\") }; if math.Trunc(number) == number { if number < -9007199254740991 || number > 9007199254740991 { return " + valueType + "{}, conversionError(path, \"JSON integer is outside the portable range\") }; return " + prefix + "NewJSONValueInteger(int(number)), nil }; return " + prefix + "NewJSONValueFloat(number), nil; case string: return " + prefix + "NewJSONValueString(value), nil; case []any: items := make([]" + valueType + ", len(value)); for index, item := range value { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return " + valueType + "{}, conversionErr }; items[index] = converted }; return " + prefix + "NewJSONValueArray(items), nil; case map[string]any: fields := make(map[string]" + valueType + ", len(value)); for key, item := range value { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return " + valueType + "{}, conversionErr }; fields[key] = converted }; return " + prefix + "NewJSONValueObject(fields), nil; default: return " + valueType + "{}, conversionError(path, \"unsupported JSON value\") } }"
+	convert := "var convert func(any, string) (" + valueType + ", *" + errorType + "); convert = func(input any, path string) (" + valueType + ", *" + errorType + ") { switch value := input.(type) { case nil: return " + prefix + "JSONValueNull, nil; case bool: return " + prefix + "NewJSONValueBoolean(value), nil; case stdjson.Number: number, parseErr := strconv.ParseFloat(string(value), 64); if parseErr != nil || math.IsInf(number, 0) || math.IsNaN(number) { return " + valueType + "{}, conversionError(path, \"JSON number is not finite\") }; if math.Trunc(number) == number { if number < -9007199254740991 || number > 9007199254740991 { return " + valueType + "{}, conversionError(path, \"JSON integer is outside the portable range\") }; return " + prefix + "NewJSONValueInteger(int(number)), nil }; return " + prefix + "NewJSONValueFloat(number), nil; case string: return " + prefix + "NewJSONValueString(value), nil; case []any: items := make([]" + valueType + ", len(value)); for index, item := range value { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return " + valueType + "{}, conversionErr }; items[index] = converted }; return " + prefix + "NewJSONValueArray(" + g.arrayReference("items") + "), nil; case map[string]any: fields := make(map[string]" + valueType + ", len(value)); for key, item := range value { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return " + valueType + "{}, conversionErr }; fields[key] = converted }; return " + prefix + "NewJSONValueObject(fields), nil; default: return " + valueType + "{}, conversionError(path, \"unsupported JSON value\") } }"
 	location := "func(source string, parseErr error) (*int, *int) { syntax, ok := parseErr.(*stdjson.SyntaxError); if !ok { return nil, nil }; offset := int(syntax.Offset) - 1; if offset < 0 { offset = 0 }; if offset > len(source) { offset = len(source) }; line, column := 1, 1; for _, value := range source[:offset] { if value == '\\n' { line++; column = 1 } else { column++ } }; return &line, &column }"
 	return "func() " + resultType + " { source := " + argument + "; " + strip + "sourceLocation := " + location + "; decoder := stdjson.NewDecoder(strings.NewReader(source)); decoder.UseNumber(); var raw any; if err := decoder.Decode(&raw); err != nil { lineValue, columnValue := sourceLocation(source, err); return " + errResult("Syntax", "err.Error()", `""`, "lineValue", "columnValue") + " }; if err := decoder.Decode(&struct{}{}); err != io.EOF { if err == nil { err = errors.New(\"JSON source contains multiple values\") }; lineValue, columnValue := sourceLocation(source, err); return " + errResult("Syntax", "err.Error()", `""`, "lineValue", "columnValue") + " }; conversionError := " + conversionError + "; " + convert + "; value, conversionErr := convert(raw, \"\"); if conversionErr != nil { return " + resultAlias + ".NewResultErr[" + valueType + ", " + errorType + "](*conversionErr) }; return " + ok("value") + " }()"
 }
@@ -2727,7 +2760,7 @@ func (g *generator) jsonStringify(call *ir.Call, argument string) string {
 		return resultAlias + ".NewResultErr[string, " + errorType + "](" + value + ")"
 	}
 	conversionError := "func(path, message string) *" + errorType + " { value := " + errorType + "{Kind: " + prefix + "JSONErrorKindEncode, Message: message, Path: path}; return &value }"
-	convert := "var convert func(" + valueType + ", string) (any, *" + errorType + "); convert = func(value " + valueType + ", path string) (any, *" + errorType + ") { switch value.Kind { case " + prefix + "JSONValueNullTag: return nil, nil; case " + prefix + "JSONValueBooleanTag: return value.BooleanValue, nil; case " + prefix + "JSONValueIntegerTag: if value.IntegerValue < -9007199254740991 || value.IntegerValue > 9007199254740991 { return nil, conversionError(path, \"JSON integer is outside the portable range\") }; return value.IntegerValue, nil; case " + prefix + "JSONValueFloatTag: if math.IsInf(value.FloatValue, 0) || math.IsNaN(value.FloatValue) { return nil, conversionError(path, \"JSON Float must be finite\") }; return value.FloatValue, nil; case " + prefix + "JSONValueStringTag: return value.StringValue, nil; case " + prefix + "JSONValueArrayTag: items := make([]any, len(value.ArrayValue)); for index, item := range value.ArrayValue { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return nil, conversionErr }; items[index] = converted }; return items, nil; case " + prefix + "JSONValueObjectTag: fields := make(map[string]any, len(value.ObjectValue)); for key, item := range value.ObjectValue { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return nil, conversionErr }; fields[key] = converted }; return fields, nil; default: return nil, conversionError(path, \"unsupported JSON value\") } }"
+	convert := "var convert func(" + valueType + ", string) (any, *" + errorType + "); convert = func(value " + valueType + ", path string) (any, *" + errorType + ") { switch value.Kind { case " + prefix + "JSONValueNullTag: return nil, nil; case " + prefix + "JSONValueBooleanTag: return value.BooleanValue, nil; case " + prefix + "JSONValueIntegerTag: if value.IntegerValue < -9007199254740991 || value.IntegerValue > 9007199254740991 { return nil, conversionError(path, \"JSON integer is outside the portable range\") }; return value.IntegerValue, nil; case " + prefix + "JSONValueFloatTag: if math.IsInf(value.FloatValue, 0) || math.IsNaN(value.FloatValue) { return nil, conversionError(path, \"JSON Float must be finite\") }; return value.FloatValue, nil; case " + prefix + "JSONValueStringTag: return value.StringValue, nil; case " + prefix + "JSONValueArrayTag: arrayValue := " + g.arrayValues("value.ArrayValue") + "; items := make([]any, len(arrayValue)); for index, item := range arrayValue { converted, conversionErr := convert(item, path+\"/\"+strconv.Itoa(index)); if conversionErr != nil { return nil, conversionErr }; items[index] = converted }; return items, nil; case " + prefix + "JSONValueObjectTag: fields := make(map[string]any, len(value.ObjectValue)); for key, item := range value.ObjectValue { escaped := strings.ReplaceAll(strings.ReplaceAll(key, \"~\", \"~0\"), \"/\", \"~1\"); converted, conversionErr := convert(item, path+\"/\"+escaped); if conversionErr != nil { return nil, conversionErr }; fields[key] = converted }; return fields, nil; default: return nil, conversionError(path, \"unsupported JSON value\") } }"
 	return "func() " + resultType + " { conversionError := " + conversionError + "; " + convert + "; raw, conversionErr := convert(" + argument + ", \"\"); if conversionErr != nil { return " + resultAlias + ".NewResultErr[string, " + errorType + "](*conversionErr) }; encoded, err := stdjson.Marshal(raw); if err != nil { return " + errResult("err.Error()", `""`) + " }; return " + ok + "(string(encoded)) }()"
 }
 
@@ -2792,7 +2825,8 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 	var result string
 	switch schema.Kind {
 	case "array":
-		result = "[]" + g.goCodecType(schema.Element)
+		g.arrayRuntime = true
+		result = "*[]" + g.goCodecType(schema.Element)
 	case "hash":
 		result = "map[string]" + g.goCodecType(schema.Element)
 	case "record", "raw_enum":
@@ -2807,7 +2841,7 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 	default:
 		result = g.goType(base)
 	}
-	if nullable {
+	if nullable && !strings.HasPrefix(result, "*") {
 		return "*" + result
 	}
 	return result
@@ -2873,7 +2907,7 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		nonnull.Type.Nullable = false
 		child := b.decoder(&nonnull)
 		body := "if value.Kind == " + b.jsonAlias + ".JSONValueNullTag { return nil, nil }; decoded, err := " + child + "(value, path); if err != nil { return nil, err }; return &decoded, nil"
-		if isTimeCodec(schema.Kind) {
+		if schema.Kind == "array" || isTimeCodec(schema.Kind) {
 			body = "if value.Kind == " + b.jsonAlias + ".JSONValueNullTag { return nil, nil }; return " + child + "(value, path)"
 		}
 		b.source.WriteString(name + " := func(value " + jsonValue + ", path string) (" + valueType + ", *" + b.errorType + ") { " + body + " }; ")
@@ -2918,7 +2952,8 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		b.generator.requireImport("strconv", "")
 		child := b.decoder(schema.Element)
 		elementType := b.generator.goCodecType(schema.Element)
-		body = "if value.Kind != " + b.jsonAlias + ".JSONValueArrayTag { " + expected("Array") + " }; decoded := make([]" + elementType + ", len(value.ArrayValue)); for index, item := range value.ArrayValue { child, err := " + child + "(item, path+\"/\"+strconv.Itoa(index)); if err != nil { var zero " + valueType + "; return zero, err }; decoded[index] = child }; return decoded, nil"
+		arrayValue := b.generator.arrayValues("value.ArrayValue")
+		body = "if value.Kind != " + b.jsonAlias + ".JSONValueArrayTag { " + expected("Array") + " }; arrayValue := " + arrayValue + "; decoded := make([]" + elementType + ", len(arrayValue)); for index, item := range arrayValue { child, err := " + child + "(item, path+\"/\"+strconv.Itoa(index)); if err != nil { var zero " + valueType + "; return zero, err }; decoded[index] = child }; return " + b.generator.arrayReference("decoded") + ", nil"
 	case "hash":
 		b.generator.requireImport("strings", "")
 		child := b.decoder(schema.Element)
@@ -2956,7 +2991,7 @@ func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		nonnull.Type.Nullable = false
 		child := b.encoder(&nonnull)
 		body := "if value == nil { return " + b.jsonAlias + ".JSONValueNull }; return " + child + "(*value)"
-		if isTimeCodec(schema.Kind) {
+		if schema.Kind == "array" || isTimeCodec(schema.Kind) {
 			body = "if value == nil { return " + b.jsonAlias + ".JSONValueNull }; return " + child + "(value)"
 		}
 		b.source.WriteString(name + " := func(value " + valueType + ") " + jsonValue + " { " + body + " }; ")
@@ -2984,7 +3019,8 @@ func (b *goJSONCodecBuilder) encoder(schema *ir.CodecSchema) string {
 		}
 	case "array":
 		child := b.encoder(schema.Element)
-		body = "items := make([]" + jsonValue + ", len(value)); for index, item := range value { items[index] = " + child + "(item) }; return " + b.jsonAlias + ".NewJSONValueArray(items)"
+		arrayValue := b.generator.arrayValues("value")
+		body = "arrayValue := " + arrayValue + "; items := make([]" + jsonValue + ", len(arrayValue)); for index, item := range arrayValue { items[index] = " + child + "(item) }; return " + b.jsonAlias + ".NewJSONValueArray(" + b.generator.arrayReference("items") + ")"
 	case "hash":
 		child := b.encoder(schema.Element)
 		body = "fields := make(map[string]" + jsonValue + ", len(value)); for key, item := range value { fields[key] = " + child + "(item) }; return " + b.jsonAlias + ".NewJSONValueObject(fields)"
@@ -3007,8 +3043,14 @@ func jsonPointerEscape(value string) string {
 func (g *generator) gormRead(call *ir.Call, arguments []string, operation string) string {
 	resultType := g.goType(call.ExprType())
 	valueType := resultType
+	resultDeclaration := "var result " + resultType
+	resultAddress := "&result"
+	resultValue := "result"
 	if call.ExprType().Kind == types.Array && len(call.ExprType().Args) > 0 {
 		valueType = g.goType(call.ExprType().Args[0])
+		sliceType := g.goArraySliceType(call.ExprType())
+		resultDeclaration = "var result " + sliceType
+		resultValue = g.arrayReference("result")
 	}
 	args := ""
 	if len(arguments) > 3 {
@@ -3016,11 +3058,11 @@ func (g *generator) gormRead(call *ir.Call, arguments []string, operation string
 	}
 	switch operation {
 	case "find_all":
-		return "func() " + resultType + " { var result " + resultType + "; if err := " + arguments[0] + ".Find(&result).Error; err != nil { panic(err) }; return result }()"
+		return "func() " + resultType + " { " + resultDeclaration + "; if err := " + arguments[0] + ".Find(" + resultAddress + ").Error; err != nil { panic(err) }; return " + resultValue + " }()"
 	case "where":
-		return "func() " + resultType + " { var result " + resultType + "; if err := " + arguments[0] + ".Where(" + arguments[2] + args + ").Find(&result).Error; err != nil { panic(err) }; return result }()"
+		return "func() " + resultType + " { " + resultDeclaration + "; if err := " + arguments[0] + ".Where(" + arguments[2] + args + ").Find(" + resultAddress + ").Error; err != nil { panic(err) }; return " + resultValue + " }()"
 	case "raw":
-		return "func() " + resultType + " { var result " + resultType + "; if err := " + arguments[0] + ".Raw(" + arguments[2] + args + ").Scan(&result).Error; err != nil { panic(err) }; return result }()"
+		return "func() " + resultType + " { " + resultDeclaration + "; if err := " + arguments[0] + ".Raw(" + arguments[2] + args + ").Scan(" + resultAddress + ").Error; err != nil { panic(err) }; return " + resultValue + " }()"
 	case "first":
 		return "func() " + valueType + " { var result " + valueType + "; if err := " + arguments[0] + ".Where(" + arguments[2] + args + ").First(&result).Error; err != nil { panic(err) }; return result }()"
 	default:
@@ -3147,11 +3189,8 @@ func (g *generator) goType(t types.Type) string {
 		g.requireImport("strings", "")
 		result = "*strings.Builder"
 	case types.Array, types.Iterable:
-		element := "any"
-		if len(t.Args) > 0 {
-			element = g.goType(t.Args[0])
-		}
-		result = "[]" + element
+		g.arrayRuntime = true
+		result = "*" + g.goArraySliceType(t)
 	case types.Range:
 		result = "[3]int"
 	case types.Hash:
@@ -3256,6 +3295,14 @@ func (g *generator) goType(t types.Type) string {
 		return "*" + result
 	}
 	return result
+}
+
+func (g *generator) goArraySliceType(t types.Type) string {
+	element := "any"
+	if len(t.Args) > 0 {
+		element = g.goType(t.Args[0])
+	}
+	return "[]" + element
 }
 
 func (g *generator) projectFunctionName(modulePath, sourceName string) string {

@@ -204,7 +204,7 @@ end
 			wants := map[string][]string{
 				"go": {
 					"func NewBox(__trbScope trbcontext.Context) *Box",
-					"self.TrbFieldValues = MapValues(__trbScope, []int{10})",
+					"self.TrbFieldValues = MapValues(__trbScope, trbArrayReference_",
 					"func MakeBox(__trbScope trbcontext.Context) *Box",
 					"return NewBox(__trbScope)",
 				},

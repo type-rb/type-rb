@@ -212,10 +212,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("os", "")
 		g.requireImport("slices", "")
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK("names") + " }()"
+		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK(g.arrayReference("names")) + " }()"
 	case "trb.internal.process.arguments":
 		g.requireImport("os", "")
-		return "append([]string{}, os.Args[1:]...)"
+		return g.arrayReference("append([]string{}, os.Args[1:]...)")
 	case "trb.internal.process.environment":
 		g.requireImport("os", "")
 		return "func() *string { value, found := os.LookupEnv(" + arguments[0] + "); if !found { return nil }; return &value }()"
@@ -230,7 +230,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("strings", "")
 		resultType, successType, _ := filesystemResultType()
 		value := successType + "{Status: status, Stdout: strings.ToValidUTF8(stdout.String(), \"�\"), Stderr: strings.ToValidUTF8(stderr.String(), \"�\"), Success: status == 0}"
-		return "func() " + resultType + " { commandName := " + arguments[0] + "; commandArguments := " + arguments[1] + "; process := exec.Command(commandName, commandArguments...); var stdout bytes.Buffer; var stderr bytes.Buffer; process.Stdout = &stdout; process.Stderr = &stderr; err := process.Run(); status := 0; if err != nil { var exitError *exec.ExitError; if errors.As(err, &exitError) { status = exitError.ExitCode() } else { return " + processError("run", "commandName", "err.Error()") + " } }; return " + filesystemOK(value) + " }()"
+		return "func() " + resultType + " { commandName := " + arguments[0] + "; commandArguments := " + g.arrayValues(arguments[1]) + "; process := exec.Command(commandName, commandArguments...); var stdout bytes.Buffer; var stderr bytes.Buffer; process.Stdout = &stdout; process.Stderr = &stderr; err := process.Run(); status := 0; if err != nil { var exitError *exec.ExitError; if errors.As(err, &exitError) { status = exitError.ExitCode() } else { return " + processError("run", "commandName", "err.Error()") + " } }; return " + filesystemOK(value) + " }()"
 	case "trb.internal.json.parse":
 		return g.jsonParse(call, arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
@@ -465,7 +465,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "strings.HasSuffix(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.split":
 		g.requireImport("strings", "")
-		return "func() []string { value := " + arguments[0] + "; separator := " + arguments[1] + "; if separator == \"\" { panic(\"String split separator is empty\") }; return strings.Split(value, separator) }()"
+		return g.arrayReference("func() []string { value := " + arguments[0] + "; separator := " + arguments[1] + "; if separator == \"\" { panic(\"String split separator is empty\") }; return strings.Split(value, separator) }()")
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
@@ -474,10 +474,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "func(value, pattern, replacement string) string { if pattern == \"\" { panic(\"String replacement pattern is empty\") }; return strings.ReplaceAll(value, pattern, replacement) }(" + arguments[0] + ", " + arguments[1] + ", " + arguments[2] + ")"
 	case "trb.std.strings.codepoints":
 		g.requireImport("unicode/utf8", "utf8")
-		return "func(value string) []int { result := make([]int, 0, utf8.RuneCountInString(value)); for _, codepoint := range value { result = append(result, int(codepoint)) }; return result }(" + arguments[0] + ")"
+		return g.arrayReference("func(value string) []int { result := make([]int, 0, utf8.RuneCountInString(value)); for _, codepoint := range value { result = append(result, int(codepoint)) }; return result }(" + arguments[0] + ")")
 	case "trb.std.strings.characters":
 		g.requireImport("unicode/utf8", "utf8")
-		return "func(value string) []string { result := make([]string, 0, utf8.RuneCountInString(value)); for _, character := range value { result = append(result, string(character)) }; return result }(" + arguments[0] + ")"
+		return g.arrayReference("func(value string) []string { result := make([]string, 0, utf8.RuneCountInString(value)); for _, character := range value { result = append(result, string(character)) }; return result }(" + arguments[0] + ")")
 	case "trb.std.strings.reverse":
 		g.requireImport("slices", "")
 		return "func(value string) string { characters := []rune(value); slices.Reverse(characters); return string(characters) }(" + arguments[0] + ")"
@@ -608,63 +608,65 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.string_builder.clear":
 		return arguments[0] + ".Reset()"
 	case "trb.std.arrays.length":
-		return "len(" + arguments[0] + ")"
+		return "len(" + g.arrayValues(arguments[0]) + ")"
 	case "trb.std.arrays.empty":
-		return "len(" + arguments[0] + ") == 0"
+		return "len(" + g.arrayValues(arguments[0]) + ") == 0"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { values := " + arguments[0] + "; requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }()"
+		return "func() " + resultType + " { values := " + g.arrayValues(arguments[0]) + "; requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }()"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		g.requireImport("slices", "")
 		safe := name == "trb.std.arrays.try_slice"
 		returnType := g.goType(call.ExprType())
 		invalid := "panic(\"Array slice range is out of bounds\")"
-		success := "return slices.Clone(values[start:stop])"
+		success := "return " + g.arrayReference("slices.Clone(values[start:stop])")
 		if safe {
 			returnType, _, _ = filesystemResultType()
 			invalid = "return " + sliceRangeError("start", "end", "exclusive", "len(values)", "Array slice range is out of bounds")
-			success = "return " + filesystemOK("slices.Clone(values[start:stop])")
+			success = "return " + filesystemOK(g.arrayReference("slices.Clone(values[start:stop])"))
 		}
-		return "func() " + returnType + " { values := " + arguments[0] + "; bounds := " + arguments[1] + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }()"
+		return "func() " + returnType + " { values := " + g.arrayValues(arguments[0]) + "; bounds := " + arguments[1] + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }()"
 	case "trb.std.arrays.first":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
+		return "func() " + g.goType(call.ExprType()) + " { values := " + g.arrayValues(arguments[0]) + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
 	case "trb.std.arrays.last":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[len(values)-1] }()"
+		return "func() " + g.goType(call.ExprType()) + " { values := " + g.arrayValues(arguments[0]) + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[len(values)-1] }()"
 	case "trb.std.arrays.copy":
 		g.requireImport("slices", "")
-		return "slices.Clone(" + arguments[0] + ")"
+		return g.arrayReference("slices.Clone(" + g.arrayValues(arguments[0]) + ")")
 	case "trb.std.arrays.contains":
 		g.requireImport("slices", "")
-		return "slices.Contains(" + arguments[0] + ", " + arguments[1] + ")"
+		return "slices.Contains(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
 	case "trb.std.arrays.index":
 		valuesType := call.Arguments[0].Value.ExprType()
 		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
 			valuesType = member.Receiver.ExprType()
 		}
 		valueType := valuesType.Args[0]
-		return "func(values " + g.goType(valuesType) + ", target " + g.goType(valueType) + ") *int { for index, value := range values { if value == target { result := index; return &result } }; return nil }(" + arguments[0] + ", " + arguments[1] + ")"
+		return "func(values " + g.goArraySliceType(valuesType) + ", target " + g.goType(valueType) + ") *int { for index, value := range values { if value == target { result := index; return &result } }; return nil }(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
 	case "trb.std.arrays.count":
-		return "func() int { values := " + arguments[0] + "; target := " + arguments[1] + "; count := 0; for _, value := range values { if value == target { count++ } }; return count }()"
+		return "func() int { values := " + g.arrayValues(arguments[0]) + "; target := " + arguments[1] + "; count := 0; for _, value := range values { if value == target { count++ } }; return count }()"
 	case "trb.std.arrays.uniq":
 		g.requireImport("slices", "")
-		return "func() " + g.goType(call.ExprType()) + " { result := " + g.goType(call.ExprType()) + "{}; for _, value := range " + arguments[0] + " { if !slices.Contains(result, value) { result = append(result, value) } }; return result }()"
+		return "func() " + g.goType(call.ExprType()) + " { result := " + g.goArraySliceType(call.ExprType()) + "{}; for _, value := range " + g.arrayValues(arguments[0]) + " { if !slices.Contains(result, value) { result = append(result, value) } }; return " + g.arrayReference("result") + " }()"
 	case "trb.std.arrays.concat":
 		g.requireImport("slices", "")
-		return "append(slices.Clone(" + arguments[0] + "), " + arguments[1] + "...)"
+		return g.arrayReference("append(slices.Clone(" + g.arrayValues(arguments[0]) + "), " + g.arrayValues(arguments[1]) + "...)")
 	case "trb.std.arrays.join":
 		g.requireImport("strings", "")
-		return "strings.Join(" + arguments[0] + ", " + arguments[1] + ")"
+		return "strings.Join(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
 	case "trb.std.arrays.pop":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; index := len(values) - 1; value := values[index]; " + arguments[0] + " = values[:index]; return value }()"
+		return "func(values *[]" + g.goType(call.ExprType()) + ") " + g.goType(call.ExprType()) + " { items := *values; if len(items) == 0 { panic(\"Array is empty\") }; index := len(items) - 1; value := items[index]; *values = items[:index]; return value }(" + arguments[0] + ")"
 	case "trb.std.arrays.shift":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; if len(values) == 0 { panic(\"Array is empty\") }; value := values[0]; " + arguments[0] + " = values[1:]; return value }()"
+		return "func(values *[]" + g.goType(call.ExprType()) + ") " + g.goType(call.ExprType()) + " { items := *values; if len(items) == 0 { panic(\"Array is empty\") }; value := items[0]; *values = items[1:]; return value }(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
-		return arguments[0] + " = append(" + arguments[0] + ", " + arguments[1] + ")"
+		valueType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
+		return "func(values *[]" + g.goType(valueType) + ", value " + g.goType(valueType) + ") { *values = append(*values, value) }(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.unshift":
-		return "func() { values := " + arguments[0] + "; value := " + arguments[1] + "; values = append(values, value); copy(values[1:], values[:len(values)-1]); values[0] = value; " + arguments[0] + " = values }()"
+		valueType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
+		return "func(values *[]" + g.goType(valueType) + ", value " + g.goType(valueType) + ") { items := *values; items = append(items, value); copy(items[1:], items[:len(items)-1]); items[0] = value; *values = items }(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.reverse":
 		g.requireImport("slices", "")
-		return "func() " + g.goType(call.ExprType()) + " { values := slices.Clone(" + arguments[0] + "); slices.Reverse(values); return values }()"
+		return "func() " + g.goType(call.ExprType()) + " { values := slices.Clone(" + g.arrayValues(arguments[0]) + "); slices.Reverse(values); return " + g.arrayReference("values") + " }()"
 	case "trb.std.arrays.sort", "trb.std.arrays.sort_descending":
 		g.requireImport("slices", "")
 		valuesType := call.ExprType()
@@ -673,9 +675,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			elementType = valuesType.Args[0]
 		}
 		comparison := g.portableSortComparison("left", "right", elementType, name == "trb.std.arrays.sort_descending")
-		return "func() " + g.goType(valuesType) + " { values := slices.Clone(" + arguments[0] + "); slices.SortStableFunc(values, func(left, right " + g.goType(elementType) + ") int { return " + comparison + " }); return values }()"
+		return "func() " + g.goType(valuesType) + " { values := slices.Clone(" + g.arrayValues(arguments[0]) + "); slices.SortStableFunc(values, func(left, right " + g.goType(elementType) + ") int { return " + comparison + " }); return " + g.arrayReference("values") + " }()"
 	case "trb.std.ranges.to_array":
-		return "func(bounds [3]int) []int { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; values := []int{}; for current := start; current < end; current++ { values = append(values, current) }; if !exclusive && start <= end { values = append(values, end) }; return values }(" + arguments[0] + ")"
+		return g.arrayReference("func(bounds [3]int) []int { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; values := []int{}; for current := start; current < end; current++ { values = append(values, current) }; if !exclusive && start <= end { values = append(values, end) }; return values }(" + arguments[0] + ")")
 	case "trb.std.hashes.length":
 		return "len(" + arguments[0] + ")"
 	case "trb.std.hashes.empty":
@@ -690,11 +692,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.keys":
 		g.requireImport("maps", "")
 		g.requireImport("slices", "")
-		return "slices.Collect(maps.Keys(" + arguments[0] + "))"
+		return g.arrayReference("slices.Collect(maps.Keys(" + arguments[0] + "))")
 	case "trb.std.hashes.values":
 		g.requireImport("maps", "")
 		g.requireImport("slices", "")
-		return "slices.Collect(maps.Values(" + arguments[0] + "))"
+		return g.arrayReference("slices.Collect(maps.Values(" + arguments[0] + "))")
 	case "trb.std.hashes.copy":
 		g.requireImport("maps", "")
 		return "maps.Clone(" + arguments[0] + ")"
@@ -901,7 +903,7 @@ func (g *generator) portableArrayString(value string, typ types.Type) string {
 	default:
 		g.requireImport("fmt", "")
 	}
-	return "func(values " + g.goType(typ) + ") string { parts := make([]string, len(values)); for index, item := range values { parts[index] = " + element + " }; return \"[\" + strings.Join(parts, \", \") + \"]\" }(" + value + ")"
+	return "func(values " + g.goArraySliceType(typ) + ") string { parts := make([]string, len(values)); for index, item := range values { parts[index] = " + element + " }; return \"[\" + strings.Join(parts, \", \") + \"]\" }(" + g.arrayValues(value) + ")"
 }
 
 func (g *generator) webLogger(call *ir.Call, arguments []string) string {
@@ -912,7 +914,7 @@ func (g *generator) webLogger(call *ir.Call, arguments []string) string {
 	options := ""
 	if len(arguments) > 2 {
 		g.requireImport("slices", "")
-		options = "loggerOptions := " + arguments[2] + "; excluded = slices.Contains(loggerOptions.ExcludePaths, loggerContext.TrbFieldRequest.TrbFieldPath); useStderr = loggerOptions.Stderr; "
+		options = "loggerOptions := " + arguments[2] + "; excluded = slices.Contains(" + g.arrayValues("loggerOptions.ExcludePaths") + ", loggerContext.TrbFieldRequest.TrbFieldPath); useStderr = loggerOptions.Stderr; "
 	}
 	return "func() (response " + g.goType(call.ExprType()) + ") { loggerContext := " + arguments[0] + "; loggerNextHandler := " + arguments[1] + "; excluded := false; useStderr := false; " + options + "if excluded { return loggerNextHandler.Call(__trbScope, loggerContext) }; started := time.Now(); status := 500; defer func() { level := \"info\"; if status >= 500 { level = \"error\" }; entry := map[string]any{\"timestamp\": time.Now().UTC().Format(time.RFC3339Nano), \"level\": level, \"event\": \"http_request\", \"method\": loggerContext.TrbFieldRequest.TrbFieldMethod.ToS(), \"path\": loggerContext.TrbFieldRequest.TrbFieldPath, \"status\": status, \"duration_ms\": float64(time.Since(started).Nanoseconds()) / 1e6}; encoded, _ := json.Marshal(entry); output := os.Stdout; if useStderr { output = os.Stderr }; fmt.Fprintln(output, string(encoded)) }(); response = loggerNextHandler.Call(__trbScope, loggerContext); status = response.TrbFieldStatus; return response }()"
 }
@@ -965,7 +967,7 @@ func (g *generator) webRequestJSON(call *ir.Call, request string) string {
 	unsupported := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("UnsupportedContentType", true) + "(contentTypes[0])"
 	invalidUTF8 := webAlias + "." + goConstantIdentifier("RequestError", "InvalidUtf8")
 	invalidJSON := webAlias + ".New" + goIdentifier("RequestError", true) + goIdentifier("InvalidJson", true) + "(decoded.ErrError)"
-	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for _, header := range requestValue.TrbFieldHeaders.Entries() { if strings.EqualFold(header.Name, \"content-type\") { contentTypes = append(contentTypes, header.Value) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.TrbFieldBody.Bytes()) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
+	return "func() " + resultType + " { requestValue := " + request + "; contentTypes := []string{}; for _, header := range " + g.arrayValues("requestValue.TrbFieldHeaders.Entries()") + " { if strings.EqualFold(header.Name, \"content-type\") { contentTypes = append(contentTypes, header.Value) } }; if len(contentTypes) == 0 { return " + errResult(missing) + " }; if len(contentTypes) != 1 { return " + errResult(duplicate) + " }; mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentTypes[0], \";\", 2)[0])); if mediaType != \"application/json\" && !(strings.HasPrefix(mediaType, \"application/\") && strings.HasSuffix(mediaType, \"+json\")) { return " + errResult(unsupported) + " }; if !utf8.Valid(requestValue.TrbFieldBody.Bytes()) { return " + errResult(invalidUTF8) + " }; decoded := " + decoded + "; if decoded.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(invalidJSON) + " }; return " + okResult + "(decoded.OkValue) }()"
 }
 
 func (g *generator) webParameterBinding(call *ir.Call, receiver, source string) string {
@@ -1007,7 +1009,7 @@ func (g *generator) webParameterBinding(call *ir.Call, receiver, source string) 
 	var body strings.Builder
 	body.WriteString("parameterValues := map[string][]string{}; ")
 	if source == "query" {
-		body.WriteString("queryResult := parameterReceiver.QueryParameters(); if queryResult.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(webAlias+".NewParameterErrorMalformedQuery(queryResult.ErrError)") + " }; for _, parameter := range queryResult.OkValue { parameterValues[parameter.Name] = append(parameterValues[parameter.Name], parameter.Value) }; ")
+		body.WriteString("queryResult := parameterReceiver.QueryParameters(); if queryResult.Kind == " + resultAlias + ".ResultErrTag { return " + errResult(webAlias+".NewParameterErrorMalformedQuery(queryResult.ErrError)") + " }; for _, parameter := range " + g.arrayValues("queryResult.OkValue") + " { parameterValues[parameter.Name] = append(parameterValues[parameter.Name], parameter.Value) }; ")
 	} else {
 		for _, field := range call.Codec.Fields {
 			body.WriteString("parameterValues[" + strconv.Quote(field.Name) + "] = []string{parameterReceiver.PathValue(" + strconv.Quote(field.Name) + ")}; ")
@@ -1023,14 +1025,15 @@ func (g *generator) webParameterBinding(call *ir.Call, receiver, source string) 
 			if field.Schema.Type.Nullable {
 				body.WriteString("if len(" + values + ") > 0 { parsedValues := make(" + fieldType[1:] + ", len(" + values + ")); ")
 			} else {
-				body.WriteString("parsedValues := make(" + fieldType + ", len(" + values + ")); ")
+				body.WriteString("parsedValues := make(" + fieldType[1:] + ", len(" + values + ")); ")
 			}
 			parser := g.goWebParameterParser(field.Schema.Element)
 			body.WriteString("for valueIndex, rawValue := range " + values + " { parsedValue, valid := " + parser + "(rawValue); if !valid { return " + invalid(field.Name, "rawValue", parameterExpected(field.Schema.Element)) + " }; parsedValues[valueIndex] = parsedValue }; ")
+			body.WriteString(variable + " = " + g.arrayReference("parsedValues"))
 			if field.Schema.Type.Nullable {
-				body.WriteString(variable + " = &parsedValues }; ")
+				body.WriteString(" }; ")
 			} else {
-				body.WriteString(variable + " = parsedValues; ")
+				body.WriteString("; ")
 			}
 		} else {
 			body.WriteString("if len(" + values + ") == 0 { ")
@@ -1138,6 +1141,6 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 	encoder := builder.encoder(call.Codec)
 	encoded := jsonAlias + ".Stringify(" + encoder + "(" + arguments[0] + "))"
 	responseType := "*" + webAlias + ".Response"
-	headers := "__trb_http.NewHeaders([]__trb_http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}})"
+	headers := "__trb_http.NewHeaders(" + g.arrayReference("[]__trb_http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}}") + ")"
 	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(map[string]any{\"status\": 500, \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))}) }; return " + webAlias + ".NewResponse(map[string]any{\"status\": " + status + ", \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(encoded.OkValue))}) }()"
 }

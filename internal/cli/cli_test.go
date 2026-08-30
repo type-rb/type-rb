@@ -6381,7 +6381,7 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		contractSource := "record Address\n\tcity: String\nend\n\n" +
-			"record User\n\tid: Integer @json(\"user_id\")\n\tname: String\n\tnickname: String?\n\tscores: Array<Float>\n\tmetadata: Hash<String, Integer>\n\taddress: Address\nend\n"
+			"record User\n\tid: Integer @json(\"user_id\")\n\tname: String\n\tnickname: String?\n\tscores: Array<Float>\n\taliases: Array<String>?\n\tmetadata: Hash<String, Integer>\n\taddress: Address\nend\n"
 		if err := os.WriteFile(contracts, []byte(contractSource), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -6390,7 +6390,7 @@ func TestRunTypedJSONRecordCodecsAcrossAvailableBackends(t *testing.T) {
 			"import { Result } from trb/std/result\n\n" +
 			"def round_trip(source: String): String; case JSON.decode<User>(source); when Result::Ok(user); case JSON.encode(user); when Result::Ok(encoded); case JSON.decode<User>(encoded); when Result::Ok(copy); return copy.name + \":\" + copy.address.city; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; when Result::Err(error); return error.path; end; end\n" +
 			"def main()\n" +
-			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[1,1.5],\\\"metadata\\\":{\\\"active\\\":1},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
+			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[1,1.5],\\\"aliases\\\":[\\\"A\\\"],\\\"metadata\\\":{\\\"active\\\":1},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
 			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"scores\\\":[],\\\"metadata\\\":{},\\\"address\\\":{\\\"city\\\":\\\"Tokyo\\\"}}\"))\n" +
 			"\tputs(round_trip(\"{\\\"user_id\\\":7,\\\"name\\\":\\\"Ada\\\",\\\"scores\\\":[],\\\"metadata\\\":{},\\\"address\\\":{\\\"city\\\":1}}\"))\n" +
 			"\treturn\n" +

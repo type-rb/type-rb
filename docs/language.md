@@ -770,6 +770,31 @@ position := values.index(3)
 occurrences := values.count(3)
 ```
 
+Arrays are shared reference values. Copying an Array into another binding or
+passing it to a function does not copy its outer storage, so element updates
+and destructive size changes remain visible through every alias—even when
+growth reallocates storage in a target runtime:
+
+```trb
+def append_then_rebind(mut items: Array<Integer>)
+	items.push(3) # visible to the caller
+	items = []    # rebinds only this parameter
+	return
+end
+
+mut values := [1]
+mut same_values := values
+same_values.push(2)
+append_then_rebind(values)
+# values and same_values both contain [1, 2, 3]
+```
+
+`mut` authorizes mutation through a binding; it does not introduce caller-side
+writeback for binding reassignment. Operations documented as returning a new
+Array, such as `dup`, `slice`, `reverse`, sorting, transformations, `uniq`, and
+`concat`, create a distinct outer Array and remain shallow with respect to
+their elements.
+
 Membership and occurrence counting use portable `==` and are therefore
 available for numeric, Boolean, String, and payloadless enum elements. They do
 not implicitly enable target-native structural equality for nested values.

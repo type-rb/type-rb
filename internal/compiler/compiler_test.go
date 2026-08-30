@@ -437,7 +437,7 @@ end
 		t.Fatalf("generated Go does not type-check: %v\n%s", err, goArtifact.Output)
 	}
 	goOutput := string(goArtifact.Output)
-	for _, expected := range []string{"for _, value := range []int{1, 2, 3}", "for index, value := range func(bounds [3]int) []int", "__trbItems1 := []int{1, 2, 3, 4, 5}", "slice := __trbItems1[", "func Sum(values []int) int", "return Sum(func(bounds [3]int) []int"} {
+	for _, expected := range []string{"for _, value := range trbArrayValues_", "for index, value := range func(bounds [3]int) []int", "__trbItems1 := trbArrayValues_", "slice := trbArrayReference_", "func Sum(values *[]int) int", "return Sum(trbArrayReference_"} {
 		if !strings.Contains(goOutput, expected) {
 			t.Fatalf("missing %q in generated Go:\n%s", expected, goOutput)
 		}
@@ -3524,7 +3524,7 @@ end
 		"func Identity[T any](value T) T",
 		"NewResultOk[int, string](42)",
 		"Identity[string]",
-		`Identity[[]string]([]string{"Ada"})`,
+		`Identity[*[]string](trbArrayReference_`,
 		"value := __trbCase1.OkValue",
 	} {
 		if !strings.Contains(goOutput, want) {
@@ -4289,7 +4289,7 @@ end
 			t.Fatalf("%s: %v", mode, err)
 		}
 		output := string(artifact.Output)
-		if mode == "go" && !strings.Contains(output, "values = append(values, 2)") {
+		if mode == "go" && !strings.Contains(output, "*values = append(*values, value)") {
 			t.Fatalf("Go member push was not lowered portably:\n%s", output)
 		}
 	}

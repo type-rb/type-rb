@@ -30,7 +30,7 @@ end
 			output := string(artifact.Output)
 			switch mode {
 			case "go":
-				for _, wanted := range []string{"type UserId = int", "type ProductIds = []UserId", "return []UserId{id}"} {
+				for _, wanted := range []string{"type UserId = int", "type ProductIds = *[]UserId", "return trbArrayReference_"} {
 					if !strings.Contains(output, wanted) {
 						t.Fatalf("generated Go is missing %q:\n%s", wanted, output)
 					}

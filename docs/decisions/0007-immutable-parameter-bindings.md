@@ -48,9 +48,10 @@ field syntax.
 
 Existing binding rules continue to apply inside the implementation: a mutable
 parameter may be reassigned and may receive destructive operations supported
-for mutable bindings. This decision does not define a general mutation-effect
-system for shared reference values passed across calls. Such effects and
-caller-side ownership remain a separate language-design problem.
+for mutable bindings. Array identity is preserved across calls, so destructive
+Array operations are visible to aliases while parameter reassignment remains
+local. This decision still does not define a general mutation-effect system or
+caller-side ownership model for every shared reference type.
 
 Iterator and call-block bindings are not changed by this decision. Adding an
 explicit `|mut value|` pattern requires a separate decision together with the

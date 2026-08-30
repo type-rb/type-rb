@@ -321,7 +321,7 @@ func (g *generator) webProtocolResponses() {
 	g.b.WriteByte('\n')
 	g.line("func trbWebHeaders(entries ...__trb_http.Header) *__trb_http.Headers {")
 	g.indent++
-	g.line("return __trb_http.NewHeaders(entries)")
+	g.line("return __trb_http.NewHeaders(" + g.arrayReference("entries") + ")")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -337,19 +337,19 @@ func (g *generator) webProtocolResponses() {
 	g.line("}")
 	g.indent--
 	g.line("}")
-	g.line("return __trb_http.NewHeaders(entries)")
+	g.line("return __trb_http.NewHeaders(" + g.arrayReference("entries") + ")")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
 	g.line("func trbWebNormalizeRequest(request *web.Request) *web.Request {")
 	g.indent++
 	g.line("headers := []__trb_http.Header{}")
-	g.line("for _, header := range request.TrbFieldHeaders.Entries() {")
+	g.line("for _, header := range " + g.arrayValues("request.TrbFieldHeaders.Entries()") + " {")
 	g.indent++
 	g.line("headers = append(headers, __trb_http.Header{Name: strings.ToLower(header.Name), Value: header.Value})")
 	g.indent--
 	g.line("}")
-	g.line("return web.NewRequest(map[string]any{\"method\": __trb_http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), \"path\": request.TrbFieldPath, \"query_string\": request.TrbFieldQueryString, \"headers\": __trb_http.NewHeaders(headers), \"body\": request.TrbFieldBody})")
+	g.line("return web.NewRequest(map[string]any{\"method\": __trb_http.NewHttpMethod(strings.ToUpper(request.TrbFieldMethod.ToS())), \"path\": request.TrbFieldPath, \"query_string\": request.TrbFieldQueryString, \"headers\": __trb_http.NewHeaders(" + g.arrayReference("headers") + "), \"body\": request.TrbFieldBody})")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -406,7 +406,7 @@ func (g *generator) webProtocolResponses() {
 	g.line("return false")
 	g.indent--
 	g.line("}")
-	g.line("for _, header := range response.TrbFieldHeaders.Entries() {")
+	g.line("for _, header := range " + g.arrayValues("response.TrbFieldHeaders.Entries()") + " {")
 	g.indent++
 	g.line("name := header.Name")
 	g.line("if name == \"\" {")
@@ -530,7 +530,7 @@ func (g *generator) webServer() {
 	g.line("response = trbWebDispatchWithBodyLimit(request.Context(), webRequest, config.BodyLimitBytes)")
 	g.indent--
 	g.line("}")
-	g.line("for _, header := range response.TrbFieldHeaders.Entries() {")
+	g.line("for _, header := range " + g.arrayValues("response.TrbFieldHeaders.Entries()") + " {")
 	g.indent++
 	g.line("writer.Header().Add(header.Name, header.Value)")
 	g.indent--
