@@ -302,7 +302,9 @@ end
 			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
 		}
 	}
-	checkTypeScriptArtifacts(t, artifacts, "record_function_field_default")
+	t.Run("typescript_typecheck", func(t *testing.T) {
+		checkTypeScriptArtifacts(t, artifacts, "record_function_field_default")
+	})
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireEffectRuntime(t, mode)

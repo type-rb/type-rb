@@ -1560,6 +1560,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.indent = g.indent + 1
 		child.returnType = n.ReturnType
 		child.statements(n.Body)
+		g.absorbRuntimeRequirements(&child)
 		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"
 	case *ir.Identifier:
 		if n.Generated {
@@ -2033,6 +2034,13 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	return strings.Join(lines, " ")
 }
 
+func (g *generator) absorbRuntimeRequirements(child *generator) {
+	g.oidcRuntime = g.oidcRuntime || child.oidcRuntime
+	g.arrayRuntime = g.arrayRuntime || child.arrayRuntime
+	g.arrayIndexRuntime = g.arrayIndexRuntime || child.arrayIndexRuntime
+	g.checkedInteger = g.checkedInteger || child.checkedInteger
+}
+
 func (g *generator) ifExpression(node *ir.If) string {
 	child := &generator{
 		functionDepth:   g.functionDepth,
@@ -2091,6 +2099,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.indent--
 	child.line("}()")
 	g.temporary = child.temporary
+	g.absorbRuntimeRequirements(child)
 	return strings.TrimSpace(child.b.String())
 }
 
@@ -2216,6 +2225,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	child.indent--
 	child.line("}()")
 	g.temporary = child.temporary
+	g.absorbRuntimeRequirements(child)
 	return strings.TrimSpace(child.b.String())
 }
 
