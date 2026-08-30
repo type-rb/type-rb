@@ -1667,6 +1667,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 	case *ir.Binary:
 		op := n.Operator
+		if (op == "==" || op == "!=") && n.Left.ExprType().Kind == types.Nil && n.Right.ExprType().Kind == types.Nil {
+			result := "true"
+			if op == "!=" {
+				result = "false"
+			}
+			return "func(left any, right any) bool { return " + result + " }(" + g.expr(n.Left) + ", " + g.expr(n.Right) + ")"
+		}
 		left := g.binaryOperand(n.Left)
 		right := g.binaryOperand(n.Right)
 		if op == "**" && n.ExprType().Kind != types.Int {

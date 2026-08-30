@@ -94,7 +94,10 @@ labels and follow their existing record rules.
 
 Writing `: Void` on a `def` or `fn` declaration is an error; omit the return
 annotation instead. `Void` appears in function types when a stored callable
-has no result, for example `(String) -> Void`.
+has no result, for example `(String) -> Void`. It is not a value type: a call
+with no result may stand alone, but its expression cannot be stored, passed,
+returned as a value, or used by another expression. Use `Unit` when an
+ordinary storable value with no payload is required.
 
 Typed function values use `fn` and capture their lexical environment:
 
@@ -188,6 +191,11 @@ names: Array<String> := ["Ada", "Grace"]
 scores: Hash<String, Integer> := {ada: 10}
 ```
 
+`nil` alone does not provide enough information to infer a binding type, so
+`value := nil` is an error. Give the binding an explicit nullable type, as in
+`value: String? := nil`. `Nil` and `Void` are compiler types and cannot be
+written as ordinary source annotations.
+
 Type names are case-sensitive and have one canonical spelling. Use
 `Integer`, `Boolean`, `String`, `Float`, `Array`, and `Hash`; aliases from
 target languages such as `Int`, `int`, `bool`, `number`, and `Map` are errors.
@@ -223,6 +231,10 @@ def display_name(name: String?): String
 	return name + "!"
 end
 ```
+
+`nil == nil` is `true` and `nil != nil` is `false`. Equality is also the
+canonical absence test for nullable values; there is no separate `nil?()`
+method.
 
 The same narrowing is available in the matching branch of `name != nil`, in
 the remaining `elsif` or `else` path of `name == nil`, in `while`, and on the
