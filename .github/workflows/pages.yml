@@ -77,6 +77,7 @@ jobs:
         run: |
           ./scripts/extract-release-notes_test.sh
           ./scripts/pages-full-tests-required_test.sh
+          ./scripts/render-homebrew-formula_test.sh
 
       - name: Verify website Go packages
         run: go test ./internal/site ./internal/playground ./cmd/trb-site

@@ -38,6 +38,9 @@ jobs:
       - name: Verify compiler
         run: go test ./...
 
+      - name: Verify release tooling
+        run: ./scripts/render-homebrew-formula_test.sh
+
       - name: Package release binaries, Formula, and notes
         id: package
         shell: bash

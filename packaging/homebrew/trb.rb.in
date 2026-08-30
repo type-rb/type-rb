@@ -52,7 +52,7 @@ class Trb < Formula
       import trb/std/io
 
       def main()
-        io.puts("installed with Homebrew")
+        IO.puts("installed with Homebrew")
         return
       end
     TRB
