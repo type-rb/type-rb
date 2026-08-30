@@ -2,6 +2,18 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.1 - 2026-08-30
+
+### Breaking changes
+
+- `trb/web` advances to package version 0.2.0 and adopts owner-qualified APIs.
+  Replace `serve()` and `configure_server(...)` with `Web.serve()` and
+  `Web::ServerConfig.new(...)`; call the response builders as `Response.text`,
+  `Response.bytes`, `Response.json`, `Response.empty`, and
+  `Response.redirect`; and replace `new_response_cookie(...)` with
+  `ResponseCookie.new(...)`. `ResponseCookie.attributes` now defaults to an
+  empty array. ([#611](https://github.com/type-rb/type-rb/pull/611))
+
 ## 0.4.0 - 2026-08-30
 
 ### Breaking changes
