@@ -42,15 +42,15 @@ string key or performing a cast:
 
 ```trb
 import trb/std/result
-import { Context, Response, text } from trb/web
+import { Context, Response } from trb/web
 import trb/web/auth/bearer
 
 def get(context: Context): Response
 	case Bearer.principal(context)
 	when Result::Ok(principal)
-		return text(principal.subject)
+		return Response.text(principal.subject)
 	when Result::Err(_error)
-		return text("unauthorized", 401)
+		return Response.text("unauthorized", 401)
 	end
 end
 ```

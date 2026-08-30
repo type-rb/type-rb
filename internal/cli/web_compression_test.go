@@ -86,22 +86,22 @@ def call(context: Context, next_handler: Next): Response
 end
 `
 			routes := map[string]string{
-				"large.trb": fmt.Sprintf(`import { Context, Response, text } from trb/web
+				"large.trb": fmt.Sprintf(`import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text(%q).with_header("content-length", %q).with_header("etag", %q)
+	return Response.text(%q).with_header("content-length", %q).with_header("etag", %q)
 end
 `, largeBody, fmt.Sprintf("%d", len(largeBody)), `"strong"`),
-				"small.trb": `import { Context, Response, text } from trb/web
+				"small.trb": `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("small")
+	return Response.text("small")
 end
 `,
-				"no_transform.trb": fmt.Sprintf(`import { Context, Response, text } from trb/web
+				"no_transform.trb": fmt.Sprintf(`import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text(%q).with_header("cache-control", "private, no-transform")
+	return Response.text(%q).with_header("cache-control", "private, no-transform")
 end
 `, largeBody),
 			}

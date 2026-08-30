@@ -217,17 +217,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.tsWebContextFetch(call, arguments)
 	case "trb.web.json":
 		return g.tsWebJSON(call, arguments)
-	case "trb.web.configure_server":
-		values := map[string]string{
-			"host":                          `"0.0.0.0"`,
-			"port":                          "3000",
-			"body_limit_bytes":              "1048576",
-			"shutdown_timeout_milliseconds": "10000",
-		}
-		for index, argument := range call.Arguments {
-			values[argument.Name] = g.expr(call.Arguments[index].Value)
-		}
-		return "{ host: " + values["host"] + ", port: " + values["port"] + ", body_limit_bytes: " + values["body_limit_bytes"] + ", shutdown_timeout_milliseconds: " + values["shutdown_timeout_milliseconds"] + " }"
 	case "trb.web.serve":
 		config := `{ host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000 }`
 		if len(arguments) > 0 {

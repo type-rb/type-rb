@@ -445,10 +445,10 @@ func TestOfficialWebResponseBuildersRejectInvalidValues(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { Response, text } from trb/web
+		Source: []byte(`import { Response } from trb/web
 
 def invalid(): Response
-	return text(1)
+	return Response.text(1)
 end
 `),
 	}
@@ -457,6 +457,28 @@ end
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/official-package", RubyLoader: "require_relative", ProjectRoot: "/project"})
 			if err == nil || !strings.Contains(err.Error(), "argument 1 to text() has type Integer, expected String") {
+				t.Fatalf("unexpected diagnostic: %v", err)
+			}
+		})
+	}
+}
+
+func TestOfficialWebOwnedOperationsAreNotTopLevelImports(t *testing.T) {
+	tests := []struct {
+		name   string
+		symbol string
+		owner  string
+	}{
+		{name: "serve", symbol: "serve", owner: "Web.serve"},
+		{name: "json", symbol: "json", owner: "Response.json"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := CompileProject([]SourceUnit{{
+				Filename: "/project/main.trb", ModulePath: "main", Package: "main",
+				Source: []byte("import { " + test.symbol + " } from trb/web\n"),
+			}}, Options{Mode: "go", GoModule: "example.com/owned-web-operation", ProjectRoot: "/project"})
+			if err == nil || !strings.Contains(err.Error(), "use "+test.owner+" through its owning declaration") {
 				t.Fatalf("unexpected diagnostic: %v", err)
 			}
 		})

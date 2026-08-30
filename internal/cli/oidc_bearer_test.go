@@ -130,17 +130,17 @@ func oidcBearerServerCommand(t *testing.T, mode, buildDirectory string) *exec.Cm
 func writeOidcBearerApplication(t *testing.T, sourceDirectory string, port int, issuer string) {
 	t.Helper()
 	files := map[string]string{
-		"main.trb": fmt.Sprintf(`import { configure_server, serve } from trb/web
+		"main.trb": fmt.Sprintf(`import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: %d))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: %d))
 	return
 end
 `, port),
-		"routes/health.trb": `import { Context, Response, text } from trb/web
+		"routes/health.trb": `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `,
 		"routes/protected/_middleware.trb": fmt.Sprintf(`import { OidcAuthError, OidcBearerOptions, OidcPrincipal, bearer_options } from trb/auth/oidc
@@ -165,15 +165,15 @@ def call(context: Context, next_handler: Next): Response
 end
 `, issuer),
 		"routes/protected/index.trb": `import { Result } from trb/std/result
-import { Context, Response, text } from trb/web
+import { Context, Response } from trb/web
 import trb/web/auth/bearer
 
 def get(context: Context): Response
 	case Bearer.principal(context)
 	when Result::Ok(value)
-		return text(value.subject + ":" + value.roles.join(","))
+		return Response.text(value.subject + ":" + value.roles.join(","))
 	when Result::Err(_error)
-		return text("missing principal", 500)
+		return Response.text("missing principal", 500)
 	end
 end
 `,

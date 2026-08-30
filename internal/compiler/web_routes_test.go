@@ -14,10 +14,10 @@ func TestCompileProjectAttachesWebRouteManifestToMain(t *testing.T) {
 			Filename:   "/project/src/main.trb",
 			ModulePath: "main",
 			Package:    "main",
-			Source: []byte(`import { configure_server, serve } from trb/web
+			Source: []byte(`import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))
 	return
 end
 `),
@@ -26,7 +26,7 @@ end
 			Filename:   "/project/src/routes/todos/[id].trb",
 			ModulePath: "routes/todos/[id]",
 			Package:    "todos",
-			Source: []byte(`import { Context, Response, json } from trb/web
+			Source: []byte(`import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -42,9 +42,9 @@ def post(context: Context): Response
 	id := context.path_value("id")
 	case context.request.json<TodoRequest>()
 	when Result::Ok(payload)
-		return json(TodoResponse.new(id: id, title: payload.title), 201)
+		return Response.json(TodoResponse.new(id: id, title: payload.title), 201)
 	when Result::Err(_error)
-		return json(TodoResponse.new(id: id, title: "invalid"), 400)
+		return Response.json(TodoResponse.new(id: id, title: "invalid"), 400)
 	end
 end
 `),
@@ -109,7 +109,7 @@ func TestCompileProjectAttachesTypedWebEndpointCatalogAcrossModes(t *testing.T) 
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-			Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+			Source: []byte("import trb/web\n\ndef main()\n\tWeb.serve()\n\treturn\nend\n"),
 		},
 		{
 			Filename: "/project/src/contracts/reports.trb", ModulePath: "contracts/reports", Package: "contracts",
@@ -132,11 +132,11 @@ end
 		},
 		{
 			Filename: "/project/src/routes/reports.trb", ModulePath: "routes/reports", Package: "routes",
-			Source: []byte(`import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+			Source: []byte(`import { Context, Endpoint, Response, handles, input, response } from trb/web
 import { CreateReportInput, CreateReportResponse, ErrorResponse } from contracts/reports
 
 def post(_context: Context): Response
-	return json(CreateReportResponse.new(id: 42), 202)
+	return Response.json(CreateReportResponse.new(id: 42), 202)
 end
 
 class CreateReportEndpoint < Endpoint
@@ -213,7 +213,7 @@ func assertEndpointCallsAreDeclarationOnly(t *testing.T, artifact *Artifact) {
 func TestCompileProjectRejectsInvalidWebEndpointContracts(t *testing.T) {
 	main := SourceUnit{
 		Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-		Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+		Source: []byte("import trb/web\n\ndef main()\n\tWeb.serve()\n\treturn\nend\n"),
 	}
 	tests := []struct {
 		name   string
@@ -222,14 +222,14 @@ func TestCompileProjectRejectsInvalidWebEndpointContracts(t *testing.T) {
 	}{
 		{
 			name: "missing handler",
-			source: `import { Context, Endpoint, Response, empty, response } from trb/web
+			source: `import { Context, Endpoint, Response, response } from trb/web
 
 record Payload
 	value: String
 end
 
 def post(_context: Context): Response
-	return empty()
+	return Response.empty()
 end
 
 class Contract < Endpoint
@@ -304,7 +304,7 @@ func TestGoWebJSONReservesPortableHTTPImportAlias(t *testing.T) {
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
-			Source: []byte("import { serve } from trb/web\n\ndef main()\n\tserve()\n\treturn\nend\n"),
+			Source: []byte("import trb/web\n\ndef main()\n\tWeb.serve()\n\treturn\nend\n"),
 		},
 		{
 			Filename: "/project/src/presentation/http/response.trb", ModulePath: "presentation/http/response", Package: "http",
@@ -317,11 +317,11 @@ end
 		},
 		{
 			Filename: "/project/src/routes/index.trb", ModulePath: "routes/index", Package: "routes",
-			Source: []byte(`import { Context, Response, json } from trb/web
+			Source: []byte(`import { Context, Response } from trb/web
 import { render } from presentation/http/response
 
 def get(_context: Context): Response
-	return render(json({ "status" => "ok" }))
+	return render(Response.json({ "status" => "ok" }))
 end
 `),
 		},
@@ -352,10 +352,10 @@ func TestCompileProjectGeneratesDefaultWebServerPort(t *testing.T) {
 		Filename:   "/project/src/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import { serve } from trb/web
+		Source: []byte(`import trb/web
 
 def main()
-	serve()
+	Web.serve()
 	return
 end
 `),
@@ -373,9 +373,9 @@ end
 			var targets []string
 			switch mode {
 			case "go":
-				targets = []string{`trbWebServe(web.ServerConfig{Host: "0.0.0.0", Port: 3000, BodyLimitBytes: 1048576, ShutdownTimeoutMilliseconds: 10000})`}
+				targets = []string{`trbWebServe(web.WebServerConfig{Host: "0.0.0.0", Port: 3000, BodyLimitBytes: 1048576, ShutdownTimeoutMilliseconds: 10000})`}
 			case "ruby":
-				targets = []string{`trb_web_serve(ServerConfig.new(host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000))`}
+				targets = []string{`trb_web_serve(Web::ServerConfig.new(host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000))`}
 			case "typescript":
 				targets = []string{`trb_web_serve({ host: "0.0.0.0", port: 3000, body_limit_bytes: 1048576, shutdown_timeout_milliseconds: 10000 });`}
 			}
@@ -452,10 +452,10 @@ func TestCompileProjectValidatesWebPathParameterCalls(t *testing.T) {
 			name:       "ordinary parameter",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	return text(context.path_value("id"))
+	return Response.text(context.path_value("id"))
 end
 `,
 		},
@@ -463,7 +463,7 @@ end
 			name:       "typed parameters",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoParams
@@ -473,9 +473,9 @@ end
 def get(context: Context): Response
 	case context.params<TodoParams>()
 	when Result::Ok(params)
-		return text(params.id.to_s())
+		return Response.text(params.id.to_s())
 	when Result::Err(_error)
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
 end
 `,
@@ -484,7 +484,7 @@ end
 			name:       "typed parameters missing route field",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoParams
@@ -494,9 +494,9 @@ end
 def get(context: Context): Response
 	case context.params<TodoParams>()
 	when Result::Ok(params)
-		return text(params.slug)
+		return Response.text(params.slug)
 	when Result::Err(_error)
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
 end
 `,
@@ -506,7 +506,7 @@ end
 			name:       "endpoint input parameters",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoParams
@@ -520,9 +520,9 @@ end
 def get(context: Context): Response
 	case context.bind<TodoInput>()
 	when Result::Ok(input)
-		return text(input.params.id.to_s())
+		return Response.text(input.params.id.to_s())
 	when Result::Err(_error)
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
 end
 `,
@@ -531,7 +531,7 @@ end
 			name:       "endpoint input parameters mismatch",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoParams
@@ -545,9 +545,9 @@ end
 def get(context: Context): Response
 	case context.bind<TodoInput>()
 	when Result::Ok(input)
-		return text(input.params.slug)
+		return Response.text(input.params.slug)
 	when Result::Err(_error)
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
 end
 `,
@@ -557,7 +557,7 @@ end
 			name:       "endpoint input parameters omit route field",
 			filename:   "/project/src/routes/todos/[id]/[slug].trb",
 			modulePath: "routes/todos/[id]/[slug]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 record TodoParams
 	id: Integer
@@ -569,9 +569,9 @@ end
 
 def get(context: Context): Response
 	input := context.bind<TodoInput>() catch |_error|
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
-	return text(input.params.id.to_s())
+	return Response.text(input.params.id.to_s())
 end
 `,
 			want: `Context#bind<TodoInput>() params is missing route parameter "slug"`,
@@ -580,7 +580,7 @@ end
 			name:       "endpoint input parameters mismatch inside catch",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 record TodoParams
 	slug: String
@@ -592,9 +592,9 @@ end
 
 def get(context: Context): Response
 	input := context.bind<TodoInput>() catch |_error|
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
-	return text(input.params.slug)
+	return Response.text(input.params.slug)
 end
 `,
 			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
@@ -603,7 +603,7 @@ end
 			name:       "endpoint input parameters mismatch inside try",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, EndpointInputError, Response, text } from trb/web
+			source: `import { Context, EndpointInputError, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoParams
@@ -621,9 +621,9 @@ end
 
 def get(context: Context): Response
 	input := bind_input(context) catch |_error|
-		return text("invalid", 400)
+		return Response.text("invalid", 400)
 	end
-	return text(input.params.slug)
+	return Response.text(input.params.slug)
 end
 `,
 			want: `Context#bind<TodoInput>() params field "slug" is not declared by route /todos/:id`,
@@ -632,10 +632,10 @@ end
 			name:       "catch-all parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	return text(context.path_value("path"))
+	return Response.text(context.path_value("path"))
 end
 `,
 		},
@@ -643,14 +643,14 @@ end
 			name:       "helper parameter",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def todo_id(context: Context): String
 	return context.path_value("id")
 end
 
 def get(context: Context): Response
-	return text(todo_id(context))
+	return Response.text(todo_id(context))
 end
 `,
 		},
@@ -658,7 +658,7 @@ end
 			name:       "unrelated local function",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def path_param(context: Context, name: String): String
 	puts(context.request.path)
@@ -667,7 +667,7 @@ end
 
 def get(context: Context): Response
 	name := "id"
-	return text(path_param(context, name))
+	return Response.text(path_param(context, name))
 end
 `,
 		},
@@ -675,11 +675,11 @@ end
 			name:       "dynamic parameter name",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def get(context: Context): Response
 	name := "id"
-	return text(context.path_value(name))
+	return Response.text(context.path_value(name))
 end
 `,
 			want: "Context#path_value() name must be a string literal in a route file",
@@ -688,10 +688,10 @@ end
 			name:       "undeclared parameter",
 			filename:   "/project/src/routes/files/[...path].trb",
 			modulePath: "routes/files/[...path]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	return text(context.path_value("slug"))
+	return Response.text(context.path_value("slug"))
 end
 `,
 			want: `Context#path_value() references undeclared route parameter "slug"`,
@@ -700,14 +700,14 @@ end
 			name:       "undeclared helper parameter",
 			filename:   "/project/src/routes/todos/[id].trb",
 			modulePath: "routes/todos/[id]",
-			source: `import { Context, Response, text } from trb/web
+			source: `import { Context, Response } from trb/web
 
 def todo_slug(context: Context): String
 	return context.path_value("slug")
 end
 
 def get(context: Context): Response
-	return text(todo_slug(context))
+	return Response.text(todo_slug(context))
 end
 `,
 			want: `Context#path_value() references undeclared route parameter "slug"`,
@@ -811,11 +811,11 @@ func assertWebServerTarget(t *testing.T, mode string, artifact *Artifact) {
 	var targets []string
 	switch mode {
 	case "go":
-		targets = []string{"func trbWebServe(config web.ServerConfig)", "nethttp.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes))", "request.URL.EscapedPath()", "request.URL.RawQuery", `net.JoinHostPort(config.Host, strconv.Itoa(config.Port))`, "signal.NotifyContext", `trbWebServe(web.ServerConfig{Host: "127.0.0.1", Port: 4100, BodyLimitBytes: 2048, ShutdownTimeoutMilliseconds: 500})`}
+		targets = []string{"func trbWebServe(config web.WebServerConfig)", "nethttp.MaxBytesReader(writer, request.Body, int64(config.BodyLimitBytes))", "request.URL.EscapedPath()", "request.URL.RawQuery", `net.JoinHostPort(config.Host, strconv.Itoa(config.Port))`, "signal.NotifyContext", `trbWebServe(func() web.WebServerConfig`, "web.Trb__RecordNew__WebServerConfig"}
 	case "ruby":
-		targets = []string{"def trb_web_serve(config)", "content_length > config.body_limit_bytes", `path, query_string = target.split("?", 2)`, "Signal.trap(signal)", `TCPServer.new(config.host, config.port)`, `trb_web_serve(ServerConfig.new(host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500))`}
+		targets = []string{"def trb_web_serve(config)", "content_length > config.body_limit_bytes", `path, query_string = target.split("?", 2)`, "Signal.trap(signal)", `TCPServer.new(config.host, config.port)`, `trb_web_serve(-> {`, "Web::ServerConfig.__trb_record_new"}
 	case "typescript":
-		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `new __trb_http.Headers(header_entries)`, `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 });`}
+		targets = []string{`import { createServer } from "node:http";`, "function trb_web_serve(config: TrbWebServerConfig)", "if (size > config.body_limit_bytes)", `new __trb_http.Headers(header_entries)`, `process.once("SIGTERM", shutdown)`, `server.listen(config.port, config.host)`, `trb_web_serve(__trb_web.__trbRecordNewWebServerConfig({ host: "127.0.0.1", port: 4100, body_limit_bytes: 2048, shutdown_timeout_milliseconds: 500 }));`}
 	}
 	targets = append(targets, "payload_too_large")
 	for _, target := range targets {

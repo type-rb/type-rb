@@ -2521,7 +2521,7 @@ func goRecordTarget(expression ir.Expression) (*ir.Identifier, []types.Type, boo
 		if !node.Namespace {
 			return nil, nil, false
 		}
-		return &ir.Identifier{ExprBase: node.ExprBase, Name: node.Name, Reference: node.Reference}, nil, true
+		return &ir.Identifier{ExprBase: node.ExprBase, Name: node.Name, Declaration: node.Declaration, Reference: node.Reference}, nil, true
 	case *ir.TypeApply:
 		identifier, _, ok := goRecordTarget(node.Receiver)
 		if !ok {

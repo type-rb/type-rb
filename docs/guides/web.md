@@ -22,7 +22,7 @@ functions determine HTTP methods. For example,
 
 <!-- trb-doc-test: web-update-todo -->
 ```trb
-import { Context, Response, json } from trb/web
+import { Context, Response } from trb/web
 import trb/std/result
 
 record UpdateTodo
@@ -38,9 +38,9 @@ def post(context: Context): Response
 	id := context.path_value("id")
 	case context.request.json<UpdateTodo>()
 	when Result::Ok(input)
-		return json(Todo.new(id: id, title: input.title), 201)
+		return Response.json(Todo.new(id: id, title: input.title), 201)
 	when Result::Err(_error)
-		return json({"error" => "invalid_request"}, 400)
+		return Response.json({"error" => "invalid_request"}, 400)
 	end
 end
 ```
@@ -58,7 +58,7 @@ handle query parameters, headers, cookies, text, bytes, and typed JSON. Response
 methods change status, headers, `Vary`, and cookies by returning a new response:
 
 ```trb
-response := json({"ok" => true})
+response := Response.json({"ok" => true})
 	.with_status(202)
 	.with_header("cache-control", "no-store")
 	.vary("accept")
@@ -68,7 +68,7 @@ Path and query values can be bound to records without giving the target
 runtime permission to reflect over application types:
 
 ```trb
-import { Context, Response, text } from trb/web
+import { Context, Response } from trb/web
 import trb/std/result
 
 record TodoParams
@@ -83,13 +83,13 @@ end
 def get(context: Context): Response
 	case context.params<TodoParams>()
 	when Result::Err(_error)
-		return text("invalid path", 400)
+		return Response.text("invalid path", 400)
 	when Result::Ok(params)
 		case context.request.query<TodoQuery>()
 		when Result::Err(_error)
-			return text("invalid query", 400)
+			return Response.text("invalid query", 400)
 		when Result::Ok(query)
-			return text(params.id.to_s() + ":" + query.tag.size().to_s())
+			return Response.text(params.id.to_s() + ":" + query.tag.size().to_s())
 		end
 	end
 end
@@ -111,7 +111,7 @@ not use that input source. `params` and `query` name binding records, while
 `body` names the typed JSON value:
 
 ```trb
-import { Context, EndpointInputError, Response, text } from trb/web
+import { Context, EndpointInputError, Response } from trb/web
 
 record TodoInput
 	params: TodoParams
@@ -122,11 +122,11 @@ end
 def invalid_input(error: EndpointInputError): Response
 	case error
 	when EndpointInputError::Params(_error)
-		return text("invalid path", 400)
+		return Response.text("invalid path", 400)
 	when EndpointInputError::Query(_error)
-		return text("invalid query", 400)
+		return Response.text("invalid query", 400)
 	when EndpointInputError::Body(_error)
-		return text("invalid body", 400)
+		return Response.text("invalid body", 400)
 	end
 end
 
@@ -134,7 +134,7 @@ def post(context: Context): Response
 	input := context.bind<TodoInput>() catch |error|
 		return invalid_input(error)
 	end
-	return text(input.params.id.to_s() + ":" + input.body.title)
+	return Response.text(input.params.id.to_s() + ":" + input.body.title)
 end
 ```
 
@@ -158,7 +158,7 @@ in that same module connects the route handler to its input and status-specific
 response types:
 
 ```trb
-import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+import { Context, Endpoint, Response, handles, input, response } from trb/web
 
 record CreateTodoBody
 	title: String
@@ -179,9 +179,9 @@ end
 
 def post(context: Context): Response
 	request := context.bind<CreateTodoInput>() catch |_error|
-		return json(ErrorResponse.new(message: "invalid request"), 400)
+		return Response.json(ErrorResponse.new(message: "invalid request"), 400)
 	end
-	return json(CreateTodoResponse.new(id: 42, title: request.body.title), 202)
+	return Response.json(CreateTodoResponse.new(id: 42, title: request.body.title), 202)
 end
 
 class CreateTodoEndpoint < Endpoint
@@ -284,7 +284,7 @@ the handler boundary. Create one `ContextKey<T>` and share that key between
 the producer and consumer:
 
 ```trb
-import { Context, ContextKey, Next, Response, text } from trb/web
+import { Context, ContextKey, Next, Response } from trb/web
 import trb/std/result
 
 record CurrentUser
@@ -302,9 +302,9 @@ end
 def get(context: Context): Response
 	case context.fetch(CURRENT_USER)
 	when Result::Ok(user)
-		return text(user.name)
+		return Response.text(user.name)
 	when Result::Err(_error)
-		return text("unauthorized", 401)
+		return Response.text("unauthorized", 401)
 	end
 end
 ```
@@ -364,6 +364,19 @@ checkpoints stop TypeRB CPU work cooperatively. Native operations receive the
 target runtime's cancellation signal when their API supports one and otherwise
 observe cancellation at the next generated boundary.
 
-`text`, `bytes`, `json`, `empty`, and `redirect` remain the standard response
-builders. Server host, port, body limit, and shutdown timeout are configured
-with `configure_server`.
+`Response.text`, `Response.bytes`, `Response.json`, `Response.empty`, and
+`Response.redirect` are the standard response builders. Pass a
+`Web::ServerConfig` to `Web.serve` to set the host, port, body limit, or
+shutdown timeout; omitted fields use the portable defaults.
+
+```trb
+import trb/web
+
+def main()
+	Web.serve(Web::ServerConfig.new(port: 8080))
+	return
+end
+```
+
+Construct response cookies directly with `ResponseCookie.new(name: ..., value:
+...)`; omit `attributes` when no cookie attributes are needed.

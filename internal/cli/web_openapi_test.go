@@ -92,10 +92,10 @@ func TestWebOpenAPIWritesBelowTheProjectRoot(t *testing.T) {
 func writeOpenAPIProject(t *testing.T, root string) {
 	t.Helper()
 	files := map[string]string{
-		"src/main.trb": `import { serve } from trb/web
+		"src/main.trb": `import trb/web
 
 def main()
-	serve()
+	Web.serve()
 	return
 end
 `,
@@ -122,11 +122,11 @@ record ErrorResponse
 	message: String
 end
 `,
-		"src/routes/reports/[id].trb": `import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+		"src/routes/reports/[id].trb": `import { Context, Endpoint, Response, handles, input, response } from trb/web
 import { CreateReportInput, CreateReportResponse, ErrorResponse, ReportID } from contracts/reports
 
 def post(_context: Context): Response
-	return json(CreateReportResponse.new(id: ReportID.new(42)), 202)
+	return Response.json(CreateReportResponse.new(id: ReportID.new(42)), 202)
 end
 
 class CreateReportEndpoint < Endpoint

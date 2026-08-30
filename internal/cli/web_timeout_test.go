@@ -58,20 +58,20 @@ def call(context: Context, next_handler: Next): Response
 end
 `
 			routes := map[string]string{
-				"fast.trb": `import { Context, Response, text } from trb/web
+				"fast.trb": `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `,
-				"slow.trb": `import { Context, Response, text } from trb/web
+				"slow.trb": `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
 	mut index := 0
 	while index < 1000000000
 		index = index + 1
 	end
-	return text("late")
+	return Response.text("late")
 end
 `,
 			}

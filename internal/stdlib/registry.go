@@ -38,6 +38,10 @@ type Block struct {
 type Symbol struct {
 	Name      string
 	Intrinsic string
+	// StaticOwner names the class or module that owns this compiler-known
+	// operation. Unlike Receiver, it represents a static member and does not
+	// pass the owner declaration as a runtime call argument.
+	StaticOwner string
 	// CompilerOnly keeps runner protocol operations out of user imports and
 	// language-service completion while allowing compiler-owned source to use
 	// the same checked package boundary.
@@ -74,6 +78,10 @@ type JSXProvider struct {
 
 func (s Symbol) HasReceiver() bool {
 	return s.Receiver.Kind != "" && s.Receiver.Kind != types.Invalid
+}
+
+func (s Symbol) HasStaticOwner() bool {
+	return s.StaticOwner != ""
 }
 
 func testAssertion(name string, expected bool) Symbol {

@@ -21,24 +21,24 @@ func initTemplateFiles(config *project.Config, template string) []initTemplateFi
 	return []initTemplateFile{
 		{
 			Path: filepath.Join(root, "main.trb"),
-			Source: `import { serve } from trb/web
+			Source: `import trb/web
 
 def main()
-	serve()
+	Web.serve()
 	return
 end
 `,
 		},
 		{
 			Path: filepath.Join(root, "routes", "index.trb"),
-			Source: `import { Context, Response, json } from trb/web
+			Source: `import { Context, Response } from trb/web
 
 record HelloResponse
 	message: String
 end
 
 def get(_context: Context): Response
-	return json(HelloResponse.new(message: "Hello, TypeRB!"))
+	return Response.json(HelloResponse.new(message: "Hello, TypeRB!"))
 end
 `,
 		},

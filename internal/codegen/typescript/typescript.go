@@ -858,6 +858,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		if declarationOnlyModule(n) {
 			g.ownedModuleDeclarations(n.Body, n.Name)
+			g.line("export const " + n.Name + " = {} as const;")
 			break
 		}
 		g.line("export namespace " + n.Name + " {")

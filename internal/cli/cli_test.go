@@ -6819,7 +6819,6 @@ end
 	ParameterError,
 	ParameterSource,
 	Response,
-	text,
 } from trb/web
 import { Result } from trb/std/result
 import { Date } from trb/std/time
@@ -6845,13 +6844,13 @@ end
 def parameter_error(error: ParameterError): Response
 	case error
 	when ParameterError::MalformedQuery(decode_error)
-		return text("malformed:" + decode_error.input, 400)
+		return Response.text("malformed:" + decode_error.input, 400)
 	when ParameterError::Missing(source: source, name: name)
-		return text("missing:" + source_name(source) + ":" + name, 400)
+		return Response.text("missing:" + source_name(source) + ":" + name, 400)
 	when ParameterError::Duplicate(source: source, name: name)
-		return text("duplicate:" + source_name(source) + ":" + name, 400)
+		return Response.text("duplicate:" + source_name(source) + ":" + name, 400)
 	when ParameterError::Invalid(source: source, name: name, value: value, expected: expected)
-		return text("invalid:" + source_name(source) + ":" + name + ":" + value + ":" + expected, 400)
+		return Response.text("invalid:" + source_name(source) + ":" + name + ":" + value + ":" + expected, 400)
 	end
 end
 
@@ -6879,7 +6878,7 @@ def get(context: Context): Response
 				"set"
 			end
 			extra := query.rating != nil && query.date != nil && query.visibility != nil
-			return text(params.id.to_s() + "|" + page + "|" + query.tag.size().to_s() + "|" + query.published.to_s() + "|" + extra.to_s())
+			return Response.text(params.id.to_s() + "|" + page + "|" + query.tag.size().to_s() + "|" + query.published.to_s() + "|" + extra.to_s())
 		end
 	end
 end
@@ -6949,7 +6948,7 @@ def main()
 	return
 end
 `
-			routeSource := `import { Context, EndpointInputError, ParameterError, RequestError, Response, text } from trb/web
+			routeSource := `import { Context, EndpointInputError, ParameterError, RequestError, Response } from trb/web
 
 record TodoParams
 	id: Integer
@@ -7000,11 +6999,11 @@ end
 def get_error(error: EndpointInputError): Response
 	case error
 	when EndpointInputError::Params(source_error)
-		return text("params:" + parameter_error_kind(source_error), 400)
+		return Response.text("params:" + parameter_error_kind(source_error), 400)
 	when EndpointInputError::Query(source_error)
-		return text("query:" + parameter_error_kind(source_error), 400)
+		return Response.text("query:" + parameter_error_kind(source_error), 400)
 	when EndpointInputError::Body(source_error)
-		return text("body:" + request_error_kind(source_error), 400)
+		return Response.text("body:" + request_error_kind(source_error), 400)
 	end
 end
 
@@ -7012,7 +7011,7 @@ def post(context: Context): Response
 	input := context.bind<TodoInput>() catch |error|
 		return get_error(error)
 	end
-	return text(input.params.id.to_s() + "|" + input.query.page.to_s() + "|" + input.body.title)
+	return Response.text(input.params.id.to_s() + "|" + input.query.page.to_s() + "|" + input.body.title)
 end
 `
 			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "todos"), 0o755); err != nil {
@@ -7070,7 +7069,6 @@ func TestRunOfficialWebResponseHeadersAcrossAvailableBackends(t *testing.T) {
 		mainSource := `import { Body, Header, Headers, HeaderValueError } from trb/http
 import {
 	Response,
-	redirect,
 } from trb/web
 import { Result } from trb/std/result
 
@@ -7104,8 +7102,8 @@ def main()
 	created := removed.with_status(201)
 	varied := created.vary("accept").vary("Origin").vary("origin")
 	found := varied.header_values("VARY")
-	default_redirect := redirect("/login")
-	temporary_redirect := redirect("/next", 307)
+	default_redirect := Response.redirect("/login")
+	temporary_redirect := Response.redirect("/next", 307)
 	puts(base.headers.values("X-Trace").size())
 	puts(base.headers.values("X-Trace")[0])
 	puts(added.headers.values("x-trace").size())
@@ -7168,14 +7166,14 @@ func TestRunOfficialWebResponseBuildersAcrossAvailableBackends(t *testing.T) {
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
 		}
-		mainSource := `import { bytes, empty, text } from trb/web
+		mainSource := `import { Response } from trb/web
 
 def main()
-	plain := text("hello")
-	not_found := text("missing", 404)
-	binary := bytes("raw".to_bytes())
-	no_content := empty()
-	reset := empty(205)
+	plain := Response.text("hello")
+	not_found := Response.text("missing", 404)
+	binary := Response.bytes("raw".to_bytes())
+	no_content := Response.empty()
+	reset := Response.empty(205)
 	puts(plain.status)
 	puts(plain.headers.values("content-type")[0])
 	puts(plain.body.to_s())
@@ -7237,12 +7235,11 @@ import {
 	Response,
 	ResponseCookie,
 	ResponseCookieAttribute,
-	new_response_cookie,
 } from trb/web
 
 def main()
 	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
-	simple := base.set_cookie(new_response_cookie("theme", "dark"))
+	simple := base.set_cookie(ResponseCookie.new(name: "theme", value: "dark"))
 	session_cookie := ResponseCookie.new(
 		name: "session",
 		value: "abc",
@@ -7336,17 +7333,16 @@ import {
 	Response,
 	ResponseCookie,
 	ResponseCookieAttribute,
-	new_response_cookie,
 } from trb/web
 
 def get(context: Context): Response
 	kind := context.path_value("kind")
 	base := Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 	if kind == "name"
-		return base.set_cookie(new_response_cookie("bad name", "value"))
+		return base.set_cookie(ResponseCookie.new(name: "bad name", value: "value"))
 	end
 	if kind == "value"
-		return base.set_cookie(new_response_cookie("session", "non ascii"))
+		return base.set_cookie(ResponseCookie.new(name: "session", value: "non ascii"))
 	end
 	if kind == "domain"
 		return base.set_cookie(ResponseCookie.new(
@@ -7384,7 +7380,7 @@ def get(context: Context): Response
 		))
 	end
 	if kind == "secure-prefix"
-		return base.set_cookie(new_response_cookie("__Secure-session", "value"))
+		return base.set_cookie(ResponseCookie.new(name: "__Secure-session", value: "value"))
 	end
 	if kind == "host-prefix"
 		return base.set_cookie(ResponseCookie.new(
@@ -7394,8 +7390,8 @@ def get(context: Context): Response
 		))
 	end
 	if kind == "duplicate"
-		first := base.set_cookie(new_response_cookie("session", "first"))
-		return first.set_cookie(new_response_cookie("session", "second"))
+		first := base.set_cookie(ResponseCookie.new(name: "session", value: "first"))
+		return first.set_cookie(ResponseCookie.new(name: "session", value: "second"))
 	end
 	return base.set_cookie(ResponseCookie.new(
 		name: "__Host-session",
@@ -7483,7 +7479,7 @@ def main()
 	return
 end
 `
-		routeSource := `import { Context, Response, json } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 record TodoRequest
@@ -7501,12 +7497,12 @@ def post(context: Context): Response
 	when Result::Ok(payload)
 		case context.request.query_parameters()
 		when Result::Ok(parameters)
-			return json(TodoResponse.new(id: id, title: payload.title + ":" + parameters[0].value + ":" + parameters[1].value), 201)
+			return Response.json(TodoResponse.new(id: id, title: payload.title + ":" + parameters[0].value + ":" + parameters[1].value), 201)
 		when Result::Err(_error)
-			return json(TodoResponse.new(id: id, title: "invalid query"), 400)
+			return Response.json(TodoResponse.new(id: id, title: "invalid query"), 400)
 		end
 	when Result::Err(_error)
-		return json(TodoResponse.new(id: id, title: "invalid"), 400)
+		return Response.json(TodoResponse.new(id: id, title: "invalid"), 400)
 	end
 end
 `
@@ -7598,10 +7594,10 @@ def main()
 	return
 end
 `
-			routeSource := `import { Context, Response, text } from trb/web
+			routeSource := `import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	return text(context.path_value("path"))
+	return Response.text(context.path_value("path"))
 end
 `
 			if err := os.MkdirAll(filepath.Join(root, "src", "routes", "files"), 0o755); err != nil {
@@ -7693,7 +7689,7 @@ def main()
 	return
 end
 `
-		routeSource := `import { Context, RequestError, Response, text } from trb/web
+		routeSource := `import { Context, RequestError, Response } from trb/web
 import { Result } from trb/std/result
 
 record Payload
@@ -7703,19 +7699,19 @@ end
 def post(context: Context): Response
 	case context.request.json<Payload>()
 	when Result::Ok(payload)
-		return text("ok:" + payload.title)
+		return Response.text("ok:" + payload.title)
 	when Result::Err(error)
 		case error
 		when RequestError::MissingContentType
-			return text("missing_content_type", 400)
+			return Response.text("missing_content_type", 400)
 		when RequestError::DuplicateContentType
-			return text("duplicate_content_type", 400)
+			return Response.text("duplicate_content_type", 400)
 		when RequestError::UnsupportedContentType(value)
-			return text("unsupported_content_type:" + value, 400)
+			return Response.text("unsupported_content_type:" + value, 400)
 		when RequestError::InvalidUtf8
-			return text("invalid_utf8", 400)
+			return Response.text("invalid_utf8", 400)
 		when RequestError::InvalidJson(_json_error)
-			return text("invalid_json", 400)
+			return Response.text("invalid_json", 400)
 		end
 	end
 end
@@ -7919,7 +7915,7 @@ def main()
 	return
 end
 `
-		routeSource := `import { Context, Response, json } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 
 record FailureResponse
 	value: Integer
@@ -7927,7 +7923,7 @@ end
 
 def get(_context: Context): Response
 	value := "not-an-integer".to_i()
-	return json(FailureResponse.new(value: value))
+	return Response.json(FailureResponse.new(value: value))
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
@@ -8097,7 +8093,7 @@ def get(_context: Context): Response
 	return Response.new(status: 204, headers: Headers.new(), body: Body.empty())
 end
 `
-		failureRouteSource := `import { Context, Response, json } from trb/web
+		failureRouteSource := `import { Context, Response } from trb/web
 
 record FailureResponse
 	value: Integer
@@ -8105,7 +8101,7 @@ end
 
 def get(_context: Context): Response
 	value := "not-an-integer".to_i()
-	return json(FailureResponse.new(value: value))
+	return Response.json(FailureResponse.new(value: value))
 end
 `
 		middlewareSource := `import { Context, Next, Response } from trb/web
@@ -8253,11 +8249,11 @@ def call(context: Context, next_handler: Next): Response
 	return compose(context, next_handler, ORDERED)
 end
 `
-		routeSource := `import { Context, Response, text } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 
 def get(context: Context): Response
 	puts("route:" + context.request.path)
-	return text("ok")
+	return Response.text("ok")
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
@@ -8339,10 +8335,10 @@ def call(context: Context, next_handler: Next): Response
 	return SecureHeaders.call(context, next_handler)
 end
 `
-		routeSource := `import { Context, Response, text } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok").with_header("X-Frame-Options", "DENY")
+	return Response.text("ok").with_header("X-Frame-Options", "DENY")
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {
@@ -8440,15 +8436,15 @@ def call(context: Context, next_handler: Next): Response
 	return RequestID.call(context, next_handler)
 end
 `
-		routeSource := `import { Context, Response, text } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 import { Result } from trb/std/result
 
 def get(context: Context): Response
 	case context.request.header_value("x-request-id")
 	when Result::Ok(value)
-		return text(value)
+		return Response.text(value)
 	when Result::Err(_error)
-		return text("missing", 500)
+		return Response.text("missing", 500)
 	end
 end
 `
@@ -8576,10 +8572,10 @@ def call(context: Context, next_handler: Next): Response
 	return CORS.call(context, next_handler, CORS_OPTIONS)
 end
 `
-		routeSource := `import { Context, Response, text } from trb/web
+		routeSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok").with_header("Vary", "Accept").with_header("X-Handler", "route")
+	return Response.text("ok").with_header("Vary", "Accept").with_header("X-Handler", "route")
 end
 `
 		if err := os.MkdirAll(filepath.Join(root, "src", "routes"), 0o755); err != nil {

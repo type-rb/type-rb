@@ -196,26 +196,17 @@ func webSymbols() map[string]stdlib.Symbol {
 	contextValueError := types.FromName("ContextValueError")
 	contextValueResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typeT, contextValueError}}
 	return map[string]stdlib.Symbol{
-		"configure_server": {
-			Name:      "configure_server",
-			Intrinsic: "trb.web.configure_server",
-			Parameters: []stdlib.Parameter{
-				{Name: "host", Type: types.FromName("String"), Optional: true, Keyword: true},
-				{Name: "port", Type: types.FromName("Integer"), Optional: true, Keyword: true},
-				{Name: "body_limit_bytes", Type: types.FromName("Integer"), Optional: true, Keyword: true},
-				{Name: "shutdown_timeout_milliseconds", Type: types.FromName("Integer"), Optional: true, Keyword: true},
-			},
-			Return: types.FromName("ServerConfig"),
-		},
 		"serve": {
-			Name:       "serve",
-			Intrinsic:  "trb.web.serve",
-			Parameters: []stdlib.Parameter{{Name: "config", Type: types.FromName("ServerConfig"), Optional: true}},
-			Return:     types.FromName("Void"),
+			Name:        "serve",
+			Intrinsic:   "trb.web.serve",
+			StaticOwner: "Web",
+			Parameters:  []stdlib.Parameter{{Name: "config", Type: types.FromName("Web::ServerConfig"), Optional: true}},
+			Return:      types.FromName("Void"),
 		},
 		"json": {
 			Name:                "json",
 			Intrinsic:           "trb.web.json",
+			StaticOwner:         "Response",
 			TypeParameters:      []string{"T"},
 			Parameters:          []stdlib.Parameter{{Name: "value", Type: typeT}, {Name: "status", Type: types.FromName("Integer"), Optional: true}},
 			Return:              types.FromName("Response"),

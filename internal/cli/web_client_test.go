@@ -144,18 +144,18 @@ end
 				t.Fatal(err)
 			}
 			files := map[string]string{
-				"src/main.trb": `import { serve } from trb/web
+				"src/main.trb": `import trb/web
 
 def main()
-	serve()
+	Web.serve()
 	return
 end
 `,
 				"src/routes/reports/[id].trb": `import { GetReportInput, ReportResponse } from acme/contracts
-import { Context, Endpoint, Response, handles, input, json, response } from trb/web
+import { Context, Endpoint, Response, handles, input, response } from trb/web
 
 def get(_context: Context): Response
-	return json({ "id" => 42 })
+	return Response.json({ "id" => 42 })
 end
 
 class GetReportEndpoint < Endpoint
@@ -201,21 +201,21 @@ func TestWebClientReportsRouteLocalContractsAtTheirSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"src/main.trb": `import { serve } from trb/web
+		"src/main.trb": `import trb/web
 
 def main()
-	serve()
+	Web.serve()
 	return
 end
 `,
-		"src/routes/health.trb": `import { Context, Endpoint, Response, handles, json, response } from trb/web
+		"src/routes/health.trb": `import { Context, Endpoint, Response, handles, response } from trb/web
 
 record HealthResponse
 	ok: Boolean
 end
 
 def get(_context: Context): Response
-	return json(HealthResponse.new(ok: true), 200)
+	return Response.json(HealthResponse.new(ok: true), 200)
 end
 
 class HealthEndpoint < Endpoint
