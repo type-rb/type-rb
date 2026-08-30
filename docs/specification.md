@@ -441,6 +441,18 @@ switches.
   and return a code-point position as `Integer?`. They return `nil` when the
   substring is absent. An empty substring is found at position zero for
   `index` and at the String size for `rindex`.
+- An Array value has reference identity. Assigning it to another binding or
+  passing it as an argument preserves that identity instead of copying the
+  outer Array. Element assignment and destructive operations such as `push`,
+  `unshift`, `pop`, and `shift` are therefore visible through every alias,
+  including a caller whose Array is held by a `mut` parameter. This rule also
+  applies when growth requires a backend to reallocate its native storage.
+- Rebinding and Array mutation are distinct. `values = other` changes only the
+  selected binding, so rebinding a `mut` parameter never replaces the caller's
+  binding. An operation documented as returning a new Array, including `dup`,
+  slicing, transformation, sorting, `uniq`, and `concat`, creates a distinct
+  outer Array; its elements remain shallowly shared where their own types have
+  reference identity.
 
 ### 3.3 Access Rules (Private)
 

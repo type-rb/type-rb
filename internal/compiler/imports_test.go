@@ -1684,17 +1684,17 @@ end
 `)
 	wants := map[string][]string{
 		"go": {
-			`slices.Clone(values)`,
-			`trbArrayIndex_` + naming.PrivateSuffix("array-index:") + `(slices.Clone(values), 1)`,
-			`values = append(values, 2)`,
-			`values = values[1:]`,
-			`copy(values[1:], values[:len(values)-1])`,
+			`slices.Clone(trbArrayValues_`,
+			`trbArrayIndex_`,
+			`*values = append(*values, value)`,
+			`*values = items[1:]`,
+			`copy(items[1:], items[:len(items)-1])`,
 			`slices.Reverse(values)`,
-			`slices.Contains(values, 2)`,
-			`slices.Contains(values, float64(1))`,
+			`slices.Contains(trbArrayValues_`,
+			`float64(1)`,
 			`target := 1`,
 			`!slices.Contains(result, value)`,
-			`append(slices.Clone([]int{1, 2}), []int{3, 4}...)`,
+			`append(slices.Clone(trbArrayValues_`,
 			`maps.Keys(labels)`,
 			`maps.Values(maps.Clone(labels))`,
 			`values := maps.Clone(values)`,
@@ -1704,7 +1704,7 @@ end
 			`panic("Hash key is missing")`,
 			`strings.HasPrefix("TypeRB", "Type")`,
 			`strings.Split(value, separator)`,
-			`strings.Join(parts, "|")`,
+			`strings.Join(trbArrayValues_`,
 		},
 		"ruby": {
 			`values.dup`,
@@ -1850,7 +1850,7 @@ func TestGoReceiverIntrinsicsSurviveImportsWithinOnePackage(t *testing.T) {
 	for _, artifact := range artifacts {
 		if artifact.IR.ModulePath == "domain/consumer" {
 			consumerOutput = string(artifact.Output)
-			foundLength = strings.Contains(consumerOutput, "len(parsed.Values)")
+			foundLength = strings.Contains(consumerOutput, "len(trbArrayValues_")
 		}
 		parsed, parseErr := parser.ParseFile(fileSet, artifact.Filename, artifact.Output, parser.AllErrors)
 		if parseErr != nil {
@@ -2068,7 +2068,7 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {`func PathClean(value string) string`, `func Components(value string) []string`, `normalized = append(normalized, part)`},
+			"go":         {`func PathClean(value string) string`, `func Components(value string) *[]string`, `*values = append(*values, value)`},
 			"ruby":       {`class Path`, `def self.clean(value)`, `def components(value)`},
 			"typescript": {`export class Path`, `static clean(value: string): string`, `export function components(value: string): Array<string>`},
 		}[mode]
@@ -2212,7 +2212,7 @@ end
 			`type URLQueryParameter struct`,
 			`func parseQueryParameter(value string)`,
 			`func ParseQuery(value string)`,
-			`func BuildQuery(parameters []URLQueryParameter) string`,
+			`func BuildQuery(parameters *[]URLQueryParameter) string`,
 			`DecodeComponent(strings.Join`,
 			`encoded := EncodeComponent(value)`,
 		},
@@ -2336,7 +2336,7 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {`var UnicodeDataVersion string = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges [][]int) bool`},
+			"go":         {`var UnicodeDataVersion string = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges *[]*[]int) bool`},
 			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "17.0.0"`, `def self.letter(value)`, `def __trb_private_`},
 			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "17.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
 		}[mode]

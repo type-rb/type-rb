@@ -77,7 +77,7 @@ func TestORMRuntimeUsesSelectedDatabaseDialect(t *testing.T) {
 				t.Fatalf("generated invalid %s ORM Go: %v\n%s", test.adapter, err, output)
 			}
 			for _, want := range []string{
-				`"example.com/orm/trb/orm"`, `orm.DbResult[[]*Product]`, `orm.NewDbResultErr[[]*Product]`,
+				`"example.com/orm/trb/orm"`, `orm.DbResult[*[]*Product]`, `orm.NewDbResultErr[*[]*Product]`,
 				`trbOrmError(err, orm.DbErrorKindQuery, "database query failed")`, `database, err := orm.TrbOrmDatabase()`,
 				`type ProductDraft struct {`,
 				`func TrbOrmBuildProduct(columns []string, values []any) *ProductDraft`,

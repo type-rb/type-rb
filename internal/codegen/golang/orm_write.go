@@ -479,7 +479,7 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 		case ormintegration.DependentDestroy:
 			g.line(variable + " := " + qualifier + goORMLoader(target) + "(" + query + ")")
 			g.line("if " + variable + ".Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, variable+".ErrError") + " }")
-			g.line("for _, related := range " + variable + ".OkValue {")
+			g.line("for _, related := range " + g.arrayValues(variable+".OkValue") + " {")
 			g.indent++
 			g.line("destroyed := " + qualifier + goORMDestroy(target) + "(related)")
 			g.line("if destroyed.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { return " + g.ormResultErr(booleanType, "destroyed.ErrError") + " }")
@@ -501,7 +501,7 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 	g.line("loaded := " + goORMLoader(model) + "(query)")
 	g.line("if loaded.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "loaded.ErrError") + " }")
 	g.line("count := 0")
-	g.line("for _, value := range loaded.OkValue { destroyed := " + core + "(value, transaction); if destroyed.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "destroyed.ErrError") + " }; if destroyed.OkValue { count++ } }")
+	g.line("for _, value := range " + g.arrayValues("loaded.OkValue") + " { destroyed := " + core + "(value, transaction); if destroyed.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { if owned { _ = transaction.Rollback() }; return " + g.ormResultErr(integerType, "destroyed.ErrError") + " }; if destroyed.OkValue { count++ } }")
 	g.line("if owned { if commitError := transaction.Commit(); commitError != nil { return " + g.ormResultErr(integerType, "*commitError") + " } }")
 	g.line("return " + g.ormResultOK(integerType, "count"))
 	g.indent--

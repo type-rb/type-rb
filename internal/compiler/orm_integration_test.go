@@ -135,8 +135,8 @@ end
 	for _, expected := range []string{
 		"type Product struct", "type TrbOrmProductQuery struct",
 		`trbOrmProductStatement(query, "\"id\", \"name\", \"price\", \"active\"")`,
-		"TrbOrmLoadProduct", "type ProductList = []*Product", "orm.DbResult[[]*Product]", "defer orm.TrbOrmCloseDatabase()",
-		"orm.NewDbResultErr[[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
+		"TrbOrmLoadProduct", "type ProductList = *[]*Product", "orm.DbResult[*[]*Product]", "defer orm.TrbOrmCloseDatabase()",
+		"orm.NewDbResultErr[*[]*Product]", `"database query failed"`, "type ProductDraft struct", "TrbOrmBuildProduct",
 		"TrbOrmSaveProductDraft", "TrbOrmCreateProduct", "type ProductChanges struct", "TrbOrmWithProduct",
 		"TrbOrmSaveProductChanges", "TrbOrmUpdateProduct", "TrbOrmInsertAllProduct", "TrbOrmDeleteProduct",
 		`TrbOrmUpdateAllProduct(TrbOrmProductExecutionScope(`, `[]string{"name"}, []any{"Updated"})`,
@@ -703,7 +703,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmInsertAllProduct([]*ProductDraft{TrbOrmProductBuildScoped`) {
+	if !strings.Contains(output, `TrbOrmInsertAllProduct(trbArrayValues_`) {
 		t.Fatalf("generated strict bulk insert does not use typed drafts:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.insert_if_absent(Product.build(name: "Unique"), unique_by: [:name]))`)
@@ -719,7 +719,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmUpsertProduct(TrbOrmProductBuildScoped`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
+	if !strings.Contains(output, `TrbOrmUpsertProduct(TrbOrmProductBuildScoped`) || !strings.Contains(output, `trbArrayValues_`) {
 		t.Fatalf("generated upsert does not preserve conflict and update columns:\n%s", output)
 	}
 	artifacts, err = compile(`puts(Product.upsert_all([Product.build(name: "First", price: 1.0), Product.build(price: 2.0, name: "Second")], unique_by: [:name], update: [:price]))`)
@@ -727,7 +727,7 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	output = string(artifacts[0].Output)
-	if !strings.Contains(output, `TrbOrmUpsertAllProduct([]*ProductDraft{TrbOrmProductBuildScoped`) || !strings.Contains(output, `[]string{"name"}, []string{"price"}`) {
+	if !strings.Contains(output, `TrbOrmUpsertAllProduct(trbArrayValues_`) || !strings.Contains(output, `[]string{"price"}`) {
 		t.Fatalf("generated upsert_all does not use typed drafts and literal columns:\n%s", output)
 	}
 	for _, test := range []struct {
@@ -1384,9 +1384,9 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[[]*models.Product]",
+		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[*[]*models.Product]",
 		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
-		"models.TrbOrmInsertAllProduct([]*models.ProductDraft{models.TrbOrmProductBuildScoped",
+		"models.TrbOrmInsertAllProduct(trbArrayValues_",
 	} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)

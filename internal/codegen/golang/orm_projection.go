@@ -105,7 +105,7 @@ func (g *generator) ormProjectionRuntime(adapter ormintegration.Adapter, model o
 	g.indent--
 	g.line("}")
 	g.line("if err := rows.Err(); err != nil { return " + g.ormResultErr(arrayType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database projection query failed\")") + " }")
-	g.line("return " + g.ormResultOK(arrayType, "result"))
+	g.line("return " + g.ormResultOK(arrayType, g.arrayReference("result")))
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')

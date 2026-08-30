@@ -356,6 +356,13 @@ non-destructive shallow `reverse`, stable non-destructive sorting, value
 membership, first-position lookup with `index(value)`, and occurrence counting.
 `Array<String>` also provides `join`.
 
+An Array is a shared reference value. Destructive operations and element
+assignment update the same Array observed by aliases and by callers that pass
+it to a `mut` parameter, including across capacity growth. Reassigning the
+parameter itself remains local. `dup` and every operation documented as
+returning a new Array create a distinct outer Array and copy elements
+shallowly.
+
 `Range<Integer>#to_a()` returns a new Array containing the same sequence that
 Range iteration would visit. Inclusive and exclusive ends are honored; an
 inclusive equal-bound Range contains one value, while exclusive equal-bound
