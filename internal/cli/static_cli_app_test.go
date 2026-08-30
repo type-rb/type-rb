@@ -57,7 +57,7 @@ end
 
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "-p", "9000", "-v"}); status != 0 {
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "-p", "8000", "-p", "9000", "-v"}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if stdout.String() != "public\n9000\ntrue\n" || stderr.Len() != 0 {
@@ -100,6 +100,76 @@ end
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "serve"`) {
 		t.Fatalf("unexpected -- error stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunGeneratedStaticCLICollectsRepeatedOptionsAndReportsApplicationFailure(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/static-cli-repeated"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { fail, run } from trb/cli
+
+record CollectArgs
+	tags: Array<String> = [] @cli(:option, name: "tag", short: "t", value_name: "TAG", about: "Add a tag")
+end
+
+enum Command
+	Collect(args: CollectArgs)
+	Fail
+end
+
+record AppArgs
+	command: Command @cli(:subcommand)
+end
+
+def main()
+	args := run<AppArgs>(name: "repeated")
+	case args.command
+	when Command::Collect(collect)
+		puts(collect.tags.join(","))
+	when Command::Fail
+		fail("application failed")
+	end
+	return
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	arguments := []string{"run", "--config", config.Path, "--", "collect", "--tag", "one", "--tag=two", "-t", "three"}
+	if status := command.Run(arguments); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "one,two,three\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected repeated output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "collect", "--help"}); status != 0 {
+		t.Fatalf("help status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "-t, --tag <TAG>...") {
+		t.Fatalf("repeated option help is missing multiplicity: %s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "fail"}); status == 0 {
+		t.Fatalf("application failure unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if !strings.HasPrefix(stderr.String(), "application failed\n") {
+		t.Fatalf("unexpected application failure stderr=%q", stderr.String())
 	}
 }
 

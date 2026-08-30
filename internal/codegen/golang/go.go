@@ -26,48 +26,49 @@ import (
 )
 
 type generator struct {
-	b                 strings.Builder
-	indent            int
-	functionDepth     int
-	receiver          string
-	returnType        types.Type
-	inConstructor     bool
-	methods           map[string]bool
-	topMethods        map[string]bool
-	staticMethods     map[string]map[string]bool
-	records           map[string]bool
-	classes           map[string]bool
-	typeAliases       map[string]string
-	typeNames         map[string]string
-	typeKinds         map[string]string
-	imports           map[string]string
-	bindingNames      map[string]string
-	bindingSources    map[string]bool
-	lexicalNames      map[string]string
-	modulePath        string
-	moduleName        string
-	moduleMethods     map[string]bool
-	goModule          string
-	temporary         int
-	breakTarget       string
-	jobs              *jobsintegration.Manifest
-	jobsSQL           *jobssql.Manifest
-	orm               *ormintegration.Manifest
-	ormCommonRuntime  bool
-	ormPackageModels  []ormintegration.Model
-	projectNames      *goProjectNames
-	execution         *effectplan.Plan
-	executionActive   bool
-	oidcRuntime       bool
-	arrayRuntime      bool
-	arrayIndexRuntime bool
-	recordSources     bool
-	sourceMarker      int
-	sourceLocations   map[int]sourcemap.Location
-	sourcePath        string
-	checkedInteger    bool
-	cli               *cliapp.Manifest
-	cliInvocations    map[int]bool
+	b                     strings.Builder
+	indent                int
+	functionDepth         int
+	receiver              string
+	returnType            types.Type
+	inConstructor         bool
+	methods               map[string]bool
+	topMethods            map[string]bool
+	staticMethods         map[string]map[string]bool
+	records               map[string]bool
+	classes               map[string]bool
+	typeAliases           map[string]string
+	typeNames             map[string]string
+	typeKinds             map[string]string
+	imports               map[string]string
+	bindingNames          map[string]string
+	bindingSources        map[string]bool
+	lexicalNames          map[string]string
+	modulePath            string
+	moduleName            string
+	moduleMethods         map[string]bool
+	goModule              string
+	temporary             int
+	breakTarget           string
+	jobs                  *jobsintegration.Manifest
+	jobsSQL               *jobssql.Manifest
+	orm                   *ormintegration.Manifest
+	ormCommonRuntime      bool
+	ormPackageModels      []ormintegration.Model
+	projectNames          *goProjectNames
+	execution             *effectplan.Plan
+	executionActive       bool
+	oidcRuntime           bool
+	arrayRuntime          bool
+	arrayIndexRuntime     bool
+	recordSources         bool
+	sourceMarker          int
+	sourceLocations       map[int]sourcemap.Location
+	sourcePath            string
+	checkedInteger        bool
+	cli                   *cliapp.Manifest
+	cliInvocations        map[int]bool
+	cliApplicationFailure bool
 }
 
 func Generate(program *ir.Program) string {
@@ -190,6 +191,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	if g.checkedInteger || strings.Contains(g.b.String(), "trbInteger") {
 		g.checkedIntegerRuntimeSupport()
+	}
+	if g.cliApplicationFailure {
+		g.cliApplicationFailureRuntimeSupport()
 	}
 	g.imports = pruneUnusedImports(g.b.String(), g.imports)
 	packageName := program.Package
@@ -1319,7 +1323,22 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++
+	cliMain := method.Name == "main" && g.cli != nil
+	if cliMain {
+		g.requireImport("fmt", "")
+		g.requireImport("os", "")
+		g.line("var __trbCLIApplicationFailureMessage string")
+		g.line("__trbCLIApplicationFailed := false")
+		g.line("func() {")
+		g.indent++
+		g.line("defer func() { if recovered := recover(); recovered != nil { if failure, ok := recovered.(interface{ TrbCLIApplicationFailure() string }); ok { __trbCLIApplicationFailureMessage = failure.TrbCLIApplicationFailure(); __trbCLIApplicationFailed = true; return }; panic(recovered) } }()")
+	}
 	g.statements(method.Body)
+	if cliMain {
+		g.indent--
+		g.line("}()")
+		g.line("if __trbCLIApplicationFailed { fmt.Fprintln(os.Stderr, __trbCLIApplicationFailureMessage); os.Exit(1) }")
+	}
 	g.executionActive = previousExecution
 	g.functionDepth--
 	g.returnType = previousReturnType
@@ -3235,6 +3254,9 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
+		} else if t.Name == "FileSystem::File" {
+			g.requireImport("os", "")
+			result = "*os.File"
 		} else if t.Declaration.Kind.IsType() && t.Declaration.Module == g.modulePath && t.Declaration.Name != "" {
 			result = goIdentifier(t.Declaration.Name, true)
 			if t.Declaration.Kind == identity.Class {

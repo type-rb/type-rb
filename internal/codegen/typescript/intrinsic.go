@@ -79,7 +79,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	filesystemError := func(operation, path, message string) string {
 		_, successType, errorType := filesystemResultType()
-		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
+		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: " + g.runtimeName("FileSystem::ErrorKind") + ".Other } satisfies " + errorType
 		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
@@ -173,6 +173,34 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		resultType, _, _ := filesystemResultType()
 		compare := "(left, right) => { const leftBytes = new TextEncoder().encode(left); const rightBytes = new TextEncoder().encode(right); const length = Math.min(leftBytes.length, rightBytes.length); for (let index = 0; index < length; index += 1) { if (leftBytes[index] !== rightBytes[index]) { return leftBytes[index]! - rightBytes[index]!; } } return leftBytes.length - rightBytes.length; }"
 		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const names = (fs.readdirSync(__trbPath) as Array<string>).sort(" + compare + "); return " + filesystemOK("names") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("list", "__trbPath", "message") + "; } })()"
+	case "trb.std.filesystem.entries":
+		resultType, _, _ := filesystemResultType()
+		compare := "(left, right) => { const leftBytes = new TextEncoder().encode(left.name); const rightBytes = new TextEncoder().encode(right.name); const length = Math.min(leftBytes.length, rightBytes.length); for (let index = 0; index < length; index += 1) { if (leftBytes[index] !== rightBytes[index]) { return leftBytes[index]! - rightBytes[index]!; } } return leftBytes.length - rightBytes.length; }"
+		entryType := g.tsType(types.FromName("FileSystem::DirectoryEntry"))
+		kind := g.runtimeName("FileSystem::DirectoryEntryKind")
+		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const source = fs.readdirSync(__trbPath, { withFileTypes: true }) as Array<any>; const entries: Array<" + entryType + "> = source.map((entry) => ({ name: entry.name, kind: entry.isFile() ? " + kind + ".File : entry.isDirectory() ? " + kind + ".Directory : " + kind + ".Other } satisfies " + entryType + ")).sort(" + compare + "); return " + filesystemOK("entries") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("entries", "__trbPath", "message") + "; } })()"
+	case "trb.std.filesystem.file.read_bytes", "trb.std.filesystem.file.read_text":
+		resultType, _, _ := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		invalid := g.filesystemErrorValue(operation, "path", strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
+		tooLarge := g.filesystemErrorValue(operation, "path", strconv.Quote("file exceeds max_bytes"), "TooLarge")
+		failure := g.filesystemErrorValue(operation, "path", "message", "Other")
+		unavailable := g.filesystemErrorValue(operation, "path", strconv.Quote("filesystem is unavailable"), "Other")
+		value := "data"
+		if name == "trb.std.filesystem.file.read_text" {
+			value = "new TextDecoder(\"utf-8\").decode(data)"
+		}
+		return "((): " + resultType + " => { const handle = " + arguments[0] + "; const maxBytes = " + arguments[1] + "; const path = handle.path; if (maxBytes < 0) { return " + resultError(invalid) + "; } const fs = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (fs === undefined) { return " + resultError(unavailable) + "; } try { const buffer = new Uint8Array(maxBytes + 1); const count = fs.readSync(handle.fd, buffer, 0, buffer.length, null); if (count > maxBytes) { return " + resultError(tooLarge) + "; } const data = buffer.slice(0, count); return " + filesystemOK(value) + "; } catch (error) { " + filesystemMessage + "return " + resultError(failure) + "; } })()"
+	case "trb.std.filesystem.file.write_bytes", "trb.std.filesystem.file.write_text":
+		resultType, successType, _ := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		failure := g.filesystemErrorValue(operation, "path", "message", "Other")
+		unavailable := g.filesystemErrorValue(operation, "path", strconv.Quote("filesystem is unavailable"), "Other")
+		encoding := ""
+		if name == "trb.std.filesystem.file.write_text" {
+			encoding = ", { encoding: \"utf8\" }"
+		}
+		return "((): " + resultType + " => { const handle = " + arguments[0] + "; const path = handle.path; const fs = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (fs === undefined) { return " + resultError(unavailable) + "; } try { fs.writeFileSync(handle.fd, " + arguments[1] + encoding + "); return " + filesystemOK("({} satisfies "+successType+")") + "; } catch (error) { " + filesystemMessage + "return " + resultError(failure) + "; } })()"
 	case "trb.internal.process.arguments":
 		return `(Reflect.get(globalThis, "process")?.argv ?? []).slice(2)`
 	case "trb.internal.process.environment":

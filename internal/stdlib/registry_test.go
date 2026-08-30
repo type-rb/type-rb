@@ -21,6 +21,27 @@ func TestGenericCollectionContractsInferFromEarlierArguments(t *testing.T) {
 	}
 }
 
+func TestFilesystemContractOwnsScopedFileOperations(t *testing.T) {
+	definition, ok := Lookup("trb/std/filesystem")
+	if !ok {
+		t.Fatal("filesystem contract is missing")
+	}
+	open := definition.Symbols["open"]
+	if open.StaticOwner != "FileSystem" || open.Block == nil || !open.Block.Structured || open.Block.Return.Name != "T" || open.Block.ResultBoundary.Name != "FileSystem::Error" {
+		t.Fatalf("FileSystem.open contract = %#v", open)
+	}
+	if len(open.Block.ScopedParameters) != 1 || !open.Block.ScopedParameters[0] {
+		t.Fatalf("FileSystem.open scoped parameters = %#v", open.Block.ScopedParameters)
+	}
+	read := definition.Symbols["read_text"]
+	if read.Receiver.Name != "FileSystem::File" || len(read.Parameters) != 1 || read.Parameters[0].Name != "max_bytes" {
+		t.Fatalf("File#read_text contract = %#v", read)
+	}
+	if !OpaqueType("FileSystem::File") {
+		t.Fatal("FileSystem::File is not opaque")
+	}
+}
+
 func TestCollectionContractsAreNotPublicPackages(t *testing.T) {
 	for _, packagePath := range []string{"trb/std/arrays", "trb/std/hashes"} {
 		if _, ok := Lookup(packagePath); ok {

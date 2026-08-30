@@ -17,6 +17,7 @@ record ServeArgs
 	directory: String
 	port: Integer = 8080 @cli(:option, short: "p", about: "Port to listen on")
 	verbose: Boolean = false @cli(:option, short: "v", about: "Enable verbose output")
+	header: Array<String> = [] @cli(:option, value_name: "HEADER", about: "Add a header")
 end
 
 enum Command
@@ -94,6 +95,25 @@ Long values may use `--port=9000`. `--` ends option parsing. Boolean options
 are flags and also accept an explicit long value such as `--verbose=false`.
 Generated usage errors go to standard error and exit with status 2.
 
+An option field may use `Array<String>`, `Array<Integer>`, `Array<Float>`, or
+`Array<Boolean>`. Every occurrence appends one converted scalar in command-line
+order, for example `--header one --header=two`. Arrays are not positional
+arguments. A required Array option must occur at least once; a record default
+such as `[]` makes it optional. Repeating a non-Array scalar option retains its
+existing last-occurrence-wins behavior.
+
+Import `fail` when the application has parsed successfully but cannot complete
+its command:
+
+```trb
+import { fail } from trb/cli
+
+fail("configuration is invalid")
+```
+
+`fail` unwinds scoped resource cleanup, writes the message to standard error,
+and exits with status 1. Parser and usage failures continue to use status 2.
+
 ## Compile one executable
 
 The current native executable backend uses the Go toolchain. Configure the
@@ -111,16 +131,17 @@ reflection, or a separate schema file.
 
 ## Initial contract
 
-The first implementation supports scalar `String`, `Integer`, `Float`, and
-`Boolean` fields, one root subcommand field, payloadless commands, and commands
-with one record payload. Root options must appear before the subcommand.
+The current implementation supports scalar `String`, `Integer`, `Float`, and
+`Boolean` fields, repeated scalar option Arrays, one root subcommand field,
+payloadless commands, and commands with one record payload. Root options must
+appear before the subcommand.
 
-Repeated values and Arrays, environment fallback, option aliases, validation
-constraints, mutually exclusive groups, shell completion, nested subcommands,
-optional or default root commands, and combined short flags are not yet
-supported. These are reserved as extensions to the same record and
-payload-enum schema. Dynamic plugins and Ruby or TypeScript launcher generation
-are outside the package's single-binary model.
+Environment fallback, option aliases, validation constraints, mutually
+exclusive groups, shell completion, nested subcommands, optional or default
+root commands, variadic positionals, and combined short flags are not yet
+supported. These are reserved as extensions to the same record and payload-enum
+schema. Dynamic plugins and Ruby or TypeScript launcher generation are outside
+the package's single-binary model.
 
 `trb/platform/go/cli` was published in TypeRB 0.3.44 and remains accepted as a
 compatibility import. Use `trb/cli` in new source.

@@ -3010,7 +3010,7 @@ end
 		}
 		runtimeWants := map[string][]string{
 			"go":         {"type FileSystemError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileSystemError]", "__trb_result.NewResultOk[unit.Unit, FileSystemError]", "slices.Sort(names)"},
-			"ruby":       {"module FileSystem", "Error = Data.define(:operation, :path, :message)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
+			"ruby":       {"module FileSystem", "Error = Data.define(:operation, :path, :message, :kind)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
 			"typescript": {"export interface FileSystemError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileSystemError>", "Result.Ok<Unit, FileSystemError>", "{} satisfies Unit", "fs.readdirSync(__trbPath)"},
 		}[mode]
 		for _, want := range runtimeWants {

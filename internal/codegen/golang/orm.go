@@ -1471,6 +1471,10 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 }
 
 func (g *generator) structuredBlock(block *ir.StructuredBlock) {
+	if block != nil && block.Intrinsic == "trb.std.filesystem.open" {
+		g.filesystemStructuredBlock(block)
+		return
+	}
 	if block.Intrinsic != "trb.orm.transaction" || block.Result == nil {
 		return
 	}

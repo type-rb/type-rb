@@ -50,6 +50,7 @@ type Field struct {
 	Required    bool
 	HasDefault  bool
 	Nullable    bool
+	Repeated    bool
 	ModulePath  string
 	TypeName    string
 	SourceOrder int
@@ -483,6 +484,23 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 		return result, []Issue{{Message: fmt.Sprintf("trb/cli long option %q for field %s must not contain '='", result.Long, field.Name), Span: field.Span}}
 	}
 	typ := field.Type.Resolved
+	if typ.Kind == "array" {
+		if result.Positional {
+			return result, []Issue{{Message: fmt.Sprintf("trb/cli repeated field %s must be an option, not a positional argument", field.Name), Span: field.Span}}
+		}
+		if typ.Nullable {
+			return result, []Issue{{Message: fmt.Sprintf("trb/cli repeated option %s must use a non-nullable Array", field.Name), Span: field.Span}}
+		}
+		if len(typ.Arguments) != 1 {
+			return result, []Issue{{Message: fmt.Sprintf("trb/cli repeated option %s must use Array with one scalar element type", field.Name), Span: field.Span}}
+		}
+		result.Repeated = true
+		result.Nullable = false
+		typ = typ.Arguments[0]
+		if typ.Nullable {
+			return result, []Issue{{Message: fmt.Sprintf("trb/cli repeated option %s must use a non-nullable scalar element type", field.Name), Span: field.Span}}
+		}
+	}
 	result.TypeName = typ.Name
 	switch typ.Kind {
 	case "string":
@@ -494,7 +512,7 @@ func scalarField(modulePath string, field packageextension.ProjectRecordField, m
 	case "bool":
 		result.Kind = BooleanValue
 	default:
-		return result, []Issue{{Message: fmt.Sprintf("trb/cli field %s must use String, Integer, Float, or Boolean in the initial contract", field.Name), Span: field.Span}}
+		return result, []Issue{{Message: fmt.Sprintf("trb/cli field %s must use String, Integer, Float, Boolean, or an option Array of one of those scalar types", field.Name), Span: field.Span}}
 	}
 	if result.Short != "" && len([]rune(result.Short)) != 1 {
 		return result, []Issue{{Message: fmt.Sprintf("trb/cli short option for %s must contain one character", field.Name), Span: field.Span}}

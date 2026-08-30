@@ -88,8 +88,26 @@ end
 	_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
 		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
 	})
-	if err == nil || !strings.Contains(err.Error(), "must use String, Integer, Float, or Boolean") {
+	if err == nil || !strings.Contains(err.Error(), "must be an option, not a positional argument") {
 		t.Fatalf("CompileProject() error=%v, want unsupported CLI field diagnostic", err)
+	}
+}
+
+func TestCLIRejectsNullableRepeatedOptionElements(t *testing.T) {
+	source := []byte(`import { run } from trb/cli
+record Args
+	values: Array<String?> = [] @cli(:option)
+end
+def main()
+	_args := run<Args>(name: "bad")
+	return
+end
+`)
+	_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must use a non-nullable scalar element type") {
+		t.Fatalf("CompileProject() error=%v, want repeated element diagnostic", err)
 	}
 }
 

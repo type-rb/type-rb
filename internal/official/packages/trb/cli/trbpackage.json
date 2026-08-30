@@ -1,7 +1,7 @@
 {
   "name": "trb/cli",
   "aliases": ["trb/platform/go/cli"],
-  "version": "0.1.0",
+  "version": "0.2.0",
   "module": "trb/cli/index",
   "source": "src/index.trb",
   "semanticProvider": "trb.cli",

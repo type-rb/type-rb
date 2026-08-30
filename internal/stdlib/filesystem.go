@@ -6,10 +6,38 @@ import trb/std/unit
 import trb/internal/filesystem as native_fs
 
 module FileSystem
+	enum ErrorKind
+		Other
+		AlreadyExists
+		InvalidLimit
+		TooLarge
+	end
+
 	record Error
 		operation: String
 		path: String
 		message: String
+		kind: FileSystem::ErrorKind = FileSystem::ErrorKind::Other
+	end
+
+	enum OpenMode
+		Read
+		Write
+		CreateNew
+	end
+
+	enum DirectoryEntryKind
+		File
+		Directory
+		Other
+	end
+
+	record DirectoryEntry
+		name: String
+		kind: FileSystem::DirectoryEntryKind
+	end
+
+	class File
 	end
 end
 

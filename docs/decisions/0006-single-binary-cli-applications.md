@@ -49,7 +49,11 @@ subcommand and option names because an operating-system argument cannot contain
 NUL. Other Unicode names remain valid. The schema analyzer rejects reserved
 names before generation.
 
-The initial value boundary accepts `String`, `Integer`, `Float`, and `Boolean`.
+The value boundary accepts `String`, `Integer`, `Float`, and `Boolean`.
+An option may wrap one of those scalar types in `Array`; each occurrence
+appends one converted value in argument order. Repeated Arrays are not
+positional arguments. Required and default behavior continues to come from the
+record field.
 Record defaults and nullable types make scalar argument fields omittable. The
 root subcommand selector is required, non-nullable, and has no default in the
 initial contract. The parser supports long options, `--option=value`,
@@ -76,11 +80,11 @@ different naming and error rules.
 ## Initial exclusions
 
 The following are designed as later schema extensions rather than alternate
-models: repeated and collection values, environment-variable fallback,
-aliases, mutually exclusive groups, value constraints, completion generation,
-nested subcommands, optional or default root commands, and options after a
-subcommand that target the root record. Each requires explicit metadata and
-deterministic conflict rules.
+models: non-scalar collection values, variadic positionals,
+environment-variable fallback, aliases, mutually exclusive groups, value
+constraints, completion generation, nested subcommands, optional or default
+root commands, and options after a subcommand that target the root record.
+Each requires explicit metadata and deterministic conflict rules.
 
 The initial compiler implementation requires `mode: "go"` and the Go
 toolchain to produce the native executable. This is a build requirement, not a

@@ -51,7 +51,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Result::Ok.new(" + value + ")"
 	}
 	filesystemError := func(operation, path, message string) string {
-		value := "FileSystem::Error.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
+		value := rubyFilesystemError(operation, path, message, "Other")
 		return "Result::Err.new(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
@@ -130,6 +130,28 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
 	case "trb.internal.filesystem.list":
 		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.std.filesystem.entries":
+		entry := "FileSystem::DirectoryEntry.new(name: name, kind: kind)"
+		value := "Dir.children(path).sort.map { |name| info = ::File.lstat(::File.join(path, name)); kind = info.file? ? FileSystem::DirectoryEntryKind::File : (info.directory? ? FileSystem::DirectoryEntryKind::Directory : FileSystem::DirectoryEntryKind::Other); " + entry + " }"
+		return "->(path) { begin; " + filesystemOK(value) + "; rescue StandardError => error; " + filesystemError("entries", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.std.filesystem.file.read_bytes", "trb.std.filesystem.file.read_text":
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		invalid := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("max_bytes must be non-negative"), "InvalidLimit") + ")"
+		tooLarge := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("file exceeds max_bytes"), "TooLarge") + ")"
+		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		value := "data"
+		if name == "trb.std.filesystem.file.read_text" {
+			value = "data.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)"
+		}
+		return "->(file, max_bytes) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = file.read(max_bytes + 1) || \"\".b; if data.bytesize > max_bytes; " + tooLarge + "; else; " + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.filesystem.file.write_bytes", "trb.std.filesystem.file.write_text":
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		value := arguments[1]
+		if name == "trb.std.filesystem.file.write_text" {
+			value += ".encode(Encoding::UTF_8)"
+		}
+		return "->(file, value) { path = file.path; begin; file.write(value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + failure + "; end }.call(" + arguments[0] + ", " + value + ")"
 	case "trb.internal.process.arguments":
 		return "ARGV.dup"
 	case "trb.internal.process.environment":

@@ -12,6 +12,7 @@ import (
 	stdhex "encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	stdrand "math/rand/v2"
 	"os"
@@ -291,6 +292,108 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
+	case "trb.std.filesystem.entries":
+		if err := require(1); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
+		if !ok {
+			return Value{}, errors.New("FileSystem.entries expects String")
+		}
+		source, err := os.ReadDir(path)
+		if err != nil {
+			return e.filesystemErr(typ, "entries", path, err)
+		}
+		entryDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::DirectoryEntry")].(*recordDefinition)
+		if !ok {
+			return Value{}, errors.New("filesystem directory entries are not loaded")
+		}
+		kindDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::DirectoryEntryKind")].(*enumDefinition)
+		if !ok {
+			return Value{}, errors.New("filesystem directory entry kinds are not loaded")
+		}
+		items := make([]Value, 0, len(source))
+		for _, sourceEntry := range source {
+			info, infoErr := sourceEntry.Info()
+			if infoErr != nil {
+				return e.filesystemErr(typ, "entries", path, infoErr)
+			}
+			kind := "Other"
+			if info.Mode().IsRegular() {
+				kind = "File"
+			} else if info.IsDir() {
+				kind = "Directory"
+			}
+			items = append(items, Value{Type: types.FromName("FileSystem::DirectoryEntry"), Data: &recordInstance{Definition: entryDefinition, Fields: map[string]Value{
+				"name": {Type: types.FromName("String"), Data: sourceEntry.Name()},
+				"kind": {Type: types.FromName("FileSystem::DirectoryEntryKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}},
+			}}})
+		}
+		entryType := types.FromName("FileSystem::DirectoryEntry")
+		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{entryType}}
+		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
+	case "trb.std.filesystem.file.read_bytes", "trb.std.filesystem.file.read_text":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		file, ok := values[0].Data.(*os.File)
+		if !ok {
+			return Value{}, errors.New("filesystem read receiver is not an open file")
+		}
+		maxBytes, ok := values[1].Data.(int64)
+		if !ok {
+			return Value{}, errors.New("filesystem read max_bytes must be Integer")
+		}
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		if maxBytes < 0 {
+			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("max_bytes must be non-negative"), "InvalidLimit")
+		}
+		data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+		if err != nil {
+			return e.filesystemErr(typ, operation, file.Name(), err)
+		}
+		if int64(len(data)) > maxBytes {
+			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file exceeds max_bytes"), "TooLarge")
+		}
+		if name == "trb.std.filesystem.file.read_text" {
+			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: strings.ToValidUTF8(string(data), "�")})
+		}
+		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(data)})
+	case "trb.std.filesystem.file.write_bytes", "trb.std.filesystem.file.write_text":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		file, ok := values[0].Data.(*os.File)
+		if !ok {
+			return Value{}, errors.New("filesystem write receiver is not an open file")
+		}
+		var data []byte
+		if name == "trb.std.filesystem.file.write_text" {
+			text, textOK := values[1].Data.(string)
+			if !textOK {
+				return Value{}, errors.New("file.write_text expects String")
+			}
+			data = []byte(text)
+		} else {
+			bytes, bytesOK := values[1].Data.(bytesValue)
+			if !bytesOK {
+				return Value{}, errors.New("file.write_bytes expects Bytes")
+			}
+			data = []byte(bytes)
+		}
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		written, err := file.Write(data)
+		if err == nil && written != len(data) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			return e.filesystemErr(typ, operation, file.Name(), err)
+		}
+		unit, err := e.unitValue()
+		if err != nil {
+			return Value{}, err
+		}
+		return e.filesystemOK(typ, unit)
 	case "trb.internal.process.arguments":
 		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
 		return Value{Type: arrayType, Data: &arrayValue{}}, nil

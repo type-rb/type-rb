@@ -158,11 +158,25 @@ func (g *generator) cliFieldValues(record cliapp.Record, prefix, keyPrefix strin
 		key := keyPrefix + "." + field.Name
 		g.line(provided + " := parsed.Provided[" + strconv.Quote(key) + "]")
 		baseType := cliGoScalarType(field.Kind)
-		if field.Nullable {
+		if field.Repeated {
+			values := name + "Values"
+			g.line(values + " := make([]" + baseType + ", 0, len(parsed.Values[" + strconv.Quote(key) + "]))")
+			g.line("for " + name + "Index, " + name + "Raw := range parsed.Values[" + strconv.Quote(key) + "] {")
+			g.indent++
+			g.line("_ = " + name + "Index")
+			parsed := g.cliParsedScalar(field, name+"Raw", name+"Value")
+			for _, line := range parsed.Lines {
+				g.line(line)
+			}
+			g.line(values + " = append(" + values + ", " + parsed.Value + ")")
+			g.indent--
+			g.line("}")
+			g.line(name + " := " + g.arrayReference(values))
+		} else if field.Nullable {
 			g.line("var " + name + " *" + baseType)
 			g.line("if " + provided + " {")
 			g.indent++
-			parsed := g.cliParsedScalar(field, "parsed.Values["+strconv.Quote(key)+"]", name+"Value")
+			parsed := g.cliParsedScalar(field, "parsed.Values["+strconv.Quote(key)+"][len(parsed.Values["+strconv.Quote(key)+"])-1]", name+"Value")
 			for _, line := range parsed.Lines {
 				g.line(line)
 			}
@@ -173,7 +187,7 @@ func (g *generator) cliFieldValues(record cliapp.Record, prefix, keyPrefix strin
 			g.line("var " + name + " " + baseType)
 			g.line("if " + provided + " {")
 			g.indent++
-			parsed := g.cliParsedScalar(field, "parsed.Values["+strconv.Quote(key)+"]", name+"Value")
+			parsed := g.cliParsedScalar(field, "parsed.Values["+strconv.Quote(key)+"][len(parsed.Values["+strconv.Quote(key)+"])-1]", name+"Value")
 			for _, line := range parsed.Lines {
 				g.line(line)
 			}
@@ -312,18 +326,19 @@ func cliFieldLiteral(key string, field cliapp.Field) string {
 		", ValueName: " + strconv.Quote(field.ValueName) +
 		", Positional: " + strconv.FormatBool(field.Positional) +
 		", Boolean: " + strconv.FormatBool(field.Kind == cliapp.BooleanValue) +
+		", Repeated: " + strconv.FormatBool(field.Repeated) +
 		", Required: " + strconv.FormatBool(field.Required) + "}"
 }
 
 func (g *generator) cliRuntimeSupport() {
-	g.line("type trb__cliField struct { Key, Name, Long, Short, About, ValueName string; Positional, Boolean, Required bool }")
+	g.line("type trb__cliField struct { Key, Name, Long, Short, About, ValueName string; Positional, Boolean, Repeated, Required bool }")
 	g.line("type trb__cliCommand struct { Name, About string; Fields []trb__cliField }")
 	g.line("type trb__cliSpec struct { Fields []trb__cliField; Commands []trb__cliCommand }")
-	g.line("type trb__cliParsed struct { Values map[string]string; Provided map[string]bool; Command string }")
+	g.line("type trb__cliParsed struct { Values map[string][]string; Provided map[string]bool; Command string }")
 	g.b.WriteByte('\n')
 	g.line("func trb__cliParse(args []string, name string, version *string, about *string, spec trb__cliSpec) trb__cliParsed {")
 	g.indent++
-	g.line("result := trb__cliParsed{Values: map[string]string{}, Provided: map[string]bool{}}")
+	g.line("result := trb__cliParsed{Values: map[string][]string{}, Provided: map[string]bool{}}")
 	g.line("fields := spec.Fields")
 	g.line("position := 0")
 	g.line("positionalOnly := false")
@@ -348,7 +363,7 @@ func (g *generator) cliRuntimeSupport() {
 	g.line("if field == nil { trb__cliFail(name, \"unknown option --\"+parts[0]) }")
 	g.line("value := \"true\"")
 	g.line("if len(parts) == 2 { value = parts[1] } else if !field.Boolean { if index+1 >= len(args) { trb__cliFail(name, \"option --\"+field.Long+\" requires a value\") }; index++; value = args[index] }")
-	g.line("result.Values[field.Key] = value; result.Provided[field.Key] = true; continue")
+	g.line("result.Values[field.Key] = append(result.Values[field.Key], value); result.Provided[field.Key] = true; continue")
 	g.indent--
 	g.line("}")
 	g.line("if !positionalOnly && strings.HasPrefix(argument, \"-\") && argument != \"-\" {")
@@ -358,12 +373,12 @@ func (g *generator) cliRuntimeSupport() {
 	g.line("if field == nil { trb__cliFail(name, \"unknown option -\"+short) }")
 	g.line("value := \"true\"")
 	g.line("if !field.Boolean { if index+1 >= len(args) { trb__cliFail(name, \"option -\"+field.Short+\" requires a value\") }; index++; value = args[index] }")
-	g.line("result.Values[field.Key] = value; result.Provided[field.Key] = true; continue")
+	g.line("result.Values[field.Key] = append(result.Values[field.Key], value); result.Provided[field.Key] = true; continue")
 	g.indent--
 	g.line("}")
 	g.line("field := trb__cliPositional(fields, position)")
 	g.line("if field == nil { trb__cliFail(name, \"unexpected argument \"+strconv.Quote(argument)) }")
-	g.line("result.Values[field.Key] = argument; result.Provided[field.Key] = true; position++")
+	g.line("result.Values[field.Key] = append(result.Values[field.Key], argument); result.Provided[field.Key] = true; position++")
 	g.indent--
 	g.line("}")
 	g.line("if len(spec.Commands) > 0 && result.Command == \"\" { trb__cliFail(name, \"a command is required\") }")
@@ -395,8 +410,13 @@ func (g *generator) cliRuntimeHelpers() {
 	g.line("for _, field := range fields { if field.Positional { if field.Required { fmt.Fprint(os.Stdout, \" <\"+field.ValueName+\">\") } else { fmt.Fprint(os.Stdout, \" [\"+field.ValueName+\"]\") } } }")
 	g.line("fmt.Fprintln(os.Stdout); if description != nil && *description != \"\" { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, *description) }")
 	g.line("if positionals { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Arguments:\"); for _, field := range fields { if !field.Positional { continue }; label := \"<\"+field.ValueName+\">\"; if !field.Required { label = \"[\"+field.ValueName+\"]\" }; fmt.Fprintf(os.Stdout, \"  %-24s %s\\n\", label, field.About) } }")
-	g.line("if options || version != nil { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Options:\"); for _, field := range fields { if field.Positional { continue }; label := \"    --\"+field.Long; if field.Short != \"\" { label = \"-\"+field.Short+\", --\"+field.Long }; if !field.Boolean { label += \" <\"+field.ValueName+\">\" }; fmt.Fprintf(os.Stdout, \"  %-24s %s\\n\", label, field.About) }; fmt.Fprintln(os.Stdout, \"  -h, --help               Print help\"); if version != nil { fmt.Fprintln(os.Stdout, \"  --version                Print version\") } } else { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Options:\"); fmt.Fprintln(os.Stdout, \"  -h, --help               Print help\") }")
+	g.line("if options || version != nil { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Options:\"); for _, field := range fields { if field.Positional { continue }; label := \"    --\"+field.Long; if field.Short != \"\" { label = \"-\"+field.Short+\", --\"+field.Long }; if !field.Boolean { label += \" <\"+field.ValueName+\">\" }; if field.Repeated { label += \"...\" }; fmt.Fprintf(os.Stdout, \"  %-24s %s\\n\", label, field.About) }; fmt.Fprintln(os.Stdout, \"  -h, --help               Print help\"); if version != nil { fmt.Fprintln(os.Stdout, \"  --version                Print version\") } } else { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Options:\"); fmt.Fprintln(os.Stdout, \"  -h, --help               Print help\") }")
 	g.line("if command == nil && len(spec.Commands) > 0 { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Commands:\"); for _, item := range spec.Commands { fmt.Fprintf(os.Stdout, \"  %-24s %s\\n\", item.Name, item.About) } }")
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) cliApplicationFailureRuntimeSupport() {
+	g.line("type trb__cliApplicationFailure string")
+	g.line("func (failure trb__cliApplicationFailure) TrbCLIApplicationFailure() string { return string(failure) }")
 }

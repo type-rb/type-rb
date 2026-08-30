@@ -37,6 +37,10 @@ type Signature struct {
 
 type Block struct {
 	Parameters []types.Type
+	// ScopedParameters marks compiler-owned values that cannot escape their
+	// structured block. A scoped value is valid only as a direct method receiver
+	// in the block that introduced it.
+	ScopedParameters []bool
 	// ControlBoundary prevents return, break, and next from crossing a
 	// backend callback whose target-language ownership would otherwise differ.
 	// Nested functions and loops still own their local control transfers.

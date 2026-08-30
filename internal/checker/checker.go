@@ -266,6 +266,8 @@ type symbol struct {
 	mustUseResult      bool
 	pending            *pendingEmptyCollection
 	concurrentBorrowed bool
+	scopedResource     bool
+	scopedBlockDepth   int
 }
 
 // pendingEmptyCollection is shared by every lexical reference found during the
@@ -537,6 +539,8 @@ type Checker struct {
 	recordDefaultUnavailable    map[string]bool
 	recordDefaultCallee         *ast.Identifier
 	voidValueUses               map[ast.Expression]bool
+	scopedResourceReceiver      ast.Expression
+	blockCallbackDepth          int
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -6121,7 +6125,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if c.inferenceOnly {
 			c.callbackScopes = append(c.callbackScopes, lambdaScope)
 		}
+		c.blockCallbackDepth++
 		c.checkStatements(n.Body, lambdaScope)
+		c.blockCallbackDepth--
 		if c.inferenceOnly {
 			c.callbackScopes = c.callbackScopes[:len(c.callbackScopes)-1]
 		}
@@ -6143,6 +6149,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
+			if value.scopedResource && (c.scopedResourceReceiver != n || c.blockCallbackDepth != value.scopedBlockDepth) {
+				c.error(n.Span(), fmt.Sprintf("scoped resource %s may only be used as a direct method receiver in its declaring block", n.Name))
+				typ = invalidType()
+			}
 			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentInitTargets[n] {
 				switch {
 				case !c.concurrencySafeType(value.typ, map[string]bool{}):
@@ -6912,7 +6922,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		previousRecordDefaultCallee := c.recordDefaultCallee
 		c.recordDefaultCallee = directCallIdentifier(n.Callee)
+		previousScopedReceiver := c.scopedResourceReceiver
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && !member.Namespace {
+			c.scopedResourceReceiver = member.Receiver
+		}
 		calleeType := c.checkExpression(n.Callee, sc)
+		c.scopedResourceReceiver = previousScopedReceiver
 		c.recordDefaultCallee = previousRecordDefaultCallee
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
@@ -7057,10 +7072,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 				}
 				typ = inferLibraryReturn(*library, receiverType, argumentTypes)
-				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
-					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
-					typ = invalidType()
-				}
 				if (library.Intrinsic == "trb.internal.json.encode" || library.Intrinsic == "trb.web.json" || library.Intrinsic == "trb.platform.typescript.browser.json_body") && len(argumentTypes) >= 1 {
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
@@ -7068,17 +7079,28 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkLibraryOrderingRequirements(n.Span(), binding.Name, *library)
 				if library.Block != nil {
 					member := declaration.Member{
-						Name:   binding.Name,
-						Return: typ,
+						Name:           binding.Name,
+						Intrinsic:      library.Intrinsic,
+						Return:         typ,
+						TypeParameters: append([]string(nil), library.TypeParameters...),
 						Block: &declaration.Block{
-							Parameters:      append([]types.Type(nil), library.Block.Parameters...),
-							ControlBoundary: library.Block.ControlBoundary,
+							Parameters:       append([]types.Type(nil), library.Block.Parameters...),
+							ControlBoundary:  library.Block.ControlBoundary,
+							Return:           library.Block.Return,
+							ResultBoundary:   library.Block.ResultBoundary,
+							Structured:       library.Block.Structured,
+							ScopedParameters: append([]bool(nil), library.Block.ScopedParameters...),
 						},
 					}
-					if blockType, checked := c.checkDeclarationBlock(n, member, sc, nil); checked {
+					c.result.ExternalMembers[n.Callee] = member
+					if blockType, checked := c.checkDeclarationBlock(n, member, sc, map[string]types.Type{}); checked {
 						typ = blockType
 					}
 					libraryBlockChecked = true
+				}
+				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
+					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
+					typ = invalidType()
 				}
 			}
 		}
@@ -7090,6 +7112,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
+			constructorType := c.result.Expressions[member.Receiver]
+			if stdlib.OpaqueType(constructorType.Name) {
+				c.error(n.Span(), constructorType.Name+" is an opaque scoped resource and cannot be constructed")
+				typ = invalidType()
+				break
+			}
 			switch receiver := member.Receiver.(type) {
 			case *ast.Identifier:
 				identifier := receiver
@@ -8842,6 +8870,10 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 			continue
 		}
 		declared := symbol{typ: parameterType, mutable: true, span: call.Block.Span()}
+		if index < len(member.Block.ScopedParameters) && member.Block.ScopedParameters[index] {
+			declared.scopedResource = true
+			declared.scopedBlockDepth = c.blockCallbackDepth + 1
+		}
 		if tracksUnusedBinding(name) {
 			used := false
 			declared.used = &used
@@ -8849,6 +8881,8 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		}
 		blockScope.values[name] = declared
 	}
+	c.blockCallbackDepth++
+	defer func() { c.blockCallbackDepth-- }()
 	if member.Block.Return.Name == "" {
 		callType := instantiateDeclarationType(member.Return, bindings)
 		declaresResultBoundary := boundaryError.Kind != "" && boundaryError.Kind != types.Never

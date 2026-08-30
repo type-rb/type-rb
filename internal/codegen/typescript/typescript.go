@@ -3936,6 +3936,9 @@ func (g *generator) tsType(t types.Type) string {
 }
 
 func (g *generator) tsTypeWithoutSemanticIdentity(t types.Type) string {
+	if t.Name == "FileSystem::File" {
+		return "{ readonly fd: number; readonly path: string }"
+	}
 	mappings := g.typeNameMappings()
 	if g.orm == nil || g.modulePath == "trb/orm/index" {
 		return tsTypeWithMappings(t, g.typeAliases, mappings, g.standardResult)

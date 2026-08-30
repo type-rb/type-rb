@@ -28,11 +28,19 @@ type Parameter struct {
 }
 
 // Block describes the callback accepted by a compiler-owned package
-// function. It deliberately models only ordinary callback blocks; structured
-// control-flow blocks remain declaration-provider functionality.
+// function. Structured blocks keep resource and control-flow ownership in the
+// compiler instead of lowering to an ordinary backend callback.
 type Block struct {
 	Parameters      []types.Type
 	ControlBoundary bool
+	Return          types.Type
+	ResultBoundary  types.Type
+	Structured      bool
+	// ScopedParameters marks values that may only be used as direct method
+	// receivers in this block. This keeps compiler-owned resource handles from
+	// escaping through assignment, arguments, collections, returns, or nested
+	// callbacks.
+	ScopedParameters []bool
 }
 
 type Symbol struct {
@@ -122,7 +130,10 @@ type Package struct {
 	TypeProvider   string
 	JSX            *JSXProvider
 	Capability     bool
-	Symbols        map[string]Symbol
+	// OpaqueTypes are compiler-owned resource representations that source code
+	// may receive but cannot construct directly.
+	OpaqueTypes map[string]bool
+	Symbols     map[string]Symbol
 }
 
 func (p *Package) Supports(mode string) bool {
@@ -150,6 +161,9 @@ var typeE = types.FromName("E")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
 var fileErrorType = types.FromName("FileSystem::Error")
+var fileType = types.FromName("FileSystem::File")
+var fileOpenModeType = types.FromName("FileSystem::OpenMode")
+var fileDirectoryEntryType = types.FromName("FileSystem::DirectoryEntry")
 var jsonValueType = types.FromName("JSON::Value")
 var jsonErrorType = types.FromName("JSON::Error")
 var processResultType = types.FromName("Process::Output")
@@ -499,11 +513,53 @@ end
 		},
 	},
 	"trb/std/filesystem": {
-		Path: "trb/std/filesystem", Root: "FileSystem",
+		Path:       "trb/std/filesystem",
+		Root:       "FileSystem",
 		ModulePath: "trb/std/filesystem/index",
-		Source:     filesystemSource(),
-		Kind:       Portable,
-		Symbols:    map[string]Symbol{},
+		RuntimeExports: []RuntimeExport{
+			{Name: "FileSystem::ErrorKind", Kind: "enum"},
+			{Name: "FileSystem::Error", Kind: "record"},
+			{Name: "FileSystem::OpenMode", Kind: "enum"},
+			{Name: "FileSystem::DirectoryEntryKind", Kind: "enum"},
+			{Name: "FileSystem::DirectoryEntry", Kind: "record"},
+			{Name: "FileSystem::File", Kind: "class"},
+		},
+		Source: filesystemSource(),
+		Kind:   Portable,
+		OpaqueTypes: map[string]bool{
+			"FileSystem::File": true,
+		},
+		Symbols: map[string]Symbol{
+			"open": {
+				Name:           "open",
+				Intrinsic:      "trb.std.filesystem.open",
+				StaticOwner:    "FileSystem",
+				TypeParameters: []string{"T"},
+				Parameters: []Parameter{
+					{Name: "path", Type: stringType},
+					{Name: "mode", Type: fileOpenModeType, Keyword: true},
+				},
+				Return: filesystemResult(typeT),
+				Block: &Block{
+					Parameters:       []types.Type{fileType},
+					Return:           typeT,
+					ResultBoundary:   fileErrorType,
+					Structured:       true,
+					ScopedParameters: []bool{true},
+				},
+			},
+			"entries": {
+				Name:        "entries",
+				Intrinsic:   "trb.std.filesystem.entries",
+				StaticOwner: "FileSystem",
+				Parameters:  []Parameter{{Name: "path", Type: stringType}},
+				Return:      filesystemResult(arrayOf(fileDirectoryEntryType)),
+			},
+			"read_text":   filesystemFileRead("read_text", stringType),
+			"read_bytes":  filesystemFileRead("read_bytes", bytesType),
+			"write_text":  filesystemFileWrite("write_text", stringType),
+			"write_bytes": filesystemFileWrite("write_bytes", bytesType),
+		},
 	},
 	"trb/std/process": {
 		Path: "trb/std/process", Root: "Process",
@@ -1465,6 +1521,26 @@ func filesystemWrite(name string, value types.Type) Symbol {
 	}
 }
 
+func filesystemFileRead(name string, value types.Type) Symbol {
+	return Symbol{
+		Name:       name,
+		Intrinsic:  "trb.std.filesystem.file." + name,
+		Receiver:   fileType,
+		Parameters: []Parameter{{Name: "max_bytes", Type: integerType, Keyword: true}},
+		Return:     filesystemResult(value),
+	}
+}
+
+func filesystemFileWrite(name string, value types.Type) Symbol {
+	return Symbol{
+		Name:       name,
+		Intrinsic:  "trb.std.filesystem.file." + name,
+		Receiver:   fileType,
+		Parameters: []Parameter{{Name: "value", Type: value}},
+		Return:     filesystemResult(unitType),
+	}
+}
+
 func jsonResult(value types.Type) types.Type {
 	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, jsonErrorType}}
 }
@@ -1544,6 +1620,17 @@ func LookupRuntimeExport(name string) (*Package, RuntimeExport, bool) {
 		}
 	}
 	return nil, RuntimeExport{}, false
+}
+
+// OpaqueType reports whether a compiler-owned package type can only be
+// introduced by that package's checked operations.
+func OpaqueType(name string) bool {
+	for _, definition := range registry {
+		if definition.OpaqueTypes[name] {
+			return true
+		}
+	}
+	return false
 }
 
 // RuntimeDependenciesForType returns compiler-owned modules whose runtime
@@ -1704,6 +1791,9 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 		for index := range block.Parameters {
 			block.Parameters[index] = substituteType(block.Parameters[index], bindings)
 		}
+		block.Return = substituteType(block.Return, bindings)
+		block.ResultBoundary = substituteType(block.ResultBoundary, bindings)
+		block.ScopedParameters = append([]bool(nil), symbol.Block.ScopedParameters...)
 		result.Block = &block
 	}
 	result.EqualityTypes = append([]types.Type(nil), symbol.EqualityTypes...)

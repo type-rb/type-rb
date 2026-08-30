@@ -495,13 +495,42 @@ import trb/std/filesystem
 import trb/std/result
 
 def load_config(path: String): Result<String, FileSystem::Error>
-	return FileSystem.read_text(path)
+	return FileSystem.open(path, mode: FileSystem::OpenMode::Read) do |file|
+		try file.read_text(max_bytes: 1048576)
+	end
 end
 ```
 
 The package provides existence checks, UTF-8 and raw-byte reads and writes,
 recursive directory creation, and sorted immediate-child listing. Failures
-carry `operation`, `path`, and `message` instead of exposing target exceptions.
+carry `operation`, `path`, `message`, and a `FileSystem::ErrorKind` instead of
+exposing target exceptions. Existing one-shot operations remain available.
+
+`FileSystem.open` accepts a typed `FileSystem::OpenMode` and requires a block.
+The `FileSystem::File` value is opaque and scoped: it may only be used as a
+direct receiver for its file methods inside that block. It cannot be
+constructed, assigned, passed to another function, placed in a collection,
+returned, or captured by a nested callback. The compiler closes the file
+before the `Result` leaves the structured block. Prefix `try` may end the
+block with an error, but cleanup still finishes before that error propagates
+to the enclosing `Result` boundary.
+
+`file.read_text(max_bytes:)` and `file.read_bytes(max_bytes:)` read at most the
+given number of bytes. A negative bound returns `InvalidLimit`; input exceeding
+the bound returns `TooLarge`. Text decoding uses the same UTF-8 replacement
+behavior as the one-shot text API. `file.write_text` and `file.write_bytes`
+write through a file opened in a writable mode.
+
+`CreateNew` creates a new file and returns `AlreadyExists` if the path already
+exists. The existence check and creation are one exclusive host operation, so
+parallel writers cannot both create the same path. This is no-clobber creation,
+not atomic replacement of an existing file. It does not promise `fsync`,
+directory synchronization, or persistence after power loss.
+
+`FileSystem.entries(path)` returns sorted immediate
+`FileSystem::DirectoryEntry` values. Each entry has a `name` and a typed kind:
+`File`, `Directory`, or `Other`. Symbolic links and other entries that must not
+be traversed as directories are `Other`. The operation does not recurse.
 
 Writes and directory creation return `Result<Unit, FileSystem::Error>`. `Unit` is a
 storable value representing successful completion; it is distinct from the

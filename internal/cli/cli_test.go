@@ -6208,6 +6208,92 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 	}
 }
 
+func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby scoped filesystem run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript scoped filesystem run")
+				continue
+			}
+		}
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/run-scoped-filesystem-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Join(root, "data")
+		if err := os.MkdirAll(filepath.Join(directory, "child"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("child", filepath.Join(directory, "link")); err != nil {
+			t.Fatal(err)
+		}
+		filePath := filepath.Join(directory, "note.txt")
+		source := "import trb/std/filesystem\n" +
+			"import { Result } from trb/std/result\n\n" +
+			"def create(path: String): String\n" +
+			"\tresult := FileSystem.open(path, mode: FileSystem::OpenMode::CreateNew) do |file|\n" +
+			"\t\ttry file.write_text(\"hello\")\n" +
+			"\tend\n" +
+			"\tcase result\n" +
+			"\twhen Result::Ok(_unit)\n\t\treturn \"created\"\n" +
+			"\twhen Result::Err(error)\n" +
+			"\t\tcase error.kind\n" +
+			"\t\twhen FileSystem::ErrorKind::AlreadyExists\n\t\t\treturn \"exists\"\n" +
+			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def bounded(path: String, maximum: Integer): String\n" +
+			"\tresult := FileSystem.open(path, mode: FileSystem::OpenMode::Read) do |file|\n" +
+			"\t\ttry file.read_text(max_bytes: maximum)\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
+			"\twhen Result::Err(error)\n\t\tcase error.kind\n" +
+			"\t\twhen FileSystem::ErrorKind::TooLarge\n\t\t\treturn \"too-large\"\n" +
+			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def entry_labels(path: String): Array<String>\n" +
+			"\tcase FileSystem.entries(path)\n" +
+			"\twhen Result::Err(error)\n\t\treturn [error.operation]\n" +
+			"\twhen Result::Ok(entries)\n" +
+			"\t\tmut labels: Array<String> := []\n" +
+			"\t\tentries.each do |entry|\n" +
+			"\t\t\tkind := case entry.kind\n" +
+			"\t\t\twhen FileSystem::DirectoryEntryKind::File\n\t\t\t\t\"file\"\n" +
+			"\t\t\twhen FileSystem::DirectoryEntryKind::Directory\n\t\t\t\t\"directory\"\n" +
+			"\t\t\twhen FileSystem::DirectoryEntryKind::Other\n\t\t\t\t\"other\"\n\t\t\tend\n" +
+			"\t\t\tlabels.push(entry.name + \":\" + kind)\n\t\tend\n\t\treturn labels\n\tend\nend\n\n" +
+			"def main()\n" +
+			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
+			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", 5))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", 4))\n" +
+			"\tputs(entry_labels(" + strconv.Quote(directory) + ").join(\",\"))\n" +
+			"\treturn\nend\n"
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "created\nexists\nhello\ntoo-large\nchild:directory,link:other,note.txt:file\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s scoped filesystem output: want %q, got %q", mode, want, stdout.String())
+		}
+	}
+}
+
 func TestRunCompilerOwnedProcessAcrossAvailableBackends(t *testing.T) {
 	if _, err := os.Stat("/bin/sh"); err != nil {
 		t.Skip("/bin/sh is unavailable")

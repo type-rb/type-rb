@@ -13,6 +13,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.cli.run" {
 		return g.cliRun(call)
 	}
+	if name == "trb.cli.fail" {
+		g.cliApplicationFailure = true
+		return "func() { panic(trb__cliApplicationFailure(" + arguments[0] + ")) }()"
+	}
 	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
 		return generated
 	}
@@ -213,6 +217,40 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("slices", "")
 		resultType, _, _ := filesystemResultType()
 		return "func() " + resultType + " { path := " + arguments[0] + "; entries, err := os.ReadDir(path); if err != nil { return " + filesystemError("list", "path", "err.Error()") + " }; names := make([]string, 0, len(entries)); for _, entry := range entries { names = append(names, entry.Name()) }; slices.Sort(names); return " + filesystemOK(g.arrayReference("names")) + " }()"
+	case "trb.std.filesystem.entries":
+		g.requireImport("os", "")
+		g.requireImport("slices", "")
+		resultType, _, _ := filesystemResultType()
+		entryType := g.goType(types.FromName("FileSystem::DirectoryEntry"))
+		other := g.filesystemDirectoryEntryKind("Other")
+		file := g.filesystemDirectoryEntryKind("File")
+		directory := g.filesystemDirectoryEntryKind("Directory")
+		return "func() " + resultType + " { path := " + arguments[0] + "; source, err := os.ReadDir(path); if err != nil { return " + filesystemError("entries", "path", "err.Error()") + " }; entries := make([]" + entryType + ", 0, len(source)); for _, sourceEntry := range source { kind := " + other + "; info, infoError := sourceEntry.Info(); if infoError != nil { return " + filesystemError("entries", "path", "infoError.Error()") + " }; if info.Mode().IsRegular() { kind = " + file + " } else if info.IsDir() { kind = " + directory + " }; entries = append(entries, " + entryType + "{Name: sourceEntry.Name(), Kind: kind}) }; slices.SortStableFunc(entries, func(left, right " + entryType + ") int { if left.Name < right.Name { return -1 }; if left.Name > right.Name { return 1 }; return 0 }); return " + filesystemOK(g.arrayReference("entries")) + " }()"
+	case "trb.std.filesystem.file.read_bytes", "trb.std.filesystem.file.read_text":
+		g.requireImport("io", "")
+		if name == "trb.std.filesystem.file.read_text" {
+			g.requireImport("strings", "")
+		}
+		resultType, _, _ := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		invalid := g.filesystemError(operation, "path", strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
+		tooLarge := g.filesystemError(operation, "path", strconv.Quote("file exceeds max_bytes"), "TooLarge")
+		failure := g.filesystemError(operation, "path", "err.Error()", "Other")
+		value := "data"
+		if name == "trb.std.filesystem.file.read_text" {
+			value = "strings.ToValidUTF8(string(data), \"�\")"
+		}
+		return "func() " + resultType + " { file := " + arguments[0] + "; maxBytes := " + arguments[1] + "; path := file.Name(); if maxBytes < 0 { return " + resultError(invalid) + " }; data, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+1)); if err != nil { return " + resultError(failure) + " }; if len(data) > maxBytes { return " + resultError(tooLarge) + " }; return " + filesystemOK(value) + " }()"
+	case "trb.std.filesystem.file.write_bytes", "trb.std.filesystem.file.write_text":
+		g.requireImport("io", "")
+		resultType, successType, _ := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		failure := g.filesystemError(operation, "path", "err.Error()", "Other")
+		value := arguments[1]
+		if name == "trb.std.filesystem.file.write_text" {
+			value = "[]byte(" + value + ")"
+		}
+		return "func() " + resultType + " { file := " + arguments[0] + "; path := file.Name(); data := " + value + "; written, err := file.Write(data); if err == nil && written != len(data) { err = io.ErrShortWrite }; if err != nil { return " + resultError(failure) + " }; return " + filesystemOK(successType+"{}") + " }()"
 	case "trb.internal.process.arguments":
 		g.requireImport("os", "")
 		return g.arrayReference("append([]string{}, os.Args[1:]...)")
