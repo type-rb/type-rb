@@ -134,6 +134,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
   permitted in a function type, for example `(String) -> Void`, but remains
   omitted from the corresponding `fn` declaration.
+- `Void` is the compiler's no-result type, not a source value type. It is valid
+  only as the return type of a function type. A Void expression may be used as
+  a standalone statement but cannot be initialized, assigned, passed,
+  returned as a value, stored in a collection, or consumed by another
+  expression. `Unit` is the ordinary storable no-payload value.
 - A function value that may return a recoverable error declares an ordinary
   `Result` return, such as `fn(): Result<User, LoadError> ... end`. Its type is
   written `() -> Result<User, LoadError>`. Prefix `try`, postfix `catch`, and
@@ -191,6 +196,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Local variable initialization uses `:=`.
 - Type inference is enabled for `:=`.
 - Explicit type with initialization is allowed: `x: T := expr`.
+- `nil` by itself cannot infer a binding type. `x := nil` is a compile error;
+  use an explicit nullable annotation such as `x: String? := nil`.
+- `Nil` and `Void` are internal compiler types rather than ordinary source
+  annotations. `Void` may appear in source only in function-return position,
+  such as `() -> Void`.
 - Type names are case-sensitive. Portable built-in type names use exactly one
   source spelling: `Any`, `Boolean`, `Integer`, `Float`, `String`, `Bytes`,
   `StringBuilder`, `Array`, `Hash`, `Range`, and `Iterable`. Target-language
@@ -749,9 +759,11 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
 - `<`, `<=`, `>`, and `>=` compare numeric values with the same widening rule.
   Portable `==` and `!=` compare numeric values, matching non-nullable
   `Boolean` or `String` values, two values of the same payloadless enum type,
-  or a nullable value with `nil`. Equality for payload-bearing enums is
-  reserved until one structural rule can be implemented identically by every
-  backend.
+  two `nil` values, or a nullable value with `nil`. `nil == nil` is `true` and
+  `nil != nil` is `false`. Comparing with `nil` is the canonical absence test;
+  TypeRB does not define a separate `nil?()` method. Equality for
+  payload-bearing enums is reserved until one structural rule can be
+  implemented identically by every backend.
 - `&&` and `||` accept two non-nullable `Boolean` values and
   return `Boolean`. Compound assignments apply the corresponding binary rule
   before checking that the result remains assignable to the mutable target.

@@ -667,9 +667,13 @@ func TestPortableORMCreateUsesSchemaTypesAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	compile := func(call string) ([]*Artifact, error) {
+		body := "\tresult := " + call + "\n\tputs(result)\n"
+		if strings.HasPrefix(call, "puts(") {
+			body = "\t" + call + "\n"
+		}
 		return CompileProject([]SourceUnit{{
 			Filename: filepath.Join(root, "src", "main.trb"), ModulePath: "src/main", Package: "main",
-			Source: []byte("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n\tresult := " + call + "\n\tputs(result)\nend\n"),
+			Source: []byte("import { Model } from trb/orm\nclass Product < Model\nend\ndef main()\n" + body + "end\n"),
 		}}, Options{
 			Mode: "go", GoModule: "example.com/orm", SourceRoot: filepath.Join(root, "src"), ProjectRoot: root,
 			PackageOptions: map[string][]byte{"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`)},

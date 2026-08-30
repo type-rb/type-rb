@@ -536,6 +536,7 @@ type Checker struct {
 	concurrentInitTargets       map[*ast.Identifier]bool
 	recordDefaultUnavailable    map[string]bool
 	recordDefaultCallee         *ast.Identifier
+	voidValueUses               map[ast.Expression]bool
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -906,6 +907,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		concurrentOrdinaryRoots:    map[*ast.MethodStatement]bool{},
 		concurrentClassRoots:       map[string]bool{},
 		concurrentInitTargets:      map[*ast.Identifier]bool{},
+		voidValueUses:              map[ast.Expression]bool{},
 	}
 }
 
@@ -1220,7 +1222,9 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 		case *ast.TypeAliasStatement:
 			c.validateTypeReferenceInScope(node.Target, extendTypeParameters(typeParameters, node.TypeParameters))
 		case *ast.NewtypeStatement:
-			c.validateTypeReferenceInScope(node.Target, typeParameters)
+			if node.Target.Name != "Nil" && node.Target.Name != "Void" {
+				c.validateTypeReferenceInScope(node.Target, typeParameters)
+			}
 		case *ast.EnumMemberStatement:
 			for _, parameter := range node.Parameters {
 				c.validateTypeReferenceInScope(parameter.Type, typeParameters)
@@ -1399,6 +1403,10 @@ func (c *Checker) validateMethodTypes(method *ast.MethodStatement, typeParameter
 }
 
 func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters map[string]bool) {
+	c.validateTypeReference(ref, typeParameters, false)
+}
+
+func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[string]bool, functionReturn bool) {
 	if ref.Empty() {
 		return
 	}
@@ -1407,15 +1415,25 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 	}()
 	if len(ref.Union) > 0 {
 		for _, alternative := range ref.Union {
-			c.validateTypeReferenceInScope(alternative, typeParameters)
+			c.validateTypeReference(alternative, typeParameters, false)
 		}
 		return
 	}
 	if ref.FunctionReturn != nil {
 		for _, parameter := range ref.FunctionParameters {
-			c.validateTypeReferenceInScope(parameter, typeParameters)
+			c.validateTypeReference(parameter, typeParameters, false)
 		}
-		c.validateTypeReferenceInScope(*ref.FunctionReturn, typeParameters)
+		c.validateTypeReference(*ref.FunctionReturn, typeParameters, true)
+		return
+	}
+	if ref.Name == "Nil" {
+		c.error(ref.Span(), "Nil is an internal flow type and cannot be written in source; use an explicit nullable type annotation")
+		return
+	}
+	if ref.Name == "Void" {
+		if !functionReturn || ref.Nullable || ref.Array || len(ref.Arguments) > 0 {
+			c.error(ref.Span(), "Void may be used only as the return type of a function type")
+		}
 		return
 	}
 	if literal, ok := types.LiteralFromSource(ref.Name); ok {
@@ -1448,7 +1466,7 @@ func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters m
 		})
 	}
 	for _, argument := range ref.Arguments {
-		c.validateTypeReferenceInScope(argument, typeParameters)
+		c.validateTypeReference(argument, typeParameters, false)
 	}
 	_, declared := c.declaredTypes[ref.Name]
 	if !declared {
@@ -1772,6 +1790,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					previousUnavailable := c.recordDefaultUnavailable
 					c.recordDefaultUnavailable = unavailable
 					actual := c.checkExpression(field.Default, recordScope)
+					actual = c.requireValueExpression(field.Default, actual, "initialize record field "+field.Name)
 					c.recordDefaultUnavailable = previousUnavailable
 					actual = c.contextualizeCollectionLiteral(field.Default, fieldType, actual)
 					if !c.assignable(field.Default, fieldType, actual) {
@@ -1997,6 +2016,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					c.concurrentBlockScopes = append(c.concurrentBlockScopes, valueScope)
 				}
 				valueType := c.checkExpression(n.Value, valueScope)
+				valueType = c.requireValueExpression(n.Value, valueType, "initialize a field")
 				if concurrentField {
 					c.concurrentBlockScopes = c.concurrentBlockScopes[:len(c.concurrentBlockScopes)-1]
 				}
@@ -2012,6 +2032,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.VariableStatement:
 			valueType := c.checkDirectStructuredResultValue(n.Value, sc, "variable declaration")
 			c.checkStructuredBlockValue(n.Value)
+			valueType = c.requireValueExpression(n.Value, valueType, "initialize "+n.Name)
 			variableType := valueType
 			emptyKind := freshEmptyCollectionKind(n.Value)
 			var pending *pendingEmptyCollection
@@ -2025,6 +2046,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				if !sc.constantsAllowed {
 					c.error(n.Span(), fmt.Sprintf("constant %s may only be declared at top level or directly inside a module or class", n.Name))
 				}
+			}
+			if n.Type.Empty() && valueType.Kind == types.Nil {
+				c.error(n.Value.Span(), fmt.Sprintf("cannot infer the type of %s from nil alone; add an explicit nullable type annotation", n.Name))
+				valueType = invalidType()
+				variableType = valueType
 			}
 			if !n.Type.Empty() {
 				variableType = c.typeFromRef(n.Type)
@@ -2117,6 +2143,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			rightType := c.checkDirectStructuredResultValue(n.Value, sc, "assignment")
 			c.checkStructuredBlockValue(n.Value)
+			rightType = c.requireValueExpression(n.Value, rightType, "be assigned")
 			if c.inferenceOnly && n.Operator == "=" {
 				if pending := c.pendingEmptyCollection(n.Target); pending != nil && freshEmptyCollectionKind(n.Value) == "" {
 					if source := c.pendingEmptyCollection(n.Value); source != nil {
@@ -2206,6 +2233,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if n.Value != nil {
 				actual = c.checkDirectStructuredResultValue(n.Value, sc, "return")
 				c.checkStructuredBlockValue(n.Value)
+				actual = c.requireValueExpression(n.Value, actual, "be returned as a value")
 			}
 			if len(c.returns) == 0 {
 				c.error(n.Span(), "return is only valid inside a function or method")
@@ -2697,6 +2725,7 @@ func (c *Checker) checkUnusedImports(statements []ast.Statement) {
 
 func (c *Checker) checkBooleanCondition(expression ast.Expression, sc *scope, construct string) {
 	typ := c.checkExpression(expression, sc)
+	typ = c.requireValueExpression(expression, typ, "be used as a "+construct+" condition")
 	if typ.Kind == types.Invalid || typ.Kind == types.Never || typ.Kind == types.Bool && !typ.Nullable {
 		return
 	}
@@ -2886,6 +2915,7 @@ func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
 	selectorType := c.checkExpression(node.Value, sc)
+	selectorType = c.requireValueExpression(node.Value, selectorType, "be used as a case selector")
 	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)
 	if literalCaseSelector(selectorType) {
 		return c.checkLiteralCase(node, sc, selectorType, expression)
@@ -3268,6 +3298,7 @@ func (c *Checker) checkControlFlowBranch(body []ast.Statement, sc *scope, span t
 	}
 	c.checkStatementSequence(body[:resultIndex], sc)
 	typ := c.checkExpression(result, sc)
+	typ = c.requireValueExpression(result, typ, "be used as a "+construct+" expression result")
 	c.checkStatementSequence(body[resultIndex+1:], sc)
 	c.checkUnusedBindings(sc)
 	return &controlFlowBranchResult{expression: result, typ: typ}
@@ -4819,6 +4850,9 @@ func (c *Checker) recordIntegerToFloat(expression ast.Expression) {
 func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 	left = scalarType(left)
 	right = scalarType(right)
+	if left.Kind == types.Nil && right.Kind == types.Nil {
+		return true
+	}
 	if left.Kind == types.Nil {
 		return right.Nullable
 	}
@@ -4961,6 +4995,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		}
 		if parameter.Default != nil {
 			actual := c.checkExpression(parameter.Default, methodScope)
+			actual = c.requireValueExpression(parameter.Default, actual, "be used as a parameter default")
 			actual = c.contextualizeCollectionLiteral(parameter.Default, typ, actual)
 			if !c.assignable(parameter.Default, typ, actual) {
 				c.error(parameter.Default.Span(), fmt.Sprintf("default value has type %s, expected %s", actual, typ))
@@ -6179,6 +6214,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		for _, part := range n.Parts {
 			if part.Expression != nil {
 				actual := c.checkExpression(part.Expression, sc)
+				actual = c.requireValueExpression(part.Expression, actual, "be interpolated into a String")
 				expanded := scalarType(c.expandAlias(actual, map[string]bool{}))
 				if expanded.Kind != types.Invalid && !isNonNullable(expanded, types.String) {
 					c.error(part.Expression.Span(), fmt.Sprintf("string interpolation requires String, got %s", actual))
@@ -6204,13 +6240,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		keyType := c.checkExpression(n.Entries[0].Key, sc)
-		if !portableHashKey(keyType) && !c.rubyNativeSyntax() {
+		keyType = c.requireValueExpression(n.Entries[0].Key, keyType, "be used as a Hash key")
+		if keyType.Kind != types.Invalid && !portableHashKey(keyType) && !c.rubyNativeSyntax() {
 			c.error(n.Entries[0].Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", keyType))
 		}
 		values := []ast.Expression{n.Entries[0].Value}
 		for _, entry := range n.Entries[1:] {
 			currentKey := c.checkExpression(entry.Key, sc)
-			if !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
+			currentKey = c.requireValueExpression(entry.Key, currentKey, "be used as a Hash key")
+			if currentKey.Kind != types.Invalid && !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
 				c.error(entry.Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", currentKey))
 			}
 			if !types.Equivalent(keyType, currentKey) {
@@ -6243,6 +6281,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		componentHasTypedProps := false
 		if n.Component != nil {
 			componentType := c.checkExpression(n.Component, sc)
+			componentType = c.requireValueExpression(n.Component, componentType, "be used as a JSX component")
 			if componentType.Kind == types.Any || componentType.Kind == types.Invalid {
 				c.error(n.Component.Span(), fmt.Sprintf("JSX component %s is not declared or imported", n.Name))
 			} else {
@@ -6267,6 +6306,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				attributeTypes[attribute.Name] = types.FromName("Boolean")
 			} else {
 				attributeTypes[attribute.Name] = c.checkExpression(attribute.Value, sc)
+				attributeTypes[attribute.Name] = c.requireValueExpression(attribute.Value, attributeTypes[attribute.Name], "be used as a JSX attribute")
 				if literalType, literal := literalExpressionType(attribute.Value); literal {
 					attributeTypes[attribute.Name] = literalType
 				}
@@ -6289,6 +6329,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkExpression(item, sc)
 			case *ast.JSXExpression:
 				childType := c.checkExpression(item.Value, sc)
+				childType = c.requireValueExpression(item.Value, childType, "be used as a JSX child")
 				if provider != nil && !jsxRenderableType(c.expandAlias(childType, map[string]bool{}), nodeType) {
 					c.error(item.Span(), fmt.Sprintf("JSX child must be renderable, got %s", childType))
 				}
@@ -6297,9 +6338,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = nodeType
 	case *ast.UnaryExpression:
 		operand := c.checkExpression(n.Operand, sc)
+		operand = c.requireValueExpression(n.Operand, operand, "be used as an operand")
 		typ = c.checkUnaryOperator(n.Span(), n.Operator, operand)
 	case *ast.BinaryExpression:
 		left := c.checkExpression(n.Left, sc)
+		left = c.requireValueExpression(n.Left, left, "be used as an operand")
 		rightScope := sc
 		if n.Operator == "&&" {
 			rightScope, _ = c.nullableConditionScopes(n.Left, sc)
@@ -6307,6 +6350,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			_, rightScope = c.nullableConditionScopes(n.Left, sc)
 		}
 		right := c.checkExpression(n.Right, rightScope)
+		right = c.requireValueExpression(n.Right, right, "be used as an operand")
 		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
 		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && scalarType(left).Kind != scalarType(right).Kind {
 			if scalarType(left).Kind == types.Int {
@@ -6319,7 +6363,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.RangeExpression:
 		start := c.checkExpression(n.Start, sc)
 		end := c.checkExpression(n.End, sc)
-		if start.Kind == types.Never || end.Kind == types.Never {
+		start = c.requireValueExpression(n.Start, start, "be used as a Range endpoint")
+		end = c.requireValueExpression(n.End, end, "be used as a Range endpoint")
+		if start.Kind == types.Invalid || end.Kind == types.Invalid {
+			typ = invalidType()
+		} else if start.Kind == types.Never || end.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 		} else if scalarType(start).Kind != types.Int || scalarType(end).Kind != types.Int {
 			c.error(n.Span(), fmt.Sprintf("range endpoints must be Integer, got %s and %s", start, end))
@@ -6345,6 +6393,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		sortBy := n.Operation == "sort_by" || n.Operation == "sort_by_descending"
 		transform := n.Operation == "map" || n.Operation == "concurrent_map" || n.Operation == "select" || n.Operation == "reduce" || predicate || sortBy
 		sourceType := c.checkExpression(n.Source, sc)
+		sourceType = c.requireValueExpression(n.Source, sourceType, "be used as an iteration source")
+		if sourceType.Kind == types.Invalid {
+			typ = invalidType()
+			break
+		}
 		if sourceType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
@@ -6378,7 +6431,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			if n.Limit != nil {
 				limitType := c.checkExpression(n.Limit, sc)
-				if scalarType(limitType).Kind != types.Int {
+				limitType = c.requireValueExpression(n.Limit, limitType, "be used as a concurrent_map limit")
+				if limitType.Kind != types.Invalid && scalarType(limitType).Kind != types.Int {
 					c.error(n.Limit.Span(), fmt.Sprintf("concurrent_map limit must be Integer, got %s", limitType))
 				}
 				if literal, ok := n.Limit.(*ast.Literal); ok {
@@ -6410,7 +6464,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), "each_slice expects exactly one size argument")
 			} else {
 				sizeType := c.checkExpression(n.SliceSize, sc)
-				if scalarType(sizeType).Kind != types.Int {
+				sizeType = c.requireValueExpression(n.SliceSize, sizeType, "be used as an each_slice size")
+				if sizeType.Kind != types.Invalid && scalarType(sizeType).Kind != types.Int {
 					c.error(n.SliceSize.Span(), fmt.Sprintf("each_slice size must be Integer, got %s", sizeType))
 				}
 				if literal, ok := n.SliceSize.(*ast.Literal); ok {
@@ -6430,6 +6485,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Span(), "reduce expects exactly one positional initial value")
 				} else {
 					accumulatorType = c.checkExpression(n.Initial, sc)
+					accumulatorType = c.requireValueExpression(n.Initial, accumulatorType, "be used as a reduce initial value")
 				}
 			}
 			bindingTypes := []types.Type{itemType}
@@ -6496,12 +6552,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					if result, ok := last.(*ast.ExpressionStatement); ok {
 						resultExpression = result.Expression
 						c.checkStatementSequence(n.Block.Body[:lastIndex], blockScope)
-						c.checkExpression(resultExpression, blockScope)
+						resultType := c.checkExpression(resultExpression, blockScope)
+						resultType = c.requireValueExpression(resultExpression, resultType, "be used as a "+n.Operation+" block result")
+						c.result.Expressions[resultExpression] = resultType
 						c.checkUnusedBindings(blockScope)
 					} else if result, ok := last.(ast.Expression); ok {
 						resultExpression = result
 						c.checkStatementSequence(n.Block.Body[:lastIndex], blockScope)
-						c.checkExpression(resultExpression, blockScope)
+						resultType := c.checkExpression(resultExpression, blockScope)
+						resultType = c.requireValueExpression(resultExpression, resultType, "be used as a "+n.Operation+" block result")
+						c.result.Expressions[resultExpression] = resultType
 						c.checkUnusedBindings(blockScope)
 					} else {
 						c.error(last.Span(), fmt.Sprintf("%s block must end with a result expression", n.Operation))
@@ -6584,6 +6644,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			break
 		}
 		receiverType := c.checkExpression(n.Receiver, sc)
+		if !n.Namespace {
+			receiverType = c.requireValueExpression(n.Receiver, receiverType, "be used as a member receiver")
+		}
 		if n.Namespace {
 			if declaration, authored := c.authoredTypeIdentityInScope(expressionTypeName(n), sc); authored {
 				typ = types.FromName(declaration.LeafName())
@@ -6594,6 +6657,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if receiverType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
+			break
+		}
+		if receiverType.Kind == types.Invalid {
+			typ = invalidType()
 			break
 		}
 		if c.concurrencyInterfaceType(receiverType) {
@@ -6862,7 +6929,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if declarationReference {
 				c.declarationReferences++
 			}
-			argumentTypes = append(argumentTypes, c.checkExpression(arg.Value, sc))
+			argumentType := c.checkExpression(arg.Value, sc)
+			argumentType = c.requireValueExpression(arg.Value, argumentType, "be used as an argument")
+			argumentTypes = append(argumentTypes, argumentType)
 			if declarationReference {
 				c.declarationReferences--
 			}
@@ -7199,7 +7268,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IndexExpression:
 		receiver := c.checkExpression(n.Receiver, sc)
 		indexType := c.checkExpression(n.Index, sc)
-		if receiver.Kind == types.Never || indexType.Kind == types.Never {
+		receiver = c.requireValueExpression(n.Receiver, receiver, "be indexed")
+		indexType = c.requireValueExpression(n.Index, indexType, "be used as an index")
+		if receiver.Kind == types.Invalid || indexType.Kind == types.Invalid {
+			typ = invalidType()
+		} else if receiver.Kind == types.Never || indexType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 		} else if receiver.Kind == types.Array && len(receiver.Args) > 0 {
 			if indexType.Kind != types.Int || indexType.Nullable {
@@ -7264,6 +7337,17 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.borrowedExpressions[expression] = c.computeConcurrentBorrowedExpression(expression, sc)
 	}
 	return typ
+}
+
+func (c *Checker) requireValueExpression(expression ast.Expression, typ types.Type, use string) types.Type {
+	if expression == nil || typ.Kind != types.Void {
+		return typ
+	}
+	if !c.voidValueUses[expression] {
+		c.error(expression.Span(), "Void expression does not produce a value and cannot "+use)
+		c.voidValueUses[expression] = true
+	}
+	return invalidType()
 }
 
 func (c *Checker) checkConcurrentNativeCall(callee ast.Expression) {
@@ -7358,6 +7442,10 @@ func (c *Checker) checkAssociationControlMember(node *ast.MemberExpression, sc *
 
 func (c *Checker) checkResultTry(node *ast.TryExpression, sc *scope) types.Type {
 	resultType := c.checkExpression(node.Value, sc)
+	resultType = c.requireValueExpression(node.Value, resultType, "be used with try")
+	if resultType.Kind == types.Invalid {
+		return invalidType()
+	}
 	c.checkStructuredResultPlacement(node, node.Value, "try")
 	success, failure, expanded, ok := c.standardResultParts(resultType)
 	if !ok {
@@ -7400,6 +7488,10 @@ func (c *Checker) checkResultTry(node *ast.TryExpression, sc *scope) types.Type 
 
 func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.Type {
 	resultType := c.checkExpression(node.Value, sc)
+	resultType = c.requireValueExpression(node.Value, resultType, "be used with catch")
+	if resultType.Kind == types.Invalid {
+		return invalidType()
+	}
 	c.checkStructuredResultPlacement(node, node.Value, "catch")
 	success, failure, expanded, ok := c.standardResultParts(resultType)
 	if !ok {
@@ -7799,6 +7891,7 @@ func (c *Checker) inferCollectionType(expressions []ast.Expression, sc *scope) t
 	checked := make([]types.Type, len(expressions))
 	for index, expression := range expressions {
 		checked[index] = c.checkExpression(expression, sc)
+		checked[index] = c.requireValueExpression(expression, checked[index], "be stored in a collection")
 	}
 
 	common := checked[0]
@@ -8859,6 +8952,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	}
 	c.checkStatementSequence(call.Block.Body[:resultIndex], blockScope)
 	actual := c.checkExpression(resultExpression, blockScope)
+	actual = c.requireValueExpression(resultExpression, actual, "be used as a "+member.Name+" block result")
 	c.checkStatementSequence(call.Block.Body[resultIndex+1:], blockScope)
 	c.checkUnusedBindings(blockScope)
 	c.loopDepth = previousLoopDepth
