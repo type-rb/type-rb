@@ -26,10 +26,10 @@ func TestTypeScriptTestSuiteDispatchesWebRoutes(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(config.SourcePath(), "routes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routeSource := `import { Context, Response, text } from trb/web
+	routeSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `
 	testSource := `import { Body, Headers, HttpMethod } from trb/http
@@ -79,10 +79,10 @@ func TestGoTestSuiteDispatchesRouteBelowDynamicSegment(t *testing.T) {
 	if err := os.MkdirAll(routeDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routeSource := `import { Context, Response, text } from trb/web
+	routeSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("preferences")
+	return Response.text("preferences")
 end
 `
 	testSource := `import { Body, Headers, HttpMethod } from trb/http
@@ -132,10 +132,10 @@ func TestGoTestSuiteRunsBesideWebRoute(t *testing.T) {
 	if err := os.MkdirAll(routeDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	routeSource := `import { Context, Response, text } from trb/web
+	routeSource := `import { Context, Response } from trb/web
 
 def health_response(): Response
-	return text("ok")
+	return Response.text("ok")
 end
 
 def get(_context: Context): Response

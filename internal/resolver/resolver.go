@@ -977,12 +977,7 @@ func (r Result) TypeMember(typeName, name string) (Binding, bool) {
 		copy := member
 		exportCopy := exported
 		result := Binding{Import: imported, Name: name, Export: &exportCopy, Member: &copy}
-		if imported.Definition != nil && imported.Definition.Root == exported.Name {
-			if symbol, exists := imported.Definition.Symbols[name]; exists {
-				symbolCopy := symbol
-				result.Library = &symbolCopy
-			}
-		}
+		attachDefinedStaticMember(&result)
 		return result, true
 	}
 	return Binding{}, false
@@ -1038,13 +1033,25 @@ func typeMemberBinding(binding Binding, name string) (Binding, bool) {
 	memberCopy := member
 	exportCopy := *binding.Export
 	result := Binding{Import: binding.Import, Name: name, Export: &exportCopy, Member: &memberCopy}
-	if binding.Import.Definition != nil && binding.Import.Definition.Root == exportCopy.Name {
-		if symbol, exists := binding.Import.Definition.Symbols[name]; exists {
-			symbolCopy := symbol
-			result.Library = &symbolCopy
-		}
-	}
+	attachDefinedStaticMember(&result)
 	return result, true
+}
+
+func attachDefinedStaticMember(binding *Binding) {
+	if binding == nil || binding.Import == nil || binding.Import.Definition == nil || binding.Export == nil || binding.Member == nil {
+		return
+	}
+	symbol, exists := binding.Import.Definition.Symbols[binding.Name]
+	if !exists {
+		return
+	}
+	rootMember := binding.Import.Definition.Root == binding.Export.Name && !symbol.HasReceiver() && !symbol.HasStaticOwner()
+	ownedMember := symbol.StaticOwner == binding.Export.Name
+	if !rootMember && !ownedMember {
+		return
+	}
+	symbolCopy := symbol
+	binding.Library = &symbolCopy
 }
 
 func (r Result) ImportedType(typeName string) (Binding, bool) {
@@ -1476,6 +1483,7 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 		}
 	}
 	addDefinedRoot(resolved, definition)
+	addDefinedStaticMembers(resolved, definition)
 	if definition.RuntimeAlias != "" {
 		resolved.Alias = definition.RuntimeAlias
 	}
@@ -1493,11 +1501,17 @@ func resolveDefinedImport(node *ast.ImportStatement, definition *stdlib.Package,
 	}
 	for _, name := range resolved.Symbols {
 		symbol, librarySymbol := definition.Symbols[name]
+		if symbol.HasStaticOwner() {
+			librarySymbol = false
+		}
 		_, sourceExport := resolved.Exports[name]
 		if definition.Root != "" {
 			librarySymbol = false
 		}
 		if !librarySymbol && !sourceExport {
+			if symbol.HasStaticOwner() {
+				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s as a top-level declaration; use %s.%s through its owning declaration", node.Path, name, symbol.StaticOwner, name))}
+			}
 			if root := resolved.Exports[definition.Root]; root.Members[name].Name != "" {
 				return nil, []diagnostic.Diagnostic{errorAt(node, fmt.Sprintf("package %s does not export %s as a top-level declaration; use %s.%s through the root import", node.Path, name, definition.Root, name))}
 			}
@@ -1735,7 +1749,7 @@ func addDefinedRoot(imported *Import, definition *stdlib.Package) {
 		}
 	}
 	for name, symbol := range definition.Symbols {
-		if symbol.CompilerOnly {
+		if symbol.CompilerOnly || symbol.HasReceiver() || symbol.HasStaticOwner() {
 			continue
 		}
 		parameters := make([]callsignature.Parameter, len(symbol.Parameters))
@@ -1785,6 +1799,40 @@ func addDefinedRoot(imported *Import, definition *stdlib.Package) {
 	imported.Exports[definition.Root] = root
 }
 
+func addDefinedStaticMembers(imported *Import, definition *stdlib.Package) {
+	if imported == nil || definition == nil {
+		return
+	}
+	for name, symbol := range definition.Symbols {
+		if symbol.CompilerOnly || !symbol.HasStaticOwner() {
+			continue
+		}
+		owner, exists := exportNamed(imported.Exports, symbol.StaticOwner)
+		if !exists || (owner.Kind != ClassExport && owner.Kind != ModuleExport && owner.Kind != RecordExport) {
+			continue
+		}
+		parameters := make([]callsignature.Parameter, len(symbol.Parameters))
+		for index, parameter := range symbol.Parameters {
+			kind := callsignature.Positional
+			label := ""
+			if parameter.Keyword {
+				kind = callsignature.NamedOnly
+				label = parameter.Name
+			}
+			presence := callsignature.Required
+			if parameter.Optional {
+				presence = callsignature.Omittable
+			}
+			parameters[index] = callsignature.Parameter{Kind: kind, Label: label, Type: parameter.Type, Presence: presence}
+		}
+		owner.Members[name] = Member{
+			Name: name, Kind: FunctionExport, Type: symbol.Return, TypeParameters: append([]string(nil), symbol.TypeParameters...),
+			Parameters: parameters, Variadic: symbol.Variadic, Class: true,
+		}
+		setExport(imported.Exports, owner.Name, owner)
+	}
+}
+
 func selectBareRoot(node *ast.ImportStatement, imported *Import) (string, []diagnostic.Diagnostic) {
 	segment := logicalImportSegment(imported.RuntimePath())
 	wanted := pathRootKey(segment)
@@ -1801,7 +1849,7 @@ func selectBareRoot(node *ast.ImportStatement, imported *Import) (string, []diag
 	}
 	if imported.Definition != nil && imported.Definition.Root == "" {
 		for name, symbol := range imported.Definition.Symbols {
-			if !symbol.CompilerOnly {
+			if !symbol.CompilerOnly && !symbol.HasStaticOwner() {
 				available = append(available, name)
 			}
 		}
@@ -1915,7 +1963,7 @@ func finalizeProjectImport(resolved *Import) (*Import, []diagnostic.Diagnostic) 
 
 func bindingFor(imported *Import, name string) (Binding, bool) {
 	if imported.Definition != nil {
-		if symbol, ok := imported.Definition.Symbols[name]; ok {
+		if symbol, ok := imported.Definition.Symbols[name]; ok && !symbol.HasStaticOwner() {
 			copy := symbol
 			return Binding{Import: imported, Name: name, Library: &copy}, true
 		}

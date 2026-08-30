@@ -262,23 +262,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.webContextFetch(call, arguments)
 	case "trb.web.json":
 		return g.webJSON(call, arguments)
-	case "trb.web.configure_server":
-		webAlias := "web"
-		if reference := expressionReference(call.Callee); reference != nil {
-			if alias := g.referenceAlias(reference); alias != "" {
-				webAlias = alias
-			}
-		}
-		values := map[string]string{
-			"host":                          `"0.0.0.0"`,
-			"port":                          "3000",
-			"body_limit_bytes":              "1048576",
-			"shutdown_timeout_milliseconds": "10000",
-		}
-		for index, argument := range call.Arguments {
-			values[argument.Name] = g.expr(call.Arguments[index].Value)
-		}
-		return webAlias + ".ServerConfig{Host: " + values["host"] + ", Port: " + values["port"] + ", BodyLimitBytes: " + values["body_limit_bytes"] + ", ShutdownTimeoutMilliseconds: " + values["shutdown_timeout_milliseconds"] + "}"
 	case "trb.web.serve":
 		webAlias := "web"
 		if reference := expressionReference(call.Callee); reference != nil {
@@ -286,7 +269,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 				webAlias = alias
 			}
 		}
-		config := webAlias + ".ServerConfig{Host: \"0.0.0.0\", Port: 3000, BodyLimitBytes: 1048576, ShutdownTimeoutMilliseconds: 10000}"
+		config := webAlias + ".WebServerConfig{Host: \"0.0.0.0\", Port: 3000, BodyLimitBytes: 1048576, ShutdownTimeoutMilliseconds: 10000}"
 		if len(arguments) > 0 {
 			config = arguments[0]
 		}

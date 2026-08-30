@@ -504,7 +504,7 @@ func (g *generator) webServer() {
 	g.requireImport("syscall", "")
 	g.requireImport("time", "stdtime")
 
-	g.line("func trbWebServe(config web.ServerConfig) {")
+	g.line("func trbWebServe(config web.WebServerConfig) {")
 	g.indent++
 	g.line("trbWebValidateServerConfig(config)")
 	g.line("handler := nethttp.HandlerFunc(func(writer nethttp.ResponseWriter, request *nethttp.Request) {")
@@ -577,7 +577,7 @@ func (g *generator) webServer() {
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
-	g.line("func trbWebValidateServerConfig(config web.ServerConfig) {")
+	g.line("func trbWebValidateServerConfig(config web.WebServerConfig) {")
 	g.indent++
 	g.line("if strings.TrimSpace(config.Host) == \"\" {")
 	g.indent++

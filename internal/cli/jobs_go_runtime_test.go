@@ -213,16 +213,16 @@ class SyncItemJob < Job
 	end
 end
 `,
-		"routes/index.trb": `import { Context, Response, text } from trb/web
+		"routes/index.trb": `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `,
-		"main.trb": `import { configure_server, serve } from trb/web
+		"main.trb": `import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: 0))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: 0))
 end
 `,
 	}

@@ -1,5 +1,5 @@
-import { configure_server, serve } from trb/web
+import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: 3000))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: 3000))
 end

@@ -232,7 +232,7 @@ responses. Both routes reuse it instead of repeating transport policy.
 ```trb
 import { CreateReportError } from services/create_report
 import { DbError } from trb/orm
-import { EndpointInputError, Response, json } from trb/web
+import { EndpointInputError, Response } from trb/web
 
 record ErrorResponse
 	code: String
@@ -242,11 +242,11 @@ end
 def endpoint_input_error_response(error: EndpointInputError): Response
 	case error
 	when EndpointInputError::Params(_error)
-		return json(ErrorResponse.new(code: "invalid_path", message: "path parameters are invalid"), 400)
+		return Response.json(ErrorResponse.new(code: "invalid_path", message: "path parameters are invalid"), 400)
 	when EndpointInputError::Query(_error)
-		return json(ErrorResponse.new(code: "invalid_query", message: "query parameters are invalid"), 400)
+		return Response.json(ErrorResponse.new(code: "invalid_query", message: "query parameters are invalid"), 400)
 	when EndpointInputError::Body(_error)
-		return json(ErrorResponse.new(code: "invalid_body", message: "request body is invalid"), 400)
+		return Response.json(ErrorResponse.new(code: "invalid_body", message: "request body is invalid"), 400)
 	end
 end
 
@@ -255,12 +255,12 @@ def create_report_error_response(error: CreateReportError): Response
 	when CreateReportError::Database(database_error)
 		return database_error_response(database_error)
 	when CreateReportError::Queue(queue_error)
-		return json(ErrorResponse.new(code: "queue_unavailable", message: queue_error.message), 503)
+		return Response.json(ErrorResponse.new(code: "queue_unavailable", message: queue_error.message), 503)
 	end
 end
 
 def database_error_response(error: DbError): Response
-	return json(ErrorResponse.new(code: "database_error", message: error.message), 500)
+	return Response.json(ErrorResponse.new(code: "database_error", message: error.message), 500)
 end
 ```
 
@@ -276,7 +276,7 @@ dynamic GET route binds the `:id` path parameter.
 ```trb
 import { create_report_error_response, endpoint_input_error_response } from http/errors
 import { create_report } from services/create_report
-import { Context, Response, json } from trb/web
+import { Context, Response } from trb/web
 
 record CreateReportBody
 	title: String
@@ -293,7 +293,7 @@ def post(context: Context): Response
 	accepted := create_report(input.body.title) catch |error|
 		return create_report_error_response(error)
 	end
-	return json(accepted, 202)
+	return Response.json(accepted, 202)
 end
 ```
 
@@ -303,7 +303,7 @@ end
 ```trb
 import { database_error_response, endpoint_input_error_response } from http/errors
 import models/report
-import { Context, Response, json } from trb/web
+import { Context, Response } from trb/web
 
 record ReportParams
 	id: Integer
@@ -326,7 +326,7 @@ def get(context: Context): Response
 	report := Report.find(input.params.id) catch |error|
 		return database_error_response(error)
 	end
-	return json(ReportResponse.new(id: report.id, status: report.status, title: report.title))
+	return Response.json(ReportResponse.new(id: report.id, status: report.status, title: report.title))
 end
 ```
 
@@ -341,10 +341,10 @@ The runnable root only starts the generated Web server.
 
 <!-- trb-doc-file: examples/tutorials/web-orm-jobs/src/main.trb -->
 ```trb
-import { configure_server, serve } from trb/web
+import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: 3000))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: 3000))
 end
 ```
 

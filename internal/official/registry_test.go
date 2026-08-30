@@ -161,7 +161,7 @@ func TestResultOnlyBundledPackageVersions(t *testing.T) {
 	for name, version := range map[string]string{
 		"trb/orm":                         "0.2.0",
 		"trb/platform/typescript/browser": "0.2.0",
-		"trb/web":                         "0.1.0",
+		"trb/web":                         "0.2.0",
 	} {
 		packageDefinition, ok := Lookup(name)
 		if !ok {
@@ -178,7 +178,7 @@ func TestBundledWebPackage(t *testing.T) {
 	if !ok {
 		t.Fatal("trb/web is not registered")
 	}
-	if packageDefinition.Version != "0.1.0" {
+	if packageDefinition.Version != "0.2.0" {
 		t.Fatalf("version = %q", packageDefinition.Version)
 	}
 	if packageDefinition.Definition.ModulePath != "trb/web/index" {
@@ -194,20 +194,14 @@ func TestBundledWebPackage(t *testing.T) {
 		t.Fatal("package source is empty")
 	}
 	json := packageDefinition.Definition.Symbols["json"]
-	if json.Intrinsic != "trb.web.json" || len(json.Parameters) != 2 || !json.Parameters[1].Optional || json.Return.String() != "Response" {
+	if json.Intrinsic != "trb.web.json" || json.StaticOwner != "Response" || len(json.Parameters) != 2 || !json.Parameters[1].Optional || json.Return.String() != "Response" {
 		t.Fatalf("unexpected json contract: %#v", json)
 	}
-	configureServer := packageDefinition.Definition.Symbols["configure_server"]
-	if configureServer.Intrinsic != "trb.web.configure_server" || configureServer.Return.String() != "ServerConfig" || len(configureServer.Parameters) != 4 {
-		t.Fatalf("unexpected configure_server contract: %#v", configureServer)
-	}
-	for _, parameter := range configureServer.Parameters {
-		if !parameter.Optional || !parameter.Keyword {
-			t.Fatalf("configure_server parameter is not optional keyword-only: %#v", parameter)
-		}
+	if _, exists := packageDefinition.Definition.Symbols["configure_server"]; exists {
+		t.Fatal("legacy configure_server contract is still registered")
 	}
 	serve := packageDefinition.Definition.Symbols["serve"]
-	if serve.Intrinsic != "trb.web.serve" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || serve.Parameters[0].Type.String() != "ServerConfig" || !serve.Parameters[0].Optional {
+	if serve.Intrinsic != "trb.web.serve" || serve.StaticOwner != "Web" || serve.Return.String() != "Void" || len(serve.Parameters) != 1 || serve.Parameters[0].Type.String() != "Web::ServerConfig" || !serve.Parameters[0].Optional {
 		t.Fatalf("unexpected serve contract: %#v", serve)
 	}
 	with := packageDefinition.Definition.Symbols["with"]

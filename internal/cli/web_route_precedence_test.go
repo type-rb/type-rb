@@ -50,22 +50,22 @@ def main()
 	return
 end
 `
-			dynamicRouteSource := `import { Context, Response, text } from trb/web
+			dynamicRouteSource := `import { Context, Response } from trb/web
 
 def get(context: Context): Response
-	return text("dynamic:" + context.path_value("id"))
+	return Response.text("dynamic:" + context.path_value("id"))
 end
 `
-			candidatesRouteSource := `import { Context, Response, text } from trb/web
+			candidatesRouteSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("static:candidates")
+	return Response.text("static:candidates")
 end
 `
-			reservedRouteSource := `import { Context, Response, text } from trb/web
+			reservedRouteSource := `import { Context, Response } from trb/web
 
 def post(_context: Context): Response
-	return text("static:reserved")
+	return Response.text("static:reserved")
 end
 `
 			routeRoot := filepath.Join(root, "src", "routes", "digital-gift-runs")

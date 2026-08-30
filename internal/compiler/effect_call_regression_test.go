@@ -147,6 +147,37 @@ end
 	}
 }
 
+func TestGoImportedNestedRecordDefaultsPreserveTheirOwner(t *testing.T) {
+	contract := SourceUnit{
+		Filename: "contracts/settings.trb", ModulePath: "contracts/settings", Package: "contracts",
+		Source: []byte(`module Settings
+	record Config
+		value: Integer = 41
+	end
+end
+`),
+	}
+	main := SourceUnit{
+		Filename: "main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`import contracts/settings
+
+def main()
+	puts(Settings::Config.new().value.to_s())
+	return
+end
+`),
+	}
+	artifacts, err := CompileProject([]SourceUnit{contract, main}, Options{
+		Mode: "go", GoModule: "example.com/imported-nested-default", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(runEffectProject(t, "go", artifacts, "example.com/imported-nested-default")); got != "41" {
+		t.Fatalf("unexpected imported nested record output: got %q, want 41", got)
+	}
+}
+
 func TestQualifiedGenericNestedRecordConstructionAcrossBackends(t *testing.T) {
 	source := []byte(`module Services
 	record Box<T>

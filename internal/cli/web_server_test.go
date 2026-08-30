@@ -40,20 +40,20 @@ func TestOfficialWebServerLifecycleAcrossAvailableBackends(t *testing.T) {
 			if err := os.MkdirAll(routeDirectory, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			mainSource := fmt.Sprintf(`import { configure_server, serve } from trb/web
+			mainSource := fmt.Sprintf(`import trb/web
 
 def main()
-	serve(configure_server(host: "127.0.0.1", port: %d, body_limit_bytes: 8, shutdown_timeout_milliseconds: 500))
+	Web.serve(Web::ServerConfig.new(host: "127.0.0.1", port: %d, body_limit_bytes: 8, shutdown_timeout_milliseconds: 500))
 	return
 end
 `, port)
 			if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(mainSource), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			routeSource := `import { Context, Response, text } from trb/web
+			routeSource := `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `
 			if err := os.WriteFile(filepath.Join(routeDirectory, "health.trb"), []byte(routeSource), 0o644); err != nil {
@@ -193,10 +193,10 @@ func TestOfficialWebServerRejectsInvalidConfigAcrossAvailableBackends(t *testing
 			if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			source := `import { configure_server, serve } from trb/web
+			source := `import trb/web
 
 def main()
-	serve(configure_server(port: 0))
+	Web.serve(Web::ServerConfig.new(port: 0))
 	return
 end
 `

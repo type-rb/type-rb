@@ -50,10 +50,10 @@ end
 }
 
 func TestTypeScriptWebTestModuleOwnsItsDispatcher(t *testing.T) {
-	const routeSource = `import { Context, Response, text } from trb/web
+	const routeSource = `import { Context, Response } from trb/web
 
 def get(_context: Context): Response
-	return text("ok")
+	return Response.text("ok")
 end
 `
 	const testSource = `import { Body, Headers, HttpMethod } from trb/http

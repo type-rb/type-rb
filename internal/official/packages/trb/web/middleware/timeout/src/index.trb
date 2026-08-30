@@ -1,4 +1,4 @@
-import { Context, Next, Response, json } from trb/web
+import { Context, Next, Response } from trb/web
 import trb/web/middleware
 import trb/internal/runtime
 import trb/internal/web/timeout as native_timeout
@@ -42,6 +42,6 @@ def _invoke(context: Context, next_handler: Next, options: TimeoutOptions): Resp
 	if options.milliseconds <= 0
 		return Runtime.fail<Response>("trb/web timeout milliseconds must be greater than zero")
 	end
-	timeout_response := json(TimeoutResponse.new(error: "gateway_timeout"), 504)
+	timeout_response := Response.json(TimeoutResponse.new(error: "gateway_timeout"), 504)
 	return native_timeout.call(context, next_handler, options.milliseconds, timeout_response)
 end

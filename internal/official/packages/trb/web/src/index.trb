@@ -188,26 +188,13 @@ class Request
 	end
 end
 
-record ServerConfig
-	host: String
-	port: Integer
-	body_limit_bytes: Integer
-	shutdown_timeout_milliseconds: Integer
-end
-
-def configure_server(
-		*,
-		host: String = "0.0.0.0",
-		port: Integer = 3000,
-		body_limit_bytes: Integer = 1048576,
-		shutdown_timeout_milliseconds: Integer = 10000,
-	): ServerConfig
-	return ServerConfig.new(
-		host: host,
-		port: port,
-		body_limit_bytes: body_limit_bytes,
-		shutdown_timeout_milliseconds: shutdown_timeout_milliseconds,
-	)
+module Web
+	record ServerConfig
+		host: String = "0.0.0.0"
+		port: Integer = 3000
+		body_limit_bytes: Integer = 1048576
+		shutdown_timeout_milliseconds: Integer = 10000
+	end
 end
 
 enum CookieSameSite
@@ -228,7 +215,7 @@ end
 record ResponseCookie
 	name: String
 	value: String
-	attributes: Array<ResponseCookieAttribute>
+	attributes: Array<ResponseCookieAttribute> = []
 end
 
 class Context
@@ -261,6 +248,30 @@ class Response
 		@headers = headers
 		@body = body
 		return
+	end
+
+	def self.text(value: String, status: Integer = 200): Response
+		return Response.new(
+			status: status,
+			headers: Headers.new([Header.new(name: "content-type", value: "text/plain; charset=utf-8")]),
+			body: Body.new(value.to_bytes()),
+		)
+	end
+
+	def self.bytes(value: Bytes, status: Integer = 200): Response
+		return Response.new(
+			status: status,
+			headers: Headers.new([Header.new(name: "content-type", value: "application/octet-stream")]),
+			body: Body.new(value),
+		)
+	end
+
+	def self.empty(status: Integer = 204): Response
+		return Response.new(status: status, headers: Headers.new(), body: Body.empty())
+	end
+
+	def self.redirect(location: String, status: Integer = 302): Response
+		return Response.empty(status).with_header("location", location)
 	end
 
 	def with_status(status: Integer): Response
@@ -337,34 +348,6 @@ end
 
 def response<T>(*, status: Integer)
 	return
-end
-
-def text(value: String, status: Integer = 200): Response
-	return Response.new(
-		status: status,
-		headers: Headers.new([Header.new(name: "content-type", value: "text/plain; charset=utf-8")]),
-		body: Body.new(value.to_bytes()),
-	)
-end
-
-def bytes(value: Bytes, status: Integer = 200): Response
-	return Response.new(
-		status: status,
-		headers: Headers.new([Header.new(name: "content-type", value: "application/octet-stream")]),
-		body: Body.new(value),
-	)
-end
-
-def empty(status: Integer = 204): Response
-	return Response.new(status: status, headers: Headers.new(), body: Body.empty())
-end
-
-def redirect(location: String, status: Integer = 302): Response
-	return empty(status).with_header("location", location)
-end
-
-def new_response_cookie(name: String, value: String): ResponseCookie
-	return ResponseCookie.new(name: name, value: value, attributes: [])
 end
 
 def _valid_response_cookie?(cookie_value: ResponseCookie): Boolean

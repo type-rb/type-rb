@@ -1,4 +1,4 @@
-import { Context, Next, Request, Response, empty } from trb/web
+import { Context, Next, Request, Response } from trb/web
 import trb/web/middleware
 
 enum PreflightMaxAge
@@ -75,7 +75,7 @@ def _preflight?(request: Request): Boolean
 end
 
 def _preflight_response(request: Request, origin: String, options: CORSOptions): Response
-	mut response := empty()
+	mut response := Response.empty()
 	if _varies_by_origin?(options)
 		response = response.vary("Origin")
 	end

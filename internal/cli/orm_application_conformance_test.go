@@ -138,7 +138,7 @@ class WebConformanceProduct < Model
 end
 `,
 				"routes/products.trb": `import { WebConformanceProduct } from models/product
-import { Context, Response, json } from trb/web
+import { Context, Response } from trb/web
 import { DbResult } from trb/orm
 
 record WebProductResponse
@@ -168,9 +168,9 @@ end
 def get(_context: Context): Response
 	case load_web_product_responses()
 	when DbResult::Ok(products)
-		return json(products)
+		return Response.json(products)
 	when DbResult::Err(error)
-		return json(WebDatabaseError.new(message: error.message), 500)
+		return Response.json(WebDatabaseError.new(message: error.message), 500)
 	end
 end
 `,

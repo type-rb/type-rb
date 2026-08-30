@@ -3372,10 +3372,10 @@ end
 		ModulePath: "routes/index",
 		Package:    "routes",
 		Source: []byte(`import { payload } from app/mapper
-import { Response, json } from trb/web
+import { Response } from trb/web
 
 def get(): Response
-	return json(payload())
+	return Response.json(payload())
 end
 `),
 	}
