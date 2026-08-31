@@ -68,6 +68,8 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	successType := block.EffectSuccess
 	if successType.Kind == "" || successType.Kind == types.Void {
 		successType = types.FromName("Unit")
+	} else if successType.Kind == types.Never {
+		successType = types.FromName("Any")
 	}
 	errorType := block.Fails
 	rawType := block.Call.ExprType()
@@ -116,9 +118,11 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		g.line("_ = " + binding)
 	}
 	g.statements(block.Body)
-	g.line(value + " := " + g.expr(block.Value))
-	g.line(completed + " = true")
-	g.line("return " + g.filesystemResultOK(successType, errorType, value))
+	if block.Value != nil {
+		g.line(value + " := " + g.expr(block.Value))
+		g.line(completed + " = true")
+		g.line("return " + g.filesystemResultOK(successType, errorType, value))
+	}
 	g.indent--
 	g.line("}()")
 

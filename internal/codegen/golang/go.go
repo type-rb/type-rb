@@ -70,6 +70,8 @@ type generator struct {
 	cli               *cliapp.Manifest
 	cliInvocations    map[int]bool
 	utf8Replacement   bool
+	cliFailure        bool
+	cliBoundary       bool
 }
 
 func Generate(program *ir.Program) string {
@@ -195,6 +197,12 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	if g.utf8Replacement {
 		g.utf8ReplacementRuntimeSupport()
+	}
+	if g.cliFailure {
+		g.cliApplicationFailureRuntimeSupport()
+	}
+	if g.cliBoundary {
+		g.cliApplicationFailureBoundarySupport()
 	}
 	g.imports = pruneUnusedImports(g.b.String(), g.imports)
 	packageName := program.Package
@@ -425,7 +433,12 @@ func (g *generator) statement(statement ir.Statement) {
 			if n.Constant {
 				name = goConstantIdentifier(n.Owner, n.Name)
 			}
-			g.line("var " + name + " " + g.goType(n.Type) + " = " + g.expr(n.Value))
+			value := g.exprExpected(n.Value, n.Type)
+			if g.cli != nil {
+				g.cliBoundary = true
+				value = "func() " + g.goType(n.Type) + " { defer " + g.cliApplicationFailureBoundaryName() + "(); return " + value + " }()"
+			}
+			g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
 		} else {
 			name := g.bindingIdentifier(n.Name)
 			g.line(name + " := " + g.exprExpected(n.Value, n.Type))
@@ -455,6 +468,8 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		if n.Value == nil {
 			g.line("return")
+		} else if n.Value.ExprType().Kind == types.Never || n.Value.ExprType().Kind == types.Void {
+			g.line(g.expr(n.Value))
 		} else {
 			g.line("return " + g.returnExpr(n.Value))
 		}
@@ -1320,10 +1335,19 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	if method.Name == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
-	if method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0 {
+	cliMain := method.Name == "main" && g.cli != nil
+	ormMain := method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0
+	if ormMain && !cliMain {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
 	g.functionDepth++
+	if cliMain {
+		g.cliBoundary = true
+		g.line("defer " + g.cliApplicationFailureBoundaryName() + "()")
+		if ormMain {
+			g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
+		}
+	}
 	g.statements(method.Body)
 	g.executionActive = previousExecution
 	g.functionDepth--
@@ -2052,6 +2076,8 @@ func (g *generator) absorbRuntimeRequirements(child *generator) {
 	g.arrayIndexRuntime = g.arrayIndexRuntime || child.arrayIndexRuntime
 	g.checkedInteger = g.checkedInteger || child.checkedInteger
 	g.utf8Replacement = g.utf8Replacement || child.utf8Replacement
+	g.cliFailure = g.cliFailure || child.cliFailure
+	g.cliBoundary = g.cliBoundary || child.cliBoundary
 }
 
 func (g *generator) ifExpression(node *ir.If) string {
@@ -2088,24 +2114,24 @@ func (g *generator) ifExpression(node *ir.If) string {
 	child.line("if " + child.expr(node.Condition) + " {" + goTrailingComment(node.TrailingComment))
 	child.indent++
 	child.statements(node.Then)
-	if !node.ThenDiverges {
-		child.line("return " + child.expr(node.ThenResult))
+	if node.ThenResult != nil {
+		child.line(child.controlFlowResult(node.ExprType(), node.ThenResult))
 	}
 	child.indent--
 	for _, branch := range node.ElseIf {
 		child.line("} else if " + child.expr(branch.Condition) + " {")
 		child.indent++
 		child.statements(branch.Body)
-		if !branch.Diverges {
-			child.line("return " + child.expr(branch.Result))
+		if branch.Result != nil {
+			child.line(child.controlFlowResult(node.ExprType(), branch.Result))
 		}
 		child.indent--
 	}
 	child.line("} else {")
 	child.indent++
 	child.statements(node.Else)
-	if !node.ElseDiverges {
-		child.line("return " + child.expr(node.ElseResult))
+	if node.ElseResult != nil {
+		child.line(child.controlFlowResult(node.ExprType(), node.ElseResult))
 	}
 	child.indent--
 	child.line("}")
@@ -2114,6 +2140,14 @@ func (g *generator) ifExpression(node *ir.If) string {
 	g.temporary = child.temporary
 	g.absorbRuntimeRequirements(child)
 	return strings.TrimSpace(child.b.String())
+}
+
+func (g *generator) controlFlowResult(resultType types.Type, expression ir.Expression) string {
+	value := g.expr(expression)
+	if resultType.Kind == types.Void || resultType.Kind == types.Never {
+		return value
+	}
+	return "return " + value
 }
 
 func (g *generator) caseExpression(node *ir.Case) string {
@@ -2169,8 +2203,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				}
 			}
 			child.statements(branch.Body)
-			if !branch.Diverges {
-				child.line("return " + child.expr(branch.Result))
+			if branch.Result != nil {
+				child.line(child.controlFlowResult(node.ExprType(), branch.Result))
 			}
 			child.indent--
 		}
@@ -2179,8 +2213,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		if node.HasElse {
 			child.line("_ = " + typed)
 			child.statements(node.Else)
-			if !node.ElseDiverges {
-				child.line("return " + child.expr(node.ElseResult))
+			if node.ElseResult != nil {
+				child.line(child.controlFlowResult(node.ExprType(), node.ElseResult))
 			}
 		} else {
 			child.line("panic(\"unreachable exhaustive case\")")
@@ -2216,8 +2250,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				}
 			}
 			child.statements(branch.Body)
-			if !branch.Diverges {
-				child.line("return " + child.expr(branch.Result))
+			if branch.Result != nil {
+				child.line(child.controlFlowResult(node.ExprType(), branch.Result))
 			}
 			child.indent--
 		}
@@ -2226,8 +2260,8 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		if node.HasElse {
 			child.caseNarrowings(node.ElseNarrowings)
 			child.statements(node.Else)
-			if !node.ElseDiverges {
-				child.line("return " + child.expr(node.ElseResult))
+			if node.ElseResult != nil {
+				child.line(child.controlFlowResult(node.ExprType(), node.ElseResult))
 			}
 		} else {
 			child.line("panic(\"unreachable exhaustive case\")")
@@ -2401,6 +2435,7 @@ func (g *generator) transformResult(transform *ir.Transform) string {
 	child.indent--
 	child.line("}()")
 	g.temporary = child.temporary
+	g.absorbRuntimeRequirements(&child)
 	return strings.TrimSpace(child.b.String())
 }
 
@@ -3228,6 +3263,11 @@ func (g *generator) goType(t types.Type) string {
 	switch t.Kind {
 	case types.Void:
 		result = ""
+	case types.Never:
+		// Never has no runtime values. Use an uninhabited-path surrogate when it
+		// appears inside a target type (for example Result<Never, E>); callable
+		// return positions are handled by goReturn and remain result-less.
+		result = "any"
 	case types.Any, types.Invalid:
 		result = "any"
 	case types.Union:
@@ -3389,7 +3429,7 @@ func (g *generator) projectFunctionName(modulePath, sourceName string) string {
 }
 
 func (g *generator) goReturn(t types.Type) string {
-	if t.Kind == types.Void {
+	if t.Kind == types.Void || t.Kind == types.Never {
 		return ""
 	}
 	return " " + g.goType(t)

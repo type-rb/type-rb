@@ -104,6 +104,27 @@ explicit occurrence replaces the default and later occurrences append to that
 parsed value. Repeating a non-Array scalar option retains its existing
 last-occurrence-wins behavior.
 
+Import `fail` when argument parsing succeeded but the selected command cannot
+complete:
+
+```trb
+import { fail } from trb/cli
+
+def execute()
+	# ...perform the selected command...
+	fail("configuration is invalid")
+end
+```
+
+`fail` is terminal: it unwinds structured cleanup such as an active
+`File.open(...) do |file| ... end` block, then writes the supplied message and
+a newline to standard error and exits with status 1. The generated boundary
+also covers package-scope binding and constant initializers, including failures
+reached through a helper before `main`, plus field and parameter defaults when
+construction or a call evaluates them. Keep application work in `main`; this
+does not add executable raw top-level statements. Parser and usage failures
+continue to use status 2.
+
 ## Compile one executable
 
 The current native executable backend uses the Go toolchain. Configure the

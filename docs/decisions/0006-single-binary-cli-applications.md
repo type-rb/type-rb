@@ -62,6 +62,18 @@ help, and generated `--version` when a version is supplied. Global options
 precede the selected subcommand. Usage errors are written to standard error
 and exit with status 2.
 
+The exact named import `fail(message)` reports an application failure. The
+generated executable propagates a compiler-owned failure signal through ordinary
+stack unwinding, allowing structured cleanup inside the application body to
+complete before the generated boundary writes the supplied message to standard
+error, followed by a newline, and exits with status 1. The same boundary covers
+authored initializer expressions: package-scope bindings and constants before
+`main`, including transitive calls, and field or parameter defaults when their
+owning construction or call runs. Application work remains in `main` rather
+than a raw top-level execution model. It is a terminal single-binary
+application operation, not a portable general process-termination API. Parser
+and usage failures remain status 2.
+
 Project analysis converts declarations into a closed, target-independent CLI
 schema. The current native executable backend generates the parser,
 conversions, payload-enum construction, and record construction using only the
