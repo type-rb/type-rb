@@ -2142,6 +2142,29 @@ func TestInvalidPortableOperatorsAreRejectedAcrossModes(t *testing.T) {
 	}
 }
 
+func TestUndeclaredValueIdentifiersAreReportedBeforeDependentOperatorsAcrossModes(t *testing.T) {
+	source := []byte("def missing(): Boolean\n\treturn value == nil\nend\n")
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := Compile("undeclared_value.trb", source, mode)
+		if err == nil || !strings.Contains(err.Error(), "value is not declared") {
+			t.Fatalf("%s: expected undeclared value diagnostic, got %v", mode, err)
+		}
+		if strings.Contains(err.Error(), "operator ==") {
+			t.Fatalf("%s: dependent operator diagnostic was not suppressed: %v", mode, err)
+		}
+	}
+
+	native := []byte(`activate trb/platform/ruby/native
+
+def dynamic_missing(): Boolean
+	return external_value == nil
+end
+`)
+	if _, err := Compile("native_undeclared_value.trb", native, "ruby"); err != nil {
+		t.Fatalf("explicit Ruby-native unresolved value was rejected: %v", err)
+	}
+}
+
 func TestWordLogicalOperatorsAreRejectedAcrossModes(t *testing.T) {
 	tests := []struct {
 		source string

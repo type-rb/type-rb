@@ -540,7 +540,7 @@ type Checker struct {
 	concurrentClassRoots        map[string]bool
 	concurrentInitTargets       map[*ast.Identifier]bool
 	recordDefaultUnavailable    map[string]bool
-	recordDefaultCallee         *ast.Identifier
+	directCallCallee            *ast.Identifier
 	voidValueUses               map[ast.Expression]bool
 	declarationOwnerReceiver    ast.Expression
 	scopedResourceReceiver      ast.Expression
@@ -6029,9 +6029,24 @@ func (c *Checker) recordDefaultCallable(name string) bool {
 	return false
 }
 
+func (c *Checker) unresolvedValueIdentifier(identifier *ast.Identifier, sc *scope) bool {
+	if identifier == nil || c.directCallCallee == identifier || c.recordDefaultCallable(identifier.Name) || c.rubyNativeSyntax() {
+		return false
+	}
+	if c.authoredTypeVisibleInScope(identifier.Name, sc) || c.declarationTypeVisible(identifier.Name) {
+		return false
+	}
+	return c.resolution.Packages[identifier.Name] == nil
+}
+
 func (c *Checker) authoredTypeInScope(name string, sc *scope) (string, bool) {
 	declaration, ok := c.authoredTypeIdentityInScope(name, sc)
 	return declaration.LeafName(), ok
+}
+
+func (c *Checker) authoredTypeVisibleInScope(name string, sc *scope) bool {
+	_, ok := c.authoredTypeIdentityInScope(name, sc)
+	return ok
 }
 
 func (c *Checker) authoredTypeIdentityInScope(name string, sc *scope) (identity.Declaration, bool) {
@@ -6258,7 +6273,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if field, ok := c.current.fields[n.Name]; ok {
 				typ = c.typeFromRef(field.Type)
 			}
-		} else if c.recordDefaultUnavailable[n.Name] && (c.recordDefaultCallee != n || !c.recordDefaultCallable(n.Name)) {
+		} else if c.recordDefaultUnavailable[n.Name] && (c.directCallCallee != n || !c.recordDefaultCallable(n.Name)) {
 			c.error(n.Span(), fmt.Sprintf("record field default cannot reference current or later field %s", n.Name))
 			typ = invalidType()
 		} else if isConstant(n.Name) {
@@ -6272,6 +6287,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					typ = invalidType()
 				}
 			}
+		} else if c.unresolvedValueIdentifier(n, sc) {
+			c.error(n.Span(), fmt.Sprintf("%s is not declared", n.Name))
+			typ = invalidType()
 		}
 	case *ast.Literal:
 		switch n.Kind {
@@ -7013,9 +7031,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee++
 		}
-		previousRecordDefaultCallee := c.recordDefaultCallee
+		previousDirectCallCallee := c.directCallCallee
 		previousSafeCallCallee := c.safeCallCallee
-		c.recordDefaultCallee = directCallIdentifier(n.Callee)
+		c.directCallCallee = directCallIdentifier(n.Callee)
 		c.safeCallCallee = nil
 		if member, safe := safeNavigationMember(n.Callee); safe {
 			c.safeCallCallee = member
@@ -7030,7 +7048,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.fileResourceCallCallee = previousFileResourceCallCallee
 		c.scopedResourceReceiver = previousScopedReceiver
 		c.safeCallCallee = previousSafeCallCallee
-		c.recordDefaultCallee = previousRecordDefaultCallee
+		c.directCallCallee = previousDirectCallCallee
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
 		}
