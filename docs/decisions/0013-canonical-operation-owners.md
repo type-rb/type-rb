@@ -1,7 +1,7 @@
 # 0013: Canonical operation owners
 
-Status: accepted; implemented for built-in value operations and
-`StringBuilder`
+Status: accepted; implemented for built-in value operations, `StringBuilder`,
+`File`, and `Dir`
 
 ## Context
 
@@ -87,7 +87,8 @@ Public operations use these owners:
    `bytes.valid_utf8?()`.
 2. An operation naturally associated with an actual nominal type, but not with
    an existing instance, is a class member on that type. This includes genuine
-   constructors and factories such as `StringBuilder.new()`.
+   constructors and factories such as `StringBuilder.new()` and
+   `File.open(path)`, as well as `Dir.children(path)`.
 3. A domain algorithm with no natural value receiver is a module member.
    Examples include `Math.sqrt(9.0)` and `JSON.decode<Value>(text)`.
 4. An intentionally direct language or DSL operation may remain a top-level
@@ -128,10 +129,19 @@ the Bytes UTF-8 predicate is `bytes.valid_utf8?()`.
 Its `new` and `from_string` factories are class members, while operations on an
 existing builder are instance methods.
 
-This is the first implementation boundary for the owner rule. Other public API
-families are evaluated and migrated in their own coherent changes; this record
-does not silently rename an existing package or introduce a compatibility
-alias.
+### File and directory operations
+
+`trb/std/file` exposes the actual opaque `File` class as its declaration root.
+`File.open` is the structured factory, and the yielded value has type `File`.
+There is no separate `File` module or aggregate `FileSystem` owner.
+
+`trb/std/dir` is a separate package with the `Dir` root because directory
+enumeration is not coupled to opening every file. The static-only `Path` holder
+is removed; `Path` remains available for a future nominal host-path value.
+
+Supporting declarations are exact named peer imports in this initial API.
+`FileMode`, `DirEntry`, and `DirEntryKind` are not made class-owned nested
+declarations by merging a module with `File` or `Dir`.
 
 ## Consequences
 
@@ -141,6 +151,10 @@ alias.
   between a utility package and a method for the same operation.
 - Type names remain available for actual values rather than static-only
   namespaces.
+- `File.open` remains Ruby-shaped without exposing public handle construction
+  or weakening its scoped cleanup contract.
+- Supporting filesystem types require exact named imports until a separate
+  portable nested-declaration design is accepted.
 - Public source that uses a removed static utility root must use the receiver
   spelling. The standard library does not publish duplicate transition aliases.
 - Backend intrinsics can retain stable internal identities while the public
@@ -149,6 +163,7 @@ alias.
 ## Deferred work
 
 - Methods and factories on nominal non-class value declarations.
+- A general source declaration for opaque or scoped resource types.
 - Portable class-owned nested declarations and any declaration-merging model.
 - Re-evaluating domain module roots when a same-named nominal value is
   proposed.

@@ -162,6 +162,22 @@ static-only utility namespace. For example, `trb/std/string_builder` binds the
 `StringBuilder` type that owns its factories and whose values own their instance
 operations.
 
+A declaration owner is not itself a runtime value. It may appear in a type
+position, own a member or constructor call, or be passed in a declaration-only
+metadata position explicitly supplied by a compiler provider. In an ordinary
+value position, select a member or construct a value instead. For example,
+`FileMode::Read` is a mode value, while bare `FileMode` is only its enum owner.
+Import aliases follow the same rule because aliasing does not change the
+declaration identity.
+
+Resource packages follow the same rule. `import trb/std/file` binds the opaque
+`File` type used by `File.open` and by its block parameter; it does not bind a
+module containing a second file-handle type. Source cannot construct the
+standard resource with `File.new()`. Its exact value type is inferred only for
+the trusted `File.open` block parameter and cannot appear recursively in
+authored parameters, returns, fields, collections, function types, or
+transparent aliases.
+
 ## Choosing an operation owner
 
 TypeRB keeps one public spelling for an operation whenever the spellings would
@@ -170,7 +186,9 @@ have the same semantics:
 - Use an instance method for an operation on an existing value, such as
   `123.to_s()`, `2.5.to_i()`, `text.upcase()`, or `bytes.valid_utf8?()`.
 - Use a class member for an operation naturally associated with an actual
-  nominal type but not an existing instance, such as `StringBuilder.new()`.
+  nominal type but not an existing instance. This includes constructors and
+  factories such as `StringBuilder.new()` and `File.open(path)`, and associated
+  operations such as `Dir.children(path)`.
 - Use a module member for a domain algorithm with no natural value receiver,
   such as `Math.sqrt(9.0)` or `JSON.decode<Value>(text)`.
 - Import an intentionally direct language or DSL operation by exact name, as
@@ -186,6 +204,19 @@ Explicitly listed portable-prelude bindings are a narrow language convenience,
 not static mirrors for value methods. For example, prelude `puts` and
 owner-qualified `IO.puts` intentionally reach the same output operation;
 packages do not gain similar aliases by default.
+
+Supporting declarations remain exact named imports. The initial file API uses
+the peer `FileMode` declaration rather than inventing a `File` module or
+requiring class-owned nesting:
+
+```trb
+import trb/std/file
+import { FileMode } from trb/std/file
+```
+
+The `Path` name is reserved for a future host-path value with defined value
+semantics. A static-only `Path` class is not used as a placeholder for path
+functions.
 
 Portable libraries use `trb/std/*`. Target-specific APIs use
 `trb/platform/<mode>/*` and are rejected when imported from another mode:

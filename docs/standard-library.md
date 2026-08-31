@@ -132,9 +132,11 @@ first := payload.at(0)
 text := payload.to_s()
 ```
 
-String conversion uses UTF-8. Decoding invalid input replaces it with U+FFFD;
-call `valid_utf8?()` first when invalid bytes must be rejected. Byte indexing is
-strict and concatenation is non-mutating.
+String conversion uses UTF-8. Decoding invalid input emits one U+FFFD for each
+maximal subpart of an ill-formed sequence: adjacent stray continuation bytes
+are replaced separately, while a truncated multibyte prefix is replaced once.
+Call `valid_utf8?()` first when invalid bytes must be rejected. Byte indexing
+is strict and concatenation is non-mutating.
 
 ## Binary encoding
 
@@ -419,23 +421,6 @@ or special-case `Result`; a Result-returning block produces an Array of Result
 values. See the [language guide](language.md#arrays-hashes-and-iteration) and
 [decision record](decisions/0004-bounded-structured-concurrent-map.md).
 
-## Logical paths
-
-`trb/std/path` manipulates portable `/`-separated logical paths without
-accessing the host filesystem:
-
-```trb
-import trb/std/path
-
-config_path := Path.join("config", "../trbconfig.jsonc")
-directory := Path.directory("src/compiler/main.trb")
-parts := Path.components("/srv/type-rb")
-```
-
-The package provides `clean`, two-part `join`, `absolute`, `components`,
-`base`, `directory`, and `separator`. Its behavior does not depend on the
-target OS or current directory.
-
 ## URL encoding
 
 `trb/std/url` encodes individual URL components and ordered query parameters:
@@ -476,28 +461,123 @@ Complete URL parsing remains a future addition to the package.
 
 ## Filesystem
 
-`trb/std/filesystem` is the explicit host-filesystem bridge. Every operation
-returns a `Result`:
+`trb/std/file` and `trb/std/dir` are separate host-filesystem bridges. `File`
+is an actual opaque resource type rather than a module containing a second file
+type. Every operation returns a `Result`:
 
+<!-- trb-doc-test: stdlib-file-read -->
 ```trb
-import trb/std/filesystem
-import trb/std/result
+import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
 
-def load_config(path: String): Result<String, FileSystem::Error>
-	return FileSystem.read_text(path)
+def load_config(path: String): Result<String, FileSystemError>
+	return File.open(path) do |file|
+		try file.read_text(max_bytes: 1048576)
+	end
 end
 ```
 
-The package provides existence checks, UTF-8 and raw-byte reads and writes,
-recursive directory creation, and sorted immediate-child listing. Failures
-carry `operation`, `path`, and `message` instead of exposing target exceptions.
+Failures carry `operation`, `path`, `message`, and a
+`FileSystemErrorKind` instead of exposing target exceptions. Import the peer
+error declarations from `trb/std/errors` only when source names them directly.
 
-Writes and directory creation return `Result<Unit, FileSystem::Error>`. `Unit` is a
-storable value representing successful completion; it is distinct from the
-internal `Void` return category.
+`File.open` requires a block and accepts an optional typed `FileMode`. Omitting
+the mode selects `Read`, which opens an existing file for reading. `Write`
+opens a file for writing, creating it or truncating it to zero bytes.
+`CreateNew` opens a newly created file for writing. The `File` value is opaque
+and scoped: it may only be used as a direct receiver for its file methods
+inside that block. It cannot be constructed, assigned, passed to another
+function, placed in a collection, returned, or captured by a nested callback.
+The compiler closes the file before the `Result` leaves the structured block.
+Prefix `try` may end the block with an error, but cleanup still finishes before
+that error propagates to the enclosing `Result` boundary. The exact standard
+`File` identity also cannot appear in an authored parameter, return, field,
+collection, function type, or transparent alias. Compiler-generated and
+external declaration contracts cannot supply it as a value; only the trusted
+`File.open` block introduces it. An unrelated declaration with the same name
+is unaffected.
 
-Filesystem paths are host paths. Use `trb/std/path` separately for portable
-lexical path operations.
+Ruby-native fallback syntax is opaque to resource analysis, so it is rejected
+while the scoped file is in scope. Compute native values before `File.open`, or
+move native work after the block has returned a non-resource value.
+
+`file.read(max_bytes:)` returns `Bytes`, and
+`file.read_text(max_bytes:)` returns `String`. A successful result contains at
+most the given number of bytes. A negative bound returns `InvalidLimit`; input
+exceeding the bound returns `TooLarge` after the operation observes one byte
+beyond it. Text decoding uses the same maximal-subpart U+FFFD replacement rule
+as `Bytes#to_s`. `file.write` accepts `Bytes`, while `file.write_text` accepts
+`String`.
+
+`CreateNew` returns `AlreadyExists` if the path already exists. The existence
+check and creation are one exclusive host operation, so parallel writers
+cannot both create the same path. This is no-clobber creation, not atomic
+replacement of an existing file. It does not promise `fsync`, directory
+synchronization, or persistence after power loss.
+
+<!-- trb-doc-test: stdlib-exclusive-create-new -->
+```trb
+import trb/std/file
+import { FileMode } from trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+import { Unit } from trb/std/unit
+
+def create_output(path: String, bytes: Bytes): Result<Unit, FileSystemError>
+	return File.open(path, mode: FileMode::CreateNew) do |file|
+		try file.write(bytes)
+	end
+end
+```
+
+`Dir.children(path)` returns sorted immediate `DirEntry` values. Each entry has
+a `name`, a host-native `path`, and a typed `DirEntryKind`: `File`, `Directory`,
+or `Other`. Symbolic links and other entries that must not be traversed as
+directories are `Other`. The operation does not recurse. `Dir` is a
+nonconstructible type root in this slice; it owns directory operations but does
+not yet represent an open directory resource.
+
+Directory entry names must have a lossless valid UTF-8 representation. If any
+name does not, `Dir.children` returns `FileSystemErrorKind::Other` for operation
+`children`, with the supplied directory as the error path and
+`directory entry name is not valid UTF-8` as the message. It never substitutes
+U+FFFD and returns a path that names a different entry. Valid names are sorted
+by their UTF-8 bytes.
+
+<!-- trb-doc-test: stdlib-dir-children -->
+```trb
+import trb/std/dir
+import { DirEntryKind } from trb/std/dir
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def regular_file_paths(directory: String): Result<Array<String>, FileSystemError>
+	entries := try Dir.children(directory)
+	mut paths: Array<String> := []
+	entries.each do |entry|
+		if entry.kind == DirEntryKind::File
+			# entry.path can be passed directly to File.open on this host.
+			paths.push(entry.path)
+		end
+	end
+	return Result<Array<String>, FileSystemError>::Ok(paths)
+end
+```
+
+Writes return `Result<Unit, FileSystemError>`. `Unit` is a storable value
+representing successful completion; it is distinct from the internal `Void`
+return category.
+
+Filesystem paths are host-native strings and are passed to the target runtime
+without slash-only normalization. `DirEntry.path` preserves the directory text
+given to `Dir.children` and appends the entry name without a cleaning join. It
+therefore preserves host resolution for parents containing symbolic links and
+`..`. The appended separator is host-native, existing Windows `/` or `\`
+suffixes are accepted, `C:` remains drive-relative as `C:child`, and UNC share
+roots receive a separator. General parsing, cleaning, volume handling, and
+cross-host path conversion are deferred until TypeRB has a genuine nominal
+`Path` value type.
 
 ## Process
 
@@ -640,9 +720,9 @@ The current portable standard library includes:
 - `trb/std/secure_compare`
 - `trb/std/string_builder`
 - `trb/std/unicode`
-- `trb/std/path`
 - `trb/std/url`
-- `trb/std/filesystem`
+- `trb/std/file`
+- `trb/std/dir`
 - `trb/std/process`
 - `trb/std/json`
 - `trb/std/jsonc`

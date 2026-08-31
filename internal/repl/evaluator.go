@@ -623,7 +623,7 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 		return flowResult{}, errors.New("structured block is missing its runtime intrinsic")
 	}
 	arguments := make([]evaluatedArgument, 0, len(node.Call.Arguments)+1)
-	if member, ok := node.Call.Callee.(*ir.Member); ok && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic)) {
+	if member, ok := node.Call.Callee.(*ir.Member); ok && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic) && !reference.ClassMember) {
 		receiver, err := e.expression(member.Receiver, module, sc)
 		if err != nil {
 			return flowResult{}, err
@@ -2550,15 +2550,23 @@ func portableFloatText(value float64) string {
 }
 
 func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string, cause error) (Value, error) {
+	return e.filesystemErrKind(resultType, operation, path, cause, "Other")
+}
+
+func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path string, cause error, kind string) (Value, error) {
 	resultDefinition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem requires trb/std/result")
 	}
-	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::Error")].(*recordDefinition)
+	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "FileSystemError")].(*recordDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem runtime is not loaded")
 	}
-	errorType := types.FromName("FileSystem::Error")
+	fileErrorKindDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "FileSystemErrorKind")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("filesystem error kinds are not loaded")
+	}
+	errorType := types.FromName("FileSystemError")
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
 	}
@@ -2570,6 +2578,11 @@ func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string,
 				"operation": {Type: types.FromName("String"), Data: operation},
 				"path":      {Type: types.FromName("String"), Data: path},
 				"message":   {Type: types.FromName("String"), Data: cause.Error()},
+				"kind": {Type: types.Type{Kind: types.Named, Name: "FileSystemErrorKind", Declaration: fileErrorKindDefinition.Node.Declaration}, Data: &enumValue{
+					Definition: fileErrorKindDefinition,
+					Name:       kind,
+					Payload:    map[string]Value{},
+				}},
 			},
 		},
 	}

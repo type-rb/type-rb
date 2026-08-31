@@ -1,7 +1,21 @@
 package stdlib
 
 func errorsSource() string {
-	return `enum NumberParseErrorKind
+	return `enum FileSystemErrorKind
+	Other
+	AlreadyExists
+	InvalidLimit
+	TooLarge
+end
+
+record FileSystemError
+	operation: String
+	path: String
+	message: String
+	kind: FileSystemErrorKind = FileSystemErrorKind::Other
+end
+
+enum NumberParseErrorKind
 	InvalidFormat
 	OutOfRange
 end

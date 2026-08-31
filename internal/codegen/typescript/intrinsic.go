@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -41,28 +42,19 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.jobsAdapterEnqueue(name, call, arguments)
 	}
 	unicodeAlias := "unicode"
-	pathAlias := "path"
 	reference := expressionReference(call.Callee)
-	compilerRootRuntime := reference != nil && (reference.Package == "trb/std/path/index" || reference.Package == "trb/std/unicode/index")
+	compilerRootRuntime := reference != nil && reference.Package == "trb/std/unicode/index"
 	if compilerRootRuntime {
-		pathAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
 		unicodeAlias = "__trb_" + pathpkg.Base(pathpkg.Dir(reference.Package))
 	}
 	if reference != nil && reference.Alias != "" && !compilerRootRuntime {
 		unicodeAlias = reference.Alias
-		pathAlias = reference.Alias
 	}
 	unicodeCall := func(symbol string) string {
 		if _, named := call.Callee.(*ir.Identifier); named {
 			return symbol
 		}
 		return unicodeAlias + ".Unicode." + symbol
-	}
-	pathCall := func(symbol string) string {
-		if _, named := call.Callee.(*ir.Identifier); named {
-			return symbol
-		}
-		return pathAlias + "." + symbol
 	}
 	filesystemResultType := func() (string, string, string) {
 		result := call.ExprType()
@@ -75,21 +67,21 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	filesystemOK := func(value string) string {
 		_, successType, errorType := filesystemResultType()
-		return g.runtimeName("Result") + ".Ok<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.filesystemResultName() + ".Ok<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	filesystemError := func(operation, path, message string) string {
 		_, successType, errorType := filesystemResultType()
-		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + " } satisfies " + errorType
-		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
+		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: " + g.filesystemRuntimeName(stdlib.FileSystemErrorKindType()) + ".Other } satisfies " + errorType
+		return g.filesystemResultName() + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
 		_, successType, errorType := filesystemResultType()
 		value := "{ operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + " } satisfies " + errorType
-		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.filesystemResultName() + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	resultError := func(value string) string {
 		_, successType, errorType := filesystemResultType()
-		return g.runtimeName("Result") + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
+		return g.filesystemResultName() + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	numberParseError := func(kind, input, message string) string {
 		value := "({ kind: " + g.runtimeName("NumberParseErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("NumberParseError") + ")"
@@ -119,7 +111,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("KeyLookupError") + ")"
 		return resultError(value)
 	}
-	filesystemHandle := `const fs = (globalThis as any).process?.getBuiltinModule?.("fs"); if (fs === undefined) { throw new Error("filesystem is unavailable"); } `
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
 	case "trb.std.io.puts":
@@ -130,20 +121,6 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			return "console.log(" + portableFloatString(arguments[0]) + ")"
 		}
 		return "console.log(" + strings.Join(arguments, ", ") + ")"
-	case "trb.std.path.separator":
-		return pathCall("separator") + "()"
-	case "trb.std.path.clean":
-		return pathCall("clean") + "(" + arguments[0] + ")"
-	case "trb.std.path.join":
-		return pathCall("join") + "(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.std.path.absolute":
-		return pathCall("absolute") + "(" + arguments[0] + ")"
-	case "trb.std.path.components":
-		return pathCall("components") + "(" + arguments[0] + ")"
-	case "trb.std.path.base":
-		return pathCall("base") + "(" + arguments[0] + ")"
-	case "trb.std.path.directory":
-		return pathCall("directory") + "(" + arguments[0] + ")"
 	case "trb.std.url.encode_component":
 		return "((value: string): string => { const bytes = new TextEncoder().encode(value); let encoded = \"\"; for (const byte of bytes) { const unreserved = byte >= 65 && byte <= 90 || byte >= 97 && byte <= 122 || byte >= 48 && byte <= 57 || byte === 45 || byte === 46 || byte === 95 || byte === 126; encoded += unreserved ? String.fromCharCode(byte) : \"%\" + byte.toString(16).toUpperCase().padStart(2, \"0\"); } return encoded; })(" + arguments[0] + ")"
 	case "trb.std.url.decode_component":
@@ -151,28 +128,91 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalidEscape := percentDecodeError("InvalidEscape", "input", "invalid percent escape in URL component")
 		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
 		return "((): " + resultType + " => { const input = " + arguments[0] + "; const characters = Array.from(input); const bytes: Array<number> = []; const encoder = new TextEncoder(); for (let index = 0; index < characters.length; index += 1) { const character = characters[index]!; if (character !== \"%\") { bytes.push(...encoder.encode(character)); continue; } if (index + 2 >= characters.length || !/^[0-9A-Fa-f]$/.test(characters[index + 1]!) || !/^[0-9A-Fa-f]$/.test(characters[index + 2]!)) { return " + invalidEscape + "; } bytes.push(Number.parseInt(characters[index + 1]! + characters[index + 2]!, 16)); index += 2; } try { const value = new TextDecoder(\"utf-8\", { fatal: true }).decode(Uint8Array.from(bytes)); return " + filesystemOK("value") + "; } catch { return " + invalidUtf8 + "; } })()"
-	case "trb.internal.filesystem.exists":
+	case "trb.std.dir.children":
+		g.temporary++
+		id := strconv.Itoa(g.temporary)
+		path := "__trbDirPath" + id
+		activePath := "__trbDirActivePath" + id
+		host := "__trbDirHost" + id
+		filesystem := "__trbDirSystem" + id
+		pathModule := "__trbDirPathModule" + id
+		source := "__trbDirSource" + id
+		decoder := "__trbDirDecoder" + id
+		names := "__trbDirNames" + id
+		rawName := "__trbDirRawName" + id
+		driveRelativeRoot := "__trbDirDriveRelativeRoot" + id
+		separator := "__trbDirSeparator" + id
+		entries := "__trbDirEntries" + id
+		entryName := "__trbDirEntryName" + id
+		childPath := "__trbDirChildPath" + id
+		info := "__trbDirInfo" + id
+		left := "__trbDirLeft" + id
+		right := "__trbDirRight" + id
+		leftBytes := "__trbDirLeftBytes" + id
+		rightBytes := "__trbDirRightBytes" + id
+		length := "__trbDirCompareLength" + id
+		index := "__trbDirCompareIndex" + id
+		caught := "__trbDirError" + id
+		message := "__trbDirMessage" + id
 		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.statSync(__trbPath); return " + filesystemOK("true") + "; } catch (error) { if ((error as any)?.code === \"ENOENT\") { return " + filesystemOK("false") + "; } " + filesystemMessage + "return " + filesystemError("exists", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.read_text":
-		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const data: Uint8Array = fs.readFileSync(__trbPath); return " + filesystemOK("new TextDecoder(\"utf-8\").decode(data)") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("read_text", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.read_bytes":
-		resultType, _, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "return " + filesystemOK("new Uint8Array(fs.readFileSync(__trbPath))") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("read_bytes", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.write_text":
-		resultType, successType, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.writeFileSync(__trbPath, " + arguments[1] + ", { encoding: \"utf8\" }); return " + filesystemOK("({} satisfies "+successType+")") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("write_text", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.write_bytes":
-		resultType, successType, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.writeFileSync(__trbPath, " + arguments[1] + "); return " + filesystemOK("({} satisfies "+successType+")") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("write_bytes", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.create_directory":
-		resultType, successType, _ := filesystemResultType()
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "fs.mkdirSync(__trbPath, { recursive: true }); return " + filesystemOK("({} satisfies "+successType+")") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("create_directory", "__trbPath", "message") + "; } })()"
-	case "trb.internal.filesystem.list":
-		resultType, _, _ := filesystemResultType()
-		compare := "(left, right) => { const leftBytes = new TextEncoder().encode(left); const rightBytes = new TextEncoder().encode(right); const length = Math.min(leftBytes.length, rightBytes.length); for (let index = 0; index < length; index += 1) { if (leftBytes[index] !== rightBytes[index]) { return leftBytes[index]! - rightBytes[index]!; } } return leftBytes.length - rightBytes.length; }"
-		return "((): " + resultType + " => { const __trbPath = " + arguments[0] + "; try { " + filesystemHandle + "const names = (fs.readdirSync(__trbPath) as Array<string>).sort(" + compare + "); return " + filesystemOK("names") + "; } catch (error) { " + filesystemMessage + "return " + filesystemError("list", "__trbPath", "message") + "; } })()"
+		compare := "(" + left + ", " + right + ") => { const " + leftBytes + " = new TextEncoder().encode(" + left + ".name); const " + rightBytes + " = new TextEncoder().encode(" + right + ".name); const " + length + " = Math.min(" + leftBytes + ".length, " + rightBytes + ".length); for (let " + index + " = 0; " + index + " < " + length + "; " + index + " += 1) { if (" + leftBytes + "[" + index + "] !== " + rightBytes + "[" + index + "]) { return " + leftBytes + "[" + index + "]! - " + rightBytes + "[" + index + "]!; } } return " + leftBytes + ".length - " + rightBytes + ".length; }"
+		result := call.ExprType()
+		entrySemantic := types.FromName("DirEntry")
+		if len(result.Args) == 2 && result.Args[0].Kind == types.Array && len(result.Args[0].Args) == 1 {
+			entrySemantic = result.Args[0].Args[0]
+		}
+		entryType := g.tsType(entrySemantic)
+		kind := g.filesystemRuntimeName(stdlib.DirEntryKindType())
+		invalidName := filesystemError("children", path, strconv.Quote("directory entry name is not valid UTF-8"))
+		failure := filesystemError("children", activePath, message)
+		return "((): " + resultType + " => { const " + path + " = " + arguments[0] + "; let " + activePath + " = " + path + "; try { const " + host + " = (globalThis as any).process; const " + filesystem + " = " + host + "?.getBuiltinModule?.(\"fs\"); const " + pathModule + " = " + host + "?.getBuiltinModule?.(\"path\"); if (" + filesystem + " === undefined || " + pathModule + " === undefined) throw new Error(\"filesystem is unavailable\"); const " + source + " = " + filesystem + ".readdirSync(" + path + ", { encoding: \"buffer\" }) as Array<Uint8Array>; const " + decoder + " = new TextDecoder(\"utf-8\", { fatal: true }); const " + names + ": Array<string> = []; for (const " + rawName + " of " + source + ") { try { " + names + ".push(" + decoder + ".decode(" + rawName + ")); } catch { return " + invalidName + "; } } const " + driveRelativeRoot + " = " + pathModule + ".sep === \"\\\\\" && /^[A-Za-z]:$/.test(" + path + "); const " + separator + " = " + path + ".endsWith(" + pathModule + ".sep) || (" + pathModule + ".sep === \"\\\\\" && " + path + ".endsWith(\"/\")) || " + driveRelativeRoot + " ? \"\" : " + pathModule + ".sep; const " + entries + ": Array<" + entryType + "> = " + names + ".map((" + entryName + ") => { const " + childPath + " = " + path + " + " + separator + " + " + entryName + "; " + activePath + " = " + childPath + "; const " + info + " = " + filesystem + ".lstatSync(" + childPath + "); " + activePath + " = " + path + "; return ({ name: " + entryName + ", path: " + childPath + ", kind: " + info + ".isFile() ? " + kind + ".File : " + info + ".isDirectory() ? " + kind + ".Directory : " + kind + ".Other } satisfies " + entryType + "); }).sort(" + compare + "); return " + filesystemOK(entries) + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + failure + "; } })()"
+	case "trb.std.file.read", "trb.std.file.read_text":
+		g.temporary++
+		id := strconv.Itoa(g.temporary)
+		handle := "__trbFileReadHandle" + id
+		limit := "__trbFileReadLimit" + id
+		path := "__trbFileReadPath" + id
+		filesystem := "__trbFileReadSystem" + id
+		buffer := "__trbFileReadBuffer" + id
+		chunks := "__trbFileReadChunks" + id
+		count := "__trbFileReadCount" + id
+		remaining := "__trbFileReadRemaining" + id
+		request := "__trbFileReadRequest" + id
+		readCount := "__trbFileReadSize" + id
+		data := "__trbFileReadData" + id
+		offset := "__trbFileReadOffset" + id
+		chunk := "__trbFileReadChunk" + id
+		caught := "__trbFileReadError" + id
+		message := "__trbFileReadMessage" + id
+		resultType, _, errorType := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.file.")
+		invalid := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
+		tooLarge := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("file exceeds max_bytes"), "TooLarge")
+		failure := g.filesystemErrorValue(errorType, operation, path, message, "Other")
+		unavailable := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("filesystem is unavailable"), "Other")
+		value := data
+		if name == "trb.std.file.read_text" {
+			value = typescriptUTF8WithReplacement(data)
+		}
+		return "((): " + resultType + " => { const " + handle + " = " + arguments[0] + "; const " + limit + " = " + arguments[1] + "; const " + path + " = " + handle + ".path; if (" + limit + " < 0) { return " + resultError(invalid) + "; } const " + filesystem + " = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (" + filesystem + " === undefined) { return " + resultError(unavailable) + "; } try { const " + buffer + " = new Uint8Array(65536); const " + chunks + ": Array<Uint8Array> = []; let " + count + " = 0; while (" + count + " <= " + limit + ") { const " + remaining + " = " + limit + " - " + count + "; const " + request + " = " + remaining + " === 0 ? 1 : Math.min(" + buffer + ".byteLength, " + remaining + "); const " + readCount + " = " + filesystem + ".readSync(" + handle + ".fd, " + buffer + ", 0, " + request + ", null); if (" + readCount + " === 0) break; " + chunks + ".push(" + buffer + ".slice(0, " + readCount + ")); " + count + " += " + readCount + "; } if (" + count + " > " + limit + ") { return " + resultError(tooLarge) + "; } const " + data + " = new Uint8Array(" + count + "); let " + offset + " = 0; for (const " + chunk + " of " + chunks + ") { " + data + ".set(" + chunk + ", " + offset + "); " + offset + " += " + chunk + ".byteLength; } return " + filesystemOK(value) + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + resultError(failure) + "; } })()"
+	case "trb.std.file.write", "trb.std.file.write_text":
+		g.temporary++
+		id := strconv.Itoa(g.temporary)
+		handle := "__trbFileWriteHandle" + id
+		data := "__trbFileWriteData" + id
+		path := "__trbFileWritePath" + id
+		filesystem := "__trbFileWriteSystem" + id
+		caught := "__trbFileWriteError" + id
+		message := "__trbFileWriteMessage" + id
+		resultType, successType, errorType := filesystemResultType()
+		operation := strings.TrimPrefix(name, "trb.std.file.")
+		failure := g.filesystemErrorValue(errorType, operation, path, message, "Other")
+		unavailable := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("filesystem is unavailable"), "Other")
+		encoding := ""
+		if name == "trb.std.file.write_text" {
+			encoding = ", { encoding: \"utf8\" }"
+		}
+		return "((): " + resultType + " => { const " + handle + " = " + arguments[0] + "; const " + data + " = " + arguments[1] + "; const " + path + " = " + handle + ".path; const " + filesystem + " = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (" + filesystem + " === undefined) { return " + resultError(unavailable) + "; } try { " + filesystem + ".writeFileSync(" + handle + ".fd, " + data + encoding + "); return " + filesystemOK("({} satisfies "+successType+")") + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + resultError(failure) + "; } })()"
 	case "trb.internal.process.arguments":
 		return `(Reflect.get(globalThis, "process")?.argv ?? []).slice(2)`
 	case "trb.internal.process.environment":
@@ -305,7 +345,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.bytes.from_string":
 		return "new TextEncoder().encode(" + arguments[0] + ")"
 	case "trb.std.bytes.to_string":
-		return "new TextDecoder(\"utf-8\").decode(" + arguments[0] + ")"
+		return typescriptUTF8WithReplacement(arguments[0])
 	case "trb.std.bytes.length":
 		return arguments[0] + ".byteLength"
 	case "trb.std.bytes.at":
@@ -525,6 +565,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "undefined"
 	}
+}
+
+func typescriptUTF8WithReplacement(value string) string {
+	return "new TextDecoder(\"utf-8\").decode(" + value + ")"
 }
 
 func tsWebContextWith(call *ir.Call, arguments []string) string {

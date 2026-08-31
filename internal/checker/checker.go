@@ -266,6 +266,8 @@ type symbol struct {
 	mustUseResult      bool
 	pending            *pendingEmptyCollection
 	concurrentBorrowed bool
+	scopedResource     bool
+	scopedBlockDepth   int
 }
 
 // pendingEmptyCollection is shared by every lexical reference found during the
@@ -537,6 +539,10 @@ type Checker struct {
 	recordDefaultUnavailable    map[string]bool
 	recordDefaultCallee         *ast.Identifier
 	voidValueUses               map[ast.Expression]bool
+	declarationOwnerReceiver    ast.Expression
+	scopedResourceReceiver      ast.Expression
+	fileResourceCallCallee      ast.Expression
+	blockCallbackDepth          int
 }
 
 // resultBoundary is the lexical destination for prefix try. A boundary entry
@@ -1411,7 +1417,11 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 		return
 	}
 	defer func() {
-		c.requireStandardResultRuntimeForSourceType(c.typeFromRefWithParameters(ref, typeParameters))
+		resolved := c.typeFromRefWithParameters(ref, typeParameters)
+		c.requireStandardResultRuntimeForSourceType(resolved)
+		if c.containsFileResourceType(resolved) && !c.typeReferenceChildContainsFileResource(ref, typeParameters) {
+			c.error(ref.Span(), "scoped File may only be introduced as the File.open() block parameter; it cannot appear in an authored value type")
+		}
 	}()
 	if len(ref.Union) > 0 {
 		for _, alternative := range ref.Union {
@@ -1504,6 +1514,34 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 	if !portableHashKey(key) {
 		c.error(ref.Arguments[0].Span(), fmt.Sprintf("Hash key type must be String or Integer, got %s", key))
 	}
+}
+
+func (c *Checker) containsFileResourceType(typ types.Type) bool {
+	typ = c.expandAlias(typ, map[string]bool{})
+	if stdlib.IsFileResourceType(typ) {
+		return true
+	}
+	for _, argument := range typ.Args {
+		if c.containsFileResourceType(argument) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checker) typeReferenceChildContainsFileResource(ref ast.TypeRef, typeParameters map[string]bool) bool {
+	children := append([]ast.TypeRef(nil), ref.Union...)
+	children = append(children, ref.FunctionParameters...)
+	if ref.FunctionReturn != nil {
+		children = append(children, *ref.FunctionReturn)
+	}
+	children = append(children, ref.Arguments...)
+	for _, child := range children {
+		if c.containsFileResourceType(c.typeFromRefWithParameters(child, typeParameters)) {
+			return true
+		}
+	}
+	return false
 }
 
 func extendTypeParameters(parent map[string]bool, parameters []ast.TypeParameter) map[string]bool {
@@ -2284,13 +2322,17 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			} else if !c.resolution.NativeSyntax {
 				c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
+			c.rejectOpaqueNativeSyntaxWithScopedResource(n.Span(), sc)
 		case *ast.NativeBlock:
 			if c.mode != "ruby" {
 				c.error(n.Span(), "unsupported block syntax in portable TypeRB")
 			} else if !c.resolution.NativeSyntax {
 				c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 			}
+			c.rejectOpaqueNativeSyntaxWithScopedResource(n.Span(), sc)
+			c.blockCallbackDepth++
 			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}})
+			c.blockCallbackDepth--
 		}
 		if inferenceRegion != nil {
 			c.finishEmptyCollectionInferenceRegion(inferenceRegion)
@@ -2675,6 +2717,12 @@ func (c *Checker) markImportedSymbolUsed(name string, generated bool) {
 		symbols = c.resolution.GeneratedSymbols
 	}
 	if binding, ok := symbols[name]; ok {
+		c.markImportUsed(binding)
+	}
+}
+
+func (c *Checker) markImportedDeclarationUsed(declaration identity.Declaration) {
+	if binding, ok := c.resolution.ImportedTypeIdentity(declaration); ok {
 		c.markImportUsed(binding)
 	}
 }
@@ -5214,7 +5262,30 @@ func (c *Checker) checkTypeParameters(parameters []ast.TypeParameter) {
 
 func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 	name := expressionTypeName(class.Superclass)
-	if name == "" || c.classes[name] != nil {
+	if name == "" {
+		return
+	}
+	_, _, transparentAlias := c.aliasDefinition(name)
+	superclassType := c.expandAlias(types.FromName(name), map[string]bool{})
+	superclassType = c.canonicalType(superclassType, c.activeTypeParameterSet())
+	// An imported transparent alias is expanded in its declaring module's
+	// namespace. If its target is not also imported by the consumer, recover the
+	// target's unambiguous catalog identity rather than falling back to its
+	// display name. Ambiguous same-name declarations deliberately remain
+	// unresolved here.
+	if transparentAlias && superclassType.Kind == types.Named && superclassType.Declaration.Empty() {
+		if binding, ok := c.resolution.CatalogType(superclassType.Name); ok {
+			superclassType.Declaration = binding.DeclarationIdentity()
+		}
+	}
+	if stdlib.OpaqueType(superclassType) {
+		if imported, ok := c.importedTypeAt(name, class.Superclass.Span()); ok {
+			c.markImportUsed(imported)
+		}
+		c.error(class.Superclass.Span(), fmt.Sprintf("%s cannot be used as a superclass because it is nonconstructible", name))
+		return
+	}
+	if c.classes[name] != nil {
 		return
 	}
 	if imported, ok := c.importedTypeAt(name, class.Superclass.Span()); ok && imported.Export.Kind == resolver.ClassExport {
@@ -6121,7 +6192,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if c.inferenceOnly {
 			c.callbackScopes = append(c.callbackScopes, lambdaScope)
 		}
+		c.blockCallbackDepth++
 		c.checkStatements(n.Body, lambdaScope)
+		c.blockCallbackDepth--
 		if c.inferenceOnly {
 			c.callbackScopes = c.callbackScopes[:len(c.callbackScopes)-1]
 		}
@@ -6143,6 +6216,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
+			if value.scopedResource && (c.scopedResourceReceiver != n || c.blockCallbackDepth != value.scopedBlockDepth) {
+				c.error(n.Span(), fmt.Sprintf("scoped resource %s may only be used as a direct method receiver in its declaring block", n.Name))
+				typ = invalidType()
+			}
 			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentInitTargets[n] {
 				switch {
 				case !c.concurrencySafeType(value.typ, map[string]bool{}):
@@ -6538,6 +6615,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.concurrentBlockScopes = append(c.concurrentBlockScopes, blockScope)
 				c.concurrentMapDepth++
 			}
+			c.blockCallbackDepth++
 			if transform {
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
 				var resultExpression ast.Expression
@@ -6607,6 +6685,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.loopDepth--
 				c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
 			}
+			c.blockCallbackDepth--
 			if transform {
 				c.valueTransformDepth--
 			}
@@ -6619,7 +6698,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Void, Name: "Void"}
 		}
 	case *ast.GenericExpression:
+		previousDeclarationOwnerReceiver := c.declarationOwnerReceiver
+		c.declarationOwnerReceiver = n.Receiver
 		receiverType := c.checkExpression(n.Receiver, sc)
+		c.declarationOwnerReceiver = previousDeclarationOwnerReceiver
 		application, ok := c.resolveGenericApplication(n)
 		if !ok {
 			typ = receiverType
@@ -6643,7 +6725,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = controlType
 			break
 		}
+		previousDeclarationOwnerReceiver := c.declarationOwnerReceiver
+		c.declarationOwnerReceiver = n.Receiver
 		receiverType := c.checkExpression(n.Receiver, sc)
+		c.declarationOwnerReceiver = previousDeclarationOwnerReceiver
 		if !n.Namespace {
 			receiverType = c.requireValueExpression(n.Receiver, receiverType, "be used as a member receiver")
 		}
@@ -6825,6 +6910,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 			}
 			c.result.ClassFieldAccesses[n] = member.field != nil
+		} else if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
+			binding = specializeResolvedEnumMember(receiverType, binding)
+			binding = specializeResolvedClassMember(receiverType, binding)
+			typ = c.resolvedBindingType(binding)
+			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
+			c.markImportedDeclarationUsed(receiverType.Declaration)
+			c.recordReference(n, binding)
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			binding = specializeResolvedEnumMember(receiverType, binding)
 			binding = specializeResolvedClassMember(receiverType, binding)
@@ -6912,7 +7004,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		previousRecordDefaultCallee := c.recordDefaultCallee
 		c.recordDefaultCallee = directCallIdentifier(n.Callee)
+		previousScopedReceiver := c.scopedResourceReceiver
+		previousFileResourceCallCallee := c.fileResourceCallCallee
+		c.fileResourceCallCallee = n.Callee
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && !member.Namespace {
+			c.scopedResourceReceiver = member.Receiver
+		}
 		calleeType := c.checkExpression(n.Callee, sc)
+		c.fileResourceCallCallee = previousFileResourceCallCallee
+		c.scopedResourceReceiver = previousScopedReceiver
 		c.recordDefaultCallee = previousRecordDefaultCallee
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
@@ -6920,12 +7020,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.recordAuthoredCall(n)
 		c.checkConcurrentDynamicCall(n.Callee, calleeType)
 		c.checkConcurrentNativeCall(n.Callee)
-		if c.declarationOnlyClassBodyCall(n) {
+		declarationOnlyCall := c.declarationOnlyClassBodyCall(n)
+		if declarationOnlyCall {
 			c.result.DeclarationOnlyCalls[n] = true
 		}
 		argumentTypes := make([]types.Type, 0, len(n.Arguments))
 		for index, arg := range n.Arguments {
-			declarationReference := c.declarationFunctionArgumentReference(n, index)
+			declarationReference := c.declarationFunctionArgumentReference(n, index) ||
+				declarationOnlyCall && c.declarationOwnerExpression(arg.Value, sc)
 			if declarationReference {
 				c.declarationReferences++
 			}
@@ -7057,10 +7159,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 				}
 				typ = inferLibraryReturn(*library, receiverType, argumentTypes)
-				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
-					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
-					typ = invalidType()
-				}
 				if (library.Intrinsic == "trb.internal.json.encode" || library.Intrinsic == "trb.web.json" || library.Intrinsic == "trb.platform.typescript.browser.json_body") && len(argumentTypes) >= 1 {
 					c.checkCodecApplication(n, library.Intrinsic, argumentTypes[0])
 				}
@@ -7068,28 +7166,50 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkLibraryOrderingRequirements(n.Span(), binding.Name, *library)
 				if library.Block != nil {
 					member := declaration.Member{
-						Name:   binding.Name,
-						Return: typ,
+						Name:           binding.Name,
+						Intrinsic:      library.Intrinsic,
+						Return:         typ,
+						TypeParameters: append([]string(nil), library.TypeParameters...),
 						Block: &declaration.Block{
-							Parameters:      append([]types.Type(nil), library.Block.Parameters...),
-							ControlBoundary: library.Block.ControlBoundary,
+							Parameters:       append([]types.Type(nil), library.Block.Parameters...),
+							ControlBoundary:  library.Block.ControlBoundary,
+							Return:           library.Block.Return,
+							ResultBoundary:   library.Block.ResultBoundary,
+							Structured:       library.Block.Structured,
+							ScopedParameters: append([]bool(nil), library.Block.ScopedParameters...),
 						},
 					}
-					if blockType, checked := c.checkDeclarationBlock(n, member, sc, nil); checked {
+					c.result.ExternalMembers[n.Callee] = member
+					var definition *stdlib.Package
+					if binding.Import != nil {
+						definition = binding.Import.Definition
+					}
+					trustedFileOpen := stdlib.IsTrustedFileOpenContract(definition, library)
+					if blockType, checked := c.checkDeclarationBlock(n, member, sc, map[string]types.Type{}, trustedFileOpen); checked {
 						typ = blockType
 					}
 					libraryBlockChecked = true
+				}
+				if unresolved := unresolvedLibraryTypeParameters(*library, typ); len(unresolved) > 0 {
+					c.error(n.Span(), fmt.Sprintf("cannot infer %s for %s()", strings.Join(unresolved, ", "), binding.Name))
+					typ = invalidType()
 				}
 			}
 		}
 		if member, ok := c.external[n.Callee]; ok {
 			var bindings map[string]types.Type
 			typ, bindings = c.checkDeclarationArgumentsWithBindings(n.Span(), member, n.Arguments, argumentTypes)
-			if blockType, checked := c.checkDeclarationBlock(n, member, sc, bindings); checked {
+			if blockType, checked := c.checkDeclarationBlock(n, member, sc, bindings, false); checked {
 				typ = blockType
 			}
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
+			constructorType := c.result.Expressions[member.Receiver]
+			if message := stdlib.OpaqueTypeConstructionMessage(constructorType); message != "" {
+				c.error(n.Span(), message)
+				typ = invalidType()
+				break
+			}
 			switch receiver := member.Receiver.(type) {
 			case *ast.Identifier:
 				identifier := receiver
@@ -7255,7 +7375,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if n.Block != nil && !libraryBlockChecked {
 			if _, declared := c.external[n.Callee]; !declared {
 				if blockMember, provided := c.declarationFunctionBlock(n, argumentTypes); provided {
-					if blockType, checked := c.checkDeclarationBlock(n, blockMember, sc, nil); checked {
+					if blockType, checked := c.checkDeclarationBlock(n, blockMember, sc, nil, false); checked {
 						typ = blockType
 					}
 				} else if c.mode == "ruby" && c.resolution.NativeSyntax {
@@ -7311,6 +7431,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if !c.resolution.NativeSyntax {
 			c.error(n.Span(), "Ruby-native syntax requires activate trb/platform/ruby/native or trb/platform/ruby/rails")
 		}
+		c.rejectOpaqueNativeSyntaxWithScopedResource(n.Span(), sc)
 	}
 	if call, ok := expression.(*ast.CallExpression); ok {
 		if construction, found := c.result.RecordConstructions[call]; found && typ.Kind == types.Named {
@@ -7332,11 +7453,106 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	}
+	if c.declarationOwnerUsedAsValue(expression, sc) {
+		c.error(expression.Span(), fmt.Sprintf("declaration %s cannot be used as a value; select one of its members", expressionTypeName(expression)))
+		typ = invalidType()
+	}
+	if c.containsFileResourceType(typ) && !c.fileResourceExpressionAllowed(expression, typ, sc) {
+		c.error(expression.Span(), "a scoped File value can only be obtained as the File.open() block parameter")
+		typ = invalidType()
+	}
 	c.result.Expressions[expression] = typ
 	if c.currentConcurrentBlockScope() != nil && c.concurrentBorrowedType(typ) {
 		c.borrowedExpressions[expression] = c.computeConcurrentBorrowedExpression(expression, sc)
 	}
 	return typ
+}
+
+func (c *Checker) rejectOpaqueNativeSyntaxWithScopedResource(span token.Span, sc *scope) {
+	for current := sc; current != nil; current = current.parent {
+		for _, value := range current.values {
+			if value.scopedResource {
+				c.error(span, "Ruby-native syntax cannot be used while a scoped resource is in scope")
+				return
+			}
+		}
+	}
+}
+
+func declarationExportOwnsMembers(binding resolver.Binding) bool {
+	if binding.Export == nil || binding.Member != nil {
+		return false
+	}
+	switch binding.Export.Kind {
+	case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Checker) declarationOwnerExpression(expression ast.Expression, sc *scope) bool {
+	switch node := expression.(type) {
+	case *ast.GenericExpression:
+		return c.declarationOwnerExpression(node.Receiver, sc)
+	case *ast.Identifier:
+		if _, exists := sc.lookup(node.Name); exists {
+			return false
+		}
+		if binding, exists := c.result.References[node]; exists {
+			return declarationExportOwnsMembers(binding)
+		}
+		if binding, exists := c.importedTypeAt(node.Name, node.Span()); exists {
+			return declarationExportOwnsMembers(binding)
+		}
+		if declared, exists := c.declaredTypes[node.Name]; exists {
+			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype"
+		}
+		return c.declarationTypeVisible(node.Name)
+	case *ast.MemberExpression:
+		if !node.Namespace {
+			return false
+		}
+		if binding, exists := c.result.References[node]; exists {
+			return declarationExportOwnsMembers(binding)
+		}
+		_, authored := c.authoredTypeIdentityInScope(expressionTypeName(node), sc)
+		return authored
+	default:
+		return false
+	}
+}
+
+func (c *Checker) declarationOwnerUsedAsValue(expression ast.Expression, sc *scope) bool {
+	if c.declarationReferences > 0 || expression == c.declarationOwnerReceiver {
+		return false
+	}
+	return c.declarationOwnerExpression(expression, sc)
+}
+
+func (c *Checker) fileResourceExpressionAllowed(expression ast.Expression, typ types.Type, sc *scope) bool {
+	// A call target denotes an operation declaration, not the File value that
+	// the operation may return. The enclosing CallExpression is checked again
+	// after invocation and therefore remains the value-origin boundary.
+	if expression == c.fileResourceCallCallee {
+		return true
+	}
+	expanded := c.expandAlias(typ, map[string]bool{})
+	if !stdlib.IsFileResourceType(expanded) {
+		return false
+	}
+	// File itself remains the declaration root used to select File.open, and an
+	// explicit declaration-reference argument is metadata rather than a runtime
+	// File value.
+	if (expression == c.declarationOwnerReceiver || c.declarationReferences > 0) && c.result.ExpressionDeclarations[expression] == stdlib.FileResourceType().Declaration {
+		return true
+	}
+	identifier, ok := expression.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	value, _, found := sc.lookupOwner(identifier.Name)
+	return found && value.scopedResource && c.scopedResourceReceiver == identifier && c.blockCallbackDepth == value.scopedBlockDepth
 }
 
 func (c *Checker) requireValueExpression(expression ast.Expression, typ types.Type, use string) types.Type {
@@ -7545,7 +7761,9 @@ func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.T
 
 func (c *Checker) standardResultParts(typ types.Type) (types.Type, types.Type, types.Type, bool) {
 	expanded := c.expandAlias(typ, map[string]bool{})
-	if expanded.Nullable || expanded.Name != "Result" || len(expanded.Args) != 2 || !c.standardResultAvailable() {
+	resultDeclaration := stdlib.ResultType(types.Type{}, types.Type{}).Declaration
+	standard := expanded.Declaration == resultDeclaration || expanded.Name == "Result" && c.standardResultAvailable()
+	if expanded.Nullable || !standard || len(expanded.Args) != 2 {
 		return types.Type{}, types.Type{}, expanded, false
 	}
 	return expanded.Args[0], expanded.Args[1], expanded, true
@@ -7619,7 +7837,8 @@ func (c *Checker) requireRuntimeType(typ types.Type) {
 }
 
 func (c *Checker) requireStandardResultRuntimeForSourceType(typ types.Type) {
-	if typ.Name == "Result" && c.standardResultAvailable() {
+	resultDeclaration := stdlib.ResultType(types.Type{}, types.Type{}).Declaration
+	if typ.Declaration == resultDeclaration || typ.Name == "Result" && c.standardResultAvailable() {
 		if definition, _, ok := stdlib.LookupRuntimeExport("Result"); ok && definition.ModulePath != c.result.Program.ModulePath {
 			c.result.RuntimeDependencies[definition.Path] = definition
 		}
@@ -8788,7 +9007,7 @@ func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member 
 	return instantiateDeclarationType(member.Return, bindings), bindings
 }
 
-func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope, bindings map[string]types.Type) (types.Type, bool) {
+func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope, bindings map[string]types.Type, trustedFileOpen bool) (types.Type, bool) {
 	if bindings == nil {
 		bindings = map[string]types.Type{}
 	}
@@ -8837,11 +9056,21 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		if index < len(member.Block.Parameters) {
 			parameterType = instantiateDeclarationType(member.Block.Parameters[index], bindings)
 		}
+		scoped := index < len(member.Block.ScopedParameters) && member.Block.ScopedParameters[index]
+		if c.containsFileResourceType(parameterType) && !(trustedFileOpen && scoped && stdlib.IsFileResourceType(parameterType)) {
+			c.error(call.Block.Span(), "only the standard File.open() contract may introduce a scoped File block parameter")
+			parameterType = invalidType()
+			scoped = false
+		}
 		if _, duplicate := blockScope.values[name]; duplicate {
 			c.error(call.Block.Span(), fmt.Sprintf("block parameter %s is duplicated", name))
 			continue
 		}
 		declared := symbol{typ: parameterType, mutable: true, span: call.Block.Span()}
+		if scoped {
+			declared.scopedResource = true
+			declared.scopedBlockDepth = c.blockCallbackDepth + 1
+		}
 		if tracksUnusedBinding(name) {
 			used := false
 			declared.used = &used
@@ -8849,6 +9078,8 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		}
 		blockScope.values[name] = declared
 	}
+	c.blockCallbackDepth++
+	defer func() { c.blockCallbackDepth-- }()
 	if member.Block.Return.Name == "" {
 		callType := instantiateDeclarationType(member.Return, bindings)
 		declaresResultBoundary := boundaryError.Kind != "" && boundaryError.Kind != types.Never
@@ -8938,7 +9169,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		boundary = resultBoundary{
 			success: blockReturn,
 			failure: boundaryError,
-			result:  types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{blockReturn, boundaryError}},
+			result:  stdlib.ResultType(blockReturn, boundaryError),
 			valid:   true,
 		}
 	}
@@ -8973,7 +9204,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 	boundaryError = instantiateDeclarationType(member.Block.ResultBoundary, bindings)
 	resultBoundaryType := types.Type{}
 	if boundaryError.Kind != "" && boundaryError.Kind != types.Never {
-		resultBoundaryType = types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{blockReturn, boundaryError}}
+		resultBoundaryType = stdlib.ResultType(blockReturn, boundaryError)
 		for _, try := range c.resultBoundaries[boundaryIndex].tries {
 			semantic := c.result.ResultTries[try]
 			semantic.ReturnSuccessType = blockReturn
@@ -9041,6 +9272,8 @@ func (c *Checker) checkNativeCallBlock(block *ast.BlockExpression, sc *scope) {
 		}
 		blockScope.values[name] = symbol{typ: types.Type{Kind: types.Any, Name: "Any"}, mutable: true, span: block.Span()}
 	}
+	c.blockCallbackDepth++
+	defer func() { c.blockCallbackDepth-- }()
 	c.loopDepth++
 	c.checkStatements(block.Body, blockScope)
 	c.loopDepth--

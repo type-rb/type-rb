@@ -931,7 +931,11 @@ func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool)
 	sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
 	for _, imported := range imports {
 		symbol, exists := imported.Definition.Symbols[name]
-		if !exists || !symbol.HasReceiver() || receiver.Nullable || !stdlib.ReceiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
+		if !exists || !symbol.HasReceiver() || receiver.Nullable {
+			continue
+		}
+		pattern := importedReceiverPattern(imported, symbol.Receiver)
+		if !stdlib.ReceiverMatches(pattern, receiver, symbol.TypeParameters) {
 			continue
 		}
 		copy := symbol
@@ -951,6 +955,29 @@ func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool)
 		Exports:    map[string]Export{},
 	}
 	return Binding{Import: imported, Name: name, Library: &symbol}, true
+}
+
+// importedReceiverPattern attaches the declaration identity available from a
+// package's source exports to its semantic receiver contracts. Official
+// packages describe intrinsics separately from their TypeRB declarations, so
+// matching by display name alone could otherwise lend a method to an unrelated
+// declaration with the same name.
+func importedReceiverPattern(imported *Import, pattern types.Type) types.Type {
+	result := pattern
+	if imported != nil && result.Kind == types.Named && result.Declaration.Empty() {
+		if exported, ok := exportNamed(imported.Exports, result.Name); ok && typeExport(exported.Kind) {
+			result.Declaration = identity.Declaration{
+				Module: imported.RuntimePath(),
+				Name:   exported.Name,
+				Kind:   identityKind(exported.Kind),
+			}
+		}
+	}
+	result.Args = make([]types.Type, len(pattern.Args))
+	for index, argument := range pattern.Args {
+		result.Args[index] = importedReceiverPattern(imported, argument)
+	}
+	return result
 }
 
 func (r Result) TypeMember(typeName, name string) (Binding, bool) {

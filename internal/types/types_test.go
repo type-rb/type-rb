@@ -75,6 +75,22 @@ func TestEquivalentDistinguishesCanonicalDeclarationsWithSameDisplayName(t *test
 	}
 }
 
+func TestAssignableDistinguishesCanonicalDeclarationsWithSameDisplayName(t *testing.T) {
+	standardFile := FromName("File")
+	standardFile.Declaration = identity.Declaration{Module: "trb/std/file/index", Name: "File", Kind: identity.Class}
+	browserFile := FromName("File")
+	browserFile.Declaration = identity.Declaration{Module: "trb/platform/typescript/browser/index", Name: "File", Kind: identity.Record}
+	if Assignable(standardFile, browserFile) || Assignable(browserFile, standardFile) {
+		t.Fatal("distinct File declarations must not be assignable")
+	}
+
+	aliasedStandardFile := standardFile
+	aliasedStandardFile.Name = "HostFile"
+	if !Assignable(standardFile, aliasedStandardFile) || !Assignable(aliasedStandardFile, standardFile) {
+		t.Fatal("aliases of the same declaration must remain assignable")
+	}
+}
+
 func TestAssignableNamedGenericIsInvariant(t *testing.T) {
 	strings := Type{Kind: Named, Name: "Box", Args: []Type{FromName("String")}}
 	integers := Type{Kind: Named, Name: "Box", Args: []Type{FromName("Integer")}}

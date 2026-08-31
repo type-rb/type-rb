@@ -41,17 +41,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		}
 		return "Unicode." + symbol
 	}
-	pathCall := func(symbol string) string {
-		if _, named := call.Callee.(*ir.Identifier); named {
-			return symbol
-		}
-		return "Path." + symbol
-	}
 	filesystemOK := func(value string) string {
 		return "Result::Ok.new(" + value + ")"
 	}
 	filesystemError := func(operation, path, message string) string {
-		value := "FileSystem::Error.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ")"
+		value := rubyFilesystemError(operation, path, message, "Other")
 		return "Result::Err.new(" + value + ")"
 	}
 	processError := func(operation, command, message string) string {
@@ -95,41 +89,35 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			return "$stdout.puts(" + portableFloatString(arguments[0]) + ")"
 		}
 		return "$stdout.puts(" + strings.Join(arguments, ", ") + ")"
-	case "trb.std.path.separator":
-		return pathCall("separator") + "()"
-	case "trb.std.path.clean":
-		return pathCall("clean") + "(" + arguments[0] + ")"
-	case "trb.std.path.join":
-		return pathCall("join") + "(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.std.path.absolute":
-		return pathCall("absolute") + "(" + arguments[0] + ")"
-	case "trb.std.path.components":
-		return pathCall("components") + "(" + arguments[0] + ")"
-	case "trb.std.path.base":
-		return pathCall("base") + "(" + arguments[0] + ")"
-	case "trb.std.path.directory":
-		return pathCall("directory") + "(" + arguments[0] + ")"
 	case "trb.std.url.encode_component":
 		return "->(value) { value.encode(Encoding::UTF_8).bytes.map { |byte| unreserved = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 46 || byte == 95 || byte == 126; unreserved ? byte.chr : format(\"%%%02X\", byte) }.join }.call(" + arguments[0] + ")"
 	case "trb.std.url.decode_component":
 		invalidEscape := percentDecodeError("InvalidEscape", "input", "invalid percent escape in URL component")
 		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
 		return "->(input) { characters = input.each_char.to_a; bytes = []; failure = nil; index = 0; while index < characters.length; character = characters[index]; if character != \"%\"; bytes.concat(character.encode(Encoding::UTF_8).bytes); index += 1; next; end; if index + 2 >= characters.length || !characters[index + 1].match?(/\\A[0-9A-Fa-f]\\z/) || !characters[index + 2].match?(/\\A[0-9A-Fa-f]\\z/); failure = " + invalidEscape + "; break; end; bytes << (characters[index + 1] + characters[index + 2]).to_i(16); index += 3; end; if failure; failure; else; value = bytes.pack(\"C*\").force_encoding(Encoding::UTF_8); if value.valid_encoding?; Result::Ok.new(value); else; " + invalidUtf8 + "; end; end }.call(" + arguments[0] + ")"
-	case "trb.internal.filesystem.exists":
-		return "->(path) { begin; File.stat(path); " + filesystemOK("true") + "; rescue Errno::ENOENT; " + filesystemOK("false") + "; rescue StandardError => error; " + filesystemError("exists", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
-	case "trb.internal.filesystem.read_text":
-		value := "File.binread(path).force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)"
-		return "->(path) { begin; " + filesystemOK(value) + "; rescue StandardError => error; " + filesystemError("read_text", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
-	case "trb.internal.filesystem.read_bytes":
-		return "->(path) { begin; " + filesystemOK("File.binread(path).b") + "; rescue StandardError => error; " + filesystemError("read_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
-	case "trb.internal.filesystem.write_text":
-		return "->(path, value) { begin; File.binwrite(path, value.encode(Encoding::UTF_8)); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("write_text", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.internal.filesystem.write_bytes":
-		return "->(path, value) { begin; File.binwrite(path, value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("write_bytes", "path", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
-	case "trb.internal.filesystem.create_directory":
-		return "->(path) { begin; require \"fileutils\"; FileUtils.mkdir_p(path); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + filesystemError("create_directory", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
-	case "trb.internal.filesystem.list":
-		return "->(path) { begin; " + filesystemOK("Dir.children(path).sort") + "; rescue StandardError => error; " + filesystemError("list", "path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.std.dir.children":
+		entry := "DirEntry.new(name: name, path: child_path, kind: kind)"
+		invalidName := filesystemError("children", "path", strconv.Quote("directory entry name is not valid UTF-8"))
+		value := "raw_names = Dir.children(path, encoding: Encoding::BINARY).sort; names = raw_names.map { |raw_name| name = raw_name.dup.force_encoding(Encoding::UTF_8); return " + invalidName + " unless name.valid_encoding?; name }; entries = names.map { |name| native_separator = ::File::ALT_SEPARATOR.nil? ? ::File::SEPARATOR : ::File::ALT_SEPARATOR; drive_relative_root = !::File::ALT_SEPARATOR.nil? && path.match?(/\\A[A-Za-z]:\\z/); separator = path.end_with?(::File::SEPARATOR) || (!::File::ALT_SEPARATOR.nil? && path.end_with?(::File::ALT_SEPARATOR)) || drive_relative_root ? \"\" : native_separator; child_path = path + separator + name; active_path = child_path; info = ::File.lstat(child_path); active_path = path; kind = info.file? ? DirEntryKind::File : (info.directory? ? DirEntryKind::Directory : DirEntryKind::Other); " + entry + " }; " + filesystemOK("entries")
+		return "->(path) { active_path = path; begin; " + value + "; rescue StandardError => error; " + filesystemError("children", "active_path", "error.message") + "; end }.call(" + arguments[0] + ")"
+	case "trb.std.file.read", "trb.std.file.read_text":
+		operation := strings.TrimPrefix(name, "trb.std.file.")
+		invalid := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("max_bytes must be non-negative"), "InvalidLimit") + ")"
+		tooLarge := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("file exceeds max_bytes"), "TooLarge") + ")"
+		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		value := "data"
+		if name == "trb.std.file.read_text" {
+			value = rubyUTF8WithReplacement("data")
+		}
+		return "->(file, max_bytes) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = \"\".b; while data.bytesize <= max_bytes; remaining = max_bytes - data.bytesize; request_bytes = remaining == 0 ? 1 : [65536, remaining].min; chunk = file.read(request_bytes); break if chunk.nil? || chunk.empty?; data << chunk; end; if data.bytesize > max_bytes; " + tooLarge + "; else; " + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+	case "trb.std.file.write", "trb.std.file.write_text":
+		operation := strings.TrimPrefix(name, "trb.std.file.")
+		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		value := arguments[1]
+		if name == "trb.std.file.write_text" {
+			value += ".encode(Encoding::UTF_8)"
+		}
+		return "->(file, value) { path = file.path; begin; file.write(value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + failure + "; end }.call(" + arguments[0] + ", " + value + ")"
 	case "trb.internal.process.arguments":
 		return "ARGV.dup"
 	case "trb.internal.process.environment":
@@ -249,7 +237,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.bytes.from_string":
 		return "(" + arguments[0] + ").encode(Encoding::UTF_8).b"
 	case "trb.std.bytes.to_string":
-		return "(" + arguments[0] + ").dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)"
+		return rubyUTF8WithReplacement(arguments[0])
 	case "trb.std.bytes.length":
 		return arguments[0] + ".bytesize"
 	case "trb.std.bytes.at":
@@ -449,6 +437,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	default:
 		return "nil"
 	}
+}
+
+func rubyUTF8WithReplacement(value string) string {
+	return "(" + value + ").dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: \"\\u{FFFD}\")"
 }
 
 func rubyWebContextWith(arguments []string) string {

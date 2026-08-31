@@ -3,6 +3,7 @@ package stdlib
 import (
 	"testing"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -18,6 +19,78 @@ func TestGenericCollectionContractsInferFromEarlierArguments(t *testing.T) {
 	}
 	if got := symbol.Parameters[1].Type.String(); got != "Integer" {
 		t.Fatalf("later use did not retain the first T binding: %s", got)
+	}
+}
+
+func TestFilesystemContractOwnsScopedFileOperations(t *testing.T) {
+	definition, ok := Lookup("trb/std/file")
+	if !ok {
+		t.Fatal("file contract is missing")
+	}
+	open := definition.Symbols["open"]
+	if definition.Root != "File" || open.StaticOwner != "File" || open.Block == nil || !open.Block.Structured || open.Block.Return.Name != "T" || open.Block.ResultBoundary.Declaration != fileSystemErrorDeclaration {
+		t.Fatalf("File.open contract = %#v", open)
+	}
+	if len(open.Parameters) != 2 || !open.Parameters[1].Keyword || !open.Parameters[1].Optional || open.Parameters[1].Type.Declaration != fileModeDeclaration {
+		t.Fatalf("File.open parameters = %#v", open.Parameters)
+	}
+	if len(open.Block.ScopedParameters) != 1 || !open.Block.ScopedParameters[0] {
+		t.Fatalf("File.open scoped parameters = %#v", open.Block.ScopedParameters)
+	}
+	if len(open.RuntimeDependencies) != 1 || open.RuntimeDependencies[0].Declaration != fileModeDeclaration {
+		t.Fatalf("File.open runtime dependencies = %#v", open.RuntimeDependencies)
+	}
+	if !IsTrustedFileOpenContract(definition, &open) {
+		t.Fatal("standard File.open was not recognized as the trusted File origin")
+	}
+	spoofed := open
+	spoofed.Intrinsic = "example.file.open"
+	clonedDefinition := *definition
+	if IsTrustedFileOpenContract(definition, &spoofed) || IsTrustedFileOpenContract(&clonedDefinition, &open) || IsTrustedFileOpenContract(nil, &open) {
+		t.Fatal("a non-standard block was recognized as the trusted File origin")
+	}
+	read := definition.Symbols["read_text"]
+	if read.Receiver.Declaration != fileDeclaration || len(read.Parameters) != 1 || read.Parameters[0].Name != "max_bytes" {
+		t.Fatalf("File#read_text contract = %#v", read)
+	}
+	if !OpaqueType(fileType) {
+		t.Fatal("File is not opaque")
+	}
+
+	directory, ok := Lookup("trb/std/dir")
+	if !ok || directory.Root != "Dir" {
+		t.Fatalf("directory contract = %#v", directory)
+	}
+	children := directory.Symbols["children"]
+	if children.StaticOwner != "Dir" || children.Return.String() != "Result<Array<DirEntry>, FileSystemError>" {
+		t.Fatalf("Dir.children contract = %#v", children)
+	}
+	if !OpaqueType(declaredType(dirDeclaration)) {
+		t.Fatal("Dir is not opaque")
+	}
+
+	for _, removed := range []string{"trb/std/filesystem", "trb/std/path", "trb/internal/filesystem"} {
+		if _, exists := Lookup(removed); exists {
+			t.Fatalf("removed package %s remains registered", removed)
+		}
+	}
+}
+
+func TestScopedFileContractUsesDeclarationIdentity(t *testing.T) {
+	unrelated := types.Type{
+		Kind:        types.Named,
+		Name:        "File",
+		Declaration: identity.Declaration{Module: "example/file", Name: "File", Kind: identity.Class},
+	}
+	if OpaqueType(unrelated) {
+		t.Fatal("an unrelated File declaration is opaque")
+	}
+	definition, ok := Lookup("trb/std/file")
+	if !ok {
+		t.Fatal("file contract is missing")
+	}
+	if ReceiverMatches(definition.Symbols["read"].Receiver, unrelated, nil) {
+		t.Fatal("an unrelated File declaration received host file methods")
 	}
 }
 

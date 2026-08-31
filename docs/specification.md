@@ -539,24 +539,45 @@ switches.
 - Bare imports are neither lowercase package namespaces nor wildcard imports.
   Adding an unrelated export does not add a source binding. Named imports never
   search inside a declaration; members remain qualified by their owner.
+- A class, record, module, enum, or newtype declaration owner is not an
+  ordinary runtime value. It may be used in type syntax, to select members or a
+  constructor, or as an explicit declaration reference in compiler-provider
+  metadata. A bare owner in any other value expression is an error. Import
+  aliases preserve this distinction because they preserve declaration identity.
 - The declaration root is not required to be a module. A standard-library
-  package whose central concept is a value exposes the actual type as its root,
-  so the same declaration owns class and instance members. It does not reserve
-  that type name for a static-only utility namespace. `trb/std/string_builder`,
-  for example, exposes the actual `StringBuilder` type.
+  package whose central concept is a value or resource exposes the actual type
+  as its root, so the same declaration is used for type annotations, class
+  members, and instance members when the value's lifecycle permits authored
+  annotations. It does not reserve that type name for a static-only utility
+  namespace. In particular, `trb/std/file` exposes the opaque resource class
+  `File`; source cannot construct it with `File.new()`.
+- The exact standard `File` value type is compiler-introduced only as the
+  inferred parameter of the trusted `File.open` block. The `File` declaration
+  remains valid as the class owner of `open`, but authored value-type positions
+  cannot contain that identity, including through nullable, collection,
+  function, or transparent-alias shapes. Functions, fields, compiler-generated
+  declarations, and external declaration providers cannot return or otherwise
+  introduce an exact `File` value. These restrictions are declaration-identity
+  based and do not affect an unrelated type also named `File`.
 - Public operations have one canonical owner. An operation on an existing
   value is an instance method on that value. An operation naturally associated
   with an actual nominal type but not an existing instance is a class member on
-  that type. An algorithm with no natural value or nominal-type owner is a
-  module member. A type-associated operation does not justify inventing a
-  utility class when no actual nominal type exists. A second public spelling is
-  permitted only when it expresses a documented semantic, lifecycle, or
-  performance distinction. Compiler-owned intrinsic modules may remain as
-  implementation details, but they do not create an additional public source
-  spelling. An explicitly listed portable prelude binding is the narrow
-  language-level exception: for example, `puts` may also be reached as
-  `IO.puts`. This exception does not authorize packages to add static mirrors
-  for receiver methods.
+  that type; this includes factories such as `File.open` and associated
+  operations such as `Dir.children`. An algorithm with no natural value or
+  nominal-type owner is a module member. A type-associated operation does not
+  justify inventing a utility class when no actual nominal type exists. A
+  second public spelling is permitted only when it expresses a documented
+  semantic, lifecycle, or performance distinction. Compiler-owned intrinsic
+  modules may remain as implementation details, but they do not create an
+  additional public source spelling. An explicitly listed portable prelude
+  binding is the narrow language-level exception: for example, `puts` may also
+  be reached as `IO.puts`. This exception does not authorize packages to add
+  static mirrors for receiver methods.
+- Supporting declarations for an opaque standard type are initially peer
+  top-level declarations, imported by exact name. Class-owned nested
+  declarations and declaration merging are not implied by declaration-root
+  imports. `FileMode`, for example, is a peer of `File` rather than a member of
+  a separate `File` module or a nested `File::Mode` declaration.
 - `activate PATH` enables a compiler or provider capability declared by the
   resolved target without creating a source binding. It accepts neither a
   named list nor an alias and rejects ordinary modules with no capability.

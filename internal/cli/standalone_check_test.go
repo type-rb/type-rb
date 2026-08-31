@@ -40,6 +40,66 @@ func TestCheckConfigFreeFileRootAcrossModes(t *testing.T) {
 	}
 }
 
+func TestCheckRejectsFilesystemDeclarationOwnersAsValuesAcrossModes(t *testing.T) {
+	tests := map[string]struct {
+		imports string
+		owner   string
+	}{
+		"File": {
+			imports: "import trb/std/file",
+			owner:   "File",
+		},
+		"Dir": {
+			imports: "import trb/std/dir",
+			owner:   "Dir",
+		},
+		"FileMode": {
+			imports: "import { FileMode } from trb/std/file",
+			owner:   "FileMode",
+		},
+		"DirEntry": {
+			imports: "import { DirEntry } from trb/std/dir",
+			owner:   "DirEntry",
+		},
+		"DirEntryKind": {
+			imports: "import { DirEntryKind } from trb/std/dir",
+			owner:   "DirEntryKind",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for name, test := range tests {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				root := t.TempDir()
+				entry := filepath.Join(root, "main.trb")
+				source := test.imports + `
+
+def consume(_value: Any)
+	return
+end
+
+def main()
+	consume(` + test.owner + `)
+	return
+end
+`
+				if err := os.WriteFile(entry, []byte(source), 0o644); err != nil {
+					t.Fatal(err)
+				}
+
+				var stdout, stderr bytes.Buffer
+				command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+				if status := command.Run([]string{"check", "--mode", mode, entry}); status != 1 {
+					t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+				}
+				want := "declaration " + test.owner + " cannot be used as a value"
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("diagnostic %q does not contain %q", stderr.String(), want)
+				}
+			})
+		}
+	}
+}
+
 func TestCheckConfigFreeFileRootDefaultsToGo(t *testing.T) {
 	root := t.TempDir()
 	entry := filepath.Join(root, "library.trb")

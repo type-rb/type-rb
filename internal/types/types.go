@@ -423,8 +423,13 @@ func Assignable(target, value Type) bool {
 	if target.Kind != value.Kind {
 		return false
 	}
-	if target.Kind == Named && target.Name != value.Name {
-		return false
+	if target.Kind == Named {
+		if !target.Declaration.Empty() && !value.Declaration.Empty() && target.Declaration != value.Declaration {
+			return false
+		}
+		if target.Name != value.Name && (target.Declaration.Empty() || value.Declaration.Empty()) {
+			return false
+		}
 	}
 	if target.Kind == Named && (len(target.Args) > 0 || len(value.Args) > 0) {
 		if len(target.Args) != len(value.Args) {

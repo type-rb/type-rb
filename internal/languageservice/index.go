@@ -305,6 +305,7 @@ func cloneSymbolCall(symbol Symbol) Symbol {
 	}
 	call := *symbol.Call
 	call.Parameters = append([]CallParameter(nil), symbol.Call.Parameters...)
+	call.BlockParameters = append([]types.Type(nil), symbol.Call.BlockParameters...)
 	for index := range call.Parameters {
 		call.Parameters[index].ReferenceScopes = append([]ReferenceScope(nil), call.Parameters[index].ReferenceScopes...)
 		for scopeIndex := range call.Parameters[index].ReferenceScopes {
@@ -734,7 +735,11 @@ func appendUniqueSymbol(symbols []Symbol, candidate Symbol) []Symbol {
 
 func addImportSymbols(visible map[string]Symbol, imported *ir.Import, programsByPath map[string]*ir.Program, exportsByPath map[string][]Symbol) {
 	exports := exportsByPath[imported.Path]
-	if definition, ok := stdlib.Lookup(imported.Path); ok {
+	definition, standard := stdlib.Lookup(imported.Path)
+	if !standard {
+		definition, standard = stdlib.Lookup(strings.TrimSuffix(imported.Path, "/index"))
+	}
+	if standard {
 		exports = append(exports, standardSymbols(definition)...)
 		if definition.Root != "" {
 			exports = append(exports, standardPackageRootSymbol(definition, standardSourceExports(definition)))
@@ -928,13 +933,19 @@ func standardPackageRootSymbol(definition *stdlib.Package, sourceExports map[str
 		members[name] = member
 	}
 	for name, library := range definition.Symbols {
-		if library.CompilerOnly {
+		if library.CompilerOnly || library.HasReceiver() {
 			continue
 		}
 		member := standardLibrarySymbol(library)
 		member.Name = name
 		member.Kind = CompletionMethod
 		members[name] = member
+	}
+	for declaration := range definition.OpaqueTypes {
+		if declaration.Name == definition.Root {
+			delete(members, "new")
+			break
+		}
 	}
 	root.Members = make([]Symbol, 0, len(members))
 	for _, member := range members {
@@ -970,6 +981,10 @@ func standardLibrarySymbol(library stdlib.Symbol) Symbol {
 			NamedOnly: parameter.Keyword, Keyword: parameter.Keyword, Optional: parameter.Optional,
 		}
 	}
+	blockParameters := []types.Type(nil)
+	if library.Block != nil {
+		blockParameters = append(blockParameters, library.Block.Parameters...)
+	}
 	return Symbol{
 		Name:   library.Name,
 		Kind:   CompletionFunction,
@@ -980,6 +995,7 @@ func standardLibrarySymbol(library stdlib.Symbol) Symbol {
 			ExplicitTypeArguments: len(library.TypeParameters) > 0,
 			TypeParameters:        append([]string(nil), library.TypeParameters...),
 			Parameters:            parameters,
+			BlockParameters:       blockParameters,
 		},
 	}
 }

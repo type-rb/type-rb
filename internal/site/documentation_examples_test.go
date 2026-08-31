@@ -39,6 +39,8 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 	}
 
 	required := map[string]bool{
+		"adr-exclusive-create-new":      false,
+		"adr-scoped-file-read":          false,
 		"getting-started-project":       false,
 		"getting-started-standalone":    false,
 		"language-discriminated-union":  false,
@@ -50,6 +52,9 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 		"react-first-component":         false,
 		"shared-http-values":            false,
 		"specification-result-baseline": false,
+		"stdlib-dir-children":           false,
+		"stdlib-exclusive-create-new":   false,
+		"stdlib-file-read":              false,
 		"stdlib-scalars":                false,
 		"web-update-todo":               false,
 	}

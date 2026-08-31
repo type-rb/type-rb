@@ -2878,34 +2878,6 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 	}
 }
 
-func TestReplEvaluatesPortablePathAcrossModes(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		root := t.TempDir()
-		config := project.New(root, mode)
-		config.SourceDir = "src"
-		if config.Go != nil {
-			config.Go.Module = "example.com/type-rb/repl-path-test"
-		}
-		if err := config.Save(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		input := "import trb/std/path\nPath.separator()\nPath.clean(\"a/./b/../c\")\nPath.clean(\"/../../srv//app\")\nPath.join(\"/srv/app\", \"../data\")\nPath.absolute(\"/srv/app\")\nPath.components(\"/srv/app/main.trb\")\nPath.base(\"/srv/app/main.trb\")\nPath.directory(\"/srv/app/main.trb\")\nPath.join(\"\", \"\")\n:quit\n"
-		var stdout, stderr bytes.Buffer
-		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
-		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
-			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
-		}
-		want := "\"/\" : String\n\"a/c\" : String\n\"/srv/app\" : String\n\"/srv/data\" : String\ntrue : Boolean\n[\"srv\", \"app\", \"main.trb\"] : Array<String>\n\"main.trb\" : String\n\"/srv/app\" : String\n\".\" : String\n"
-		if stdout.String() != want || stderr.Len() != 0 {
-			t.Fatalf("unexpected %s path REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
-		}
-	}
-}
-
 func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2922,22 +2894,25 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		}
 
 		directory := filepath.Join(root, "data")
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		textPath := filepath.Join(directory, "note.txt")
-		bytesPath := filepath.Join(directory, "value.bin")
 		missingPath := filepath.Join(directory, "missing.txt")
 		input := strings.Join([]string{
-			"import trb/std/filesystem",
+			"import trb/std/file",
+			"import { FileMode } from trb/std/file",
+			"import trb/std/dir",
+			"import { FileSystemErrorKind } from trb/std/errors",
 			"import { Result } from trb/std/result",
-			"def describe(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
-			"FileSystem.create_directory(" + strconv.Quote(directory) + ")",
-			"FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
-			"FileSystem.read_text(" + strconv.Quote(textPath) + ")",
-			"FileSystem.exists(" + strconv.Quote(textPath) + ")",
-			"FileSystem.exists(" + strconv.Quote(missingPath) + ")",
-			"FileSystem.list(" + strconv.Quote(directory) + ")",
-			"FileSystem.write_bytes(" + strconv.Quote(bytesPath) + ", \"B\".to_bytes())",
-			"FileSystem.read_bytes(" + strconv.Quote(bytesPath) + ")",
-			"describe(FileSystem.read_text(" + strconv.Quote(missingPath) + "))",
+			"def create_label(path: String, text: String): String; result := File.open(path, mode: FileMode::CreateNew) do |file|; try file.write_text(text); end; case result; when Result::Ok(_unit); return \"created\"; when Result::Err(error); case error.kind; when FileSystemErrorKind::AlreadyExists; return \"exists\"; else; return error.operation; end; end; end",
+			"def read_label(path: String): String; result := File.open(path) do |file|; try file.read_text(max_bytes: 16); end; case result; when Result::Ok(text); return text; when Result::Err(_error); return \"missing\"; end; end",
+			"def child_names(path: String): Array<String>; case Dir.children(path); when Result::Err(error); return [error.operation]; when Result::Ok(entries); mut names: Array<String> := []; entries.each do |entry|; names.push(entry.name); end; return names; end; end",
+			"create_label(" + strconv.Quote(textPath) + ", \"A😀\")",
+			"read_label(" + strconv.Quote(textPath) + ")",
+			"child_names(" + strconv.Quote(directory) + ")",
+			"create_label(" + strconv.Quote(textPath) + ", \"second\")",
+			"read_label(" + strconv.Quote(missingPath) + ")",
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -2945,15 +2920,11 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: \"A😀\") : Result<String, FileSystem::Error>\n" +
-			"Result::Ok(value: true) : Result<Boolean, FileSystem::Error>\n" +
-			"Result::Ok(value: false) : Result<Boolean, FileSystem::Error>\n" +
-			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileSystem::Error>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileSystem::Error>\n" +
-			"\"read_text\" : String\n"
+		want := "\"created\" : String\n" +
+			"\"A😀\" : String\n" +
+			"[\"note.txt\"] : Array<String>\n" +
+			"\"exists\" : String\n" +
+			"\"missing\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s filesystem REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -6134,17 +6105,17 @@ end
 	}
 }
 
-func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
+func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
 			if _, err := exec.LookPath("ruby"); err != nil {
-				t.Log("ruby is not installed; skipping Ruby filesystem run")
+				t.Log("ruby is not installed; skipping Ruby scoped filesystem run")
 				continue
 			}
 		}
 		if mode == "typescript" {
 			if _, err := exec.LookPath("node"); err != nil {
-				t.Log("node is not installed; skipping TypeScript filesystem run")
+				t.Log("node is not installed; skipping TypeScript scoped filesystem run")
 				continue
 			}
 		}
@@ -6152,7 +6123,7 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		config := project.New(root, mode)
 		config.SourceDir = "src"
 		if config.Go != nil {
-			config.Go.Module = "example.com/type-rb/run-filesystem-test"
+			config.Go.Module = "example.com/type-rb/run-scoped-filesystem-test"
 		}
 		if err := config.Save(); err != nil {
 			t.Fatal(err)
@@ -6161,34 +6132,88 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 		directory := filepath.Join(root, "data")
-		textPath := filepath.Join(directory, "note.txt")
-		missingPath := filepath.Join(directory, "missing.txt")
-		bmpPath := filepath.Join(directory, "\uE000")
-		astralPath := filepath.Join(directory, "\U00010000")
-		source := "import trb/std/filesystem\n" +
+		if err := os.MkdirAll(filepath.Join(directory, "child"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		symlinkAvailable := true
+		if err := os.Symlink("child", filepath.Join(directory, "link")); err != nil {
+			symlinkAvailable = false
+			t.Logf("symlink creation is unavailable; continuing without symlink entry: %v", err)
+		}
+		for _, name := range []string{"\uE000", "\U00010000"} {
+			if err := os.WriteFile(filepath.Join(directory, name), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		filePath := filepath.Join(directory, "note.txt")
+		racePath := filepath.Join(root, "race.txt")
+		bytesPath := filepath.Join(root, "value.bin")
+		invalidTextPath := filepath.Join(root, "invalid-utf8.txt")
+		if err := os.WriteFile(invalidTextPath, []byte{0xff}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		source := "import trb/std/file\n" +
+			"import { FileMode } from trb/std/file\n" +
+			"import trb/std/dir\n" +
+			"import { DirEntryKind } from trb/std/dir\n" +
+			"import { FileSystemErrorKind } from trb/std/errors\n" +
 			"import { Result } from trb/std/result\n\n" +
-			"def text_or_operation(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
-			"def names_or_error(value: Result<Array<String>, FileSystem::Error>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
-			"def boolean_or_false(value: Result<Boolean, FileSystem::Error>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
+			"def create(path: String): String\n" +
+			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
+			"\t\ttry file.write_text(\"hello\")\n" +
+			"\tend\n" +
+			"\tcase result\n" +
+			"\twhen Result::Ok(_unit)\n\t\treturn \"created\"\n" +
+			"\twhen Result::Err(error)\n" +
+			"\t\tcase error.kind\n" +
+			"\t\twhen FileSystemErrorKind::AlreadyExists\n\t\t\treturn \"exists\"\n" +
+			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def create_race(path: String): String\n" +
+			"\tresults := [1, 2].concurrent_map(limit: 2) do |_index|\n" +
+			"\t\tcreate(path)\n" +
+			"\tend\n" +
+			"\treturn results.sort().join(\",\")\nend\n\n" +
+			"def bounded(path: String, maximum: Integer): String\n" +
+			"\tresult := File.open(path) do |file|\n" +
+			"\t\ttry file.read_text(max_bytes: maximum)\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
+			"\twhen Result::Err(error)\n\t\tcase error.kind\n" +
+			"\t\twhen FileSystemErrorKind::TooLarge\n\t\t\treturn \"too-large\"\n" +
+			"\t\twhen FileSystemErrorKind::InvalidLimit\n\t\t\treturn \"invalid-limit\"\n" +
+			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def create_bytes(path: String): String\n" +
+			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
+			"\t\ttry file.write(\"B\".to_bytes())\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(_unit)\n\t\treturn \"bytes-created\"\n" +
+			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
+			"def bounded_bytes(path: String): String\n" +
+			"\tresult := File.open(path) do |file|\n" +
+			"\t\tbytes := try file.read(max_bytes: 1)\n\t\tbytes.to_s()\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
+			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
+			"def entry_labels(path: String): Array<String>\n" +
+			"\tcase Dir.children(path)\n" +
+			"\twhen Result::Err(error)\n\t\treturn [error.operation]\n" +
+			"\twhen Result::Ok(entries)\n" +
+			"\t\tmut labels: Array<String> := []\n" +
+			"\t\tentries.each do |entry|\n" +
+			"\t\t\tkind := case entry.kind\n" +
+			"\t\t\twhen DirEntryKind::File\n\t\t\t\t\"file:\" + bounded(entry.path, 5)\n" +
+			"\t\t\twhen DirEntryKind::Directory\n\t\t\t\t\"directory\"\n" +
+			"\t\t\twhen DirEntryKind::Other\n\t\t\t\t\"other\"\n\t\t\tend\n" +
+			"\t\t\tlabels.push(entry.name + \":\" + kind)\n\t\tend\n\t\treturn labels\n\tend\nend\n\n" +
 			"def main()\n" +
-			"\t_directory := FileSystem.create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_text := FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_astral := FileSystem.write_text(" + strconv.Quote(astralPath) + ", \"\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_bmp := FileSystem.write_text(" + strconv.Quote(bmpPath) + ", \"\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(textPath) + ")))\n" +
-			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(missingPath) + ")))\n" +
-			"\tputs(names_or_error(FileSystem.list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +
-			"\tputs(boolean_or_false(FileSystem.exists(" + strconv.Quote(textPath) + ")))\n" +
-			"\treturn\n" +
-			"end\n"
+			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
+			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
+			"\tputs(create_race(" + strconv.Quote(racePath) + "))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", 5))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", 4))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", -1))\n" +
+			"\tputs(create_bytes(" + strconv.Quote(bytesPath) + "))\n" +
+			"\tputs(bounded_bytes(" + strconv.Quote(bytesPath) + "))\n" +
+			"\tputs(bounded(" + strconv.Quote(invalidTextPath) + ", 1))\n" +
+			"\tputs(entry_labels(" + strconv.Quote(directory) + ").join(\",\"))\n" +
+			"\treturn\nend\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -6197,8 +6222,13 @@ func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		if want := "A😀\nread_text\nnote.txt,\uE000,\U00010000\ntrue\n"; stdout.String() != want {
-			t.Fatalf("unexpected %s filesystem program output: want %q, got %q", mode, want, stdout.String())
+		entryLabels := "child:directory,note.txt:file:hello,\uE000:file:,\U00010000:file:"
+		if symlinkAvailable {
+			entryLabels = "child:directory,link:other,note.txt:file:hello,\uE000:file:,\U00010000:file:"
+		}
+		want := "created\nexists\ncreated,exists\nhello\ntoo-large\ninvalid-limit\nbytes-created\nB\n�\n" + entryLabels + "\n"
+		if stdout.String() != want {
+			t.Fatalf("unexpected %s scoped filesystem output: want %q, got %q", mode, want, stdout.String())
 		}
 	}
 }

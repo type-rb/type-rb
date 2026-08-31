@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -28,11 +29,19 @@ type Parameter struct {
 }
 
 // Block describes the callback accepted by a compiler-owned package
-// function. It deliberately models only ordinary callback blocks; structured
-// control-flow blocks remain declaration-provider functionality.
+// function. Structured blocks keep resource and control-flow ownership in the
+// compiler instead of lowering to an ordinary backend callback.
 type Block struct {
 	Parameters      []types.Type
 	ControlBoundary bool
+	Return          types.Type
+	ResultBoundary  types.Type
+	Structured      bool
+	// ScopedParameters marks values that may only be used as direct method
+	// receivers in this block. This keeps compiler-owned resource handles from
+	// escaping through assignment, arguments, collections, returns, or nested
+	// callbacks.
+	ScopedParameters []bool
 }
 
 type Symbol struct {
@@ -46,6 +55,10 @@ type Symbol struct {
 	// language-service completion while allowing compiler-owned source to use
 	// the same checked package boundary.
 	CompilerOnly bool
+	// trustedScopedFileOrigin is an internal capability token copied only from
+	// the bundled File.open registry symbol. Declaration and native providers
+	// cannot manufacture it through their public protocols.
+	trustedScopedFileOrigin bool
 	// RuntimeIndependent marks an intrinsic that is fully lowered by every
 	// backend even when its public package also provides a source wrapper.
 	RuntimeIndependent  bool
@@ -122,7 +135,11 @@ type Package struct {
 	TypeProvider   string
 	JSX            *JSXProvider
 	Capability     bool
-	Symbols        map[string]Symbol
+	// OpaqueTypes are compiler-owned declarations that source code may receive
+	// or name but cannot construct directly. Each entry provides a
+	// source-facing construction diagnostic.
+	OpaqueTypes map[identity.Declaration]string
+	Symbols     map[string]Symbol
 }
 
 func (p *Package) Supports(mode string) bool {
@@ -149,7 +166,10 @@ var typeT = types.FromName("T")
 var typeE = types.FromName("E")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
-var fileErrorType = types.FromName("FileSystem::Error")
+var fileSystemErrorType = declaredType(fileSystemErrorDeclaration)
+var fileType = FileResourceType()
+var fileModeType = declaredType(fileModeDeclaration)
+var dirEntryType = declaredType(dirEntryDeclaration)
 var jsonValueType = types.FromName("JSON::Value")
 var jsonErrorType = types.FromName("JSON::Error")
 var processResultType = types.FromName("Process::Output")
@@ -320,6 +340,8 @@ end
 			{Name: "SliceRangeError", Kind: "record"},
 			{Name: "KeyLookupError", Kind: "record"},
 			{Name: "EnumValueError", Kind: "record"},
+			{Name: "FileSystemErrorKind", Kind: "enum"},
+			{Name: "FileSystemError", Kind: "record"},
 		},
 		Source:  errorsSource(),
 		Kind:    Portable,
@@ -451,26 +473,6 @@ end
 			},
 		},
 	},
-	"trb/std/path": {
-		Path: "trb/std/path", Root: "Path",
-		ModulePath: "trb/std/path/index",
-		Source:     pathSource(),
-		Kind:       Portable,
-		Symbols: map[string]Symbol{
-			"separator": {Name: "separator", Intrinsic: "trb.std.path.separator", Return: stringType},
-			"clean":     unary("clean", "trb.std.path.clean", stringType, stringType),
-			"join": {
-				Name:       "join",
-				Intrinsic:  "trb.std.path.join",
-				Parameters: []Parameter{{Name: "left", Type: stringType}, {Name: "right", Type: stringType}},
-				Return:     stringType,
-			},
-			"absolute":   unary("absolute", "trb.std.path.absolute", stringType, booleanType),
-			"components": unary("components", "trb.std.path.components", stringType, arrayOf(stringType)),
-			"base":       unary("base", "trb.std.path.base", stringType, stringType),
-			"directory":  unary("directory", "trb.std.path.directory", stringType, stringType),
-		},
-	},
 	"trb/std/url": {
 		Path:       "trb/std/url",
 		Root:       "URL",
@@ -498,12 +500,69 @@ end
 			"decode_component": unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType)),
 		},
 	},
-	"trb/std/filesystem": {
-		Path: "trb/std/filesystem", Root: "FileSystem",
-		ModulePath: "trb/std/filesystem/index",
-		Source:     filesystemSource(),
-		Kind:       Portable,
-		Symbols:    map[string]Symbol{},
+	"trb/std/file": {
+		Path:       "trb/std/file",
+		Root:       "File",
+		ModulePath: fileModulePath,
+		RuntimeExports: []RuntimeExport{
+			{Name: "File", Kind: "class"},
+			{Name: "FileMode", Kind: "enum"},
+		},
+		Source: fileSource(),
+		Kind:   Portable,
+		OpaqueTypes: map[identity.Declaration]string{
+			fileDeclaration: "File cannot be constructed directly; use File.open() with a block",
+		},
+		Symbols: map[string]Symbol{
+			"open": {
+				Name:                    "open",
+				Intrinsic:               "trb.std.file.open",
+				StaticOwner:             "File",
+				TypeParameters:          []string{"T"},
+				trustedScopedFileOrigin: true,
+				Parameters: []Parameter{
+					{Name: "path", Type: stringType},
+					{Name: "mode", Type: fileModeType, Optional: true, Keyword: true},
+				},
+				Return:              filesystemResult(typeT),
+				RuntimeDependencies: []types.Type{fileModeType},
+				Block: &Block{
+					Parameters:       []types.Type{fileType},
+					Return:           typeT,
+					ResultBoundary:   fileSystemErrorType,
+					Structured:       true,
+					ScopedParameters: []bool{true},
+				},
+			},
+			"read":       fileRead("read", bytesType),
+			"read_text":  fileRead("read_text", stringType),
+			"write":      fileWrite("write", bytesType),
+			"write_text": fileWrite("write_text", stringType),
+		},
+	},
+	"trb/std/dir": {
+		Path:       "trb/std/dir",
+		Root:       "Dir",
+		ModulePath: dirModulePath,
+		RuntimeExports: []RuntimeExport{
+			{Name: "Dir", Kind: "class"},
+			{Name: "DirEntryKind", Kind: "enum"},
+			{Name: "DirEntry", Kind: "record"},
+		},
+		Source: dirSource(),
+		Kind:   Portable,
+		OpaqueTypes: map[identity.Declaration]string{
+			dirDeclaration: "Dir cannot be constructed directly; use Dir.children()",
+		},
+		Symbols: map[string]Symbol{
+			"children": {
+				Name:        "children",
+				Intrinsic:   "trb.std.dir.children",
+				StaticOwner: "Dir",
+				Parameters:  []Parameter{{Name: "path", Type: stringType}},
+				Return:      filesystemResult(arrayOf(dirEntryType)),
+			},
+		},
 	},
 	"trb/std/process": {
 		Path: "trb/std/process", Root: "Process",
@@ -542,25 +601,6 @@ end
 				},
 				Return: processResult(processResultType),
 			},
-		},
-	},
-	"trb/internal/filesystem": {
-		Path: "trb/internal/filesystem", Root: "FileSystem",
-		Kind:     Portable,
-		Internal: true,
-		Symbols: map[string]Symbol{
-			"exists":      filesystemUnary("exists", booleanType),
-			"read_text":   filesystemUnary("read_text", stringType),
-			"read_bytes":  filesystemUnary("read_bytes", bytesType),
-			"write_text":  filesystemWrite("write_text", stringType),
-			"write_bytes": filesystemWrite("write_bytes", bytesType),
-			"create_directory": {
-				Name:       "create_directory",
-				Intrinsic:  "trb.internal.filesystem.create_directory",
-				Parameters: []Parameter{{Name: "path", Type: stringType}},
-				Return:     filesystemResult(unitType),
-			},
-			"list": filesystemUnary("list", arrayOf(stringType)),
 		},
 	},
 	"trb/std/json": {
@@ -1455,23 +1495,25 @@ func hashOf(key, value types.Type) types.Type {
 }
 
 func filesystemResult(value types.Type) types.Type {
-	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, fileErrorType}}
+	return ResultType(value, fileSystemErrorType)
 }
 
-func filesystemUnary(name string, result types.Type) Symbol {
+func fileRead(name string, value types.Type) Symbol {
 	return Symbol{
 		Name:       name,
-		Intrinsic:  "trb.internal.filesystem." + name,
-		Parameters: []Parameter{{Name: "path", Type: stringType}},
-		Return:     filesystemResult(result),
+		Intrinsic:  "trb.std.file." + name,
+		Receiver:   fileType,
+		Parameters: []Parameter{{Name: "max_bytes", Type: integerType, Keyword: true}},
+		Return:     filesystemResult(value),
 	}
 }
 
-func filesystemWrite(name string, value types.Type) Symbol {
+func fileWrite(name string, value types.Type) Symbol {
 	return Symbol{
 		Name:       name,
-		Intrinsic:  "trb.internal.filesystem." + name,
-		Parameters: []Parameter{{Name: "path", Type: stringType}, {Name: "value", Type: value}},
+		Intrinsic:  "trb.std.file." + name,
+		Receiver:   fileType,
+		Parameters: []Parameter{{Name: "value", Type: value}},
 		Return:     filesystemResult(unitType),
 	}
 }
@@ -1557,15 +1599,39 @@ func LookupRuntimeExport(name string) (*Package, RuntimeExport, bool) {
 	return nil, RuntimeExport{}, false
 }
 
+// OpaqueType reports whether an exact compiler-owned package type can only be
+// introduced by that package's checked operations. Declaration identity is
+// required so an unrelated type with the same display name remains ordinary.
+func OpaqueType(typ types.Type) bool {
+	return OpaqueTypeConstructionMessage(typ) != ""
+}
+
+// OpaqueTypeConstructionMessage returns the source-facing diagnostic for an
+// exact compiler-owned type whose values cannot be directly constructed.
+func OpaqueTypeConstructionMessage(typ types.Type) string {
+	if typ.Declaration.Empty() {
+		return ""
+	}
+	for _, definition := range registry {
+		if message := definition.OpaqueTypes[typ.Declaration]; message != "" {
+			return message
+		}
+	}
+	return ""
+}
+
 // RuntimeDependenciesForType returns compiler-owned modules whose runtime
 // declarations are named by a library intrinsic's result type. Source code
 // still needs an explicit import to refer to those declarations directly.
 func RuntimeDependenciesForType(typ types.Type) []*Package {
-	names := map[string]bool{}
+	declarations := map[identity.Declaration]bool{}
+	unresolvedNames := map[string]bool{}
 	var collect func(types.Type)
 	collect = func(current types.Type) {
-		if current.Name != "" {
-			names[current.Name] = true
+		if !current.Declaration.Empty() {
+			declarations[current.Declaration] = true
+		} else if current.Name != "" {
+			unresolvedNames[current.Name] = true
 		}
 		for _, argument := range current.Args {
 			collect(argument)
@@ -1576,7 +1642,8 @@ func RuntimeDependenciesForType(typ types.Type) []*Package {
 	dependencies := []*Package{}
 	for _, definition := range registry {
 		for _, exported := range definition.RuntimeExports {
-			if names[exported.Name] {
+			declaration := identity.Declaration{Module: definition.ModulePath, Name: exported.Name, Kind: identity.Kind(exported.Kind)}
+			if declarations[declaration] || unresolvedNames[exported.Name] {
 				dependencies = append(dependencies, definition)
 				break
 			}
@@ -1620,18 +1687,41 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 // completion cannot advertise target-native or otherwise invalid members.
 func ReceiverMethods(receiver types.Type) []Symbol {
 	targets := receiverMethods[receiver.Kind]
+	methodsByName := map[string]Symbol{}
 	names := make([]string, 0, len(targets))
 	for name := range targets {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	methods := make([]Symbol, 0, len(names))
 	for _, name := range names {
 		_, method, ok := LookupReceiverMethod(receiver, name)
 		if ok {
-			methods = append(methods, method)
+			methodsByName[name] = method
 		}
+	}
+	// Named resource types cannot share the built-in kind table: their
+	// declaration identity, rather than their display name, owns the method.
+	// Discover those contracts directly and retain the same exact matching used
+	// by the checker so an unrelated File declaration receives no host methods.
+	for _, definition := range registry {
+		for name, method := range definition.Symbols {
+			if !method.HasReceiver() || !ReceiverMatches(method.Receiver, receiver, method.TypeParameters) {
+				continue
+			}
+			method.Name = name
+			method.Receiver = receiver
+			methodsByName[name] = method
+		}
+	}
+	names = names[:0]
+	for name := range methodsByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	methods := make([]Symbol, 0, len(names))
+	for _, name := range names {
+		methods = append(methods, methodsByName[name])
 	}
 	return methods
 }
@@ -1652,8 +1742,14 @@ func receiverMatches(pattern, actual types.Type, typeParameterNames []string) bo
 		if expected.Kind != value.Kind || expected.Nullable != value.Nullable {
 			return false
 		}
-		if expected.Kind == types.Named && expected.Name != value.Name {
-			return false
+		if expected.Kind == types.Named {
+			if !expected.Declaration.Empty() {
+				if expected.Declaration != value.Declaration {
+					return false
+				}
+			} else if expected.Name != value.Name {
+				return false
+			}
 		}
 		if len(expected.Args) != len(value.Args) {
 			if len(value.Args) == 0 {
@@ -1715,6 +1811,9 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 		for index := range block.Parameters {
 			block.Parameters[index] = substituteType(block.Parameters[index], bindings)
 		}
+		block.Return = substituteType(block.Return, bindings)
+		block.ResultBoundary = substituteType(block.ResultBoundary, bindings)
+		block.ScopedParameters = append([]bool(nil), symbol.Block.ScopedParameters...)
 		result.Block = &block
 	}
 	result.EqualityTypes = append([]types.Type(nil), symbol.EqualityTypes...)
