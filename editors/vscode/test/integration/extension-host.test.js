@@ -368,7 +368,7 @@ end
 import { FileMode } from trb/std/file
 
 def main()
-\tFile.open(${JSON.stringify(marker)}, mode: FileMode::Write) do |file|
+\t_result := File.open(${JSON.stringify(marker)}, mode: FileMode::Write) do |file|
 \t\ttry file.write_text("extension-host-ok")
 \tend catch |_error|
 \t\treturn
