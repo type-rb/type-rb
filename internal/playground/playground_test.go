@@ -113,7 +113,8 @@ func TestFormatUsesCommentPreservingFormatter(t *testing.T) {
 
 func TestRunRejectsHostAndPlatformPackages(t *testing.T) {
 	for _, source := range []string{
-		"import trb/std/filesystem\n_found := FileSystem.exists(\".\") catch |_error|\n\tfalse\nend\n",
+		"import trb/std/file\nimport { FileSystemError } from trb/std/errors\nimport { Result } from trb/std/result\n\ndef probe(): Result<Bytes, FileSystemError>\n\treturn File.open(\".\") do |file|\n\t\ttry file.read(max_bytes: 1)\n\tend\nend\n",
+		"import trb/std/dir\nimport { DirEntry } from trb/std/dir\nimport { FileSystemError } from trb/std/errors\nimport { Result } from trb/std/result\n\ndef probe(): Result<Array<DirEntry>, FileSystemError>\n\treturn Dir.children(\".\")\nend\n",
 		"import trb/std/process\nProcess.argv()\n",
 		"import trb/platform/go/http\nHTTP.router()\n",
 	} {

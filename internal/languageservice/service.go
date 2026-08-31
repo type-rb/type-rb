@@ -79,7 +79,11 @@ type CallInfo struct {
 	ExplicitTypeArguments bool
 	TypeParameters        []string
 	Parameters            []CallParameter
-	Alternatives          []CallSignature
+	// BlockParameters retains compiler-known block binding types for editor
+	// queries. Ordinary source callbacks do not need this metadata; structured
+	// package operations such as File.open use it to type their scoped binding.
+	BlockParameters []types.Type
+	Alternatives    []CallSignature
 }
 
 type CallParameter struct {

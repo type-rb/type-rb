@@ -160,7 +160,7 @@ func disallowedRuntimeImport(program *ast.Program) string {
 		if !ok {
 			continue
 		}
-		if imported.Path == "trb/std/filesystem" || imported.Path == "trb/std/process" || strings.HasPrefix(imported.Path, "trb/platform/") {
+		if imported.Path == "trb/std/file" || imported.Path == "trb/std/dir" || imported.Path == "trb/std/process" || strings.HasPrefix(imported.Path, "trb/platform/") {
 			return imported.Path
 		}
 	}

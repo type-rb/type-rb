@@ -20,7 +20,7 @@ func TestClassBodyDeclarationRuleIsCheckedAndOmittedByEveryBackend(t *testing.T)
 			provider := parseDeclarationOnlyProgram(t, `class ContractBase
 end
 
-def declare<T>()
+def declare<T>(_target: Any)
 	return
 end
 `, mode, "test/provider")
@@ -36,7 +36,7 @@ class Input
 end
 
 class Endpoint < ContractBase
-	declare<Input>()
+	declare<Input>(Input)
 end
 `, mode, "app/endpoint")
 			declarations := declaration.NewCatalog()

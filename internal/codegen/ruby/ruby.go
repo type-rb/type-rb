@@ -465,7 +465,11 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(closer, "")
 	case *ir.StructuredBlock:
-		g.ormStructuredBlock(n)
+		if n.Intrinsic == "trb.std.file.open" {
+			g.filesystemStructuredBlock(n)
+		} else {
+			g.ormStructuredBlock(n)
+		}
 	}
 }
 
@@ -929,6 +933,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			return reference.Runtime.Symbol + "(" + strings.Join(parts, ", ") + ")"
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Intrinsic != "" {
+			for index, argument := range n.Arguments {
+				parts[index] = g.expr(argument.Value)
+			}
 			if reference.ReceiverMethod {
 				if member, ok := receiverMember(n.Callee); ok {
 					parts = append([]string{g.receiverOperand(member.Receiver)}, parts...)
