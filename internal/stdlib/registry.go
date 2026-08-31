@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -54,6 +55,10 @@ type Symbol struct {
 	// language-service completion while allowing compiler-owned source to use
 	// the same checked package boundary.
 	CompilerOnly bool
+	// trustedScopedFileOrigin is an internal capability token copied only from
+	// the bundled File.open registry symbol. Declaration and native providers
+	// cannot manufacture it through their public protocols.
+	trustedScopedFileOrigin bool
 	// RuntimeIndependent marks an intrinsic that is fully lowered by every
 	// backend even when its public package also provides a source wrapper.
 	RuntimeIndependent  bool
@@ -130,9 +135,10 @@ type Package struct {
 	TypeProvider   string
 	JSX            *JSXProvider
 	Capability     bool
-	// OpaqueTypes are compiler-owned resource representations that source code
-	// may receive but cannot construct directly.
-	OpaqueTypes map[string]bool
+	// OpaqueTypes are compiler-owned declarations that source code may receive
+	// or name but cannot construct directly. Each entry provides a
+	// source-facing construction diagnostic.
+	OpaqueTypes map[identity.Declaration]string
 	Symbols     map[string]Symbol
 }
 
@@ -160,10 +166,10 @@ var typeT = types.FromName("T")
 var typeE = types.FromName("E")
 var typeK = types.FromName("K")
 var typeV = types.FromName("V")
-var fileErrorType = types.FromName("FileSystem::Error")
-var fileType = types.FromName("FileSystem::File")
-var fileOpenModeType = types.FromName("FileSystem::OpenMode")
-var fileDirectoryEntryType = types.FromName("FileSystem::DirectoryEntry")
+var fileSystemErrorType = declaredType(fileSystemErrorDeclaration)
+var fileType = FileResourceType()
+var fileModeType = declaredType(fileModeDeclaration)
+var dirEntryType = declaredType(dirEntryDeclaration)
 var jsonValueType = types.FromName("JSON::Value")
 var jsonErrorType = types.FromName("JSON::Error")
 var processResultType = types.FromName("Process::Output")
@@ -334,6 +340,8 @@ end
 			{Name: "SliceRangeError", Kind: "record"},
 			{Name: "KeyLookupError", Kind: "record"},
 			{Name: "EnumValueError", Kind: "record"},
+			{Name: "FileSystemErrorKind", Kind: "enum"},
+			{Name: "FileSystemError", Kind: "record"},
 		},
 		Source:  errorsSource(),
 		Kind:    Portable,
@@ -465,26 +473,6 @@ end
 			},
 		},
 	},
-	"trb/std/path": {
-		Path: "trb/std/path", Root: "Path",
-		ModulePath: "trb/std/path/index",
-		Source:     pathSource(),
-		Kind:       Portable,
-		Symbols: map[string]Symbol{
-			"separator": {Name: "separator", Intrinsic: "trb.std.path.separator", Return: stringType},
-			"clean":     unary("clean", "trb.std.path.clean", stringType, stringType),
-			"join": {
-				Name:       "join",
-				Intrinsic:  "trb.std.path.join",
-				Parameters: []Parameter{{Name: "left", Type: stringType}, {Name: "right", Type: stringType}},
-				Return:     stringType,
-			},
-			"absolute":   unary("absolute", "trb.std.path.absolute", stringType, booleanType),
-			"components": unary("components", "trb.std.path.components", stringType, arrayOf(stringType)),
-			"base":       unary("base", "trb.std.path.base", stringType, stringType),
-			"directory":  unary("directory", "trb.std.path.directory", stringType, stringType),
-		},
-	},
 	"trb/std/url": {
 		Path:       "trb/std/url",
 		Root:       "URL",
@@ -512,53 +500,68 @@ end
 			"decode_component": unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType)),
 		},
 	},
-	"trb/std/filesystem": {
-		Path:       "trb/std/filesystem",
-		Root:       "FileSystem",
-		ModulePath: "trb/std/filesystem/index",
+	"trb/std/file": {
+		Path:       "trb/std/file",
+		Root:       "File",
+		ModulePath: fileModulePath,
 		RuntimeExports: []RuntimeExport{
-			{Name: "FileSystem::ErrorKind", Kind: "enum"},
-			{Name: "FileSystem::Error", Kind: "record"},
-			{Name: "FileSystem::OpenMode", Kind: "enum"},
-			{Name: "FileSystem::DirectoryEntryKind", Kind: "enum"},
-			{Name: "FileSystem::DirectoryEntry", Kind: "record"},
-			{Name: "FileSystem::File", Kind: "class"},
+			{Name: "File", Kind: "class"},
+			{Name: "FileMode", Kind: "enum"},
 		},
-		Source: filesystemSource(),
+		Source: fileSource(),
 		Kind:   Portable,
-		OpaqueTypes: map[string]bool{
-			"FileSystem::File": true,
+		OpaqueTypes: map[identity.Declaration]string{
+			fileDeclaration: "File cannot be constructed directly; use File.open() with a block",
 		},
 		Symbols: map[string]Symbol{
 			"open": {
-				Name:           "open",
-				Intrinsic:      "trb.std.filesystem.open",
-				StaticOwner:    "FileSystem",
-				TypeParameters: []string{"T"},
+				Name:                    "open",
+				Intrinsic:               "trb.std.file.open",
+				StaticOwner:             "File",
+				TypeParameters:          []string{"T"},
+				trustedScopedFileOrigin: true,
 				Parameters: []Parameter{
 					{Name: "path", Type: stringType},
-					{Name: "mode", Type: fileOpenModeType, Keyword: true},
+					{Name: "mode", Type: fileModeType, Optional: true, Keyword: true},
 				},
-				Return: filesystemResult(typeT),
+				Return:              filesystemResult(typeT),
+				RuntimeDependencies: []types.Type{fileModeType},
 				Block: &Block{
 					Parameters:       []types.Type{fileType},
 					Return:           typeT,
-					ResultBoundary:   fileErrorType,
+					ResultBoundary:   fileSystemErrorType,
 					Structured:       true,
 					ScopedParameters: []bool{true},
 				},
 			},
-			"entries": {
-				Name:        "entries",
-				Intrinsic:   "trb.std.filesystem.entries",
-				StaticOwner: "FileSystem",
+			"read":       fileRead("read", bytesType),
+			"read_text":  fileRead("read_text", stringType),
+			"write":      fileWrite("write", bytesType),
+			"write_text": fileWrite("write_text", stringType),
+		},
+	},
+	"trb/std/dir": {
+		Path:       "trb/std/dir",
+		Root:       "Dir",
+		ModulePath: dirModulePath,
+		RuntimeExports: []RuntimeExport{
+			{Name: "Dir", Kind: "class"},
+			{Name: "DirEntryKind", Kind: "enum"},
+			{Name: "DirEntry", Kind: "record"},
+		},
+		Source: dirSource(),
+		Kind:   Portable,
+		OpaqueTypes: map[identity.Declaration]string{
+			dirDeclaration: "Dir cannot be constructed directly; use Dir.children()",
+		},
+		Symbols: map[string]Symbol{
+			"children": {
+				Name:        "children",
+				Intrinsic:   "trb.std.dir.children",
+				StaticOwner: "Dir",
 				Parameters:  []Parameter{{Name: "path", Type: stringType}},
-				Return:      filesystemResult(arrayOf(fileDirectoryEntryType)),
+				Return:      filesystemResult(arrayOf(dirEntryType)),
 			},
-			"read_text":   filesystemFileRead("read_text", stringType),
-			"read_bytes":  filesystemFileRead("read_bytes", bytesType),
-			"write_text":  filesystemFileWrite("write_text", stringType),
-			"write_bytes": filesystemFileWrite("write_bytes", bytesType),
 		},
 	},
 	"trb/std/process": {
@@ -598,25 +601,6 @@ end
 				},
 				Return: processResult(processResultType),
 			},
-		},
-	},
-	"trb/internal/filesystem": {
-		Path: "trb/internal/filesystem", Root: "FileSystem",
-		Kind:     Portable,
-		Internal: true,
-		Symbols: map[string]Symbol{
-			"exists":      filesystemUnary("exists", booleanType),
-			"read_text":   filesystemUnary("read_text", stringType),
-			"read_bytes":  filesystemUnary("read_bytes", bytesType),
-			"write_text":  filesystemWrite("write_text", stringType),
-			"write_bytes": filesystemWrite("write_bytes", bytesType),
-			"create_directory": {
-				Name:       "create_directory",
-				Intrinsic:  "trb.internal.filesystem.create_directory",
-				Parameters: []Parameter{{Name: "path", Type: stringType}},
-				Return:     filesystemResult(unitType),
-			},
-			"list": filesystemUnary("list", arrayOf(stringType)),
 		},
 	},
 	"trb/std/json": {
@@ -686,9 +670,10 @@ end
 			},
 		},
 	},
-	"trb/std/strings": {
-		Path: "trb/std/strings", Root: "Strings",
-		Kind: Portable,
+	"trb/internal/strings": {
+		Path:     "trb/internal/strings",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"length":    unary("length", "trb.std.strings.length", stringType, integerType),
 			"empty":     unary("empty", "trb.std.strings.empty", stringType, booleanType),
@@ -798,9 +783,10 @@ end
 			"from_codepoint":   unary("from_codepoint", "trb.std.unicode.from_codepoint", integerType, stringType),
 		},
 	},
-	"trb/std/bytes": {
-		Path: "trb/std/bytes", Root: "Bytes", BuiltinRoot: true,
-		Kind: Portable,
+	"trb/internal/bytes": {
+		Path:     "trb/internal/bytes",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"from_string": unary("from_string", "trb.std.bytes.from_string", stringType, bytesType),
 			"to_string":   unary("to_string", "trb.std.bytes.to_string", bytesType, stringType),
@@ -956,6 +942,13 @@ end
 				Return:    stringBuilderType,
 			},
 			"from_string": unary("from_string", "trb.std.string_builder.from_string", stringType, stringBuilderType),
+		},
+	},
+	"trb/internal/string_builder": {
+		Path:     "trb/internal/string_builder",
+		Kind:     Portable,
+		Internal: true,
+		Symbols: map[string]Symbol{
 			"append": {
 				Name:      "append",
 				Intrinsic: "trb.std.string_builder.append",
@@ -1135,9 +1128,10 @@ end
 			},
 		},
 	},
-	"trb/std/ranges": {
-		Path: "trb/std/ranges",
-		Kind: Portable,
+	"trb/internal/ranges": {
+		Path:     "trb/internal/ranges",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"to_array": unary("to_array", "trb.std.ranges.to_array", rangeOf(integerType), arrayOf(integerType)),
 		},
@@ -1214,9 +1208,10 @@ end
 			},
 		},
 	},
-	"trb/std/numbers": {
-		Path: "trb/std/numbers", Root: "Numbers",
-		Kind: Portable,
+	"trb/internal/numbers": {
+		Path:     "trb/internal/numbers",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"to_string":         unary("to_string", "trb.std.numbers.to_string", integerType, stringType),
 			"to_float":          unary("to_float", "trb.std.numbers.integer_to_float", integerType, floatType),
@@ -1255,9 +1250,10 @@ end
 			"log10": unary("log10", "trb.std.math.log10", floatType, floatType),
 		},
 	},
-	"trb/std/booleans": {
-		Path: "trb/std/booleans", Root: "Booleans",
-		Kind: Portable,
+	"trb/internal/booleans": {
+		Path:     "trb/internal/booleans",
+		Kind:     Portable,
+		Internal: true,
 		Symbols: map[string]Symbol{
 			"to_string": unary("to_string", "trb.std.booleans.to_string", booleanType, stringType),
 		},
@@ -1345,74 +1341,73 @@ end
 // catalog instead of maintaining a second, target-specific method table.
 var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 	types.Int: {
-		"to_s":      {PackagePath: "trb/std/numbers", Symbol: "to_string"},
-		"to_f":      {PackagePath: "trb/std/numbers", Symbol: "to_float"},
-		"abs":       {PackagePath: "trb/std/numbers", Symbol: "absolute"},
-		"min":       {PackagePath: "trb/std/numbers", Symbol: "min"},
-		"max":       {PackagePath: "trb/std/numbers", Symbol: "max"},
-		"clamp":     {PackagePath: "trb/std/numbers", Symbol: "clamp"},
-		"zero?":     {PackagePath: "trb/std/numbers", Symbol: "zero"},
-		"positive?": {PackagePath: "trb/std/numbers", Symbol: "positive"},
-		"negative?": {PackagePath: "trb/std/numbers", Symbol: "negative"},
-		"even?":     {PackagePath: "trb/std/numbers", Symbol: "even"},
-		"odd?":      {PackagePath: "trb/std/numbers", Symbol: "odd"},
+		"to_s":      {PackagePath: "trb/internal/numbers", Symbol: "to_string"},
+		"to_f":      {PackagePath: "trb/internal/numbers", Symbol: "to_float"},
+		"abs":       {PackagePath: "trb/internal/numbers", Symbol: "absolute"},
+		"min":       {PackagePath: "trb/internal/numbers", Symbol: "min"},
+		"max":       {PackagePath: "trb/internal/numbers", Symbol: "max"},
+		"clamp":     {PackagePath: "trb/internal/numbers", Symbol: "clamp"},
+		"zero?":     {PackagePath: "trb/internal/numbers", Symbol: "zero"},
+		"positive?": {PackagePath: "trb/internal/numbers", Symbol: "positive"},
+		"negative?": {PackagePath: "trb/internal/numbers", Symbol: "negative"},
+		"even?":     {PackagePath: "trb/internal/numbers", Symbol: "even"},
+		"odd?":      {PackagePath: "trb/internal/numbers", Symbol: "odd"},
 	},
 	types.Float: {
-		"to_s":      {PackagePath: "trb/std/numbers", Symbol: "float_to_string"},
-		"to_i":      {PackagePath: "trb/std/numbers", Symbol: "truncate"},
-		"truncate":  {PackagePath: "trb/std/numbers", Symbol: "truncate"},
-		"floor":     {PackagePath: "trb/std/numbers", Symbol: "floor"},
-		"ceil":      {PackagePath: "trb/std/numbers", Symbol: "ceil"},
-		"round":     {PackagePath: "trb/std/numbers", Symbol: "round"},
-		"abs":       {PackagePath: "trb/std/numbers", Symbol: "float_absolute"},
-		"finite?":   {PackagePath: "trb/std/numbers", Symbol: "finite"},
-		"infinite?": {PackagePath: "trb/std/numbers", Symbol: "infinite"},
-		"nan?":      {PackagePath: "trb/std/numbers", Symbol: "nan"},
+		"to_s":      {PackagePath: "trb/internal/numbers", Symbol: "float_to_string"},
+		"to_i":      {PackagePath: "trb/internal/numbers", Symbol: "truncate"},
+		"floor":     {PackagePath: "trb/internal/numbers", Symbol: "floor"},
+		"ceil":      {PackagePath: "trb/internal/numbers", Symbol: "ceil"},
+		"round":     {PackagePath: "trb/internal/numbers", Symbol: "round"},
+		"abs":       {PackagePath: "trb/internal/numbers", Symbol: "float_absolute"},
+		"finite?":   {PackagePath: "trb/internal/numbers", Symbol: "finite"},
+		"infinite?": {PackagePath: "trb/internal/numbers", Symbol: "infinite"},
+		"nan?":      {PackagePath: "trb/internal/numbers", Symbol: "nan"},
 	},
 	types.Bool: {
-		"to_s": {PackagePath: "trb/std/booleans", Symbol: "to_string"},
+		"to_s": {PackagePath: "trb/internal/booleans", Symbol: "to_string"},
 	},
 	types.String: {
-		"to_i":        {PackagePath: "trb/std/numbers", Symbol: "parse_integer"},
-		"try_to_i":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_integer"},
-		"to_f":        {PackagePath: "trb/std/numbers", Symbol: "parse_float"},
-		"try_to_f":    {PackagePath: "trb/std/numbers", Symbol: "try_parse_float"},
-		"size":        {PackagePath: "trb/std/strings", Symbol: "length"},
-		"empty?":      {PackagePath: "trb/std/strings", Symbol: "empty"},
-		"strip":       {PackagePath: "trb/std/strings", Symbol: "strip"},
-		"lstrip":      {PackagePath: "trb/std/strings", Symbol: "lstrip"},
-		"rstrip":      {PackagePath: "trb/std/strings", Symbol: "rstrip"},
-		"upcase":      {PackagePath: "trb/std/strings", Symbol: "uppercase"},
-		"downcase":    {PackagePath: "trb/std/strings", Symbol: "lowercase"},
-		"include?":    {PackagePath: "trb/std/strings", Symbol: "contains"},
-		"start_with?": {PackagePath: "trb/std/strings", Symbol: "starts_with"},
-		"end_with?":   {PackagePath: "trb/std/strings", Symbol: "ends_with"},
-		"split":       {PackagePath: "trb/std/strings", Symbol: "split"},
-		"codepoints":  {PackagePath: "trb/std/strings", Symbol: "codepoints"},
-		"chars":       {PackagePath: "trb/std/strings", Symbol: "characters"},
-		"reverse":     {PackagePath: "trb/std/strings", Symbol: "reverse"},
-		"replace_all": {PackagePath: "trb/std/strings", Symbol: "replace_all"},
-		"try_fetch":   {PackagePath: "trb/std/strings", Symbol: "try_fetch"},
-		"slice":       {PackagePath: "trb/std/strings", Symbol: "slice"},
-		"try_slice":   {PackagePath: "trb/std/strings", Symbol: "try_slice"},
-		"index":       {PackagePath: "trb/std/strings", Symbol: "index"},
-		"rindex":      {PackagePath: "trb/std/strings", Symbol: "rindex"},
-		"to_bytes":    {PackagePath: "trb/std/bytes", Symbol: "from_string"},
+		"to_i":        {PackagePath: "trb/internal/numbers", Symbol: "parse_integer"},
+		"try_to_i":    {PackagePath: "trb/internal/numbers", Symbol: "try_parse_integer"},
+		"to_f":        {PackagePath: "trb/internal/numbers", Symbol: "parse_float"},
+		"try_to_f":    {PackagePath: "trb/internal/numbers", Symbol: "try_parse_float"},
+		"size":        {PackagePath: "trb/internal/strings", Symbol: "length"},
+		"empty?":      {PackagePath: "trb/internal/strings", Symbol: "empty"},
+		"strip":       {PackagePath: "trb/internal/strings", Symbol: "strip"},
+		"lstrip":      {PackagePath: "trb/internal/strings", Symbol: "lstrip"},
+		"rstrip":      {PackagePath: "trb/internal/strings", Symbol: "rstrip"},
+		"upcase":      {PackagePath: "trb/internal/strings", Symbol: "uppercase"},
+		"downcase":    {PackagePath: "trb/internal/strings", Symbol: "lowercase"},
+		"include?":    {PackagePath: "trb/internal/strings", Symbol: "contains"},
+		"start_with?": {PackagePath: "trb/internal/strings", Symbol: "starts_with"},
+		"end_with?":   {PackagePath: "trb/internal/strings", Symbol: "ends_with"},
+		"split":       {PackagePath: "trb/internal/strings", Symbol: "split"},
+		"codepoints":  {PackagePath: "trb/internal/strings", Symbol: "codepoints"},
+		"chars":       {PackagePath: "trb/internal/strings", Symbol: "characters"},
+		"reverse":     {PackagePath: "trb/internal/strings", Symbol: "reverse"},
+		"replace_all": {PackagePath: "trb/internal/strings", Symbol: "replace_all"},
+		"try_fetch":   {PackagePath: "trb/internal/strings", Symbol: "try_fetch"},
+		"slice":       {PackagePath: "trb/internal/strings", Symbol: "slice"},
+		"try_slice":   {PackagePath: "trb/internal/strings", Symbol: "try_slice"},
+		"index":       {PackagePath: "trb/internal/strings", Symbol: "index"},
+		"rindex":      {PackagePath: "trb/internal/strings", Symbol: "rindex"},
+		"to_bytes":    {PackagePath: "trb/internal/bytes", Symbol: "from_string"},
 	},
 	types.Bytes: {
-		"to_s":       {PackagePath: "trb/std/bytes", Symbol: "to_string"},
-		"size":       {PackagePath: "trb/std/bytes", Symbol: "length"},
-		"at":         {PackagePath: "trb/std/bytes", Symbol: "at"},
-		"concat":     {PackagePath: "trb/std/bytes", Symbol: "concat"},
-		"valid_utf8": {PackagePath: "trb/std/bytes", Symbol: "valid_utf8"},
+		"to_s":        {PackagePath: "trb/internal/bytes", Symbol: "to_string"},
+		"size":        {PackagePath: "trb/internal/bytes", Symbol: "length"},
+		"at":          {PackagePath: "trb/internal/bytes", Symbol: "at"},
+		"concat":      {PackagePath: "trb/internal/bytes", Symbol: "concat"},
+		"valid_utf8?": {PackagePath: "trb/internal/bytes", Symbol: "valid_utf8"},
 	},
 	types.StringBuilder: {
-		"append":           {PackagePath: "trb/std/string_builder", Symbol: "append"},
-		"append_codepoint": {PackagePath: "trb/std/string_builder", Symbol: "append_codepoint"},
-		"size":             {PackagePath: "trb/std/string_builder", Symbol: "length"},
-		"empty?":           {PackagePath: "trb/std/string_builder", Symbol: "empty"},
-		"to_s":             {PackagePath: "trb/std/string_builder", Symbol: "to_string"},
-		"clear":            {PackagePath: "trb/std/string_builder", Symbol: "clear"},
+		"append":           {PackagePath: "trb/internal/string_builder", Symbol: "append"},
+		"append_codepoint": {PackagePath: "trb/internal/string_builder", Symbol: "append_codepoint"},
+		"size":             {PackagePath: "trb/internal/string_builder", Symbol: "length"},
+		"empty?":           {PackagePath: "trb/internal/string_builder", Symbol: "empty"},
+		"to_s":             {PackagePath: "trb/internal/string_builder", Symbol: "to_string"},
+		"clear":            {PackagePath: "trb/internal/string_builder", Symbol: "clear"},
 	},
 	types.Array: {
 		"size":            {PackagePath: "trb/internal/arrays", Symbol: "length"},
@@ -1438,7 +1433,7 @@ var receiverMethods = map[types.Kind]map[string]receiverMethodTarget{
 		"sort_descending": {PackagePath: "trb/internal/arrays", Symbol: "sort_descending"},
 	},
 	types.Range: {
-		"to_a": {PackagePath: "trb/std/ranges", Symbol: "to_array"},
+		"to_a": {PackagePath: "trb/internal/ranges", Symbol: "to_array"},
 	},
 	types.Hash: {
 		"size":      {PackagePath: "trb/internal/hashes", Symbol: "length"},
@@ -1500,41 +1495,23 @@ func hashOf(key, value types.Type) types.Type {
 }
 
 func filesystemResult(value types.Type) types.Type {
-	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{value, fileErrorType}}
+	return ResultType(value, fileSystemErrorType)
 }
 
-func filesystemUnary(name string, result types.Type) Symbol {
+func fileRead(name string, value types.Type) Symbol {
 	return Symbol{
 		Name:       name,
-		Intrinsic:  "trb.internal.filesystem." + name,
-		Parameters: []Parameter{{Name: "path", Type: stringType}},
-		Return:     filesystemResult(result),
-	}
-}
-
-func filesystemWrite(name string, value types.Type) Symbol {
-	return Symbol{
-		Name:       name,
-		Intrinsic:  "trb.internal.filesystem." + name,
-		Parameters: []Parameter{{Name: "path", Type: stringType}, {Name: "value", Type: value}},
-		Return:     filesystemResult(unitType),
-	}
-}
-
-func filesystemFileRead(name string, value types.Type) Symbol {
-	return Symbol{
-		Name:       name,
-		Intrinsic:  "trb.std.filesystem.file." + name,
+		Intrinsic:  "trb.std.file." + name,
 		Receiver:   fileType,
 		Parameters: []Parameter{{Name: "max_bytes", Type: integerType, Keyword: true}},
 		Return:     filesystemResult(value),
 	}
 }
 
-func filesystemFileWrite(name string, value types.Type) Symbol {
+func fileWrite(name string, value types.Type) Symbol {
 	return Symbol{
 		Name:       name,
-		Intrinsic:  "trb.std.filesystem.file." + name,
+		Intrinsic:  "trb.std.file." + name,
 		Receiver:   fileType,
 		Parameters: []Parameter{{Name: "value", Type: value}},
 		Return:     filesystemResult(unitType),
@@ -1622,26 +1599,39 @@ func LookupRuntimeExport(name string) (*Package, RuntimeExport, bool) {
 	return nil, RuntimeExport{}, false
 }
 
-// OpaqueType reports whether a compiler-owned package type can only be
-// introduced by that package's checked operations.
-func OpaqueType(name string) bool {
+// OpaqueType reports whether an exact compiler-owned package type can only be
+// introduced by that package's checked operations. Declaration identity is
+// required so an unrelated type with the same display name remains ordinary.
+func OpaqueType(typ types.Type) bool {
+	return OpaqueTypeConstructionMessage(typ) != ""
+}
+
+// OpaqueTypeConstructionMessage returns the source-facing diagnostic for an
+// exact compiler-owned type whose values cannot be directly constructed.
+func OpaqueTypeConstructionMessage(typ types.Type) string {
+	if typ.Declaration.Empty() {
+		return ""
+	}
 	for _, definition := range registry {
-		if definition.OpaqueTypes[name] {
-			return true
+		if message := definition.OpaqueTypes[typ.Declaration]; message != "" {
+			return message
 		}
 	}
-	return false
+	return ""
 }
 
 // RuntimeDependenciesForType returns compiler-owned modules whose runtime
 // declarations are named by a library intrinsic's result type. Source code
 // still needs an explicit import to refer to those declarations directly.
 func RuntimeDependenciesForType(typ types.Type) []*Package {
-	names := map[string]bool{}
+	declarations := map[identity.Declaration]bool{}
+	unresolvedNames := map[string]bool{}
 	var collect func(types.Type)
 	collect = func(current types.Type) {
-		if current.Name != "" {
-			names[current.Name] = true
+		if !current.Declaration.Empty() {
+			declarations[current.Declaration] = true
+		} else if current.Name != "" {
+			unresolvedNames[current.Name] = true
 		}
 		for _, argument := range current.Args {
 			collect(argument)
@@ -1652,7 +1642,8 @@ func RuntimeDependenciesForType(typ types.Type) []*Package {
 	dependencies := []*Package{}
 	for _, definition := range registry {
 		for _, exported := range definition.RuntimeExports {
-			if names[exported.Name] {
+			declaration := identity.Declaration{Module: definition.ModulePath, Name: exported.Name, Kind: identity.Kind(exported.Kind)}
+			if declarations[declaration] || unresolvedNames[exported.Name] {
 				dependencies = append(dependencies, definition)
 				break
 			}
@@ -1696,18 +1687,41 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 // completion cannot advertise target-native or otherwise invalid members.
 func ReceiverMethods(receiver types.Type) []Symbol {
 	targets := receiverMethods[receiver.Kind]
+	methodsByName := map[string]Symbol{}
 	names := make([]string, 0, len(targets))
 	for name := range targets {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 
-	methods := make([]Symbol, 0, len(names))
 	for _, name := range names {
 		_, method, ok := LookupReceiverMethod(receiver, name)
 		if ok {
-			methods = append(methods, method)
+			methodsByName[name] = method
 		}
+	}
+	// Named resource types cannot share the built-in kind table: their
+	// declaration identity, rather than their display name, owns the method.
+	// Discover those contracts directly and retain the same exact matching used
+	// by the checker so an unrelated File declaration receives no host methods.
+	for _, definition := range registry {
+		for name, method := range definition.Symbols {
+			if !method.HasReceiver() || !ReceiverMatches(method.Receiver, receiver, method.TypeParameters) {
+				continue
+			}
+			method.Name = name
+			method.Receiver = receiver
+			methodsByName[name] = method
+		}
+	}
+	names = names[:0]
+	for name := range methodsByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	methods := make([]Symbol, 0, len(names))
+	for _, name := range names {
+		methods = append(methods, methodsByName[name])
 	}
 	return methods
 }
@@ -1728,8 +1742,14 @@ func receiverMatches(pattern, actual types.Type, typeParameterNames []string) bo
 		if expected.Kind != value.Kind || expected.Nullable != value.Nullable {
 			return false
 		}
-		if expected.Kind == types.Named && expected.Name != value.Name {
-			return false
+		if expected.Kind == types.Named {
+			if !expected.Declaration.Empty() {
+				if expected.Declaration != value.Declaration {
+					return false
+				}
+			} else if expected.Name != value.Name {
+				return false
+			}
 		}
 		if len(expected.Args) != len(value.Args) {
 			if len(value.Args) == 0 {

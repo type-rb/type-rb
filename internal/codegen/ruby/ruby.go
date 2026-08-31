@@ -465,7 +465,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.line(closer, "")
 	case *ir.StructuredBlock:
-		if n.Intrinsic == "trb.std.filesystem.open" {
+		if n.Intrinsic == "trb.std.file.open" {
 			g.filesystemStructuredBlock(n)
 		} else {
 			g.ormStructuredBlock(n)

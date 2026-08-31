@@ -22,6 +22,7 @@ import (
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/sourcemap"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -69,6 +70,7 @@ type generator struct {
 	cli                   *cliapp.Manifest
 	cliInvocations        map[int]bool
 	cliApplicationFailure bool
+	utf8Replacement       bool
 }
 
 func Generate(program *ir.Program) string {
@@ -194,6 +196,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	if g.cliApplicationFailure {
 		g.cliApplicationFailureRuntimeSupport()
+	}
+	if g.utf8Replacement {
+		g.utf8ReplacementRuntimeSupport()
 	}
 	g.imports = pruneUnusedImports(g.b.String(), g.imports)
 	packageName := program.Package
@@ -3175,6 +3180,39 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 	return goImportAlias(alias)
 }
 
+func (g *generator) declarationAlias(declaration identity.Declaration) string {
+	if declaration.Empty() || declaration.Module == "" {
+		return ""
+	}
+	directory := pathpkg.Dir(declaration.Module)
+	if directory == "." {
+		directory = ""
+	}
+	if directory == g.currentDirectory() {
+		return ""
+	}
+	generatedDirectory := GeneratedSourceDirectory(directory)
+	importPath := generatedDirectory
+	if g.goModule != "" {
+		importPath = pathpkg.Join(g.goModule, generatedDirectory)
+	}
+	if importPath == "" {
+		return ""
+	}
+	alias := g.requireSourceImport(importPath, pathpkg.Base(directory))
+	if alias == "" {
+		alias = pathpkg.Base(importPath)
+	}
+	return goImportAlias(alias)
+}
+
+func (g *generator) filesystemDeclarationAlias(typ types.Type) string {
+	if !stdlib.IsFilesystemContractType(typ) {
+		return ""
+	}
+	return g.declarationAlias(typ.Declaration)
+}
+
 func goImportAlias(name string) string {
 	if name == "_" {
 		return "_"
@@ -3254,11 +3292,16 @@ func (g *generator) goType(t types.Type) string {
 	default:
 		if t.Name == "" {
 			result = "any"
-		} else if t.Name == "FileSystem::File" {
+		} else if stdlib.IsFileResourceType(t) {
 			g.requireImport("os", "")
 			result = "*os.File"
 		} else if t.Declaration.Kind.IsType() && t.Declaration.Module == g.modulePath && t.Declaration.Name != "" {
 			result = goIdentifier(t.Declaration.Name, true)
+			if t.Declaration.Kind == identity.Class {
+				result = "*" + result
+			}
+		} else if alias := g.filesystemDeclarationAlias(t); alias != "" {
+			result = alias + "." + goIdentifier(t.Declaration.Name, true)
 			if t.Declaration.Kind == identity.Class {
 				result = "*" + result
 			}

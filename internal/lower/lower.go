@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -1465,11 +1466,12 @@ func resultSuccessType(typ types.Type) types.Type {
 }
 
 func resultType(success, failure types.Type) types.Type {
-	return types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{success, failure}}
+	return stdlib.ResultType(success, failure)
 }
 
 func resultReference() *ir.Reference {
-	return &ir.Reference{Package: "trb/std/result/index", Alias: "__trb_result", Symbol: "Result", ExportKind: "enum"}
+	result := stdlib.ResultType(types.Type{}, types.Type{})
+	return &ir.Reference{Package: result.Declaration.Module, Alias: "__trb_result", Symbol: result.Declaration.Name, ExportKind: "enum", Declaration: result.Declaration}
 }
 
 func (l *lowerer) resultPattern(span token.Span, result types.Type, member string) ir.Expression {

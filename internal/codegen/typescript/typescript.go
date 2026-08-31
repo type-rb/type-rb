@@ -18,6 +18,7 @@ import (
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/sourcemap"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
@@ -41,6 +42,7 @@ type generator struct {
 	typeParameters   map[string]int
 	lexicalNames     map[string]string
 	exactTypes       map[string]*typescriptTypeIdentity
+	declarationNames map[identity.Declaration]string
 	runtimeImports   map[string]bool
 	emittedImports   map[string]bool
 	standardResult   bool
@@ -170,7 +172,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -192,6 +194,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	for _, statement := range statements {
 		if imported, ok := statement.(*ir.Import); ok {
 			g.registerNestedTypeMappings(imported)
+			g.registerImportedDeclarationNames(imported)
 		}
 	}
 	for i, statement := range statements {
@@ -1096,6 +1099,41 @@ func (g *generator) registerNestedTypeMappings(imported *ir.Import) {
 	}
 }
 
+func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
+	if imported == nil || imported.Native && len(imported.RuntimeSymbols) > 0 {
+		return
+	}
+	switch imported.Path {
+	case "trb/std/file/index", "trb/std/dir/index", "trb/std/errors/index", "trb/std/result/index":
+	default:
+		return
+	}
+	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
+		return
+	}
+	runtimeAlias := "__trb_" + pathpkg.Base(pathpkg.Dir(imported.Path))
+	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
+		kind := identity.Kind(imported.SymbolKinds[symbol])
+		if !kind.IsType() || strings.Contains(symbol, "::") {
+			continue
+		}
+		name := imported.SymbolAliases[symbol]
+		if name == "" {
+			name = symbol
+		}
+		switch {
+		case imported.Namespace && imported.Alias != "":
+			name = imported.Alias + "." + tsOwnedTypeName(symbol)
+		case imported.IntrinsicSymbols[symbol] && !imported.RuntimeIndependentSymbols[symbol]:
+			name = runtimeAlias + "." + tsOwnedTypeName(symbol)
+		case symbol == imported.QualifiedRoot && !typescriptQualifiedRootDeclaration(imported):
+			name = runtimeAlias + "." + tsOwnedTypeName(symbol)
+		}
+		declaration := identity.Declaration{Module: imported.Path, Name: symbol, Kind: kind}
+		g.declarationNames[declaration] = name
+	}
+}
+
 func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
 	methods := make([]*ir.Method, 0, len(module.Body))
 	for _, member := range module.Body {
@@ -1937,14 +1975,14 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.transform(n)
 	case *ir.Member:
 		if n.Namespace && n.ExprType().Declaration.Kind.IsType() && n.ExprType().Declaration.Name != "" {
-			owner := g.runtimeName(n.ExprType().Declaration.Name)
+			owner := g.declarationName(n.ExprType().Declaration)
 			if n.ExprType().Declaration.LeafName() == n.Name {
 				return owner
 			}
 			return owner + "." + tsMethodName(n.Name)
 		}
 		if n.Namespace && n.Reference != nil && n.Reference.Declaration.Kind.IsType() && n.Reference.Declaration.Name != "" {
-			owner := g.runtimeName(n.Reference.Declaration.Name)
+			owner := g.declarationName(n.Reference.Declaration)
 			if n.Reference.Declaration.LeafName() == n.Name {
 				return owner
 			}
@@ -2248,6 +2286,9 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 
 func (g *generator) enumCallOwner(call *ir.EnumCall) string {
 	owner := g.runtimeName(call.EnumName)
+	if call.Reference != nil && call.Reference.Declaration.Kind.IsType() {
+		owner = g.declarationName(call.Reference.Declaration)
+	}
 	if call.Reference == nil {
 		if semantic := g.localDeclarationName(call.OwnerIdentity); semantic != "" {
 			return semantic
@@ -2261,6 +2302,9 @@ func (g *generator) enumCallOwner(call *ir.EnumCall) string {
 
 func (g *generator) enumConstructOwner(node *ir.EnumConstruct) string {
 	owner := g.runtimeName(node.EnumName)
+	if node.Reference != nil && node.Reference.Declaration.Kind.IsType() {
+		owner = g.declarationName(node.Reference.Declaration)
+	}
 	if node.Reference == nil {
 		if semantic := g.localDeclarationName(node.Declaration); semantic != "" {
 			return semantic
@@ -2277,6 +2321,16 @@ func (g *generator) localDeclarationName(declaration identity.Declaration) strin
 		return ""
 	}
 	return tsOwnedTypeName(declaration.Name)
+}
+
+func (g *generator) declarationName(declaration identity.Declaration) string {
+	if name := g.declarationNames[declaration]; name != "" {
+		return name
+	}
+	if name := g.localDeclarationName(declaration); name != "" {
+		return name
+	}
+	return g.runtimeName(declaration.Name)
 }
 
 func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
@@ -3936,7 +3990,7 @@ func (g *generator) tsType(t types.Type) string {
 }
 
 func (g *generator) tsTypeWithoutSemanticIdentity(t types.Type) string {
-	if t.Name == "FileSystem::File" {
+	if stdlib.IsFileResourceType(t) {
 		return "{ readonly fd: number; readonly path: string }"
 	}
 	mappings := g.typeNameMappings()
@@ -3960,8 +4014,12 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 	for index, argument := range typ.Args {
 		result.arguments[index] = g.semanticTypeIdentity(argument)
 	}
-	if typ.Kind == types.Named && typ.Declaration.Kind.IsType() && typ.Declaration.Module == g.modulePath {
-		result.name = tsOwnedTypeName(typ.Declaration.Name)
+	if typ.Kind == types.Named && typ.Declaration.Kind.IsType() {
+		if typ.Declaration.Module == g.modulePath {
+			result.name = tsOwnedTypeName(typ.Declaration.Name)
+		} else {
+			result.name = g.declarationNames[typ.Declaration]
+		}
 	}
 	if !typeScriptTypeIdentityPresent(result) {
 		return nil

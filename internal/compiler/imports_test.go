@@ -18,10 +18,9 @@ import (
 )
 
 const portableMain = `import trb/std/io
-import trb/std/strings
 
 def main()
-  message := Strings.uppercase("Hello, TypeRB")
+  message := "Hello, TypeRB".upcase()
   puts(1 + 2)
   IO.puts(message)
   return
@@ -80,28 +79,18 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		call := variable.Value.(*ir.Call)
 		resolved = call.Callee.(*ir.Member).Reference
 	}
-	if resolved == nil || resolved.Package != "trb/std/strings" || resolved.Intrinsic != "trb.std.strings.uppercase" {
+	if resolved == nil || resolved.Package != "trb/internal/strings" || resolved.Intrinsic != "trb.std.strings.uppercase" || !resolved.ReceiverMethod {
 		t.Fatalf("standard call was not retained as a resolved IR reference: %#v", resolved)
 	}
 }
 
 func TestPortableReceiverMethodsShareStandardContractsAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/numbers
-
-def receiver_text(): String
+	source := []byte(`def receiver_text(): String
 	return 123.to_s()
-end
-
-def package_text(): String
-	return Numbers.to_string(123)
 end
 
 def float_text(): String
 	return 0.25.to_s()
-end
-
-def package_float_text(): String
-	return Numbers.float_to_string(0.25)
 end
 
 def integer_as_float(): Float
@@ -142,7 +131,7 @@ end
 			}
 		}
 
-		var receiverReference, packageReference *ir.Reference
+		var receiverReference *ir.Reference
 		for _, statement := range artifact.IR.Statements {
 			method, ok := statement.(*ir.Method)
 			if !ok || len(method.Body) == 0 {
@@ -156,32 +145,20 @@ end
 			if !ok {
 				continue
 			}
-			switch method.Name {
-			case "receiver_text":
+			if method.Name == "receiver_text" {
 				receiverReference = call.Callee.(*ir.Member).Reference
-			case "package_text":
-				packageReference = call.Callee.(*ir.Member).Reference
 			}
 		}
-		if receiverReference == nil || packageReference == nil ||
-			receiverReference.Intrinsic != packageReference.Intrinsic ||
-			receiverReference.Package != packageReference.Package ||
-			!receiverReference.ReceiverMethod || packageReference.ReceiverMethod {
-			t.Fatalf("%s did not retain a shared package/receiver contract: receiver=%#v package=%#v", mode, receiverReference, packageReference)
+		if receiverReference == nil || receiverReference.Intrinsic != "trb.std.numbers.to_string" ||
+			receiverReference.Package != "trb/internal/numbers" || !receiverReference.ReceiverMethod {
+			t.Fatalf("%s did not retain the internal receiver contract: %#v", mode, receiverReference)
 		}
 	}
 }
 
 func TestPortableScalarReceiverMethodsLowerAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/numbers
-import trb/std/booleans
-
-def integer_absolute(): Integer
+	source := []byte(`def integer_absolute(): Integer
 	return (-4).abs()
-end
-
-def package_integer_absolute(): Integer
-	return Numbers.absolute(-4)
 end
 
 def integer_bounds(): Integer
@@ -197,7 +174,7 @@ def float_absolute(): Float
 end
 
 def float_rounding(): Integer
-	return (-2.75).floor() + (-2.75).ceil() + (-2.5).round() + 2.75.truncate()
+	return (-2.75).floor() + (-2.75).ceil() + (-2.5).round() + 2.75.to_i()
 end
 
 def float_predicates(value: Float): Boolean
@@ -206,10 +183,6 @@ end
 
 def boolean_text(): String
 	return true.to_s()
-end
-
-def package_boolean_text(): String
-	return Booleans.to_string(false)
 end
 `)
 	wants := map[string][]string{
@@ -504,14 +477,44 @@ func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestReceiverOnlyStandardPackagesCannotBeImported(t *testing.T) {
+	for _, packagePath := range []string{
+		"trb/std/booleans",
+		"trb/std/bytes",
+		"trb/std/numbers",
+		"trb/std/ranges",
+		"trb/std/strings",
+	} {
+		source := []byte("import " + packagePath + "\n")
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			_, err := Compile("removed_package.trb", source, mode)
+			want := "unknown TypeRB package " + packagePath
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, packagePath, want, err)
+			}
+		}
+	}
+}
+
+func TestReceiverContractsCannotBeImportedDirectly(t *testing.T) {
+	for _, packagePath := range []string{
+		"trb/internal/booleans",
+		"trb/internal/bytes",
+		"trb/internal/numbers",
+		"trb/internal/ranges",
+		"trb/internal/string_builder",
+		"trb/internal/strings",
+	} {
+		_, err := Compile("internal_package.trb", []byte("import "+packagePath+"\n"), "go")
+		want := "package " + packagePath + " is internal to the TypeRB standard library"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: expected %q diagnostic, got %v", packagePath, want, err)
+		}
+	}
+}
+
 func TestPortableStringTrimmingLowersAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/strings
-
-def package_strip(value: String): String
-	return Strings.strip(value)
-end
-
-def receiver_strip(value: String): String
+	source := []byte(`def receiver_strip(value: String): String
 	return value.strip()
 end
 
@@ -548,9 +551,9 @@ func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "package argument type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.strip(1)\nend\n",
-			want:   "argument 1 to strip() has type Integer, expected String",
+			name:   "wrong receiver type",
+			source: "def bad(): String\n\treturn 1.strip()\nend\n",
+			want:   "type Integer has no member strip",
 		},
 		{
 			name:   "receiver arity",
@@ -568,13 +571,7 @@ func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
 }
 
 func TestPortableStringReplacementLowersAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/strings
-
-def package_replace(value: String, pattern: String, replacement: String): String
-	return Strings.replace_all(value, pattern, replacement)
-end
-
-def receiver_replace(value: String, pattern: String, replacement: String): String
+	source := []byte(`def receiver_replace(value: String, pattern: String, replacement: String): String
 	return value.replace_all(pattern, replacement)
 end
 `)
@@ -603,9 +600,9 @@ func TestPortableStringReplacementDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "package replacement type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.replace_all(\"value\", \"v\", 1)\nend\n",
-			want:   "argument 3 to replace_all() has type Integer, expected String",
+			name:   "receiver replacement type",
+			source: "def bad(): String\n\treturn \"value\".replace_all(\"v\", 1)\nend\n",
+			want:   "argument 2 to replace_all() has type Integer, expected String",
 		},
 		{
 			name:   "receiver arity",
@@ -622,11 +619,9 @@ func TestPortableStringReplacementDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
-func TestPortableBytesPackageAndReceiverMethodsLowerAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/bytes
-
-def joined(): Bytes
-	return Bytes.concat(Bytes.from_string("A"), "😀".to_bytes())
+func TestPortableBytesReceiverMethodsLowerAcrossBackends(t *testing.T) {
+	source := []byte(`def joined(): Bytes
+	return "A".to_bytes().concat("😀".to_bytes())
 end
 
 def byte_length(): Integer
@@ -642,7 +637,7 @@ def decoded(): String
 end
 
 def valid(): Boolean
-	return joined().valid_utf8()
+	return joined().valid_utf8?()
 end
 `)
 	wants := map[string][]string{
@@ -650,14 +645,15 @@ end
 			`append(append([]byte{}, []byte("A")...), []byte("😀")...)`,
 			`len(append(append([]byte{}, Joined()...), []byte("!")...))`,
 			`return int(value[index])`,
-			`strings.ToValidUTF8(string(Joined()), "�")`,
+			`return trbDecodeUTF8_`,
+			`utf8.RuneError`,
 			`utf8.Valid(Joined())`,
 		},
 		"ruby": {
 			`("A").encode(Encoding::UTF_8).b + ("😀").encode(Encoding::UTF_8).b`,
 			`.bytesize`,
 			`.bytes.fetch(0)`,
-			`.dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace)`,
+			`.dup.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\u{FFFD}")`,
 			`.dup.force_encoding(Encoding::UTF_8).valid_encoding?`,
 		},
 		"typescript": {
@@ -698,7 +694,7 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
-		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn Bytes.at(Bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
+		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().at(\"0\")\nend\n", want: "argument 1 to at() has type String, expected Integer"},
 		{source: "def bad(): Bytes\n\treturn \"A\"\nend\n", want: "return type is String, expected Bytes"},
 		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().missing()\nend\n", want: "type Bytes has no member missing"},
 		{source: "def bad(): Bytes\n\treturn Bytes.new([])\nend\n", want: "type Bytes has no member new"},
@@ -840,38 +836,19 @@ func TestCompilerOwnedNamespaceImportsRetainRequiredRuntimeAcrossBackends(t *tes
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import trb/std/encoding/hex
-import trb/std/filesystem
+import trb/std/dir
+import { DirEntry } from trb/std/dir
+import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def decoded(value: String): Result<Bytes, Hex::DecodeError>
 	return Hex.decode(value)
 end
 
-def loaded(path: String): Result<String, FileSystem::Error>
-	return FileSystem.read_text(path)
+def listed(path: String): Result<Array<DirEntry>, FileSystemError>
+	return Dir.children(path)
 end
 `),
-	}
-	wants := map[string][]string{
-		"go": {
-			`import "example.com/namespace-runtime/trb/std/encoding/hex"`,
-			`import "example.com/namespace-runtime/trb/std/filesystem"`,
-			`hex.HexDecodeError`,
-			`filesystem.ReadText(path)`,
-		},
-		"ruby": {
-			`require_relative "./trb/std/encoding/hex/index"`,
-			`require_relative "./trb/std/filesystem/index"`,
-			`def decoded(value)`,
-			`read_text(path)`,
-		},
-		"typescript": {
-			`import * as __trb_hex from "./trb/std/encoding/hex/index.ts";`,
-			`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`,
-			`__trb_hex.HexDecodeError`,
-			`__trb_hex.HexDecodeErrorKind.InvalidCharacter`,
-			`__trb_filesystem.read_text(path)`,
-		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/namespace-runtime", RubyLoader: "require_relative"})
@@ -882,13 +859,12 @@ end
 		if consumer == nil {
 			t.Fatalf("%s omitted the runtime namespace consumer: %#v", mode, artifacts)
 		}
-		output := string(consumer.Output)
-		for _, want := range wants[mode] {
-			if !strings.Contains(output, want) {
-				t.Fatalf("generated %s runtime namespace consumer is missing %q:\n%s", mode, want, output)
-			}
-		}
-		for _, modulePath := range []string{"trb/std/encoding/hex/index", "trb/std/filesystem/index", "trb/std/result/index"} {
+		for _, modulePath := range []string{
+			"trb/std/encoding/hex/index",
+			"trb/std/dir/index",
+			"trb/std/errors/index",
+			"trb/std/result/index",
+		} {
 			count := 0
 			for _, artifact := range artifacts {
 				if artifact.IR.ModulePath == modulePath {
@@ -1473,7 +1449,7 @@ func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 def render(): String
 	mut builder := StringBuilder.new()
 	builder.append("A")
-	StringBuilder.append_codepoint(builder, 128512)
+	builder.append_codepoint(128512)
 	builder.append_codepoint(33)
 	return builder.to_s()
 end
@@ -1492,7 +1468,7 @@ def reset(): String
 	mut builder := StringBuilder.from_string("old")
 	builder.clear()
 	builder.append("new")
-	return StringBuilder.to_string(builder)
+	return builder.to_s()
 end
 `)
 	wants := map[string][]string{
@@ -1560,14 +1536,19 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 			want:   "builder is immutable; declare it with mut to use append()",
 		},
 		{
-			name:   "package requires mut",
-			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tStringBuilder.clear(builder)\n\treturn\nend\n",
+			name:   "clear receiver requires mut",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tbuilder.clear()\n\treturn\nend\n",
 			want:   "builder is immutable; declare it with mut to use clear()",
 		},
 		{
 			name:   "append type",
 			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
 			want:   "argument 1 to append() has type Integer, expected String",
+		},
+		{
+			name:   "instance operation is not static",
+			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tStringBuilder.clear(builder)\n\treturn\nend\n",
+			want:   "type StringBuilder has no member clear",
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -2004,97 +1985,14 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
-func TestCompilerOwnedPortablePathPackageLowersAcrossBackends(t *testing.T) {
-	consumerSource := SourceUnit{
-		Filename:   "/project/main.trb",
-		ModulePath: "main",
-		Package:    "main",
-		Source: []byte(`import trb/std/path
-
-def normalized(): String
-	return Path.clean("a/./b/../c")
-end
-
-def joined(): String
-	return Path.join("/srv/app", "../data")
-end
-
-def inspected(): Boolean
-	return Path.absolute("/srv/app") && Path.base("/srv/app/main.trb") == "main.trb" && Path.directory("/srv/app/main.trb") == "/srv/app"
-end
-
-def parts(): Array<String>
-	return Path.components("/srv/app/main.trb")
-end
-`),
-	}
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		artifacts, err := CompileProject([]SourceUnit{consumerSource}, Options{Mode: mode, GoModule: "example.com/path-app", RubyLoader: "require_relative"})
-		if err != nil {
-			t.Fatalf("%s rejected compiler-owned path package: %v", mode, err)
-		}
-		var consumer, runtime *Artifact
-		for _, artifact := range artifacts {
-			switch artifact.IR.ModulePath {
-			case "main":
-				consumer = artifact
-			case "trb/std/path/index":
-				runtime = artifact
+func TestRemovedPathAndFilesystemPackagesCannotBeImported(t *testing.T) {
+	for _, packagePath := range []string{"trb/std/path", "trb/std/filesystem"} {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			_, err := Compile("removed_package.trb", []byte("import "+packagePath+"\n"), mode)
+			want := "unknown TypeRB package " + packagePath
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, packagePath, want, err)
 			}
-		}
-		if consumer == nil || runtime == nil {
-			t.Fatalf("%s did not emit consumer and path runtime: %#v", mode, artifacts)
-		}
-		consumerWants := map[string][]string{
-			"go": {
-				`import "example.com/path-app/trb/std/path"`,
-				`path.Clean("a/./b/../c")`,
-				`path.Components("/srv/app/main.trb")`,
-			},
-			"ruby": {
-				`require_relative "./trb/std/path/index"`,
-				`Path.clean("a/./b/../c")`,
-				`Path.components("/srv/app/main.trb")`,
-			},
-			"typescript": {
-				`import * as __trb_path from "./trb/std/path/index.ts";`,
-				`__trb_path.clean("a/./b/../c")`,
-				`__trb_path.components("/srv/app/main.trb")`,
-			},
-		}[mode]
-		for _, want := range consumerWants {
-			if output := string(consumer.Output); !strings.Contains(output, want) {
-				t.Fatalf("generated %s path consumer is missing %q:\n%s", mode, want, output)
-			}
-		}
-		runtimeWants := map[string][]string{
-			"go":         {`func PathClean(value string) string`, `func Components(value string) *[]string`, `*values = append(*values, value)`},
-			"ruby":       {`class Path`, `def self.clean(value)`, `def components(value)`},
-			"typescript": {`export class Path`, `static clean(value: string): string`, `export function components(value: string): Array<string>`},
-		}[mode]
-		for _, want := range runtimeWants {
-			if output := string(runtime.Output); !strings.Contains(output, want) {
-				t.Fatalf("generated %s path runtime is missing %q:\n%s", mode, want, output)
-			}
-		}
-		if mode == "go" {
-			fileSet := token.NewFileSet()
-			parsed, parseErr := parser.ParseFile(fileSet, "path.go", runtime.Output, parser.AllErrors)
-			if parseErr != nil {
-				t.Fatalf("generated Go path runtime does not parse: %v\n%s", parseErr, runtime.Output)
-			}
-			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("path", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
-				t.Fatalf("generated Go path runtime does not type-check: %v\n%s", checkErr, runtime.Output)
-			}
-		}
-	}
-}
-
-func TestPortablePathDiagnosticsAreModeIndependent(t *testing.T) {
-	source := []byte("import trb/std/path\ndef bad(): String\n\treturn Path.clean(1)\nend\n")
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if _, err := Compile("bad.trb", source, mode); err == nil || !strings.Contains(err.Error(), "argument 1 to clean() has type Integer, expected String") {
-			t.Fatalf("%s did not reject invalid path argument: %v", mode, err)
 		}
 	}
 }
@@ -2527,55 +2425,29 @@ func TestSafePortableConversionAndLookupLowerAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
 import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors
-import trb/std/numbers
-import trb/std/strings
 
 def parsed(value: String): Result<Integer, NumberParseError>
 	return value.try_to_i()
-end
-
-def package_parsed(value: String): Result<Integer, NumberParseError>
-	return Numbers.try_parse_integer(value)
 end
 
 def parsed_float(value: String): Result<Float, NumberParseError>
 	return value.try_to_f()
 end
 
-def package_parsed_float(value: String): Result<Float, NumberParseError>
-	return Numbers.try_parse_float(value)
-end
-
 def float_value(value: String): Float
 	return value.to_f()
-end
-
-def package_float_value(value: String): Float
-	return Numbers.parse_float(value)
 end
 
 def string_value(value: String, index: Integer): Result<String, IndexLookupError>
 	return value.try_fetch(index)
 end
 
-def package_string_value(value: String, index: Integer): Result<String, IndexLookupError>
-	return Strings.try_fetch(value, index)
-end
-
 def characters(value: String): Array<String>
 	return value.chars()
 end
 
-def package_characters(value: String): Array<String>
-	return Strings.characters(value)
-end
-
 def reversed(value: String): String
 	return value.reverse()
-end
-
-def package_reversed(value: String): String
-	return Strings.reverse(value)
 end
 
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
@@ -2838,7 +2710,7 @@ end
 		},
 		"typescript": {
 			`import { Result } from "./trb/std/result/index.ts";`,
-			`import { NumberParseErrorKind } from "./trb/std/errors/index.ts";`,
+			`from "./trb/std/errors/index.ts";`,
 			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Integer" } satisfies NumberParseError`,
 			`{ kind: NumberParseErrorKind.InvalidFormat, input: __trbInput, message: "invalid Float" } satisfies NumberParseError`,
 			`{ index: __trbRequested, size: __trbValue.length, message: "String index is out of bounds" } satisfies IndexLookupError`,
@@ -2921,30 +2793,48 @@ end
 	}
 }
 
-func TestTypeScriptEmitsRootRuntimeOnceForNestedTypes(t *testing.T) {
+func TestTypeScriptUsesCanonicalFilesystemDeclarationModules(t *testing.T) {
 	source := SourceUnit{
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import trb/std/filesystem
+		Source: []byte(`import trb/std/file
+import { FileMode } from trb/std/file
+import { FileSystemError, FileSystemErrorKind } from trb/std/errors
 import { Result } from trb/std/result
+import { Unit } from trb/std/unit
 
-def load(path: String): Result<String, FileSystem::Error>
-	return FileSystem.read_text(path)
+def create(path: String, value: String): Result<Unit, FileSystemError>
+	return File.open(path, mode: FileMode::CreateNew) do |file|
+		try file.write_text(value)
+	end
+end
+
+def already_exists(error: FileSystemError): Boolean
+	return error.kind == FileSystemErrorKind::AlreadyExists
 end
 `),
 	}
 	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript"})
 	if err != nil {
-		t.Fatalf("compile root and support type imports: %v", err)
+		t.Fatalf("compile filesystem declaration imports: %v", err)
 	}
 	consumer := findArtifactByModule(artifacts, "main")
 	if consumer == nil {
 		t.Fatal("missing consumer artifact")
 	}
-	const runtimeImport = `import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`
-	if count := strings.Count(string(consumer.Output), runtimeImport); count != 1 {
-		t.Fatalf("filesystem runtime import count = %d, want 1:\n%s", count, consumer.Output)
+	for _, runtimePath := range []string{
+		`"./trb/std/file/index.ts"`,
+		`"./trb/std/errors/index.ts"`,
+		`"./trb/std/result/index.ts"`,
+		`"./trb/std/unit/index.ts"`,
+	} {
+		if !strings.Contains(string(consumer.Output), runtimePath) {
+			t.Fatalf("generated TypeScript is missing canonical module %s:\n%s", runtimePath, consumer.Output)
+		}
+	}
+	if strings.Contains(string(consumer.Output), "trb/std/filesystem") {
+		t.Fatalf("generated TypeScript retained the removed aggregate filesystem module:\n%s", consumer.Output)
 	}
 }
 
@@ -2963,98 +2853,90 @@ func TestStructuredErrorTypeNamesStillRequireExplicitImports(t *testing.T) {
 	}
 }
 
-func TestPortableFilesystemPackageLowersAcrossBackends(t *testing.T) {
-	source := SourceUnit{
-		Filename:   "/project/main.trb",
-		ModulePath: "main",
-		Package:    "main",
-		Source: []byte(`import trb/std/filesystem
-import { Result } from trb/std/result
-
-def load(path: String): Result<String, FileSystem::Error>
-	return FileSystem.read_text(path)
-end
-`),
-	}
-
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: mode, GoModule: "example.com/filesystem-app", RubyLoader: "require_relative"})
-		if err != nil {
-			t.Fatalf("%s rejected the standard filesystem package: %v", mode, err)
-		}
-		var consumer, filesystemRuntime, resultRuntime, unitRuntime *Artifact
-		for _, artifact := range artifacts {
-			switch artifact.IR.ModulePath {
-			case "main":
-				consumer = artifact
-			case "trb/std/filesystem/index":
-				filesystemRuntime = artifact
-			case "trb/std/result/index":
-				resultRuntime = artifact
-			case "trb/std/unit/index":
-				unitRuntime = artifact
-			}
-		}
-		if consumer == nil || filesystemRuntime == nil || resultRuntime == nil || unitRuntime == nil {
-			t.Fatalf("%s did not compile the consumer, filesystem runtime, and transitive Result/Unit runtimes: %#v", mode, artifacts)
-		}
-		consumerWants := map[string][]string{
-			"go":         {`"example.com/filesystem-app/trb/std/filesystem"`, "filesystem.ReadText(path)"},
-			"ruby":       {`require_relative "./trb/std/filesystem/index"`, "read_text(path)"},
-			"typescript": {`import * as __trb_filesystem from "./trb/std/filesystem/index.ts";`, "__trb_filesystem.FileSystemError", "__trb_filesystem.read_text(path)"},
-		}[mode]
-		for _, want := range consumerWants {
-			if output := string(consumer.Output); !strings.Contains(output, want) {
-				t.Fatalf("generated %s filesystem consumer is missing %q:\n%s", mode, want, output)
-			}
-		}
-		runtimeWants := map[string][]string{
-			"go":         {"type FileSystemError struct", "os.ReadFile(path)", "__trb_result.NewResultErr[string, FileSystemError]", "__trb_result.NewResultOk[unit.Unit, FileSystemError]", "slices.Sort(names)"},
-			"ruby":       {"module FileSystem", "Error = Data.define(:operation, :path, :message, :kind)", "File.binread(path)", "Result::Err.new", "Result::Ok.new(Unit.new)", "Dir.children(path).sort"},
-			"typescript": {"export interface FileSystemError", `getBuiltinModule?.("fs")`, "Result.Err<string, FileSystemError>", "Result.Ok<Unit, FileSystemError>", "{} satisfies Unit", "fs.readdirSync(__trbPath)"},
-		}[mode]
-		for _, want := range runtimeWants {
-			if output := string(filesystemRuntime.Output); !strings.Contains(output, want) {
-				t.Fatalf("generated %s filesystem runtime is missing %q:\n%s", mode, want, output)
-			}
-		}
-	}
-}
-
 func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
 	tests := []struct {
-		name       string
-		source     string
-		modulePath string
-		want       string
+		name   string
+		source string
+		want   string
 	}{
 		{
-			name:   "read path",
-			source: "import { FileSystem } from trb/std/filesystem\nvalue := FileSystem.read_text(1)\n",
-			want:   "argument 1 to read_text() has type Integer, expected String",
+			name: "open path",
+			source: `import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def bad(): Result<String, FileSystemError>
+	return File.open(1) do |file|
+		try file.read_text(max_bytes: 10)
+	end
+end
+`,
+			want: "argument 1 to open() has type Integer, expected String",
 		},
 		{
-			name:   "write bytes value",
-			source: "import { FileSystem } from trb/std/filesystem\nvalue := FileSystem.write_bytes(\"output.bin\", \"not bytes\")\n",
-			want:   "argument 2 to write_bytes() has type String, expected Bytes",
+			name: "open mode",
+			source: `import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def bad(): Result<String, FileSystemError>
+	return File.open("input.txt", mode: "read") do |file|
+		try file.read_text(max_bytes: 10)
+	end
+end
+`,
+			want: "argument 2 to open() has type String, expected FileMode",
 		},
 		{
-			name:       "internal import",
-			source:     "import trb/internal/filesystem as native_fs\nvalue := native_fs.exists(\"input.txt\")\n",
-			modulePath: "trb/std/user_source_cannot_spoof_internal_access",
-			want:       "package trb/internal/filesystem is internal to the TypeRB standard library",
+			name: "bounded read",
+			source: `import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def bad(path: String): Result<String, FileSystemError>
+	return File.open(path) do |file|
+		try file.read_text(max_bytes: "ten")
+	end
+end
+`,
+			want: "argument 1 to read_text() has type String, expected Integer",
+		},
+		{
+			name: "bytes write",
+			source: `import trb/std/file
+import { FileMode } from trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+import { Unit } from trb/std/unit
+
+def bad(path: String): Result<Unit, FileSystemError>
+	return File.open(path, mode: FileMode::Write) do |file|
+		try file.write("not bytes")
+	end
+end
+`,
+			want: "argument 1 to write() has type String, expected Bytes",
+		},
+		{
+			name: "children path",
+			source: `import trb/std/dir
+import { DirEntry } from trb/std/dir
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def bad(): Result<Array<DirEntry>, FileSystemError>
+	return Dir.children(1)
+end
+`,
+			want: "argument 1 to children() has type Integer, expected String",
 		},
 	}
 	for _, test := range tests {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
 			t.Run(test.name+"/"+mode, func(t *testing.T) {
-				modulePath := test.modulePath
-				if modulePath == "" {
-					modulePath = "main"
-				}
 				_, err := CompileProject([]SourceUnit{{
 					Filename:   "/project/main.trb",
-					ModulePath: modulePath,
+					ModulePath: "main",
 					Package:    "main",
 					Source:     []byte(test.source),
 				}}, Options{Mode: mode, GoModule: "example.com/filesystem-diagnostics", RubyLoader: "require_relative"})
@@ -3604,7 +3486,7 @@ func TestGoPutsDereferencesNullableValues(t *testing.T) {
 }
 
 func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
-	source := []byte("import trb/std/strings\n\ndef count(): Integer\n  return Strings.length(\"😀a\")\nend\n")
+	source := []byte("def count(): Integer\n  return \"😀a\".size()\nend\n")
 	tests := []struct {
 		mode string
 		want string

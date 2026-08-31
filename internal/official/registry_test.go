@@ -66,6 +66,9 @@ func TestBundledCLIUsesCanonicalProductPackageAndLegacyAlias(t *testing.T) {
 	if canonical.Definition.ModulePath != "trb/cli/index" || canonical.Definition.Kind != "portable" {
 		t.Fatalf("unexpected CLI package boundary: %#v", canonical.Definition)
 	}
+	if canonical.Version != "0.2.0" {
+		t.Fatalf("CLI package version = %q, want 0.2.0", canonical.Version)
+	}
 	if !canonical.Definition.Supports("go") || canonical.Definition.Supports("ruby") || canonical.Definition.Supports("typescript") {
 		t.Fatalf("unexpected CLI target support: %#v", canonical.Definition.Targets)
 	}

@@ -994,10 +994,9 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 
 	input := strings.Join([]string{
-		"import trb/std/strings",
 		"import { User } from models/user",
 		`name := "Ada"`,
-		"Strings.uppercase(name)",
+		"name.upcase()",
 		"user := User.new(name: name)",
 		"user.name",
 		":type user",
@@ -2241,7 +2240,7 @@ false.to_s()
 (-2.75).ceil()
 2.5.round()
 (-2.5).round()
-2.75.truncate()
+2.75.to_i()
 Math.sqrt(9)
 Math.exp(0)
 Math.log(1)
@@ -2598,7 +2597,7 @@ func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "value := \"A😀\".to_bytes()\nvalue\nvalue.size()\nvalue.at(1)\nvalue.to_s()\nvalue.valid_utf8()\nvalue.concat(\"!\".to_bytes()).to_s()\n:quit\n"
+		input := "value := \"A😀\".to_bytes()\nvalue\nvalue.size()\nvalue.at(1)\nvalue.to_s()\nvalue.valid_utf8?()\nvalue.concat(\"!\".to_bytes()).to_s()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -2879,34 +2878,6 @@ func TestReplEvaluatesPortableCollectionTransformationsAcrossModes(t *testing.T)
 	}
 }
 
-func TestReplEvaluatesPortablePathAcrossModes(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		root := t.TempDir()
-		config := project.New(root, mode)
-		config.SourceDir = "src"
-		if config.Go != nil {
-			config.Go.Module = "example.com/type-rb/repl-path-test"
-		}
-		if err := config.Save(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-
-		input := "import trb/std/path\nPath.separator()\nPath.clean(\"a/./b/../c\")\nPath.clean(\"/../../srv//app\")\nPath.join(\"/srv/app\", \"../data\")\nPath.absolute(\"/srv/app\")\nPath.components(\"/srv/app/main.trb\")\nPath.base(\"/srv/app/main.trb\")\nPath.directory(\"/srv/app/main.trb\")\nPath.join(\"\", \"\")\n:quit\n"
-		var stdout, stderr bytes.Buffer
-		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
-		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
-			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
-		}
-		want := "\"/\" : String\n\"a/c\" : String\n\"/srv/app\" : String\n\"/srv/data\" : String\ntrue : Boolean\n[\"srv\", \"app\", \"main.trb\"] : Array<String>\n\"main.trb\" : String\n\"/srv/app\" : String\n\".\" : String\n"
-		if stdout.String() != want || stderr.Len() != 0 {
-			t.Fatalf("unexpected %s path REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
-		}
-	}
-}
-
 func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		root := t.TempDir()
@@ -2923,22 +2894,25 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		}
 
 		directory := filepath.Join(root, "data")
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		textPath := filepath.Join(directory, "note.txt")
-		bytesPath := filepath.Join(directory, "value.bin")
 		missingPath := filepath.Join(directory, "missing.txt")
 		input := strings.Join([]string{
-			"import trb/std/filesystem",
+			"import trb/std/file",
+			"import { FileMode } from trb/std/file",
+			"import trb/std/dir",
+			"import { FileSystemErrorKind } from trb/std/errors",
 			"import { Result } from trb/std/result",
-			"def describe(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end",
-			"FileSystem.create_directory(" + strconv.Quote(directory) + ")",
-			"FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\")",
-			"FileSystem.read_text(" + strconv.Quote(textPath) + ")",
-			"FileSystem.exists(" + strconv.Quote(textPath) + ")",
-			"FileSystem.exists(" + strconv.Quote(missingPath) + ")",
-			"FileSystem.list(" + strconv.Quote(directory) + ")",
-			"FileSystem.write_bytes(" + strconv.Quote(bytesPath) + ", \"B\".to_bytes())",
-			"FileSystem.read_bytes(" + strconv.Quote(bytesPath) + ")",
-			"describe(FileSystem.read_text(" + strconv.Quote(missingPath) + "))",
+			"def create_label(path: String, text: String): String; result := File.open(path, mode: FileMode::CreateNew) do |file|; try file.write_text(text); end; case result; when Result::Ok(_unit); return \"created\"; when Result::Err(error); case error.kind; when FileSystemErrorKind::AlreadyExists; return \"exists\"; else; return error.operation; end; end; end",
+			"def read_label(path: String): String; result := File.open(path) do |file|; try file.read_text(max_bytes: 16); end; case result; when Result::Ok(text); return text; when Result::Err(_error); return \"missing\"; end; end",
+			"def child_names(path: String): Array<String>; case Dir.children(path); when Result::Err(error); return [error.operation]; when Result::Ok(entries); mut names: Array<String> := []; entries.each do |entry|; names.push(entry.name); end; return names; end; end",
+			"create_label(" + strconv.Quote(textPath) + ", \"A😀\")",
+			"read_label(" + strconv.Quote(textPath) + ")",
+			"child_names(" + strconv.Quote(directory) + ")",
+			"create_label(" + strconv.Quote(textPath) + ", \"second\")",
+			"read_label(" + strconv.Quote(missingPath) + ")",
 			":quit",
 		}, "\n") + "\n"
 		var stdout, stderr bytes.Buffer
@@ -2946,15 +2920,11 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: \"A😀\") : Result<String, FileSystem::Error>\n" +
-			"Result::Ok(value: true) : Result<Boolean, FileSystem::Error>\n" +
-			"Result::Ok(value: false) : Result<Boolean, FileSystem::Error>\n" +
-			"Result::Ok(value: [\"note.txt\"]) : Result<Array<String>, FileSystem::Error>\n" +
-			"Result::Ok(value: Unit()) : Result<Unit, FileSystem::Error>\n" +
-			"Result::Ok(value: Bytes[66]) : Result<Bytes, FileSystem::Error>\n" +
-			"\"read_text\" : String\n"
+		want := "\"created\" : String\n" +
+			"\"A😀\" : String\n" +
+			"[\"note.txt\"] : Array<String>\n" +
+			"\"exists\" : String\n" +
+			"\"missing\" : String\n"
 		if stdout.String() != want || stderr.Len() != 0 {
 			t.Fatalf("unexpected %s filesystem REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, want, stdout.String(), stderr.String())
 		}
@@ -4768,10 +4738,9 @@ func TestRunPortableStringReplacementAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := "import trb/std/strings\n\n" +
-			"def main()\n" +
+		source := "def main()\n" +
 			"\tputs(\"a😀a\".replace_all(\"a\", \"$&\"))\n" +
-			"\tputs(Strings.replace_all(\"aaaa\", \"aa\", \"$1\"))\n" +
+			"\tputs(\"aaaa\".replace_all(\"aa\", \"$1\"))\n" +
 			"\treturn\n" +
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -4840,7 +4809,7 @@ def main()
 	puts((-2.75).ceil())
 	puts(2.5.round())
 	puts((-2.5).round())
-	puts(2.75.truncate())
+	puts(2.75.to_i())
 	puts(Math.sqrt(9) == 3.0)
 	puts(Math.exp(0) == 1.0)
 	puts(Math.log(1) == 0.0)
@@ -5606,16 +5575,13 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		}
 		source := "import { Result } from trb/std/result\n" +
 			"import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors\n" +
-			"import trb/std/string_builder\n" +
-			"import trb/std/numbers\n" +
-			"import trb/std/booleans\n" +
-			"import trb/std/strings\n\n" +
+			"import trb/std/string_builder\n\n" +
 			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def float_result(value: Result<Float, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def string_index_result(value: Result<String, IndexLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.index.to_s() + \"/\" + error.size.to_s() + \" \" + error.message; end; end\n" +
 			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
-			"def scalar_check(value: Float): Boolean; return (-4).abs() == Numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == Booleans.to_string(true); end\n\n" +
+			"def scalar_check(value: Float): Boolean; return (-4).abs() == 4 && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == \"true\"; end\n\n" +
 			"def main()\n" +
 			"\tputs(scalar_check(0.25))\n" +
 			"\tputs(parse_result(\"12\".try_to_i()))\n" +
@@ -5632,7 +5598,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
 			"\tputs(\"A😀\".chars().join(\"|\"))\n" +
 			"\tputs(\"A😀\".reverse())\n" +
-			"\tputs(Strings.reverse(\"TypeRB\"))\n" +
+			"\tputs(\"TypeRB\".reverse())\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +
@@ -6139,75 +6105,6 @@ end
 	}
 }
 
-func TestRunCompilerOwnedFilesystemAcrossAvailableBackends(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		if mode == "ruby" {
-			if _, err := exec.LookPath("ruby"); err != nil {
-				t.Log("ruby is not installed; skipping Ruby filesystem run")
-				continue
-			}
-		}
-		if mode == "typescript" {
-			if _, err := exec.LookPath("node"); err != nil {
-				t.Log("node is not installed; skipping TypeScript filesystem run")
-				continue
-			}
-		}
-		root := t.TempDir()
-		config := project.New(root, mode)
-		config.SourceDir = "src"
-		if config.Go != nil {
-			config.Go.Module = "example.com/type-rb/run-filesystem-test"
-		}
-		if err := config.Save(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		directory := filepath.Join(root, "data")
-		textPath := filepath.Join(directory, "note.txt")
-		missingPath := filepath.Join(directory, "missing.txt")
-		bmpPath := filepath.Join(directory, "\uE000")
-		astralPath := filepath.Join(directory, "\U00010000")
-		source := "import trb/std/filesystem\n" +
-			"import { Result } from trb/std/result\n\n" +
-			"def text_or_operation(value: Result<String, FileSystem::Error>): String; case value; when Result::Ok(text); return text; when Result::Err(error); return error.operation; end; end\n" +
-			"def names_or_error(value: Result<Array<String>, FileSystem::Error>): Array<String>; case value; when Result::Ok(names); return names; when Result::Err(error); return [error.operation]; end; end\n" +
-			"def boolean_or_false(value: Result<Boolean, FileSystem::Error>): Boolean; case value; when Result::Ok(found); return found; when Result::Err(error); return error.operation.empty?(); end; end\n\n" +
-			"def main()\n" +
-			"\t_directory := FileSystem.create_directory(" + strconv.Quote(directory) + ") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_text := FileSystem.write_text(" + strconv.Quote(textPath) + ", \"A😀\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_astral := FileSystem.write_text(" + strconv.Quote(astralPath) + ", \"\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\t_bmp := FileSystem.write_text(" + strconv.Quote(bmpPath) + ", \"\") catch |_error|\n" +
-			"\t\treturn\n" +
-			"\tend\n" +
-			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(textPath) + ")))\n" +
-			"\tputs(text_or_operation(FileSystem.read_text(" + strconv.Quote(missingPath) + ")))\n" +
-			"\tputs(names_or_error(FileSystem.list(" + strconv.Quote(directory) + ")).join(\",\"))\n" +
-			"\tputs(boolean_or_false(FileSystem.exists(" + strconv.Quote(textPath) + ")))\n" +
-			"\treturn\n" +
-			"end\n"
-		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		var stdout, stderr bytes.Buffer
-		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
-			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
-		}
-		if want := "A😀\nread_text\nnote.txt,\uE000,\U00010000\ntrue\n"; stdout.String() != want {
-			t.Fatalf("unexpected %s filesystem program output: want %q, got %q", mode, want, stdout.String())
-		}
-	}
-}
-
 func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		if mode == "ruby" {
@@ -6241,42 +6138,78 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 		if err := os.Symlink("child", filepath.Join(directory, "link")); err != nil {
 			t.Fatal(err)
 		}
+		for _, name := range []string{"\uE000", "\U00010000"} {
+			if err := os.WriteFile(filepath.Join(directory, name), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		filePath := filepath.Join(directory, "note.txt")
-		source := "import trb/std/filesystem\n" +
+		racePath := filepath.Join(root, "race.txt")
+		bytesPath := filepath.Join(root, "value.bin")
+		invalidTextPath := filepath.Join(root, "invalid-utf8.txt")
+		if err := os.WriteFile(invalidTextPath, []byte{0xff}, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		source := "import trb/std/file\n" +
+			"import { FileMode } from trb/std/file\n" +
+			"import trb/std/dir\n" +
+			"import { DirEntryKind } from trb/std/dir\n" +
+			"import { FileSystemErrorKind } from trb/std/errors\n" +
 			"import { Result } from trb/std/result\n\n" +
 			"def create(path: String): String\n" +
-			"\tresult := FileSystem.open(path, mode: FileSystem::OpenMode::CreateNew) do |file|\n" +
+			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
 			"\t\ttry file.write_text(\"hello\")\n" +
 			"\tend\n" +
 			"\tcase result\n" +
 			"\twhen Result::Ok(_unit)\n\t\treturn \"created\"\n" +
 			"\twhen Result::Err(error)\n" +
 			"\t\tcase error.kind\n" +
-			"\t\twhen FileSystem::ErrorKind::AlreadyExists\n\t\t\treturn \"exists\"\n" +
+			"\t\twhen FileSystemErrorKind::AlreadyExists\n\t\t\treturn \"exists\"\n" +
 			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def create_race(path: String): String\n" +
+			"\tresults := [1, 2].concurrent_map(limit: 2) do |_index|\n" +
+			"\t\tcreate(path)\n" +
+			"\tend\n" +
+			"\treturn results.sort().join(\",\")\nend\n\n" +
 			"def bounded(path: String, maximum: Integer): String\n" +
-			"\tresult := FileSystem.open(path, mode: FileSystem::OpenMode::Read) do |file|\n" +
+			"\tresult := File.open(path) do |file|\n" +
 			"\t\ttry file.read_text(max_bytes: maximum)\n\tend\n" +
 			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
 			"\twhen Result::Err(error)\n\t\tcase error.kind\n" +
-			"\t\twhen FileSystem::ErrorKind::TooLarge\n\t\t\treturn \"too-large\"\n" +
+			"\t\twhen FileSystemErrorKind::TooLarge\n\t\t\treturn \"too-large\"\n" +
+			"\t\twhen FileSystemErrorKind::InvalidLimit\n\t\t\treturn \"invalid-limit\"\n" +
 			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
+			"def create_bytes(path: String): String\n" +
+			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
+			"\t\ttry file.write(\"B\".to_bytes())\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(_unit)\n\t\treturn \"bytes-created\"\n" +
+			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
+			"def bounded_bytes(path: String): String\n" +
+			"\tresult := File.open(path) do |file|\n" +
+			"\t\tbytes := try file.read(max_bytes: 1)\n\t\tbytes.to_s()\n\tend\n" +
+			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
+			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
 			"def entry_labels(path: String): Array<String>\n" +
-			"\tcase FileSystem.entries(path)\n" +
+			"\tcase Dir.children(path)\n" +
 			"\twhen Result::Err(error)\n\t\treturn [error.operation]\n" +
 			"\twhen Result::Ok(entries)\n" +
 			"\t\tmut labels: Array<String> := []\n" +
 			"\t\tentries.each do |entry|\n" +
 			"\t\t\tkind := case entry.kind\n" +
-			"\t\t\twhen FileSystem::DirectoryEntryKind::File\n\t\t\t\t\"file\"\n" +
-			"\t\t\twhen FileSystem::DirectoryEntryKind::Directory\n\t\t\t\t\"directory\"\n" +
-			"\t\t\twhen FileSystem::DirectoryEntryKind::Other\n\t\t\t\t\"other\"\n\t\t\tend\n" +
+			"\t\t\twhen DirEntryKind::File\n\t\t\t\t\"file:\" + bounded(entry.path, 5)\n" +
+			"\t\t\twhen DirEntryKind::Directory\n\t\t\t\t\"directory\"\n" +
+			"\t\t\twhen DirEntryKind::Other\n\t\t\t\t\"other\"\n\t\t\tend\n" +
 			"\t\t\tlabels.push(entry.name + \":\" + kind)\n\t\tend\n\t\treturn labels\n\tend\nend\n\n" +
 			"def main()\n" +
 			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
 			"\tputs(create(" + strconv.Quote(filePath) + "))\n" +
+			"\tputs(create_race(" + strconv.Quote(racePath) + "))\n" +
 			"\tputs(bounded(" + strconv.Quote(filePath) + ", 5))\n" +
 			"\tputs(bounded(" + strconv.Quote(filePath) + ", 4))\n" +
+			"\tputs(bounded(" + strconv.Quote(filePath) + ", -1))\n" +
+			"\tputs(create_bytes(" + strconv.Quote(bytesPath) + "))\n" +
+			"\tputs(bounded_bytes(" + strconv.Quote(bytesPath) + "))\n" +
+			"\tputs(bounded(" + strconv.Quote(invalidTextPath) + ", 1))\n" +
 			"\tputs(entry_labels(" + strconv.Quote(directory) + ").join(\",\"))\n" +
 			"\treturn\nend\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -6287,7 +6220,7 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
 		}
-		want := "created\nexists\nhello\ntoo-large\nchild:directory,link:other,note.txt:file\n"
+		want := "created\nexists\ncreated,exists\nhello\ntoo-large\ninvalid-limit\nbytes-created\nB\n�\nchild:directory,link:other,note.txt:file:hello,\uE000:file:,\U00010000:file:\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s scoped filesystem output: want %q, got %q", mode, want, stdout.String())
 		}

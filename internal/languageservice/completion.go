@@ -951,7 +951,12 @@ func directReceiverMembers(receiver types.Type, context Context) []Symbol {
 		result = instantiateSymbols(result, info.TypeParameters, receiver.Args)
 	}
 	for _, method := range stdlib.ReceiverMethods(receiver) {
-		result = append(result, Symbol{Name: method.Name, Kind: CompletionMethod, Detail: librarySignature(method), Type: method.Return, Call: &CallInfo{ParameterCount: len(method.Parameters)}})
+		symbol := standardLibrarySymbol(method)
+		symbol.Kind = CompletionMethod
+		// Receiver type arguments have already specialized the contract, so
+		// callers never author explicit type arguments for a receiver method.
+		symbol.Call.ExplicitTypeArguments = false
+		result = append(result, symbol)
 	}
 	if receiver.Kind == types.Array || receiver.Kind == types.Range {
 		for _, name := range []string{"all?", "any?", "find", "find_index", "none?", "sort_by", "sort_by_descending"} {
@@ -1083,6 +1088,14 @@ func instantiateSymbol(symbol Symbol, parameters []string, arguments []types.Typ
 	substitutions := completionTypeSubstitutions(parameters, arguments)
 	result.Type = substituteCompletionType(symbol.Type, substitutions)
 	result.Members = instantiateSymbols(symbol.Members, parameters, arguments)
+	if symbol.Call != nil && len(symbol.Call.BlockParameters) > 0 {
+		call := *symbol.Call
+		call.BlockParameters = make([]types.Type, len(symbol.Call.BlockParameters))
+		for index, parameter := range symbol.Call.BlockParameters {
+			call.BlockParameters[index] = substituteCompletionType(parameter, substitutions)
+		}
+		result.Call = &call
+	}
 	return result
 }
 
@@ -1119,6 +1132,11 @@ func mergeMemberSymbols(left, right Symbol) Symbol {
 	}
 	if result.Kind == CompletionField && result.Type.Kind != "" {
 		result.Detail = displayType(result.Type)
+	}
+	if result.Call != nil && right.Call != nil && len(result.Call.BlockParameters) == 0 && len(right.Call.BlockParameters) > 0 {
+		call := *result.Call
+		call.BlockParameters = append([]types.Type(nil), right.Call.BlockParameters...)
+		result.Call = &call
 	}
 	return result
 }
@@ -1432,6 +1450,8 @@ func lexicalSymbolsWithLocals(source string, cursor int, context Context) ([]Sym
 			}
 		case "fn":
 			collectParameters(significant, index+1, known, locals)
+		case "do":
+			collectCompilerBlockParameters(significant, index, known, context, locals)
 		case "import":
 			collectImportedNames(significant, index+1, known)
 		default:
@@ -1444,6 +1464,80 @@ func lexicalSymbolsWithLocals(source string, cursor int, context Context) ([]Sym
 	}
 	sortSymbols(result)
 	return result, locals
+}
+
+// collectCompilerBlockParameters types bindings for the narrow class of
+// compiler-known structured block calls. Source callbacks and iterator blocks
+// retain their existing inference paths; they do not carry BlockParameters.
+func collectCompilerBlockParameters(tokens []token.Token, block int, symbols map[string]Symbol, context Context, locals map[string]bool) {
+	if block+2 >= len(tokens) || tokens[block+1].Lexeme != "|" || !compilerBlockOpenAtCursor(tokens, block) {
+		return
+	}
+	bindings := []token.Token{}
+	for index := block + 2; index < len(tokens) && tokens[index].Lexeme != "|"; index++ {
+		if tokens[index].Kind == token.Identifier {
+			bindings = append(bindings, tokens[index])
+		}
+	}
+	if len(bindings) == 0 || block == 0 || tokens[block-1].Lexeme != ")" {
+		return
+	}
+	open := matchingCallOpen(tokens, block-1)
+	if open <= 0 {
+		return
+	}
+	calleeEnd := open - 1
+	calleeStart := calleeEnd
+	for calleeStart >= 2 && (tokens[calleeStart-1].Lexeme == "." || tokens[calleeStart-1].Lexeme == "&." || tokens[calleeStart-1].Lexeme == "::") && tokens[calleeStart-2].Kind == token.Identifier {
+		calleeStart -= 2
+	}
+	callee, ok := resolveCompletionTokens(tokens[calleeStart:calleeEnd+1], func(name string) (Symbol, bool) {
+		symbol, exists := symbols[name]
+		return symbol, exists
+	}, context)
+	if !ok || callee.Call == nil || len(callee.Call.BlockParameters) == 0 {
+		return
+	}
+	for index, binding := range bindings {
+		if index >= len(callee.Call.BlockParameters) {
+			break
+		}
+		typ := callee.Call.BlockParameters[index]
+		symbols[binding.Lexeme] = Symbol{Name: binding.Lexeme, Kind: CompletionParameter, Detail: displayType(typ), Type: typ}
+		locals[binding.Lexeme] = true
+	}
+}
+
+func compilerBlockOpenAtCursor(tokens []token.Token, block int) bool {
+	depth := 1
+	for index := block + 1; index < len(tokens); index++ {
+		switch tokens[index].Lexeme {
+		case "class", "record", "enum", "interface", "module", "def", "fn", "if", "case", "while", "do":
+			depth++
+		case "end":
+			depth--
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func matchingCallOpen(tokens []token.Token, close int) int {
+	depth := 0
+	for index := close; index >= 0; index-- {
+		switch tokens[index].Lexeme {
+		case ")":
+			depth++
+		case "(":
+			depth--
+			if depth == 0 {
+				return index
+			}
+		}
+	}
+	return -1
 }
 
 func collectTypeParameters(tokens []token.Token, start int, symbols map[string]Symbol) {

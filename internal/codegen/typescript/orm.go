@@ -366,7 +366,7 @@ func (g *generator) ormIntrinsic(name string, call *ir.Call, arguments []string)
 }
 
 func (g *generator) structuredBlock(block *ir.StructuredBlock) {
-	if block != nil && block.Intrinsic == "trb.std.filesystem.open" {
+	if block != nil && block.Intrinsic == "trb.std.file.open" {
 		g.filesystemStructuredBlock(block)
 		return
 	}

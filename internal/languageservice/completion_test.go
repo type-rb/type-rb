@@ -70,6 +70,7 @@ end
 
 user := User.new("Ada")
 str_a := "hello"
+bytes := "hello".to_bytes()
 numbers := [1, 2, 3]
 status := OrderStatus::Pending
 `
@@ -112,6 +113,7 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				{source: "0.25.fin", want: "finite?", insertText: "finite?()", kind: languageservice.CompletionMethod},
 				{source: "0.25.flo", want: "floor", insertText: "floor()", kind: languageservice.CompletionMethod},
 				{source: "true.to_", want: "to_s", insertText: "to_s()", kind: languageservice.CompletionMethod},
+				{source: "bytes.valid_", want: "valid_utf8?", insertText: "valid_utf8?()", kind: languageservice.CompletionMethod},
 			} {
 				items := service.Complete(test.source, len(test.source))
 				item, ok := findCompletion(items, test.want)
@@ -127,6 +129,9 @@ func TestCompletionUsesCheckedContextAcrossModes(t *testing.T) {
 				if got := test.source[item.Replacement.Start:len(test.source)]; got == "" {
 					t.Errorf("Complete(%q) returned empty replacement prefix", test.source)
 				}
+			}
+			if _, ok := findCompletion(service.Complete("0.25.tru", len("0.25.tru")), "truncate"); ok {
+				t.Fatal("Float#truncate remains in completion after Float#to_i became canonical")
 			}
 		})
 	}
@@ -237,7 +242,7 @@ func TestCompletionIncludesExplicitImportedNamesAndDeclarationRoots(t *testing.T
 	artifacts, err := compiler.CompileProject([]compiler.SourceUnit{
 		{Filename: "models/user.trb", ModulePath: "models/user", Source: []byte("record User\n\tname: String\nend\n")},
 		{Filename: "models/state.trb", ModulePath: "models/state", Source: []byte("enum State\n\tOpen\n\tClosed\nend\n")},
-		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport { State as WorkflowState } from models/state\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/strings\nimport trb/std/json\n")},
+		{Filename: ".trb-repl.trb", ModulePath: "repl", Source: []byte("import { User } from models/user\nimport { State as WorkflowState } from models/state\nimport { Result } from trb/std/result\nimport { Date } from trb/std/time\nimport trb/std/json\n")},
 	}, compiler.Options{Mode: "go", Package: "main", ModulePath: "repl", AllowUnusedImports: true})
 	if err != nil {
 		t.Fatal(err)
@@ -251,9 +256,6 @@ func TestCompletionIncludesExplicitImportedNamesAndDeclarationRoots(t *testing.T
 
 	if _, ok := findCompletion(service.Complete("Us", 2), "User"); !ok {
 		t.Fatal("named project import was not completed")
-	}
-	if _, ok := findCompletion(service.Complete("Strings.up", len("Strings.up")), "uppercase"); !ok {
-		t.Fatal("standard package root member was not completed")
 	}
 	if _, ok := findCompletion(service.Complete("Result::O", len("Result::O")), "Ok"); !ok {
 		t.Fatal("imported enum member was not completed")

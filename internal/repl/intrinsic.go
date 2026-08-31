@@ -17,7 +17,7 @@ import (
 	stdrand "math/rand/v2"
 	"os"
 	"os/exec"
-	pathpkg "path"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -28,6 +28,17 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func directoryChildPath(parent, name string) string {
+	volume := filepath.VolumeName(parent)
+	if volume == parent && len(volume) == 2 && volume[1] == ':' {
+		return parent + name
+	}
+	if len(parent) > 0 && os.IsPathSeparator(parent[len(parent)-1]) {
+		return parent + name
+	}
+	return parent + string(os.PathSeparator) + name
+}
 
 func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema) (Value, error) {
 	return e.intrinsicCall(name, arguments, typ, codec, nil)
@@ -106,68 +117,6 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		fmt.Fprintln(e.stdout, plain(values[0]))
 		return Value{Type: typ}, nil
-	case "trb.std.path.separator":
-		return Value{Type: typ, Data: "/"}, nil
-	case "trb.std.path.clean":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		value, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("path.clean expects String")
-		}
-		return Value{Type: typ, Data: pathpkg.Clean(value)}, nil
-	case "trb.std.path.join":
-		if err := require(2); err != nil {
-			return Value{}, err
-		}
-		left, leftOK := values[0].Data.(string)
-		right, rightOK := values[1].Data.(string)
-		if !leftOK || !rightOK {
-			return Value{}, errors.New("path.join expects String values")
-		}
-		if left == "" {
-			return Value{Type: typ, Data: pathpkg.Clean(right)}, nil
-		}
-		if right == "" {
-			return Value{Type: typ, Data: pathpkg.Clean(left)}, nil
-		}
-		return Value{Type: typ, Data: pathpkg.Clean(left + "/" + right)}, nil
-	case "trb.std.path.absolute":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		value, ok := values[0].Data.(string)
-		return Value{Type: typ, Data: ok && strings.HasPrefix(value, "/")}, nil
-	case "trb.std.path.components":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		value, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("path.components expects String")
-		}
-		parts := strings.Split(pathpkg.Clean(value), "/")
-		items := make([]Value, 0, len(parts))
-		for _, part := range parts {
-			if part != "" && part != "." {
-				items = append(items, Value{Type: types.FromName("String"), Data: part})
-			}
-		}
-		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
-	case "trb.std.path.base", "trb.std.path.directory":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		value, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("path.base/directory expects String")
-		}
-		cleaned := pathpkg.Clean(value)
-		if name == "trb.std.path.base" {
-			return Value{Type: typ, Data: pathpkg.Base(cleaned)}, nil
-		}
-		return Value{Type: typ, Data: pathpkg.Dir(cleaned)}, nil
 	case "trb.std.url.encode_component":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -190,133 +139,43 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return e.percentDecodeResultErr(typ, kind, input, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: value})
-	case "trb.internal.filesystem.exists":
+	case "trb.std.dir.children":
 		if err := require(1); err != nil {
 			return Value{}, err
 		}
 		path, ok := values[0].Data.(string)
 		if !ok {
-			return Value{}, errors.New("filesystem.exists expects String")
-		}
-		_, err := os.Stat(path)
-		if err == nil {
-			return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: true})
-		}
-		if os.IsNotExist(err) {
-			return e.filesystemOK(typ, Value{Type: types.FromName("Boolean"), Data: false})
-		}
-		return e.filesystemErr(typ, "exists", path, err)
-	case "trb.internal.filesystem.read_text", "trb.internal.filesystem.read_bytes":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		path, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("filesystem read expects String")
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return e.filesystemErr(typ, strings.TrimPrefix(name, "trb.internal.filesystem."), path, err)
-		}
-		if name == "trb.internal.filesystem.read_text" {
-			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: strings.ToValidUTF8(string(data), "�")})
-		}
-		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(append([]byte(nil), data...))})
-	case "trb.internal.filesystem.write_text", "trb.internal.filesystem.write_bytes":
-		if err := require(2); err != nil {
-			return Value{}, err
-		}
-		path, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("filesystem write path expects String")
-		}
-		var data []byte
-		if name == "trb.internal.filesystem.write_text" {
-			value, stringOK := values[1].Data.(string)
-			if !stringOK {
-				return Value{}, errors.New("filesystem.write_text expects String")
-			}
-			data = []byte(value)
-		} else {
-			value, bytesOK := values[1].Data.(bytesValue)
-			if !bytesOK {
-				return Value{}, errors.New("filesystem.write_bytes expects Bytes")
-			}
-			data = []byte(value)
-		}
-		operation := strings.TrimPrefix(name, "trb.internal.filesystem.")
-		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return e.filesystemErr(typ, operation, path, err)
-		}
-		unit, err := e.unitValue()
-		if err != nil {
-			return Value{}, err
-		}
-		return e.filesystemOK(typ, unit)
-	case "trb.internal.filesystem.create_directory":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		path, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("filesystem.create_directory expects String")
-		}
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return e.filesystemErr(typ, "create_directory", path, err)
-		}
-		unit, err := e.unitValue()
-		if err != nil {
-			return Value{}, err
-		}
-		return e.filesystemOK(typ, unit)
-	case "trb.internal.filesystem.list":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		path, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("filesystem.list expects String")
-		}
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return e.filesystemErr(typ, "list", path, err)
-		}
-		names := make([]string, len(entries))
-		for index, entry := range entries {
-			names[index] = entry.Name()
-		}
-		sort.Strings(names)
-		items := make([]Value, len(names))
-		for index, item := range names {
-			items[index] = Value{Type: types.FromName("String"), Data: item}
-		}
-		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{types.FromName("String")}}
-		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
-	case "trb.std.filesystem.entries":
-		if err := require(1); err != nil {
-			return Value{}, err
-		}
-		path, ok := values[0].Data.(string)
-		if !ok {
-			return Value{}, errors.New("FileSystem.entries expects String")
+			return Value{}, errors.New("Dir.children expects String")
 		}
 		source, err := os.ReadDir(path)
 		if err != nil {
-			return e.filesystemErr(typ, "entries", path, err)
+			return e.filesystemErr(typ, "children", path, err)
 		}
-		entryDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::DirectoryEntry")].(*recordDefinition)
+		sort.SliceStable(source, func(left, right int) bool { return source[left].Name() < source[right].Name() })
+		entryDefinition, ok := e.definitions[symbolKey("trb/std/dir/index", "DirEntry")].(*recordDefinition)
 		if !ok {
 			return Value{}, errors.New("filesystem directory entries are not loaded")
 		}
-		kindDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::DirectoryEntryKind")].(*enumDefinition)
+		kindDefinition, ok := e.definitions[symbolKey("trb/std/dir/index", "DirEntryKind")].(*enumDefinition)
 		if !ok {
 			return Value{}, errors.New("filesystem directory entry kinds are not loaded")
 		}
+		entryType := types.FromName("DirEntry")
+		if len(typ.Args) == 2 && typ.Args[0].Kind == types.Array && len(typ.Args[0].Args) == 1 {
+			entryType = typ.Args[0].Args[0]
+		}
+		kindType := types.Type{Kind: types.Named, Name: "DirEntryKind", Declaration: kindDefinition.Node.Declaration}
 		items := make([]Value, 0, len(source))
 		for _, sourceEntry := range source {
+			if !utf8.ValidString(sourceEntry.Name()) {
+				return e.filesystemErr(typ, "children", path, errors.New("directory entry name is not valid UTF-8"))
+			}
+		}
+		for _, sourceEntry := range source {
+			childPath := directoryChildPath(path, sourceEntry.Name())
 			info, infoErr := sourceEntry.Info()
 			if infoErr != nil {
-				return e.filesystemErr(typ, "entries", path, infoErr)
+				return e.filesystemErr(typ, "children", childPath, infoErr)
 			}
 			kind := "Other"
 			if info.Mode().IsRegular() {
@@ -324,15 +183,15 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			} else if info.IsDir() {
 				kind = "Directory"
 			}
-			items = append(items, Value{Type: types.FromName("FileSystem::DirectoryEntry"), Data: &recordInstance{Definition: entryDefinition, Fields: map[string]Value{
+			items = append(items, Value{Type: entryType, Data: &recordInstance{Definition: entryDefinition, Fields: map[string]Value{
 				"name": {Type: types.FromName("String"), Data: sourceEntry.Name()},
-				"kind": {Type: types.FromName("FileSystem::DirectoryEntryKind"), Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}},
+				"path": {Type: types.FromName("String"), Data: childPath},
+				"kind": {Type: kindType, Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}},
 			}}})
 		}
-		entryType := types.FromName("FileSystem::DirectoryEntry")
 		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{entryType}}
 		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
-	case "trb.std.filesystem.file.read_bytes", "trb.std.filesystem.file.read_text":
+	case "trb.std.file.read", "trb.std.file.read_text":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
@@ -344,7 +203,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("filesystem read max_bytes must be Integer")
 		}
-		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		operation := strings.TrimPrefix(name, "trb.std.file.")
 		if maxBytes < 0 {
 			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("max_bytes must be non-negative"), "InvalidLimit")
 		}
@@ -355,11 +214,11 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if int64(len(data)) > maxBytes {
 			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file exceeds max_bytes"), "TooLarge")
 		}
-		if name == "trb.std.filesystem.file.read_text" {
-			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: strings.ToValidUTF8(string(data), "�")})
+		if name == "trb.std.file.read_text" {
+			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: utf8WithReplacement(data)})
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(data)})
-	case "trb.std.filesystem.file.write_bytes", "trb.std.filesystem.file.write_text":
+	case "trb.std.file.write", "trb.std.file.write_text":
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
@@ -368,7 +227,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, errors.New("filesystem write receiver is not an open file")
 		}
 		var data []byte
-		if name == "trb.std.filesystem.file.write_text" {
+		if name == "trb.std.file.write_text" {
 			text, textOK := values[1].Data.(string)
 			if !textOK {
 				return Value{}, errors.New("file.write_text expects String")
@@ -377,11 +236,11 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		} else {
 			bytes, bytesOK := values[1].Data.(bytesValue)
 			if !bytesOK {
-				return Value{}, errors.New("file.write_bytes expects Bytes")
+				return Value{}, errors.New("file.write expects Bytes")
 			}
 			data = []byte(bytes)
 		}
-		operation := strings.TrimPrefix(name, "trb.std.filesystem.file.")
+		operation := strings.TrimPrefix(name, "trb.std.file.")
 		written, err := file.Write(data)
 		if err == nil && written != len(data) {
 			err = io.ErrShortWrite
@@ -746,7 +605,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("bytes.to_string expects Bytes")
 		}
-		return Value{Type: typ, Data: strings.ToValidUTF8(string(value), "�")}, nil
+		return Value{Type: typ, Data: utf8WithReplacement(value)}, nil
 	case "trb.std.bytes.length":
 		if err := require(1); err != nil {
 			return Value{}, err

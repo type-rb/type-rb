@@ -175,11 +175,12 @@ search, Range materialization, Range-based Array and Unicode String slicing,
 code-point substring search, `Result`,
 bytes, hexadecimal and Base64 encoding, legacy MD5/SHA-1 checksums,
 SHA-256/SHA-512 hashing and HMAC, non-cryptographic and secure randomness,
-constant-time byte comparison, Unicode text, logical paths,
-URL component and query handling, filesystem and process access, JSON/JSONC,
-and immutable date/time values. The portable time package separates `Date`,
-`TimeOfDay`, civil `DateTime`, exact `Instant`, fixed `Duration`, and named
-`TimeZone`; its canonical JSON codecs and DST error behavior run across all
+constant-time byte comparison, Unicode text, URL component and query handling,
+scoped host-file access with bounded reads and exclusive creation, sorted typed
+immediate directory entries, process access, JSON/JSONC, and immutable
+date/time values. The portable time package separates `Date`, `TimeOfDay`,
+civil `DateTime`, exact `Instant`, fixed `Duration`, and named `TimeZone`; its
+canonical JSON codecs and DST error behavior run across all
 three backends.
 Raw-value enums use the same checked String or Integer representation for
 conversion, JSON codecs, generated applications, and the REPL. Its
@@ -425,9 +426,10 @@ TypeScript browser applications can import the official
 those shared methods and headers, repeated query parameters, text, bytes, form,
 JSON, and native browser `File` bodies, and timeouts. Indexed native component
 callbacks can pass a DOM `File` through the platform package's checked metadata
-boundary and into a request without losing the underlying browser object.
-`File#read()` and `File#read_text()` expose their buffered contents as Result
-values from generated-TypeScript-only browser operations.
+boundary and into a request without losing the underlying browser object. That
+platform package's DOM `File#read()` and `File#read_text()` expose buffered
+contents as Result values from generated-TypeScript-only browser operations;
+its declaration identity is distinct from the scoped standard-library `File`.
 Fetch responses retain status, headers, final URL, and buffered bytes; explicit
 JSON decoding produces `Response<T>` and preserves
 the raw response in a classified `RequestError` when the contract is invalid.

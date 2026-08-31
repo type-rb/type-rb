@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -84,6 +87,15 @@ end
 
 	stdout.Reset()
 	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "--verbose=false"}); status != 0 {
+		t.Fatalf("explicit false status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "public\n8080\nfalse\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected explicit false output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
 	if status := command.Run([]string{"run", "--config", config.Path, "--", "--help"}); status != 0 {
 		t.Fatalf("help status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
@@ -106,6 +118,7 @@ end
 func TestRunGeneratedStaticCLICollectsRepeatedOptionsAndReportsApplicationFailure(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
+	config.Name = "repeated"
 	config.SourceDir = "src"
 	config.Go.Module = "example.com/type-rb/static-cli-repeated"
 	if err := config.Save(); err != nil {
@@ -114,10 +127,18 @@ func TestRunGeneratedStaticCLICollectsRepeatedOptionsAndReportsApplicationFailur
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	failurePath := filepath.Join(root, "failure.txt")
 	source := `import { fail, run } from trb/cli
+import trb/std/file
+import { FileMode } from trb/std/file
+import { Result } from trb/std/result
 
 record CollectArgs
+	counts: Array<Integer> @cli(:option, name: "count", short: "c", value_name: "COUNT", about: "Add a count")
 	tags: Array<String> = [] @cli(:option, name: "tag", short: "t", value_name: "TAG", about: "Add a tag")
+	ratios: Array<Float> = [] @cli(:option, name: "ratio", value_name: "RATIO", about: "Add a ratio")
+	flags: Array<Boolean> = [] @cli(:option, name: "flag", short: "f", about: "Add a flag")
+	fallbacks: Array<String> = ["fallback"] @cli(:option, name: "fallback", value_name: "VALUE", about: "Override fallback values")
 end
 
 enum Command
@@ -134,8 +155,22 @@ def main()
 	case args.command
 	when Command::Collect(collect)
 		puts(collect.tags.join(","))
+		puts(collect.counts[0].to_s() + "," + collect.counts[1].to_s() + "," + collect.counts[2].to_s())
+		puts(collect.ratios[0].to_s() + "," + collect.ratios[1].to_s())
+		puts(collect.flags[0].to_s() + "," + collect.flags[1].to_s() + "," + collect.flags[2].to_s())
+		puts(collect.fallbacks.join(","))
 	when Command::Fail
-		fail("application failed")
+		_result := File.open(` + strconv.Quote(failurePath) + `, mode: FileMode::Write) do |file|
+			_written := try file.write_text("cleanup completed")
+			fail("application failed")
+			_written
+		end
+		case _result
+		when Result::Ok(_value)
+			return
+		when Result::Err(_error)
+			return
+		end
 	end
 	return
 end
@@ -146,11 +181,17 @@ end
 
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	arguments := []string{"run", "--config", config.Path, "--", "collect", "--tag", "one", "--tag=two", "-t", "three"}
+	arguments := []string{
+		"run", "--config", config.Path, "--", "collect",
+		"--tag", "one", "--tag=two", "-t", "three",
+		"--count", "1", "--count=-2", "-c", "3",
+		"--ratio", "1.5", "--ratio=-2.25",
+		"--flag", "--flag=false", "-f",
+	}
 	if status := command.Run(arguments); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "one,two,three\n" || stderr.Len() != 0 {
+	if stdout.String() != "one,two,three\n1,-2,3\n1.5,-2.25\ntrue,false,true\nfallback\n" || stderr.Len() != 0 {
 		t.Fatalf("unexpected repeated output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 
@@ -159,17 +200,75 @@ end
 	if status := command.Run([]string{"run", "--config", config.Path, "--", "collect", "--help"}); status != 0 {
 		t.Fatalf("help status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "-t, --tag <TAG>...") {
-		t.Fatalf("repeated option help is missing multiplicity: %s", stdout.String())
+	for _, fragment := range []string{"-t, --tag <TAG>...", "-c, --count <COUNT>...", "--ratio <RATIO>...", "-f, --flag..."} {
+		if !strings.Contains(stdout.String(), fragment) {
+			t.Fatalf("repeated option help is missing %q: %s", fragment, stdout.String())
+		}
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if status := command.Run([]string{"run", "--config", config.Path, "--", "fail"}); status == 0 {
-		t.Fatalf("application failure unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
+	if status := command.Run([]string{"build", "--config", config.Path, "--compile"}); status != 0 {
+		t.Fatalf("compile status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	executable := filepath.Join(root, "bin", config.Name)
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
+	direct := exec.Command(executable, "collect", "--count", "not-an-integer")
+	var directStdout, directStderr bytes.Buffer
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err := direct.Run()
+	exitError, ok := err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("invalid repeated Integer error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), `invalid value "not-an-integer" for counts`) {
+		t.Fatalf("unexpected invalid repeated Integer error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+
+	direct = exec.Command(executable, "collect")
+	directStdout.Reset()
+	directStderr.Reset()
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err = direct.Run()
+	exitError, ok = err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("missing repeated option error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), "missing option --count") {
+		t.Fatalf("unexpected missing repeated option error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+
+	direct = exec.Command(executable)
+	directStdout.Reset()
+	directStderr.Reset()
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err = direct.Run()
+	exitError, ok = err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("missing subcommand error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), "a command is required") {
+		t.Fatalf("unexpected missing subcommand error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "fail"}); status != 1 {
+		t.Fatalf("application failure status=%d, want 1; stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if !strings.HasPrefix(stderr.String(), "application failed\n") {
 		t.Fatalf("unexpected application failure stderr=%q", stderr.String())
+	}
+	if contents, err := os.ReadFile(failurePath); err != nil || string(contents) != "cleanup completed" {
+		t.Fatalf("scoped file was not completed before application failure: contents=%q err=%v", contents, err)
+	}
+	if err := os.Remove(failurePath); err != nil {
+		t.Fatalf("scoped file remains open after application failure: %v", err)
 	}
 }
 

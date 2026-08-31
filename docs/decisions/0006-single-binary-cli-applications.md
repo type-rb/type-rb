@@ -54,9 +54,10 @@ An option may wrap one of those scalar types in `Array`; each occurrence
 appends one converted value in argument order. Repeated Arrays are not
 positional arguments. Required and default behavior continues to come from the
 record field.
-Record defaults and nullable types make scalar argument fields omittable. The
-root subcommand selector is required, non-nullable, and has no default in the
-initial contract. The parser supports long options, `--option=value`,
+Record defaults and nullable types make scalar argument fields omittable. A
+root-only schema may omit a subcommand selector. When a schema declares one,
+the selector is required, non-nullable, and has no default in the initial
+contract. The parser supports long options, `--option=value`,
 one-character short options, Boolean flags, `--`, generated root and command
 help, and generated `--version` when a version is supplied. Global options
 precede the selected subcommand. Usage errors are written to standard error

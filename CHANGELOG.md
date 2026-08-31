@@ -2,6 +2,44 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.3 - 2026-08-31
+
+### Breaking changes
+
+- Host filesystem access now uses separate `trb/std/file` and `trb/std/dir`
+  type roots. Replace the aggregate `FileSystem` API with scoped
+  `File.open(...) do |file| ... end` operations and `Dir.children`; the former
+  slash-only `trb/std/path` package is removed while a genuine host `Path`
+  value type remains deferred.
+- Built-in value operations are receiver-only. The public utility packages for
+  numbers, booleans, strings, bytes, and ranges are removed; use forms such as
+  `value.to_s()`, `value.to_i()`, and `bytes.valid_utf8?()` directly.
+  `trb/std/string_builder` remains available for the `new` and `from_string`
+  factories; call operations such as `append`, `size`, `to_s`, and `clear` on
+  the builder value instead of through static wrappers.
+
+### Standard library and compiler
+
+- `File.open` provides typed read, write, and exclusive no-clobber create-new
+  modes with deterministic cleanup, bounded byte and text reads, structured
+  `FileSystemError` failures, and a compiler-enforced non-escaping file handle.
+  `Dir.children` returns sorted immediate entries with host-native paths and
+  typed file, directory, or other classification. Returned child paths retain
+  the supplied parent resolution without lexical cleaning, and entry names
+  that cannot cross the lossless UTF-8 boundary produce a structured failure.
+  Declaration-identity checks keep unrelated types that are also named `File`
+  independent.
+
+### Command-line applications
+
+- The bundled `trb/cli` package advances to 0.2.0. Option fields may use arrays
+  of scalar values to collect repeated occurrences in command-line order.
+  `fail(message)` reports an application failure with exit status 1 after
+  scoped cleanup; parser failures retain status 2. Schemas that declare
+  subcommands still require callers to select one explicitly; no default
+  subcommand is added.
+  ([#620](https://github.com/type-rb/type-rb/pull/620))
+
 ## 0.4.2 - 2026-08-30
 
 ### Packaging

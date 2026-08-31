@@ -7,11 +7,11 @@ import (
 )
 
 func rubyFilesystemError(operation, path, message, kind string) string {
-	return "FileSystem::Error.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: FileSystem::ErrorKind::" + kind + ")"
+	return "FileSystemError.new(operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: FileSystemErrorKind::" + kind + ")"
 }
 
 func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
-	if block == nil || block.Result == nil || len(block.Call.Arguments) < 2 {
+	if block == nil || block.Result == nil || len(block.Call.Arguments) < 1 {
 		return
 	}
 	g.temporary++
@@ -25,8 +25,12 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(raw+" = -> do", block.TrailingComment)
 	g.indent++
 	g.line(path+" = "+g.expr(block.Call.Arguments[0].Value), "")
-	g.line(mode+" = "+g.expr(block.Call.Arguments[1].Value), "")
-	g.line("flags = "+mode+" == FileSystem::OpenMode::Read ? \"rb\" : ("+mode+" == FileSystem::OpenMode::Write ? \"wb\" : \"wbx\")", "")
+	modeValue := "FileMode::Read"
+	if len(block.Call.Arguments) > 1 {
+		modeValue = g.expr(block.Call.Arguments[1].Value)
+	}
+	g.line(mode+" = "+modeValue, "")
+	g.line("flags = "+mode+" == FileMode::Read ? \"rb\" : ("+mode+" == FileMode::Write ? \"wb\" : \"wbx\")", "")
 	g.line("begin", "")
 	g.indent++
 	g.line(handle+" = ::File.open("+path+", flags, 0o644)", "")

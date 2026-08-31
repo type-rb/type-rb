@@ -46,8 +46,9 @@ Options accept those keys plus `name` (or `long`) and `short`. The root
 subcommand selector itself has no naming metadata; put `name` and `about` on
 its enum members.
 
-The root `@cli(:subcommand)` field is required and non-nullable and cannot have
-a record default in the initial contract. Defaults and nullable types make
+A root-only schema may omit `@cli(:subcommand)`. When a root record declares a
+subcommand field, that field is required and non-nullable and cannot have a
+record default in the initial contract. Defaults and nullable types make
 ordinary scalar positional or option fields omittable.
 
 The record passed to `run<...>` must itself be non-nullable and non-generic in
@@ -132,9 +133,10 @@ reflection, or a separate schema file.
 ## Initial contract
 
 The current implementation supports scalar `String`, `Integer`, `Float`, and
-`Boolean` fields, repeated scalar option Arrays, one root subcommand field,
-payloadless commands, and commands with one record payload. Root options must
-appear before the subcommand.
+`Boolean` fields, repeated scalar option Arrays, root-only schemas or one
+required root subcommand field, payloadless commands, and commands with one
+record payload. When subcommands are present, root options must appear before
+the selected subcommand.
 
 Environment fallback, option aliases, validation constraints, mutually
 exclusive groups, shell completion, nested subcommands, optional or default

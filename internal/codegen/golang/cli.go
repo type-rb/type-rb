@@ -160,6 +160,9 @@ func (g *generator) cliFieldValues(record cliapp.Record, prefix, keyPrefix strin
 		baseType := cliGoScalarType(field.Kind)
 		if field.Repeated {
 			values := name + "Values"
+			if !field.HasDefault {
+				g.line("_ = " + provided)
+			}
 			g.line(values + " := make([]" + baseType + ", 0, len(parsed.Values[" + strconv.Quote(key) + "]))")
 			g.line("for " + name + "Index, " + name + "Raw := range parsed.Values[" + strconv.Quote(key) + "] {")
 			g.indent++

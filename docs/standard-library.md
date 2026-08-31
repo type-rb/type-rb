@@ -28,13 +28,12 @@ IO.puts("Hello, TypeRB!")
 
 ## Scalars and strings
 
-Portable built-in types expose receiver methods backed by the same contracts
-as `trb/std/numbers`, `trb/std/booleans`, and `trb/std/strings`:
+Portable built-in types expose import-free receiver methods. They do not also
+provide public static mirrors, so each operation has one ordinary spelling:
 
 <!-- trb-doc-test: stdlib-scalars -->
 ```trb
 import trb/std/math
-import trb/std/strings
 
 text := 123.to_s()
 ratio_text := 0.25.to_s()
@@ -62,7 +61,7 @@ last_emoji := "A😀B😀".rindex("😀")
 characters := "A😀".chars()
 reversed := "A😀".reverse()
 replaced := "a😀a".replace_all("a", "$&")
-upper := Strings.uppercase("Hello")
+upper := "Hello".upcase()
 ```
 
 Integer parsing accepts a complete ASCII decimal integer with an optional sign.
@@ -76,18 +75,16 @@ point, and exponent. At least one digit is required. `to_f()` raises on an
 invalid spelling or a value that overflows the portable binary64 range;
 `try_to_f()` returns `Result<Float, NumberParseError>`. Non-finite spellings
 such as `NaN` and `Infinity` are not accepted. Values smaller than the binary64
-range round to signed zero consistently across backends. Declaration-root
-forms are `Numbers.parse_float` and `Numbers.try_parse_float`.
+range round to signed zero consistently across backends.
 
 `Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
 toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
 uses a portable fixed decimal spelling without exponent notation, including
-`.0` for integral Float values. Their declaration-root forms are
-`Numbers.to_float`, `Numbers.truncate`, and `Numbers.float_to_string`.
+`.0` for integral Float values.
 
 Integers provide `abs()`, `zero?()`, `positive?()`, `negative?()`, `even?()`,
 `odd?()`, `min()`, `max()`, and `clamp()`. An invalid clamp range raises.
-Floats provide `abs()`, `floor()`, `ceil()`, `round()`, `truncate()`,
+Floats provide `abs()`, `floor()`, `ceil()`, `round()`,
 `finite?()`, `infinite?()`, and `nan?()`; the integer conversions reject
 non-finite and out-of-range results. `round()` resolves halfway values away
 from zero. `abs()` converts negative zero to positive zero and leaves NaN as
@@ -98,13 +95,7 @@ Float. Integer arguments use the ordinary safe widening to Float. Negative
 square roots and logarithms are NaN, and logarithms of zero are negative
 infinity. Exponentiation remains the `**` operator.
 
-`Boolean#to_s()` returns lowercase `"true"` or `"false"`. Declaration-root
-forms use `Numbers.absolute`, `Numbers.zero`, `Numbers.positive`,
-`Numbers.negative`, `Numbers.even`, `Numbers.odd`,
-`Numbers.float_absolute`, `Numbers.finite`, `Numbers.infinite`, and
-`Numbers.nan`, plus `Numbers.min`, `Numbers.max`, `Numbers.clamp`,
-`Numbers.floor`, `Numbers.ceil`, `Numbers.round`, `Numbers.truncate`, and
-`Booleans.to_string`.
+`Boolean#to_s()` returns lowercase `"true"` or `"false"`.
 
 `String#size`, `[]`, `try_fetch`, `slice`, `try_slice`, `index`, and `rindex`
 operate on Unicode code points rather than encoded bytes. Indexes are
@@ -127,8 +118,7 @@ sequence. String trimming uses the pinned Unicode 17.0 `White_Space` set,
 preserves internal whitespace, and does not remove U+FEFF. `replace_all()`
 replaces every non-overlapping literal occurrence. The replacement is also
 literal, so strings such as `$&` and `$1` have no special meaning; an empty
-pattern raises. The declaration-root forms are `Strings.characters`,
-`Strings.reverse`, and `Strings.replace_all`.
+pattern raises.
 
 ## Bytes
 
@@ -136,17 +126,18 @@ pattern raises. The declaration-root forms are `Strings.characters`,
 `Array<Integer>`:
 
 ```trb
-import trb/std/bytes
-
 payload := "A😀".to_bytes()
 byte_length := payload.size()
 first := payload.at(0)
-text := Bytes.to_string(payload)
+text := payload.to_s()
 ```
 
-String conversion uses UTF-8. Decoding invalid input replaces it with U+FFFD;
-call `valid_utf8()` first when invalid bytes must be rejected. Byte indexing is
-strict and concatenation is non-mutating.
+String conversion uses UTF-8. Decoding invalid input emits one U+FFFD for each
+maximal subpart of an ill-formed UTF-8 sequence. For example, the two stray
+continuation bytes `80 80` become two replacement characters, while the
+truncated sequence `E2 82` becomes one. Call `valid_utf8?()` first when invalid
+bytes must be rejected. Byte indexing is strict and concatenation is
+non-mutating.
 
 ## Binary encoding
 
@@ -366,7 +357,7 @@ shallowly.
 `Range<Integer>#to_a()` returns a new Array containing the same sequence that
 Range iteration would visit. Inclusive and exclusive ends are honored; an
 inclusive equal-bound Range contains one value, while exclusive equal-bound
-and reversed Ranges are empty. The package form is `ranges.to_array(range)`.
+and reversed Ranges are empty.
 
 `sort()` and `sort_descending()` order an Array of `Integer`, `Float`, or
 `String`. `sort_by` and `sort_by_descending` evaluate one non-fallible key
@@ -430,23 +421,6 @@ or special-case `Result`; a Result-returning block produces an Array of Result
 values. See the [language guide](language.md#arrays-hashes-and-iteration) and
 [decision record](decisions/0004-bounded-structured-concurrent-map.md).
 
-## Logical paths
-
-`trb/std/path` manipulates portable `/`-separated logical paths without
-accessing the host filesystem:
-
-```trb
-import trb/std/path
-
-config_path := Path.join("config", "../trbconfig.jsonc")
-directory := Path.directory("src/compiler/main.trb")
-parts := Path.components("/srv/type-rb")
-```
-
-The package provides `clean`, two-part `join`, `absolute`, `components`,
-`base`, `directory`, and `separator`. Its behavior does not depend on the
-target OS or current directory.
-
 ## URL encoding
 
 `trb/std/url` encodes individual URL components and ordered query parameters:
@@ -487,39 +461,46 @@ Complete URL parsing remains a future addition to the package.
 
 ## Filesystem
 
-`trb/std/filesystem` is the explicit host-filesystem bridge. Every operation
-returns a `Result`:
+`trb/std/file` and `trb/std/dir` are separate host-filesystem bridges. `File`
+is an actual opaque resource type rather than a module containing a second file
+type. Every operation returns a `Result`:
 
+<!-- trb-doc-test: stdlib-file-read -->
 ```trb
-import trb/std/filesystem
-import trb/std/result
+import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
 
-def load_config(path: String): Result<String, FileSystem::Error>
-	return FileSystem.open(path, mode: FileSystem::OpenMode::Read) do |file|
+def load_config(path: String): Result<String, FileSystemError>
+	return File.open(path) do |file|
 		try file.read_text(max_bytes: 1048576)
 	end
 end
 ```
 
-The package provides existence checks, UTF-8 and raw-byte reads and writes,
-recursive directory creation, and sorted immediate-child listing. Failures
-carry `operation`, `path`, `message`, and a `FileSystem::ErrorKind` instead of
-exposing target exceptions. Existing one-shot operations remain available.
+Failures carry `operation`, `path`, `message`, and a
+`FileSystemErrorKind` instead of exposing target exceptions. Import the peer
+error declarations from `trb/std/errors` only when source names them directly.
 
-`FileSystem.open` accepts a typed `FileSystem::OpenMode` and requires a block.
-The `FileSystem::File` value is opaque and scoped: it may only be used as a
-direct receiver for its file methods inside that block. It cannot be
+`File.open` requires a block and accepts an optional typed `FileMode`. Omitting
+the mode selects `Read`. The `File` value is opaque and scoped: it may only be
+used as a direct receiver for its file methods inside that block. It cannot be
 constructed, assigned, passed to another function, placed in a collection,
 returned, or captured by a nested callback. The compiler closes the file
-before the `Result` leaves the structured block. Prefix `try` may end the
-block with an error, but cleanup still finishes before that error propagates
-to the enclosing `Result` boundary.
+before the `Result` leaves the structured block. Prefix `try` may end the block
+with an error, but cleanup still finishes before that error propagates to the
+enclosing `Result` boundary. The exact standard `File` identity also cannot
+appear in an authored parameter, return, field, collection, function type, or
+transparent alias. Compiler-generated and external declaration contracts
+cannot supply it as a value; only the trusted `File.open` block introduces it.
+An unrelated declaration with the same name is unaffected.
 
-`file.read_text(max_bytes:)` and `file.read_bytes(max_bytes:)` read at most the
-given number of bytes. A negative bound returns `InvalidLimit`; input exceeding
-the bound returns `TooLarge`. Text decoding uses the same UTF-8 replacement
-behavior as the one-shot text API. `file.write_text` and `file.write_bytes`
-write through a file opened in a writable mode.
+`file.read(max_bytes:)` returns `Bytes`, and
+`file.read_text(max_bytes:)` returns `String`. Both read at most the given
+number of bytes. A negative bound returns `InvalidLimit`; input exceeding the
+bound returns `TooLarge`. Text decoding uses the same maximal-subpart U+FFFD
+replacement rule as `Bytes#to_s`. `file.write` accepts `Bytes`, while
+`file.write_text` accepts `String`.
 
 `CreateNew` creates a new file and returns `AlreadyExists` if the path already
 exists. The existence check and creation are one exclusive host operation, so
@@ -527,17 +508,68 @@ parallel writers cannot both create the same path. This is no-clobber creation,
 not atomic replacement of an existing file. It does not promise `fsync`,
 directory synchronization, or persistence after power loss.
 
-`FileSystem.entries(path)` returns sorted immediate
-`FileSystem::DirectoryEntry` values. Each entry has a `name` and a typed kind:
-`File`, `Directory`, or `Other`. Symbolic links and other entries that must not
-be traversed as directories are `Other`. The operation does not recurse.
+<!-- trb-doc-test: stdlib-exclusive-create-new -->
+```trb
+import trb/std/file
+import { FileMode } from trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+import { Unit } from trb/std/unit
 
-Writes and directory creation return `Result<Unit, FileSystem::Error>`. `Unit` is a
-storable value representing successful completion; it is distinct from the
-internal `Void` return category.
+def create_output(path: String, bytes: Bytes): Result<Unit, FileSystemError>
+	return File.open(path, mode: FileMode::CreateNew) do |file|
+		try file.write(bytes)
+	end
+end
+```
 
-Filesystem paths are host paths. Use `trb/std/path` separately for portable
-lexical path operations.
+`Dir.children(path)` returns sorted immediate `DirEntry` values. Each entry has
+a `name`, a host-native `path`, and a typed `DirEntryKind`: `File`, `Directory`,
+or `Other`. Symbolic links and other entries that must not be traversed as
+directories are `Other`. The operation does not recurse. `Dir` is a
+nonconstructible type root in this slice; it owns directory operations but does
+not yet represent an open directory resource.
+
+Directory entry names must have a lossless valid UTF-8 representation. If any
+name does not, `Dir.children` returns `FileSystemErrorKind::Other` for operation
+`children`, with the supplied directory as the error path and
+`directory entry name is not valid UTF-8` as the message. It never substitutes
+U+FFFD and returns a path that names a different entry. Valid names are sorted
+by their UTF-8 bytes.
+
+<!-- trb-doc-test: stdlib-dir-children -->
+```trb
+import trb/std/dir
+import { DirEntryKind } from trb/std/dir
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def regular_file_paths(directory: String): Result<Array<String>, FileSystemError>
+	entries := try Dir.children(directory)
+	mut paths: Array<String> := []
+	entries.each do |entry|
+		if entry.kind == DirEntryKind::File
+			# entry.path can be passed directly to File.open on this host.
+			paths.push(entry.path)
+		end
+	end
+	return Result<Array<String>, FileSystemError>::Ok(paths)
+end
+```
+
+Writes return `Result<Unit, FileSystemError>`. `Unit` is a storable value
+representing successful completion; it is distinct from the internal `Void`
+return category.
+
+Filesystem paths are host-native strings and are passed to the target runtime
+without slash-only normalization. `DirEntry.path` preserves the directory text
+given to `Dir.children` and appends the entry name without a cleaning join. It
+therefore preserves host resolution for parents containing symbolic links and
+`..`. The appended separator is host-native, existing Windows `/` or `\`
+suffixes are accepted, `C:` remains drive-relative as `C:child`, and UNC share
+roots receive a separator. General parsing, cleaning, volume handling, and
+cross-host path conversion are deferred until TypeRB has a genuine nominal
+`Path` value type.
 
 ## Process
 
@@ -672,11 +704,7 @@ See the [testing guide](guides/testing.md).
 The current portable standard library includes:
 
 - `trb/std/io`
-- `trb/std/strings`
-- `trb/std/numbers`
 - `trb/std/math`
-- `trb/std/booleans`
-- `trb/std/bytes`
 - `trb/std/encoding/hex`
 - `trb/std/encoding/base64`
 - `trb/std/digest`
@@ -684,10 +712,9 @@ The current portable standard library includes:
 - `trb/std/secure_compare`
 - `trb/std/string_builder`
 - `trb/std/unicode`
-- `trb/std/ranges`
-- `trb/std/path`
 - `trb/std/url`
-- `trb/std/filesystem`
+- `trb/std/file`
+- `trb/std/dir`
 - `trb/std/process`
 - `trb/std/json`
 - `trb/std/jsonc`

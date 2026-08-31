@@ -1,6 +1,7 @@
 # 0011: Declaration-root imports
 
-Status: accepted and implemented in TypeRB 0.4.0
+Status: accepted and implemented in TypeRB 0.4.0; operation ownership is
+clarified by [ADR 0013](0013-canonical-operation-owners.md)
 
 ## Context
 
@@ -37,13 +38,13 @@ declaration would expose a marker in completion, aliasing, collision, and
 unused-binding rules. Treating a zero-match bare import as activation would
 instead make the meaning of `import path` depend on hidden package metadata.
 
-Ruby demonstrates the readability of uppercase namespaces and owned nested
-declarations. Go normally keeps functions qualified by a declared package
-name and uses a distinct blank import for initialization-only dependencies.
-TypeScript and JavaScript make peer declarations convenient through named
-imports and distinguish bindingless module loading. TypeRB combines the
-declaration properties without copying Ruby file loading, Go's lowercase
-package identifiers, or general JavaScript side-effect imports.
+Ruby demonstrates the readability of uppercase classes and modules as call
+owners. Go normally keeps functions qualified by a declared package name and
+uses a distinct blank import for initialization-only dependencies. TypeScript
+and JavaScript make peer declarations convenient through named imports and
+distinguish bindingless module loading. TypeRB combines the declaration
+properties without copying Ruby file loading, Go's lowercase package
+identifiers, or general JavaScript side-effect imports.
 
 The import path cannot mechanically determine capitalization. In particular,
 `json` may intentionally expose `JSON`, not `Json`, and `request_id` may expose
@@ -126,6 +127,12 @@ The shorthand is not a lowercase package namespace, a wildcard import, or an
 import of every public declaration. Adding an unrelated export therefore does
 not add a source binding or change existing name resolution.
 
+The selected root's declaration kind remains significant. A bare import may
+bind an actual class or value type; it does not convert that declaration into a
+namespace. The separate canonical-operation-owner rules decide whether a
+standard concept is a type or a module. Declaration-root imports do not require
+every package to expose a module-shaped root.
+
 The resolver determines the root as follows:
 
 1. Resolve the import to its canonical logical module. When the resolved
@@ -155,8 +162,8 @@ Examples include:
 | `url` | `URL` | yes |
 | `hmac` | `HMAC` | yes |
 | `base64` | `Base64` | yes |
-| `filesystem` | `FileSystem` | yes |
-| `file_system` | `FileSystem` | yes |
+| `file` | `File` | yes |
+| `dir` | `Dir` | yes |
 | `secure_random` | `SecureRandom` | yes |
 | `string_builder` | `StringBuilder` | yes |
 | `request_id` | `RequestID` | yes |
@@ -170,14 +177,15 @@ name. A module is not required to provide a matching root. For example, the
 
 A root must also be a valid ordinary binding in the importing scope. Standard
 and official package authors must not choose a root that collides with an
-unrelated prelude declaration. A compiler-owned standard package may reuse a
-built-in type name only when it provides the canonical imported static API for
-that built-in rather than introducing a second meaning. This narrow rule
-allows `Bytes` and `StringBuilder` to gain their standard static operations
-through `trb/std/bytes` and `trb/std/string_builder`; it is not available to
-official or third-party packages. In particular, the digest API uses
-`import trb/std/digest` and `Digest.sha256(...)`; it does not reuse `Hash`,
-which is already the built-in `Hash<K, V>` collection type.
+unrelated prelude declaration. A compiler-owned standard package may expose a
+built-in type as its root only when the imported declaration is that same
+canonical type, rather than a utility namespace with a second meaning. This
+narrow rule allows the actual `StringBuilder` type to own its factories through
+`trb/std/string_builder`; built-in receiver operations need no utility root or
+import. The rule is not available to official or third-party packages. In
+particular, the digest API uses `import trb/std/digest` and
+`Digest.sha256(...)`; it does not reuse `Hash`, which is already the built-in
+`Hash<K, V>` collection type.
 
 If more than one declaration has the same root key as the path, the bare
 import is ambiguous. Exact named imports remain available when the declaration
@@ -465,51 +473,31 @@ continued root uniqueness cannot be proven.
 Formatting never converts between `import` and `activate`; they express
 different source semantics.
 
-### Owned nested declarations
+### Declaration ownership is separate
 
-Declaration ownership, rather than physical package grouping, determines
-whether a type is nested. Operations use `.` and nested declarations use
-`::`:
-
-```trb
-import trb/std/json
-import trb/std/result
-
-def decode_user(text: String): Result<User, JSON::Error>
-	return JSON.decode<User>(text)
-end
-```
-
-A supporting declaration is nested when its unqualified name is generic or it
-has meaning only as part of one capability. Examples are `JSON::Error`,
-`FileSystem::Error`, `Process::Output`, and `Hex::DecodeError`. Nesting keeps
-ownership visible and avoids peer names such as `JsonError`, `FileError`, and
-`ProcessResult`.
-
-A declaration remains a peer top-level export when it is an independently
-useful part of the program's vocabulary. Types such as `Instant`, `Duration`,
-`Date`, and `TimeZone` are imported by name rather than being forced under a
-`Time` namespace:
+Root selection does not decide whether supporting declarations are nested or
+top-level peers. Named imports already support independently useful peer types:
 
 ```trb
 import { Instant, Duration, TimeZone } from trb/std/time
 ```
 
-Likewise, `Hex` and `Base64` are peer capability modules in the `encoding`
-group, not implementation details nested under an `Encoding` root. Each owns
-its operations and decode error family, so the standard library keeps them as
-separate canonical leaf modules:
+Likewise, a package may expose separate leaf capability modules without an
+aggregator or re-export solely to reduce import lines:
 
 ```trb
 import trb/std/encoding/hex
 import trb/std/encoding/base64
 ```
 
-The standard library does not add an aggregator or re-export solely to reduce
-the number of import lines, because that would create synonymous import paths.
-A shared package is appropriate when it is itself the canonical owner of peer
-declarations, as with `trb/std/time`. This is an API ownership rule, not an
-exception table maintained by the compiler.
+Importing a class root does not implicitly create class-owned nested
+declarations, merge a module with that class, or make every peer declaration
+available through the root. Supporting declarations for the initial `File`
+and `Dir` APIs remain exact named peer imports. Portable class-owned nesting is
+deferred until it has an explicit language and backend contract.
+
+[ADR 0013](0013-canonical-operation-owners.md) defines the separate rules for
+choosing type, module, and receiver owners.
 
 ### Implementation order
 
@@ -551,8 +539,10 @@ semantics it owns.
 
 ## Consequences
 
-- Common module operations have one qualified spelling, such as
-  `Math.sqrt(9)`, and member completion starts from an explicit owner.
+- Common domain operations have one qualified spelling, such as
+  `Math.sqrt(9.0)`, and member completion starts from an explicit owner.
+  Operations on an existing value use their receiver instead of a duplicate
+  utility root.
 - Public top-level functions such as `describe`, `expect`, and `test` remain
   directly importable without making module members directly importable.
 - Multiple peer declarations and collision-resolving aliases still fit on one
@@ -577,14 +567,14 @@ semantics it owns.
   authored import path, so formatter shortening cannot silently rebind later.
 - Capability-only source remains rare and explicit without synthetic marker
   declarations or a metadata-dependent meaning for ordinary imports.
-- Supporting types can arrive with their owner through one root import, while
-  frequently used independent types remain concise in annotations.
+- Supporting peer types remain available through exact named imports; a bare
+  root import does not silently add them to scope.
 - Existing package imports that create lowercase namespaces, import all
   project exports, or activate an integration are invalid under the new model
   and must be rewritten with the source change that adopts it.
-- The compiler must support imported modules with public methods and nested
-  declarations, including namespace-stable type identity across modules and
-  backends. Current implementation limitations do not alter the source model.
+- The compiler must preserve the selected declaration's kind and identity
+  across modules and backends. Class-owned nested declarations are not required
+  by this decision.
 
 ## Rejected alternatives
 
@@ -621,9 +611,8 @@ semantics it owns.
   compatibility risk but gives root-stable targets two canonical root
   spellings even though their effective export rule guarantees root
   uniqueness.
-- Nesting every declaration produces repetitive names such as
-  `Time::Duration`; flattening every declaration loses useful ownership and
-  encourages prefixed names such as `JsonError`.
+- Inferring nesting from a bare import would conflate binding selection with
+  declaration ownership and make classes behave as merged namespaces.
 
 ## Deferred work
 
@@ -633,6 +622,8 @@ semantics it owns.
 - Additional path-separator normalization, such as matching `react-query` to
   `ReactQuery`. The initial rule removes ASCII `_` only.
 - Wildcard imports and general public re-export syntax.
+- Portable class-owned nested declarations and declaration merging. Supporting
+  types remain explicit top-level peers until those semantics are designed.
 - Capability-specific selectors for a target that declares more than one
   capability.
 - Structured, host-validated, fragment-scoped capability edges for generated

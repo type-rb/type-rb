@@ -147,14 +147,64 @@ Imports are explicit and resolved before type checking:
 import app/models/user
 import { UserRepo } from app/repos/user_repo
 import { Contract as ExternalContract } from acme/contracts
-import trb/std/strings
+import trb/std/math
 ```
 
 A bare import binds one unique public declaration root whose authored name
-matches the final path segment, such as `User`, `Strings`, or `JSON`. It does
+matches the final path segment, such as `User`, `Math`, or `JSON`. It does
 not create a lowercase package namespace or import every export. Use a named
 import for exact peer declarations and top-level functions; `as` changes only
 the local binding.
+
+The root can be a type as well as a module. Value and resource concepts use
+their actual type as the root rather than consuming the type name with a
+static-only utility namespace. For example, `import trb/std/file` binds the
+opaque `File` type used by `File.open` and by the block parameter that it
+yields. It does not bind a module containing a second file-handle type, and
+source cannot construct the resource with `File.new()`. `File` remains valid as
+the class owner in `File.open`, but its value type is inferred only for that
+trusted block parameter. Authored parameters, returns, fields, collection
+elements, function types, and transparent aliases cannot contain the exact
+standard `File` type.
+
+## Choosing an operation owner
+
+TypeRB keeps one public spelling for an operation whenever the spellings would
+have the same semantics:
+
+- Use an instance method for an operation on an existing value, such as
+  `123.to_s()`, `2.5.to_i()`, `text.upcase()`, or `bytes.valid_utf8?()`.
+- Use a class member for an operation naturally associated with an actual
+  nominal type but not an existing instance. This includes constructors and
+  factories such as `StringBuilder.new()` and `File.open(path)`, and associated
+  operations such as `Dir.children(path)`.
+- Use a module member for a domain algorithm with no natural value receiver,
+  such as `Math.sqrt(9.0)` or `JSON.decode<Value>(text)`.
+
+Built-in receiver operations do not require utility imports, and TypeRB does
+not also expose equivalent static utility forms. Two operations may coexist
+only when their documented semantics, lifecycle, or performance differ rather
+than merely their call style. A type-associated operation does not justify
+creating a utility class when no actual nominal type exists.
+
+Explicitly listed portable-prelude bindings are a narrow language convenience,
+not static mirrors for value methods. For example, prelude `puts` and
+owner-qualified `IO.puts` intentionally reach the same output operation;
+packages do not gain similar aliases by default.
+
+Supporting declarations remain exact named imports. The initial file API uses
+the peer `FileMode` declaration instead of inventing a `File` module or
+requiring class-owned nesting. A source file that uses both imports them
+together:
+
+```trb
+import trb/std/file
+import { FileMode } from trb/std/file
+```
+
+The `Path` name is reserved for a future host-path value with defined value
+semantics. A static-only `Path` class is not used as a placeholder for path
+functions.
 
 Portable libraries use `trb/std/*`. Target-specific APIs use
 `trb/platform/<mode>/*` and are rejected when imported from another mode:

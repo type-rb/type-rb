@@ -4,24 +4,35 @@ import (
 	"strconv"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-func (g *generator) filesystemErrorValue(operation, path, message, kind string) string {
-	errorType := g.tsType(types.FromName("FileSystem::Error"))
-	return "({ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: " + g.runtimeName("FileSystem::ErrorKind") + "." + kind + " } satisfies " + errorType + ")"
+func (g *generator) filesystemErrorValue(errorType, operation, path, message, kind string) string {
+	return "({ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: " + g.filesystemRuntimeName(stdlib.FileSystemErrorKindType()) + "." + kind + " } satisfies " + errorType + ")"
 }
 
 func (g *generator) filesystemResultOK(valueType, errorType types.Type, value string) string {
-	return g.runtimeName("Result") + ".Ok<" + g.tsType(valueType) + ", " + g.tsType(errorType) + ">(" + value + ")"
+	return g.filesystemResultName() + ".Ok<" + g.tsType(valueType) + ", " + g.tsType(errorType) + ">(" + value + ")"
 }
 
 func (g *generator) filesystemResultErr(valueType, errorType types.Type, value string) string {
-	return g.runtimeName("Result") + ".Err<" + g.tsType(valueType) + ", " + g.tsType(errorType) + ">(" + value + ")"
+	return g.filesystemResultName() + ".Err<" + g.tsType(valueType) + ", " + g.tsType(errorType) + ">(" + value + ")"
+}
+
+func (g *generator) filesystemRuntimeName(typ types.Type) string {
+	if name := g.declarationNames[typ.Declaration]; name != "" {
+		return name
+	}
+	return g.runtimeName(typ.Name)
+}
+
+func (g *generator) filesystemResultName() string {
+	return g.filesystemRuntimeName(stdlib.ResultType(types.Type{}, types.Type{}))
 }
 
 func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
-	if block == nil || block.Result == nil || len(block.Call.Arguments) < 2 {
+	if block == nil || block.Result == nil || len(block.Call.Arguments) < 1 {
 		return
 	}
 	g.temporary++
@@ -37,18 +48,24 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		successType = types.FromName("Unit")
 	}
 	errorType := block.Fails
+	errorTypeName := g.tsType(errorType)
 	rawType := block.Call.ExprType()
 	resultType := g.tsType(rawType)
 	g.line("const " + raw + ": " + resultType + " = (() => {")
 	g.indent++
 	g.line("const " + path + " = " + g.expr(block.Call.Arguments[0].Value) + ";")
 	g.line(`const fs = (globalThis as any).process?.getBuiltinModule?.("fs");`)
-	unavailable := g.filesystemErrorValue("open", path, strconv.Quote("filesystem is unavailable"), "Other")
+	unavailable := g.filesystemErrorValue(errorTypeName, "open", path, strconv.Quote("filesystem is unavailable"), "Other")
 	g.line("if (fs === undefined) return " + g.filesystemResultErr(successType, errorType, unavailable) + ";")
-	g.line("const " + mode + " = " + g.expr(block.Call.Arguments[1].Value) + ";")
-	g.line("const flags = " + mode + " === " + g.runtimeName("FileSystem::OpenMode") + ".Read ? \"r\" : " + mode + " === " + g.runtimeName("FileSystem::OpenMode") + ".Write ? \"w\" : \"wx\";")
-	openOther := g.filesystemErrorValue("open", path, "message", "Other")
-	openExists := g.filesystemErrorValue("open", path, "message", "AlreadyExists")
+	modeName := g.filesystemRuntimeName(stdlib.FileModeType())
+	modeValue := modeName + ".Read"
+	if len(block.Call.Arguments) > 1 {
+		modeValue = g.expr(block.Call.Arguments[1].Value)
+	}
+	g.line("const " + mode + " = " + modeValue + ";")
+	g.line("const flags = " + mode + " === " + modeName + ".Read ? \"r\" : " + mode + " === " + modeName + ".Write ? \"w\" : \"wx\";")
+	openOther := g.filesystemErrorValue(errorTypeName, "open", path, "message", "Other")
+	openExists := g.filesystemErrorValue(errorTypeName, "open", path, "message", "AlreadyExists")
 	g.line("let " + handle + ": number;")
 	g.line("try { " + handle + " = fs.openSync(" + path + ", flags, 0o644); } catch (error) { const message = error instanceof Error ? error.message : String(error); return " + g.filesystemResultErr(successType, errorType, "(error as any)?.code === \"EEXIST\" ? "+openExists+" : "+openOther) + "; }")
 	g.line("let " + result + ": " + resultType + " | undefined;")
@@ -72,7 +89,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.indent--
 	g.line("} finally {")
 	g.indent++
-	closeError := g.filesystemErrorValue("close", path, "message", "Other")
+	closeError := g.filesystemErrorValue(errorTypeName, "close", path, "message", "Other")
 	g.line("try { fs.closeSync(" + handle + "); } catch (error) { if (" + completed + ") { const message = error instanceof Error ? error.message : String(error); " + result + " = " + g.filesystemResultErr(successType, errorType, closeError) + "; } }")
 	g.indent--
 	g.line("}")

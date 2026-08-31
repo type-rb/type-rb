@@ -2558,15 +2558,15 @@ func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path str
 	if !ok {
 		return Value{}, errors.New("filesystem requires trb/std/result")
 	}
-	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::Error")].(*recordDefinition)
+	fileErrorDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "FileSystemError")].(*recordDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem runtime is not loaded")
 	}
-	fileErrorKindDefinition, ok := e.definitions[symbolKey("trb/std/filesystem/index", "FileSystem::ErrorKind")].(*enumDefinition)
+	fileErrorKindDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "FileSystemErrorKind")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem error kinds are not loaded")
 	}
-	errorType := types.FromName("FileSystem::Error")
+	errorType := types.FromName("FileSystemError")
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
 	}
@@ -2578,7 +2578,7 @@ func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path str
 				"operation": {Type: types.FromName("String"), Data: operation},
 				"path":      {Type: types.FromName("String"), Data: path},
 				"message":   {Type: types.FromName("String"), Data: cause.Error()},
-				"kind": {Type: types.FromName("FileSystem::ErrorKind"), Data: &enumValue{
+				"kind": {Type: types.Type{Kind: types.Named, Name: "FileSystemErrorKind", Declaration: fileErrorKindDefinition.Node.Declaration}, Data: &enumValue{
 					Definition: fileErrorKindDefinition,
 					Name:       kind,
 					Payload:    map[string]Value{},

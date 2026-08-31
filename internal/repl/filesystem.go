@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -15,10 +16,10 @@ func init() {
 	registerRuntimeProvider(func() runtimeProvider { return &filesystemRuntimeProvider{} })
 }
 
-func (*filesystemRuntimeProvider) Name() string { return "trb/std/filesystem" }
+func (*filesystemRuntimeProvider) Name() string { return "trb/std/file" }
 
 func (*filesystemRuntimeProvider) Handles(intrinsic string) bool {
-	return intrinsic == "trb.std.filesystem.open"
+	return intrinsic == "trb.std.file.open"
 }
 
 func (*filesystemRuntimeProvider) Configure([]*ir.Program) error { return nil }
@@ -30,26 +31,30 @@ func (*filesystemRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvocatio
 }
 
 func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtimeBlockInvocation) (Value, error) {
-	if len(invocation.Arguments) < 2 {
-		return Value{}, errors.New("FileSystem.open requires path and mode")
+	if len(invocation.Arguments) < 1 {
+		return Value{}, errors.New("File.open requires a path")
 	}
 	path, ok := invocation.Arguments[0].Value.Data.(string)
 	if !ok {
-		return Value{}, errors.New("FileSystem.open path must be String")
+		return Value{}, errors.New("File.open path must be String")
 	}
-	mode, ok := invocation.Arguments[1].Value.Data.(*enumValue)
-	if !ok {
-		return Value{}, errors.New("FileSystem.open mode must be FileSystem::OpenMode")
+	modeName := "Read"
+	if len(invocation.Arguments) > 1 {
+		mode, ok := invocation.Arguments[1].Value.Data.(*enumValue)
+		if !ok {
+			return Value{}, errors.New("File.open mode must be FileMode")
+		}
+		modeName = mode.Name
 	}
 	flags := os.O_RDONLY
-	switch mode.Name {
+	switch modeName {
 	case "Read":
 	case "Write":
 		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	case "CreateNew":
 		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	default:
-		return Value{}, fmt.Errorf("unknown FileSystem::OpenMode %s", mode.Name)
+		return Value{}, fmt.Errorf("unknown FileMode %s", modeName)
 	}
 	file, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
@@ -59,7 +64,7 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 		}
 		return evaluator.filesystemErrKind(invocation.Type, "open", path, err, kind)
 	}
-	value, evaluateErr := invocation.Evaluate([]Value{{Type: types.FromName("FileSystem::File"), Data: file}})
+	value, evaluateErr := invocation.Evaluate([]Value{{Type: stdlib.FileResourceType(), Data: file}})
 	closeErr := file.Close()
 	if evaluateErr != nil {
 		return Value{}, evaluateErr
