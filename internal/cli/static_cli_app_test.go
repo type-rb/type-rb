@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -57,7 +59,7 @@ end
 
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "-p", "9000", "-v"}); status != 0 {
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "-p", "8000", "-p", "9000", "-v"}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
 	if stdout.String() != "public\n9000\ntrue\n" || stderr.Len() != 0 {
@@ -84,6 +86,15 @@ end
 
 	stdout.Reset()
 	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "serve", "public", "--verbose=false"}); status != 0 {
+		t.Fatalf("explicit false status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "public\n8080\nfalse\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected explicit false output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
 	if status := command.Run([]string{"run", "--config", config.Path, "--", "--help"}); status != 0 {
 		t.Fatalf("help status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
@@ -100,6 +111,141 @@ end
 	}
 	if !strings.Contains(stderr.String(), `unexpected argument "serve"`) {
 		t.Fatalf("unexpected -- error stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunGeneratedStaticCLICollectsRepeatedOptions(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Name = "repeated"
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/static-cli-repeated"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { run } from trb/cli
+
+record CollectArgs
+	counts: Array<Integer> @cli(:option, name: "count", short: "c", value_name: "COUNT", about: "Add a count")
+	tags: Array<String> = [] @cli(:option, name: "tag", short: "t", value_name: "TAG", about: "Add a tag")
+	ratios: Array<Float> = [] @cli(:option, name: "ratio", value_name: "RATIO", about: "Add a ratio")
+	flags: Array<Boolean> = [] @cli(:option, name: "flag", short: "f", about: "Add a flag")
+	fallbacks: Array<String> = ["fallback"] @cli(:option, name: "fallback", value_name: "VALUE", about: "Override fallback values")
+end
+
+enum Command
+	Collect(args: CollectArgs)
+end
+
+record AppArgs
+	command: Command @cli(:subcommand)
+end
+
+def main()
+	args := run<AppArgs>(name: "repeated")
+	case args.command
+	when Command::Collect(collect)
+		puts(collect.tags.join(","))
+		puts(collect.counts[0].to_s() + "," + collect.counts[1].to_s() + "," + collect.counts[2].to_s())
+		puts(collect.ratios[0].to_s() + "," + collect.ratios[1].to_s())
+		puts(collect.flags[0].to_s() + "," + collect.flags[1].to_s() + "," + collect.flags[2].to_s())
+		puts(collect.fallbacks.join(","))
+	end
+	return
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	arguments := []string{
+		"run", "--config", config.Path, "--", "collect",
+		"--tag", "one", "--tag=two", "-t", "three",
+		"--count", "1", "--count=-2", "-c", "3",
+		"--ratio", "1.5", "--ratio=-2.25",
+		"--flag", "--flag=false", "-f",
+	}
+	if status := command.Run(arguments); status != 0 {
+		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "one,two,three\n1,-2,3\n1.5,-2.25\ntrue,false,true\nfallback\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected repeated output stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	overridden := append(append([]string(nil), arguments...), "--fallback", "first", "--fallback=second")
+	if status := command.Run(overridden); status != 0 {
+		t.Fatalf("override status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "one,two,three\n1,-2,3\n1.5,-2.25\ntrue,false,true\nfirst,second\n" || stderr.Len() != 0 {
+		t.Fatalf("unexpected repeated override stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"run", "--config", config.Path, "--", "collect", "--help"}); status != 0 {
+		t.Fatalf("help status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	for _, fragment := range []string{"-t, --tag <TAG>...", "-c, --count <COUNT>...", "--ratio <RATIO>...", "-f, --flag..."} {
+		if !strings.Contains(stdout.String(), fragment) {
+			t.Fatalf("repeated option help is missing %q: %s", fragment, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if status := command.Run([]string{"build", "--config", config.Path, "--compile"}); status != 0 {
+		t.Fatalf("compile status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	executable := filepath.Join(root, "bin", config.Name)
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
+	direct := exec.Command(executable, "collect", "--count", "not-an-integer")
+	var directStdout, directStderr bytes.Buffer
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err := direct.Run()
+	exitError, ok := err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("invalid repeated Integer error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), `invalid value "not-an-integer" for counts`) {
+		t.Fatalf("unexpected invalid repeated Integer error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+
+	direct = exec.Command(executable, "collect")
+	directStdout.Reset()
+	directStderr.Reset()
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err = direct.Run()
+	exitError, ok = err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("missing repeated option error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), "missing option --count") {
+		t.Fatalf("unexpected missing repeated option error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+
+	direct = exec.Command(executable)
+	directStdout.Reset()
+	directStderr.Reset()
+	direct.Stdout = &directStdout
+	direct.Stderr = &directStderr
+	err = direct.Run()
+	exitError, ok = err.(*exec.ExitError)
+	if !ok || exitError.ExitCode() != 2 {
+		t.Fatalf("missing subcommand error=%v, want exit status 2; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+	}
+	if !strings.Contains(directStderr.String(), "a command is required") {
+		t.Fatalf("unexpected missing subcommand error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
 	}
 }
 
