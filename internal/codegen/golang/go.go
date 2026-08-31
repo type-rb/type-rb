@@ -2540,6 +2540,11 @@ func (g *generator) unaryOperand(expression ir.Expression) string {
 
 func (g *generator) memberReceiver(expression ir.Expression) string {
 	value := g.expr(expression)
+	typ := expression.ExprType()
+	goType := g.goType(typ)
+	if typ.Nullable && strings.HasPrefix(goType, "*") {
+		return "(func(value " + goType + ") " + goType + " { if value == nil { panic(\"nil receiver\") }; return value }(" + value + "))"
+	}
 	switch expression.(type) {
 	case *ir.Conversion:
 		return "(" + value + ")"

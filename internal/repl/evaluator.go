@@ -1019,16 +1019,37 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		return Value{Type: node.ExprType(), Data: &rangeValue{Start: startValue, End: endValue, Exclusive: node.Exclusive}}, nil
 	case *ir.Member:
-		if node.Reference != nil && node.Reference.Intrinsic != "" && node.Reference.ExportKind == "property" {
+		var safeReceiver *Value
+		if node.Safe {
 			receiver, err := e.expression(node.Receiver, module, sc)
 			if err != nil {
 				return Value{}, err
+			}
+			if receiver.Data == nil {
+				return Value{Type: node.ExprType(), Data: nil}, nil
+			}
+			receiver.Type.Nullable = false
+			safeReceiver = &receiver
+		}
+		if node.Reference != nil && node.Reference.Intrinsic != "" && node.Reference.ExportKind == "property" {
+			receiver := Value{}
+			if safeReceiver != nil {
+				receiver = *safeReceiver
+			} else {
+				var err error
+				receiver, err = e.expression(node.Receiver, module, sc)
+				if err != nil {
+					return Value{}, err
+				}
 			}
 			value, handled, err := e.runtimeCall(runtimeInvocation{
 				Name: node.Reference.Intrinsic, Arguments: []evaluatedArgument{{Value: receiver}},
 				Type: node.ExprType(), MemberName: node.Name,
 			})
 			if handled {
+				if node.Safe {
+					value.Type = node.ExprType()
+				}
 				return value, err
 			}
 		}
@@ -1045,14 +1066,21 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				return value, nil
 			}
 		}
-		receiver, err := e.expression(node.Receiver, module, sc)
-		if err != nil {
-			return Value{}, err
+		receiver := Value{}
+		if safeReceiver != nil {
+			receiver = *safeReceiver
+		} else {
+			var err error
+			receiver, err = e.expression(node.Receiver, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
 		}
-		if node.Safe && receiver.Data == nil {
-			return Value{Type: node.ExprType(), Data: nil}, nil
+		result, err := e.member(receiver, node.Name, module)
+		if node.Safe {
+			result.Type = node.ExprType()
 		}
-		return e.member(receiver, node.Name, module)
+		return result, err
 	case *ir.RecordConstruct:
 		arguments := make([]evaluatedArgument, len(node.Arguments))
 		for index, argument := range node.Arguments {
@@ -1091,6 +1119,18 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		return value, nil
 	case *ir.Call:
 		reference := expressionReference(node.Callee)
+		var safeReceiver *Value
+		if member, safe := safeCallMember(node.Callee); safe {
+			receiver, err := e.expression(member.Receiver, module, sc)
+			if err != nil {
+				return Value{}, err
+			}
+			if receiver.Data == nil {
+				return Value{Type: node.ExprType(), Data: nil}, nil
+			}
+			receiver.Type.Nullable = false
+			safeReceiver = &receiver
+		}
 		arguments := make([]evaluatedArgument, 0, len(node.Arguments)+1)
 		if reference != nil && reference.Intrinsic != "" && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic)) {
 			var member *ir.Member
@@ -1101,9 +1141,15 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				member, _ = callee.Receiver.(*ir.Member)
 			}
 			if member != nil {
-				receiver, err := e.expression(member.Receiver, module, sc)
-				if err != nil {
-					return Value{}, err
+				receiver := Value{}
+				if safeReceiver != nil {
+					receiver = *safeReceiver
+				} else {
+					var err error
+					receiver, err = e.expression(member.Receiver, module, sc)
+					if err != nil {
+						return Value{}, err
+					}
 				}
 				arguments = append(arguments, evaluatedArgument{Value: receiver})
 			}
@@ -1116,16 +1162,36 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
 		}
 		if reference != nil && reference.Intrinsic != "" {
-			return e.intrinsicCall(reference.Intrinsic, arguments, node.ExprType(), node.Codec, node)
+			result, err := e.intrinsicCall(reference.Intrinsic, arguments, node.ExprType(), node.Codec, node)
+			if safeReceiver != nil {
+				result.Type = node.ExprType()
+			}
+			return result, err
 		}
 		var callee Value
 		var err error
-		if member, ok := node.Callee.(*ir.Member); ok && member.Reference != nil && member.Reference.Package != "" {
+		if member, safe := safeCallMember(node.Callee); safe && safeReceiver != nil {
+			if member.Reference != nil && member.Reference.Package != "" {
+				if imported, ok := e.symbol(member.Reference.Package, member.Reference.Symbol); ok {
+					callee = imported
+				} else {
+					callee, err = e.callMember(*safeReceiver, member.Name, module)
+				}
+			} else {
+				callee, err = e.callMember(*safeReceiver, member.Name, module)
+			}
+		} else if member, ok := node.Callee.(*ir.Member); ok && member.Reference != nil && member.Reference.Package != "" {
 			callee, err = e.expression(node.Callee, module, sc)
 		} else if member, ok := node.Callee.(*ir.Member); ok {
-			receiver, receiverErr := e.expression(member.Receiver, module, sc)
-			if receiverErr != nil {
-				return Value{}, receiverErr
+			receiver := Value{}
+			if safeReceiver != nil {
+				receiver = *safeReceiver
+			} else {
+				var receiverErr error
+				receiver, receiverErr = e.expression(member.Receiver, module, sc)
+				if receiverErr != nil {
+					return Value{}, receiverErr
+				}
 			}
 			callee, err = e.callMember(receiver, member.Name, module)
 		} else {
@@ -1139,9 +1205,17 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, fmt.Errorf("%s is not callable", Inspect(callee))
 		}
 		if function.Intrinsic != "" {
-			return e.intrinsicCall(function.Intrinsic, arguments, node.ExprType(), nil, node)
+			result, err := e.intrinsicCall(function.Intrinsic, arguments, node.ExprType(), nil, node)
+			if safeReceiver != nil {
+				result.Type = node.ExprType()
+			}
+			return result, err
 		}
-		return e.call(function, arguments)
+		result, err := e.call(function, arguments)
+		if safeReceiver != nil {
+			result.Type = node.ExprType()
+		}
+		return result, err
 	case *ir.EnumCall:
 		return e.enumCall(node, module, sc)
 	case *ir.EnumConstruct:
@@ -3386,6 +3460,17 @@ func expressionReference(expression ir.Expression) *ir.Reference {
 		return expressionReference(node.Receiver)
 	default:
 		return nil
+	}
+}
+
+func safeCallMember(expression ir.Expression) (*ir.Member, bool) {
+	switch node := expression.(type) {
+	case *ir.Member:
+		return node, node.Safe
+	case *ir.TypeApply:
+		return safeCallMember(node.Receiver)
+	default:
+		return nil, false
 	}
 }
 

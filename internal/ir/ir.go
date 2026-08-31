@@ -695,6 +695,9 @@ type Call struct {
 	Block           *Block
 	Codec           *CodecSchema
 	DeclarationOnly bool
+	// PresentType is the call result after a safe-navigation receiver is known
+	// to be non-nil. It remains zero for ordinary calls.
+	PresentType types.Type
 }
 
 func (*Call) irExpression() {}
@@ -818,6 +821,9 @@ type Member struct {
 	// ClassField distinguishes storage-backed class properties from methods and
 	// record fields so backends can preserve both `value.name` and `value.name()`.
 	ClassField bool
+	// PresentType is the member's type after a safe-navigation receiver is
+	// known to be non-nil. It remains zero for ordinary member access.
+	PresentType types.Type
 	// UnionAlternatives asks representation-sensitive backends to project a
 	// common data member from an erased union value.
 	UnionAlternatives []UnionMemberAlternative

@@ -1176,6 +1176,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			ExprBase: base, Callee: l.expression(n.Callee),
 			CallSignature:   append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
+			PresentType:     l.checked.SafeNavigationCallTypes[n],
 		}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = l.lowerCodecSchema(codec.Schema)
@@ -1201,6 +1202,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			ExprBase: base, Receiver: l.expression(receiver), Name: name,
 			Declaration: l.checked.ExpressionDeclarations[n], Dispatch: l.checked.ExpressionDispatches[n],
 			Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference,
+			PresentType: l.checked.SafeNavigationPresentTypes[n],
 		}
 		for _, alternative := range l.checked.UnionMemberAccesses[n] {
 			member.UnionAlternatives = append(member.UnionAlternatives, ir.UnionMemberAlternative{Type: alternative.Alternative, MemberType: alternative.Member})

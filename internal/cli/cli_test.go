@@ -3833,6 +3833,182 @@ end
 	}
 }
 
+func TestSafeNavigationAcrossAvailableBackendsAndREPL(t *testing.T) {
+	definitions := `class Consumer
+	def take(value: String): String
+		puts("call")
+		return value
+	end
+
+	def echo<T>(value: T): T
+		puts("generic")
+		return value
+	end
+
+	def touch()
+		puts("touch")
+		return
+	end
+end
+
+class Child
+	def name(): String
+		return "child"
+	end
+end
+
+record Holder
+	child: Child
+end
+
+record Label
+	text: String
+end
+
+def maybe_consumer(present: Boolean): Consumer?
+	puts("receiver")
+	if present
+		return Consumer.new()
+	end
+	return nil
+end
+
+def maybe_label(present: Boolean): Label?
+	puts("label receiver")
+	if present
+		return Label.new(text: "label")
+	end
+	return nil
+end
+
+def maybe_holder(present: Boolean): Holder?
+	puts("holder receiver")
+	if present
+		return Holder.new(child: Child.new())
+	end
+	return nil
+end
+
+def maybe_text(present: Boolean): String?
+	puts("text receiver")
+	if present
+		return "value"
+	end
+	return nil
+end
+
+def argument(): String
+	puts("argument")
+	return "value"
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		root := t.TempDir()
+		config := project.New(root, mode)
+		config.SourceDir = "src"
+		if config.Go != nil {
+			config.Go.Module = "example.com/type-rb/safe-navigation-test"
+		}
+		if err := config.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		replInput := definitions + `maybe_consumer(false)&.take(argument())
+maybe_consumer(true)&.take(argument())
+maybe_consumer(false)&.echo<String>(argument())
+maybe_consumer(true)&.echo<String>(argument())
+Consumer.new()&.take(argument())
+maybe_label(false)&.text
+maybe_label(true)&.text
+maybe_text(false)&.size()
+maybe_text(true)&.size()
+maybe_holder(false)&.child&.name()
+maybe_holder(true)&.child&.name()
+:quit
+`
+		var replStdout, replStderr bytes.Buffer
+		replCommand := &CLI{Stdin: strings.NewReader(replInput), Stdout: &replStdout, Stderr: &replStderr}
+		if status := replCommand.Run([]string{"repl", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s REPL status=%d stderr=%s", mode, status, replStderr.String())
+		}
+		replWant := "receiver\nnil : String?\nreceiver\nargument\ncall\n\"value\" : String?\nreceiver\nnil : String?\nreceiver\nargument\ngeneric\n\"value\" : String?\nargument\ncall\n\"value\" : String\nlabel receiver\nnil : String?\nlabel receiver\n\"label\" : String?\ntext receiver\nnil : Integer?\ntext receiver\n5 : Integer?\nholder receiver\nnil : String?\nholder receiver\n\"child\" : String?\n"
+		if replStdout.String() != replWant || replStderr.Len() != 0 {
+			t.Fatalf("unexpected %s safe-navigation REPL result\nwant:\n%s\ngot:\n%s\nstderr:\n%s", mode, replWant, replStdout.String(), replStderr.String())
+		}
+
+		if mode == "ruby" {
+			if _, err := exec.LookPath("ruby"); err != nil {
+				t.Log("ruby is not installed; skipping Ruby safe-navigation run")
+				continue
+			}
+		}
+		if mode == "typescript" {
+			if _, err := exec.LookPath("node"); err != nil {
+				t.Log("node is not installed; skipping TypeScript safe-navigation run")
+				continue
+			}
+		}
+		source := definitions + `
+def main()
+	missing := maybe_consumer(false)&.take(argument())
+	puts(missing == nil)
+	present := maybe_consumer(true)&.take(argument())
+	puts(present)
+	missing_generic := maybe_consumer(false)&.echo<String>(argument())
+	puts(missing_generic == nil)
+	present_generic := maybe_consumer(true)&.echo<String>(argument())
+	puts(present_generic)
+	puts(Consumer.new()&.take(argument()))
+	maybe_consumer(false)&.touch()
+	maybe_consumer(true)&.touch()
+	missing_label := maybe_label(false)&.text
+	puts(missing_label == nil)
+	puts(maybe_label(true)&.text)
+	missing_size := maybe_text(false)&.size()
+	puts(missing_size == nil)
+	puts(maybe_text(true)&.size())
+	missing_name := maybe_holder(false)&.child&.name()
+	puts(missing_name == nil)
+	puts(maybe_holder(true)&.child&.name())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+		if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+			t.Fatalf("%s status=%d stderr=%s", mode, status, stderr.String())
+		}
+		want := "receiver\ntrue\nreceiver\nargument\ncall\nvalue\nreceiver\ntrue\nreceiver\nargument\ngeneric\nvalue\nargument\ncall\nvalue\nreceiver\nreceiver\ntouch\nlabel receiver\ntrue\nlabel receiver\nlabel\ntext receiver\ntrue\ntext receiver\n5\nholder receiver\ntrue\nholder receiver\nchild\n"
+		if stdout.String() != want || stderr.Len() != 0 {
+			t.Fatalf("unexpected %s safe-navigation output: want %q, got %q; stderr=%s", mode, want, stdout.String(), stderr.String())
+		}
+
+		ordinaryChain := definitions + `
+def main()
+	puts(maybe_holder(false)&.child.name())
+	return
+end
+`
+		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(ordinaryChain), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if status := command.Run([]string{"run", "--config", config.Path}); status == 0 {
+			t.Fatalf("%s ordinary call after safe navigation unexpectedly succeeded: stdout=%s", mode, stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "holder receiver") || stderr.Len() == 0 {
+			t.Fatalf("%s ordinary call did not fail after evaluating the safe receiver: stdout=%s stderr=%s", mode, stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestReplRejectsPlatformPackageForConfiguredModeAndContinues(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")

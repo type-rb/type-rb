@@ -1313,6 +1313,128 @@ end
 	}
 }
 
+func TestSafeNavigationInfersNullableResultsAcrossModes(t *testing.T) {
+	source := []byte(`class Consumer
+	def take(value: String): String
+		return value
+	end
+
+	def touch()
+		return
+	end
+end
+
+record Label
+	text: String
+end
+
+record CallbackHolder
+	callback: (String) -> String
+end
+
+def maybe_consumer(): Consumer?
+	return nil
+end
+
+def maybe_label(): Label?
+	return nil
+end
+
+def call_non_nullable(): String
+	return Consumer.new()&.take("value")
+end
+
+def call_function_field(holder: CallbackHolder): String
+	return holder&.callback("value")
+end
+
+def inspect_safe_navigation()
+	call_result := maybe_consumer()&.take("value")
+	member_result := maybe_label()&.text
+	puts(call_result == nil)
+	puts(member_result == nil)
+	maybe_consumer()&.touch()
+	return
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("safe_navigation.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected safe navigation: %v", mode, err)
+		}
+		var callType, memberType types.Type
+		for _, statement := range artifact.IR.Statements {
+			method, ok := statement.(*ir.Method)
+			if !ok || method.Name != "inspect_safe_navigation" {
+				continue
+			}
+			for _, body := range method.Body {
+				variable, ok := body.(*ir.Variable)
+				if !ok {
+					continue
+				}
+				switch variable.Name {
+				case "call_result":
+					callType = variable.Type
+				case "member_result":
+					memberType = variable.Type
+				}
+			}
+		}
+		for name, typ := range map[string]types.Type{"call_result": callType, "member_result": memberType} {
+			if typ.Kind != types.String || !typ.Nullable {
+				t.Fatalf("%s inferred %s as %s, want String?", mode, name, typ)
+			}
+		}
+		if mode == "go" {
+			fileSet := token.NewFileSet()
+			parsed, parseErr := parser.ParseFile(fileSet, "safe_navigation.go", artifact.Output, parser.AllErrors)
+			if parseErr != nil {
+				t.Fatalf("generated Go does not parse: %v\n%s", parseErr, artifact.Output)
+			}
+			if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+				t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, artifact.Output)
+			}
+		}
+	}
+}
+
+func TestSafeNavigationDoesNotProtectAnOrdinaryChainedCall(t *testing.T) {
+	definitions := `class Child
+	def name(): String
+		return "child"
+	end
+end
+
+record Holder
+	child: Child
+end
+
+def maybe_holder(): Holder?
+	return nil
+end
+`
+	source := []byte(definitions + `
+
+def ordinary(): String
+	return maybe_holder()&.child.name()
+end
+
+def safe(): String?
+	return maybe_holder()&.child&.name()
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		artifact, err := Compile("safe_navigation_chain.trb", source, mode)
+		if err != nil {
+			t.Fatalf("%s rejected safe-navigation chaining: %v", mode, err)
+		}
+		if mode == "go" && !strings.Contains(string(artifact.Output), `panic("nil receiver")`) {
+			t.Fatalf("generated Go ordinary member access does not retain the nil failure:\n%s", artifact.Output)
+		}
+	}
+}
+
 func TestNullableAssignmentNarrowsToAssignedNonNullableValue(t *testing.T) {
 	source := []byte(`def display_name(mut name: String?): String
 	if name == nil
