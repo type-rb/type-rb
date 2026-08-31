@@ -1399,6 +1399,37 @@ func TestReplAutoImportsDoNotShiftUserDiagnostics(t *testing.T) {
 	}
 }
 
+func TestReplReportsUndeclaredValuesBeforeDependentOperatorsAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, mode)
+			config.SourceDir = "src"
+			if config.Go != nil {
+				config.Go.Module = "example.com/type-rb/repl-undeclared-value"
+			}
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader("value == nil\n:quit\n"), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
+				t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "(trb):1:1: error[TRB3000]: value is not declared") {
+				t.Fatalf("REPL did not report the undeclared value first:\n%s", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "operator ==") {
+				t.Fatalf("REPL reported a dependent operator diagnostic:\n%s", stderr.String())
+			}
+		})
+	}
+}
+
 func TestReplReportsRuntimeSourceLocations(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
