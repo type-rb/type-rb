@@ -74,22 +74,35 @@ func TestCompileProjectGeneratesSingleBinaryCLI(t *testing.T) {
 	}
 }
 
-func TestCLIRejectsUnsupportedSchemaShapes(t *testing.T) {
-	source := []byte(`import { run } from trb/cli
+func TestCLIRejectsUnsupportedRepeatedOptionShapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		want  string
+	}{
+		{name: "positional", field: "values: Array<String>", want: "must be an option, not a positional argument"},
+		{name: "nullable array", field: "values: Array<String>? = nil @cli(:option)", want: "must use a non-nullable Array"},
+		{name: "nullable element", field: "values: Array<String?> = [] @cli(:option)", want: "must use a non-nullable scalar element type"},
+		{name: "non-scalar element", field: "values: Array<Array<String>> = [] @cli(:option)", want: "must use String, Integer, Float, Boolean, or an option Array of one of those scalar types"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := []byte(`import { run } from trb/cli
 record Args
-	values: Array<String>
+	` + test.field + `
 end
 def main()
-	args := run<Args>(name: "bad")
-	puts(args.values)
+	_args := run<Args>(name: "bad")
 	return
 end
 `)
-	_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
-		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
-	})
-	if err == nil || !strings.Contains(err.Error(), "must use String, Integer, Float, or Boolean") {
-		t.Fatalf("CompileProject() error=%v, want unsupported CLI field diagnostic", err)
+			_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+				Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("CompileProject() error=%v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
