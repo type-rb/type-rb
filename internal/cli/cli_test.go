@@ -994,10 +994,9 @@ func TestReplUsesProjectModeKeepsStateAndLoadsProjectImports(t *testing.T) {
 	}
 
 	input := strings.Join([]string{
-		"import trb/std/strings",
 		"import { User } from models/user",
 		`name := "Ada"`,
-		"Strings.uppercase(name)",
+		"name.upcase()",
 		"user := User.new(name: name)",
 		"user.name",
 		":type user",
@@ -2241,7 +2240,7 @@ false.to_s()
 (-2.75).ceil()
 2.5.round()
 (-2.5).round()
-2.75.truncate()
+2.75.to_i()
 Math.sqrt(9)
 Math.exp(0)
 Math.log(1)
@@ -2598,7 +2597,7 @@ func TestReplEvaluatesPortableBytesAcrossModes(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		input := "value := \"A😀\".to_bytes()\nvalue\nvalue.size()\nvalue.at(1)\nvalue.to_s()\nvalue.valid_utf8()\nvalue.concat(\"!\".to_bytes()).to_s()\n:quit\n"
+		input := "value := \"A😀\".to_bytes()\nvalue\nvalue.size()\nvalue.at(1)\nvalue.to_s()\nvalue.valid_utf8?()\nvalue.concat(\"!\".to_bytes()).to_s()\n:quit\n"
 		var stdout, stderr bytes.Buffer
 		command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}
 		if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
@@ -4768,10 +4767,9 @@ func TestRunPortableStringReplacementAcrossAvailableBackends(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		source := "import trb/std/strings\n\n" +
-			"def main()\n" +
+		source := "def main()\n" +
 			"\tputs(\"a😀a\".replace_all(\"a\", \"$&\"))\n" +
-			"\tputs(Strings.replace_all(\"aaaa\", \"aa\", \"$1\"))\n" +
+			"\tputs(\"aaaa\".replace_all(\"aa\", \"$1\"))\n" +
 			"\treturn\n" +
 			"end\n"
 		if err := os.WriteFile(filepath.Join(root, "src", "main.trb"), []byte(source), 0o644); err != nil {
@@ -4840,7 +4838,7 @@ def main()
 	puts((-2.75).ceil())
 	puts(2.5.round())
 	puts((-2.5).round())
-	puts(2.75.truncate())
+	puts(2.75.to_i())
 	puts(Math.sqrt(9) == 3.0)
 	puts(Math.exp(0) == 1.0)
 	puts(Math.log(1) == 0.0)
@@ -5606,16 +5604,13 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 		}
 		source := "import { Result } from trb/std/result\n" +
 			"import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors\n" +
-			"import trb/std/string_builder\n" +
-			"import trb/std/numbers\n" +
-			"import trb/std/booleans\n" +
-			"import trb/std/strings\n\n" +
+			"import trb/std/string_builder\n\n" +
 			"def parse_result(value: Result<Integer, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def float_result(value: Result<Float, NumberParseError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def string_index_result(value: Result<String, IndexLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.index.to_s() + \"/\" + error.size.to_s() + \" \" + error.message; end; end\n" +
 			"def index_result(value: Result<Integer, IndexLookupError>): String; case value; when Result::Ok(number); return \"ok:\" + number.to_s(); when Result::Err(error); return \"err:\" + error.message; end; end\n" +
 			"def key_result(value: Result<String, KeyLookupError>): String; case value; when Result::Ok(text); return \"ok:\" + text; when Result::Err(error); return \"err:\" + error.message; end; end\n" +
-			"def scalar_check(value: Float): Boolean; return (-4).abs() == Numbers.absolute(-4) && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == Booleans.to_string(true); end\n\n" +
+			"def scalar_check(value: Float): Boolean; return (-4).abs() == 4 && 0.zero?() && 1.positive?() && (-1).negative?() && 2.even?() && 3.odd?() && (-0.25).abs() == 0.25 && (value.finite?() || value.infinite?() || value.nan?()) && true.to_s() == \"true\"; end\n\n" +
 			"def main()\n" +
 			"\tputs(scalar_check(0.25))\n" +
 			"\tputs(parse_result(\"12\".try_to_i()))\n" +
@@ -5632,7 +5627,7 @@ func TestRunSafePortableConversionAndLookupAcrossAvailableBackends(t *testing.T)
 			"\tputs(string_index_result(\"A😀\".try_fetch(-1)))\n" +
 			"\tputs(\"A😀\".chars().join(\"|\"))\n" +
 			"\tputs(\"A😀\".reverse())\n" +
-			"\tputs(Strings.reverse(\"TypeRB\"))\n" +
+			"\tputs(\"TypeRB\".reverse())\n" +
 			"\tvalues := [7]\n" +
 			"\tputs(index_result(values.try_fetch(0)))\n" +
 			"\tputs(index_result(values.try_fetch(1)))\n" +

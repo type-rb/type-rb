@@ -21,16 +21,33 @@ func TestGenericCollectionContractsInferFromEarlierArguments(t *testing.T) {
 	}
 }
 
-func TestCollectionContractsAreNotPublicPackages(t *testing.T) {
-	for _, packagePath := range []string{"trb/std/arrays", "trb/std/hashes"} {
+func TestReceiverContractsAreNotPublicPackages(t *testing.T) {
+	for _, packagePath := range []string{
+		"trb/std/arrays",
+		"trb/std/booleans",
+		"trb/std/bytes",
+		"trb/std/hashes",
+		"trb/std/numbers",
+		"trb/std/ranges",
+		"trb/std/strings",
+	} {
 		if _, ok := Lookup(packagePath); ok {
 			t.Fatalf("%s remains available as a public package", packagePath)
 		}
 	}
-	for _, packagePath := range []string{"trb/internal/arrays", "trb/internal/hashes"} {
+	for _, packagePath := range []string{
+		"trb/internal/arrays",
+		"trb/internal/booleans",
+		"trb/internal/bytes",
+		"trb/internal/hashes",
+		"trb/internal/numbers",
+		"trb/internal/ranges",
+		"trb/internal/string_builder",
+		"trb/internal/strings",
+	} {
 		definition, ok := Lookup(packagePath)
 		if !ok || !definition.Internal {
-			t.Fatalf("%s is not an internal collection contract: %#v", packagePath, definition)
+			t.Fatalf("%s is not an internal receiver contract: %#v", packagePath, definition)
 		}
 	}
 }
@@ -183,12 +200,15 @@ func TestNumericReceiverAndMathContracts(t *testing.T) {
 		{receiver: types.FromName("Float"), name: "floor", want: "Integer"},
 		{receiver: types.FromName("Float"), name: "ceil", want: "Integer"},
 		{receiver: types.FromName("Float"), name: "round", want: "Integer"},
-		{receiver: types.FromName("Float"), name: "truncate", want: "Integer"},
+		{receiver: types.FromName("Float"), name: "to_i", want: "Integer"},
 	} {
 		_, method, ok := LookupReceiverMethod(test.receiver, test.name)
 		if !ok || method.Return.String() != test.want {
 			t.Fatalf("%s#%s contract=%#v, want %s", test.receiver, test.name, method, test.want)
 		}
+	}
+	if _, _, ok := LookupReceiverMethod(types.FromName("Float"), "truncate"); ok {
+		t.Fatal("Float#truncate remains as an alias for Float#to_i")
 	}
 
 	definition, ok := Lookup("trb/std/math")
@@ -386,7 +406,7 @@ func TestIntegerRangeCanMaterializeAnArray(t *testing.T) {
 	if !ok {
 		t.Fatal("Range<Integer>#to_a is missing")
 	}
-	if definition.Path != "trb/std/ranges" || len(method.Parameters) != 0 || method.Return.String() != "Array<Integer>" {
+	if definition.Path != "trb/internal/ranges" || !definition.Internal || len(method.Parameters) != 0 || method.Return.String() != "Array<Integer>" {
 		t.Fatalf("Range<Integer>#to_a contract=%#v from %#v", method, definition)
 	}
 }
@@ -427,10 +447,10 @@ func TestReceiverContractsCanConstrainCollectionArguments(t *testing.T) {
 	}
 }
 
-func TestStringTrimmingReceiversSharePackageContracts(t *testing.T) {
-	definition, ok := Lookup("trb/std/strings")
+func TestStringTrimmingReceiversShareInternalContracts(t *testing.T) {
+	definition, ok := Lookup("trb/internal/strings")
 	if !ok {
-		t.Fatal("strings package is missing")
+		t.Fatal("internal strings contract is missing")
 	}
 	for _, name := range []string{"strip", "lstrip", "rstrip"} {
 		packageSymbol, ok := definition.Symbols[name]
@@ -446,6 +466,37 @@ func TestStringTrimmingReceiversSharePackageContracts(t *testing.T) {
 		}
 		if len(receiverSymbol.Parameters) != 0 || receiverSymbol.Return.Kind != types.String {
 			t.Fatalf("String#%s has the wrong signature: %#v", name, receiverSymbol)
+		}
+	}
+}
+
+func TestPredicateReceiverNamesAreCanonical(t *testing.T) {
+	bytes := types.FromName("Bytes")
+	if _, method, ok := LookupReceiverMethod(bytes, "valid_utf8?"); !ok || method.Return.Kind != types.Bool {
+		t.Fatalf("Bytes#valid_utf8? contract=%#v", method)
+	}
+	if _, _, ok := LookupReceiverMethod(bytes, "valid_utf8"); ok {
+		t.Fatal("Bytes#valid_utf8 remains as a non-predicate alias")
+	}
+}
+
+func TestStringBuilderPublicContractOnlyContainsFactories(t *testing.T) {
+	definition, ok := Lookup("trb/std/string_builder")
+	if !ok {
+		t.Fatal("StringBuilder package is missing")
+	}
+	if len(definition.Symbols) != 2 {
+		t.Fatalf("StringBuilder public symbols=%v, want only new and from_string", definition.Symbols)
+	}
+	for _, name := range []string{"new", "from_string"} {
+		if _, ok := definition.Symbols[name]; !ok {
+			t.Fatalf("StringBuilder.%s factory is missing", name)
+		}
+	}
+	for _, name := range []string{"append", "append_codepoint", "size", "empty?", "to_s", "clear"} {
+		pkg, _, ok := LookupReceiverMethod(types.FromName("StringBuilder"), name)
+		if !ok || pkg.Path != "trb/internal/string_builder" || !pkg.Internal {
+			t.Fatalf("StringBuilder#%s is not backed by the internal receiver contract: %#v", name, pkg)
 		}
 	}
 }

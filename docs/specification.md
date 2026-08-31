@@ -539,6 +539,24 @@ switches.
 - Bare imports are neither lowercase package namespaces nor wildcard imports.
   Adding an unrelated export does not add a source binding. Named imports never
   search inside a declaration; members remain qualified by their owner.
+- The declaration root is not required to be a module. A standard-library
+  package whose central concept is a value exposes the actual type as its root,
+  so the same declaration owns class and instance members. It does not reserve
+  that type name for a static-only utility namespace. `trb/std/string_builder`,
+  for example, exposes the actual `StringBuilder` type.
+- Public operations have one canonical owner. An operation on an existing
+  value is an instance method on that value. An operation naturally associated
+  with an actual nominal type but not an existing instance is a class member on
+  that type. An algorithm with no natural value or nominal-type owner is a
+  module member. A type-associated operation does not justify inventing a
+  utility class when no actual nominal type exists. A second public spelling is
+  permitted only when it expresses a documented semantic, lifecycle, or
+  performance distinction. Compiler-owned intrinsic modules may remain as
+  implementation details, but they do not create an additional public source
+  spelling. An explicitly listed portable prelude binding is the narrow
+  language-level exception: for example, `puts` may also be reached as
+  `IO.puts`. This exception does not authorize packages to add static mirrors
+  for receiver methods.
 - `activate PATH` enables a compiler or provider capability declared by the
   resolved target without creating a source binding. It accepts neither a
   named list nor an alias and rejects ordinary modules with no capability.

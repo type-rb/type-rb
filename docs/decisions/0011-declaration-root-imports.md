@@ -1,6 +1,7 @@
 # 0011: Declaration-root imports
 
-Status: accepted and implemented in TypeRB 0.4.0
+Status: accepted and implemented in TypeRB 0.4.0; operation ownership is
+clarified by [ADR 0013](0013-canonical-operation-owners.md)
 
 ## Context
 
@@ -37,13 +38,13 @@ declaration would expose a marker in completion, aliasing, collision, and
 unused-binding rules. Treating a zero-match bare import as activation would
 instead make the meaning of `import path` depend on hidden package metadata.
 
-Ruby demonstrates the readability of uppercase namespaces and owned nested
-declarations. Go normally keeps functions qualified by a declared package
-name and uses a distinct blank import for initialization-only dependencies.
-TypeScript and JavaScript make peer declarations convenient through named
-imports and distinguish bindingless module loading. TypeRB combines the
-declaration properties without copying Ruby file loading, Go's lowercase
-package identifiers, or general JavaScript side-effect imports.
+Ruby demonstrates the readability of uppercase classes and modules as call
+owners. Go normally keeps functions qualified by a declared package name and
+uses a distinct blank import for initialization-only dependencies. TypeScript
+and JavaScript make peer declarations convenient through named imports and
+distinguish bindingless module loading. TypeRB combines the declaration
+properties without copying Ruby file loading, Go's lowercase package
+identifiers, or general JavaScript side-effect imports.
 
 The import path cannot mechanically determine capitalization. In particular,
 `json` may intentionally expose `JSON`, not `Json`, and `request_id` may expose
@@ -126,6 +127,12 @@ The shorthand is not a lowercase package namespace, a wildcard import, or an
 import of every public declaration. Adding an unrelated export therefore does
 not add a source binding or change existing name resolution.
 
+The selected root's declaration kind remains significant. A bare import may
+bind an actual class or value type; it does not convert that declaration into a
+namespace. The separate canonical-operation-owner rules decide whether a
+standard concept is a type or a module. Declaration-root imports do not require
+every package to expose a module-shaped root.
+
 The resolver determines the root as follows:
 
 1. Resolve the import to its canonical logical module. When the resolved
@@ -170,14 +177,15 @@ name. A module is not required to provide a matching root. For example, the
 
 A root must also be a valid ordinary binding in the importing scope. Standard
 and official package authors must not choose a root that collides with an
-unrelated prelude declaration. A compiler-owned standard package may reuse a
-built-in type name only when it provides the canonical imported static API for
-that built-in rather than introducing a second meaning. This narrow rule
-allows `Bytes` and `StringBuilder` to gain their standard static operations
-through `trb/std/bytes` and `trb/std/string_builder`; it is not available to
-official or third-party packages. In particular, the digest API uses
-`import trb/std/digest` and `Digest.sha256(...)`; it does not reuse `Hash`,
-which is already the built-in `Hash<K, V>` collection type.
+unrelated prelude declaration. A compiler-owned standard package may expose a
+built-in type as its root only when the imported declaration is that same
+canonical type, rather than a utility namespace with a second meaning. This
+narrow rule allows the actual `StringBuilder` type to own its factories through
+`trb/std/string_builder`; built-in receiver operations need no utility root or
+import. The rule is not available to official or third-party packages. In
+particular, the digest API uses `import trb/std/digest` and
+`Digest.sha256(...)`; it does not reuse `Hash`, which is already the built-in
+`Hash<K, V>` collection type.
 
 If more than one declaration has the same root key as the path, the bare
 import is ambiguous. Exact named imports remain available when the declaration
@@ -551,8 +559,10 @@ semantics it owns.
 
 ## Consequences
 
-- Common module operations have one qualified spelling, such as
-  `Math.sqrt(9)`, and member completion starts from an explicit owner.
+- Common domain operations have one qualified spelling, such as
+  `Math.sqrt(9.0)`, and member completion starts from an explicit owner.
+  Operations on an existing value use their receiver instead of a duplicate
+  utility root.
 - Public top-level functions such as `describe`, `expect`, and `test` remain
   directly importable without making module members directly importable.
 - Multiple peer declarations and collision-resolving aliases still fit on one

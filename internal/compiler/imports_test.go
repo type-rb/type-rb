@@ -18,10 +18,9 @@ import (
 )
 
 const portableMain = `import trb/std/io
-import trb/std/strings
 
 def main()
-  message := Strings.uppercase("Hello, TypeRB")
+  message := "Hello, TypeRB".upcase()
   puts(1 + 2)
   IO.puts(message)
   return
@@ -80,28 +79,18 @@ func TestPortableStandardLibraryLowersAcrossBackends(t *testing.T) {
 		call := variable.Value.(*ir.Call)
 		resolved = call.Callee.(*ir.Member).Reference
 	}
-	if resolved == nil || resolved.Package != "trb/std/strings" || resolved.Intrinsic != "trb.std.strings.uppercase" {
+	if resolved == nil || resolved.Package != "trb/internal/strings" || resolved.Intrinsic != "trb.std.strings.uppercase" || !resolved.ReceiverMethod {
 		t.Fatalf("standard call was not retained as a resolved IR reference: %#v", resolved)
 	}
 }
 
 func TestPortableReceiverMethodsShareStandardContractsAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/numbers
-
-def receiver_text(): String
+	source := []byte(`def receiver_text(): String
 	return 123.to_s()
-end
-
-def package_text(): String
-	return Numbers.to_string(123)
 end
 
 def float_text(): String
 	return 0.25.to_s()
-end
-
-def package_float_text(): String
-	return Numbers.float_to_string(0.25)
 end
 
 def integer_as_float(): Float
@@ -142,7 +131,7 @@ end
 			}
 		}
 
-		var receiverReference, packageReference *ir.Reference
+		var receiverReference *ir.Reference
 		for _, statement := range artifact.IR.Statements {
 			method, ok := statement.(*ir.Method)
 			if !ok || len(method.Body) == 0 {
@@ -156,32 +145,20 @@ end
 			if !ok {
 				continue
 			}
-			switch method.Name {
-			case "receiver_text":
+			if method.Name == "receiver_text" {
 				receiverReference = call.Callee.(*ir.Member).Reference
-			case "package_text":
-				packageReference = call.Callee.(*ir.Member).Reference
 			}
 		}
-		if receiverReference == nil || packageReference == nil ||
-			receiverReference.Intrinsic != packageReference.Intrinsic ||
-			receiverReference.Package != packageReference.Package ||
-			!receiverReference.ReceiverMethod || packageReference.ReceiverMethod {
-			t.Fatalf("%s did not retain a shared package/receiver contract: receiver=%#v package=%#v", mode, receiverReference, packageReference)
+		if receiverReference == nil || receiverReference.Intrinsic != "trb.std.numbers.to_string" ||
+			receiverReference.Package != "trb/internal/numbers" || !receiverReference.ReceiverMethod {
+			t.Fatalf("%s did not retain the internal receiver contract: %#v", mode, receiverReference)
 		}
 	}
 }
 
 func TestPortableScalarReceiverMethodsLowerAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/numbers
-import trb/std/booleans
-
-def integer_absolute(): Integer
+	source := []byte(`def integer_absolute(): Integer
 	return (-4).abs()
-end
-
-def package_integer_absolute(): Integer
-	return Numbers.absolute(-4)
 end
 
 def integer_bounds(): Integer
@@ -197,7 +174,7 @@ def float_absolute(): Float
 end
 
 def float_rounding(): Integer
-	return (-2.75).floor() + (-2.75).ceil() + (-2.5).round() + 2.75.truncate()
+	return (-2.75).floor() + (-2.75).ceil() + (-2.5).round() + 2.75.to_i()
 end
 
 def float_predicates(value: Float): Boolean
@@ -206,10 +183,6 @@ end
 
 def boolean_text(): String
 	return true.to_s()
-end
-
-def package_boolean_text(): String
-	return Booleans.to_string(false)
 end
 `)
 	wants := map[string][]string{
@@ -504,14 +477,44 @@ func TestPortableReceiverMethodDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestReceiverOnlyStandardPackagesCannotBeImported(t *testing.T) {
+	for _, packagePath := range []string{
+		"trb/std/booleans",
+		"trb/std/bytes",
+		"trb/std/numbers",
+		"trb/std/ranges",
+		"trb/std/strings",
+	} {
+		source := []byte("import " + packagePath + "\n")
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			_, err := Compile("removed_package.trb", source, mode)
+			want := "unknown TypeRB package " + packagePath
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s %s: expected %q diagnostic, got %v", mode, packagePath, want, err)
+			}
+		}
+	}
+}
+
+func TestReceiverContractsCannotBeImportedDirectly(t *testing.T) {
+	for _, packagePath := range []string{
+		"trb/internal/booleans",
+		"trb/internal/bytes",
+		"trb/internal/numbers",
+		"trb/internal/ranges",
+		"trb/internal/string_builder",
+		"trb/internal/strings",
+	} {
+		_, err := Compile("internal_package.trb", []byte("import "+packagePath+"\n"), "go")
+		want := "package " + packagePath + " is internal to the TypeRB standard library"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: expected %q diagnostic, got %v", packagePath, want, err)
+		}
+	}
+}
+
 func TestPortableStringTrimmingLowersAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/strings
-
-def package_strip(value: String): String
-	return Strings.strip(value)
-end
-
-def receiver_strip(value: String): String
+	source := []byte(`def receiver_strip(value: String): String
 	return value.strip()
 end
 
@@ -548,9 +551,9 @@ func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "package argument type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.strip(1)\nend\n",
-			want:   "argument 1 to strip() has type Integer, expected String",
+			name:   "wrong receiver type",
+			source: "def bad(): String\n\treturn 1.strip()\nend\n",
+			want:   "type Integer has no member strip",
 		},
 		{
 			name:   "receiver arity",
@@ -568,13 +571,7 @@ func TestPortableStringTrimmingDiagnosticsAreModeIndependent(t *testing.T) {
 }
 
 func TestPortableStringReplacementLowersAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/strings
-
-def package_replace(value: String, pattern: String, replacement: String): String
-	return Strings.replace_all(value, pattern, replacement)
-end
-
-def receiver_replace(value: String, pattern: String, replacement: String): String
+	source := []byte(`def receiver_replace(value: String, pattern: String, replacement: String): String
 	return value.replace_all(pattern, replacement)
 end
 `)
@@ -603,9 +600,9 @@ func TestPortableStringReplacementDiagnosticsAreModeIndependent(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "package replacement type",
-			source: "import trb/std/strings\ndef bad(): String\n\treturn Strings.replace_all(\"value\", \"v\", 1)\nend\n",
-			want:   "argument 3 to replace_all() has type Integer, expected String",
+			name:   "receiver replacement type",
+			source: "def bad(): String\n\treturn \"value\".replace_all(\"v\", 1)\nend\n",
+			want:   "argument 2 to replace_all() has type Integer, expected String",
 		},
 		{
 			name:   "receiver arity",
@@ -622,11 +619,9 @@ func TestPortableStringReplacementDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
-func TestPortableBytesPackageAndReceiverMethodsLowerAcrossBackends(t *testing.T) {
-	source := []byte(`import trb/std/bytes
-
-def joined(): Bytes
-	return Bytes.concat(Bytes.from_string("A"), "😀".to_bytes())
+func TestPortableBytesReceiverMethodsLowerAcrossBackends(t *testing.T) {
+	source := []byte(`def joined(): Bytes
+	return "A".to_bytes().concat("😀".to_bytes())
 end
 
 def byte_length(): Integer
@@ -642,7 +637,7 @@ def decoded(): String
 end
 
 def valid(): Boolean
-	return joined().valid_utf8()
+	return joined().valid_utf8?()
 end
 `)
 	wants := map[string][]string{
@@ -698,7 +693,7 @@ func TestPortableBytesDiagnosticsAreModeIndependent(t *testing.T) {
 		source string
 		want   string
 	}{
-		{source: "import trb/std/bytes\ndef bad(): Integer\n\treturn Bytes.at(Bytes.from_string(\"A\"), \"0\")\nend\n", want: "argument 2 to at() has type String, expected Integer"},
+		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().at(\"0\")\nend\n", want: "argument 1 to at() has type String, expected Integer"},
 		{source: "def bad(): Bytes\n\treturn \"A\"\nend\n", want: "return type is String, expected Bytes"},
 		{source: "def bad(): Integer\n\treturn \"A\".to_bytes().missing()\nend\n", want: "type Bytes has no member missing"},
 		{source: "def bad(): Bytes\n\treturn Bytes.new([])\nend\n", want: "type Bytes has no member new"},
@@ -1473,7 +1468,7 @@ func TestPortableStringBuilderLowersAcrossBackends(t *testing.T) {
 def render(): String
 	mut builder := StringBuilder.new()
 	builder.append("A")
-	StringBuilder.append_codepoint(builder, 128512)
+	builder.append_codepoint(128512)
 	builder.append_codepoint(33)
 	return builder.to_s()
 end
@@ -1492,7 +1487,7 @@ def reset(): String
 	mut builder := StringBuilder.from_string("old")
 	builder.clear()
 	builder.append("new")
-	return StringBuilder.to_string(builder)
+	return builder.to_s()
 end
 `)
 	wants := map[string][]string{
@@ -1560,14 +1555,19 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 			want:   "builder is immutable; declare it with mut to use append()",
 		},
 		{
-			name:   "package requires mut",
-			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tStringBuilder.clear(builder)\n\treturn\nend\n",
+			name:   "clear receiver requires mut",
+			source: "import trb/std/string_builder\ndef bad()\n\tbuilder := StringBuilder.new()\n\tbuilder.clear()\n\treturn\nend\n",
 			want:   "builder is immutable; declare it with mut to use clear()",
 		},
 		{
 			name:   "append type",
 			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
 			want:   "argument 1 to append() has type Integer, expected String",
+		},
+		{
+			name:   "instance operation is not static",
+			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tStringBuilder.clear(builder)\n\treturn\nend\n",
+			want:   "type StringBuilder has no member clear",
 		},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -2527,55 +2527,29 @@ func TestSafePortableConversionAndLookupLowerAcrossBackends(t *testing.T) {
 		Package:    "main",
 		Source: []byte(`import { Result } from trb/std/result
 import { IndexLookupError, KeyLookupError, NumberParseError } from trb/std/errors
-import trb/std/numbers
-import trb/std/strings
 
 def parsed(value: String): Result<Integer, NumberParseError>
 	return value.try_to_i()
-end
-
-def package_parsed(value: String): Result<Integer, NumberParseError>
-	return Numbers.try_parse_integer(value)
 end
 
 def parsed_float(value: String): Result<Float, NumberParseError>
 	return value.try_to_f()
 end
 
-def package_parsed_float(value: String): Result<Float, NumberParseError>
-	return Numbers.try_parse_float(value)
-end
-
 def float_value(value: String): Float
 	return value.to_f()
-end
-
-def package_float_value(value: String): Float
-	return Numbers.parse_float(value)
 end
 
 def string_value(value: String, index: Integer): Result<String, IndexLookupError>
 	return value.try_fetch(index)
 end
 
-def package_string_value(value: String, index: Integer): Result<String, IndexLookupError>
-	return Strings.try_fetch(value, index)
-end
-
 def characters(value: String): Array<String>
 	return value.chars()
 end
 
-def package_characters(value: String): Array<String>
-	return Strings.characters(value)
-end
-
 def reversed(value: String): String
 	return value.reverse()
-end
-
-def package_reversed(value: String): String
-	return Strings.reverse(value)
 end
 
 def array_value(values: Array<Integer>, index: Integer): Result<Integer, IndexLookupError>
@@ -3604,7 +3578,7 @@ func TestGoPutsDereferencesNullableValues(t *testing.T) {
 }
 
 func TestPortableStringLengthUsesUnicodeCodePoints(t *testing.T) {
-	source := []byte("import trb/std/strings\n\ndef count(): Integer\n  return Strings.length(\"😀a\")\nend\n")
+	source := []byte("def count(): Integer\n  return \"😀a\".size()\nend\n")
 	tests := []struct {
 		mode string
 		want string

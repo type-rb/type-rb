@@ -28,13 +28,12 @@ IO.puts("Hello, TypeRB!")
 
 ## Scalars and strings
 
-Portable built-in types expose receiver methods backed by the same contracts
-as `trb/std/numbers`, `trb/std/booleans`, and `trb/std/strings`:
+Portable built-in types expose import-free receiver methods. They do not also
+provide public static mirrors, so each operation has one ordinary spelling:
 
 <!-- trb-doc-test: stdlib-scalars -->
 ```trb
 import trb/std/math
-import trb/std/strings
 
 text := 123.to_s()
 ratio_text := 0.25.to_s()
@@ -62,7 +61,7 @@ last_emoji := "A😀B😀".rindex("😀")
 characters := "A😀".chars()
 reversed := "A😀".reverse()
 replaced := "a😀a".replace_all("a", "$&")
-upper := Strings.uppercase("Hello")
+upper := "Hello".upcase()
 ```
 
 Integer parsing accepts a complete ASCII decimal integer with an optional sign.
@@ -76,18 +75,16 @@ point, and exponent. At least one digit is required. `to_f()` raises on an
 invalid spelling or a value that overflows the portable binary64 range;
 `try_to_f()` returns `Result<Float, NumberParseError>`. Non-finite spellings
 such as `NaN` and `Infinity` are not accepted. Values smaller than the binary64
-range round to signed zero consistently across backends. Declaration-root
-forms are `Numbers.parse_float` and `Numbers.try_parse_float`.
+range round to signed zero consistently across backends.
 
 `Integer#to_f()` is an exact widening conversion. `Float#to_i()` truncates
 toward zero and raises for non-finite or out-of-range values. `Float#to_s()`
 uses a portable fixed decimal spelling without exponent notation, including
-`.0` for integral Float values. Their declaration-root forms are
-`Numbers.to_float`, `Numbers.truncate`, and `Numbers.float_to_string`.
+`.0` for integral Float values.
 
 Integers provide `abs()`, `zero?()`, `positive?()`, `negative?()`, `even?()`,
 `odd?()`, `min()`, `max()`, and `clamp()`. An invalid clamp range raises.
-Floats provide `abs()`, `floor()`, `ceil()`, `round()`, `truncate()`,
+Floats provide `abs()`, `floor()`, `ceil()`, `round()`,
 `finite?()`, `infinite?()`, and `nan?()`; the integer conversions reject
 non-finite and out-of-range results. `round()` resolves halfway values away
 from zero. `abs()` converts negative zero to positive zero and leaves NaN as
@@ -98,13 +95,7 @@ Float. Integer arguments use the ordinary safe widening to Float. Negative
 square roots and logarithms are NaN, and logarithms of zero are negative
 infinity. Exponentiation remains the `**` operator.
 
-`Boolean#to_s()` returns lowercase `"true"` or `"false"`. Declaration-root
-forms use `Numbers.absolute`, `Numbers.zero`, `Numbers.positive`,
-`Numbers.negative`, `Numbers.even`, `Numbers.odd`,
-`Numbers.float_absolute`, `Numbers.finite`, `Numbers.infinite`, and
-`Numbers.nan`, plus `Numbers.min`, `Numbers.max`, `Numbers.clamp`,
-`Numbers.floor`, `Numbers.ceil`, `Numbers.round`, `Numbers.truncate`, and
-`Booleans.to_string`.
+`Boolean#to_s()` returns lowercase `"true"` or `"false"`.
 
 `String#size`, `[]`, `try_fetch`, `slice`, `try_slice`, `index`, and `rindex`
 operate on Unicode code points rather than encoded bytes. Indexes are
@@ -127,8 +118,7 @@ sequence. String trimming uses the pinned Unicode 17.0 `White_Space` set,
 preserves internal whitespace, and does not remove U+FEFF. `replace_all()`
 replaces every non-overlapping literal occurrence. The replacement is also
 literal, so strings such as `$&` and `$1` have no special meaning; an empty
-pattern raises. The declaration-root forms are `Strings.characters`,
-`Strings.reverse`, and `Strings.replace_all`.
+pattern raises.
 
 ## Bytes
 
@@ -136,16 +126,14 @@ pattern raises. The declaration-root forms are `Strings.characters`,
 `Array<Integer>`:
 
 ```trb
-import trb/std/bytes
-
 payload := "A😀".to_bytes()
 byte_length := payload.size()
 first := payload.at(0)
-text := Bytes.to_string(payload)
+text := payload.to_s()
 ```
 
 String conversion uses UTF-8. Decoding invalid input replaces it with U+FFFD;
-call `valid_utf8()` first when invalid bytes must be rejected. Byte indexing is
+call `valid_utf8?()` first when invalid bytes must be rejected. Byte indexing is
 strict and concatenation is non-mutating.
 
 ## Binary encoding
@@ -279,8 +267,9 @@ blank := builder.empty?()
 message := builder.to_s()
 ```
 
-Destructive operations require a `mut` binding. `to_s()` returns an immutable
-snapshot, and size counts Unicode code points.
+Only `new()` and `from_string()` are class members. Operations on an existing
+builder are receiver methods. Destructive operations require a `mut` binding;
+`to_s()` returns an immutable snapshot, and size counts Unicode code points.
 
 `trb/std/unicode` provides scalar and identifier classification from one pinned
 data set shared by all targets:
@@ -366,7 +355,7 @@ shallowly.
 `Range<Integer>#to_a()` returns a new Array containing the same sequence that
 Range iteration would visit. Inclusive and exclusive ends are honored; an
 inclusive equal-bound Range contains one value, while exclusive equal-bound
-and reversed Ranges are empty. The package form is `ranges.to_array(range)`.
+and reversed Ranges are empty.
 
 `sort()` and `sort_descending()` order an Array of `Integer`, `Float`, or
 `String`. `sort_by` and `sort_by_descending` evaluate one non-fallible key
@@ -643,11 +632,7 @@ See the [testing guide](guides/testing.md).
 The current portable standard library includes:
 
 - `trb/std/io`
-- `trb/std/strings`
-- `trb/std/numbers`
 - `trb/std/math`
-- `trb/std/booleans`
-- `trb/std/bytes`
 - `trb/std/encoding/hex`
 - `trb/std/encoding/base64`
 - `trb/std/digest`
@@ -655,7 +640,6 @@ The current portable standard library includes:
 - `trb/std/secure_compare`
 - `trb/std/string_builder`
 - `trb/std/unicode`
-- `trb/std/ranges`
 - `trb/std/path`
 - `trb/std/url`
 - `trb/std/filesystem`
