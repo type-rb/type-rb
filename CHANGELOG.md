@@ -2,6 +2,58 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.3 - 2026-08-31
+
+### Breaking changes
+
+- Built-in value operations now have one receiver-oriented spelling. Replace
+  static number, string, Boolean, bytes, and range utility calls with receiver
+  methods; use `Float#to_i` instead of `Float#truncate`, and use
+  `Bytes#valid_utf8?` for UTF-8 validation.
+  ([#621](https://github.com/type-rb/type-rb/pull/621))
+- Replace `trb/std/filesystem` and `trb/std/path` imports with the scoped
+  `trb/std/file` and `trb/std/dir` APIs. The former APIs are not retained as
+  aliases because scoped resource ownership and host-native path semantics are
+  different contracts.
+  ([#623](https://github.com/type-rb/type-rb/pull/623))
+
+### Language and compiler
+
+- Arrays now have consistent shared-reference mutation semantics across Go,
+  Ruby, TypeScript, and compiler-managed runtime boundaries. Mutating elements
+  or growing an Array through an alias is visible to every alias, while
+  rebinding a mutable parameter remains local to the call.
+  ([#615](https://github.com/type-rb/type-rb/pull/615))
+- `nil == nil` is now true and `nil != nil` is false across all backends.
+  Nil-only binding inference and use of `Void` expressions as values now
+  produce focused diagnostics; `Unit` remains the storable no-value type.
+  ([#619](https://github.com/type-rb/type-rb/pull/619))
+- Safe navigation evaluates its receiver once, skips member access and call
+  arguments when the receiver is `nil`, preserves nullable result types, and
+  behaves consistently in Go, Ruby, TypeScript, and the REPL.
+  ([#624](https://github.com/type-rb/type-rb/pull/624))
+
+### Standard library
+
+- `trb/std/file` adds opaque block-scoped `File.open` handles, typed `Read`,
+  `Write`, and exclusive `CreateNew` modes, bounded byte and text reads, and
+  deterministic cleanup before `Result` propagation. `CreateNew` prevents
+  clobbering; it is not atomic replacement and makes no durability promise.
+  `trb/std/dir` adds sorted immediate entries that distinguish files,
+  directories, and non-traversable other entries.
+  ([#623](https://github.com/type-rb/type-rb/pull/623))
+
+### CLI
+
+- `trb/cli` option fields may use `Array<String>`, `Array<Integer>`,
+  `Array<Float>`, or `Array<Boolean>` to collect repeated occurrences in
+  command-line order. Scalar options retain final-occurrence behavior.
+  ([#622](https://github.com/type-rb/type-rb/pull/622))
+- `trb/cli` 0.3.0 adds `fail(message)` for application failures. It completes
+  structured cleanup, writes the supplied message to standard error, and exits
+  with status 1; parser and usage failures remain status 2.
+  ([#625](https://github.com/type-rb/type-rb/pull/625))
+
 ## 0.4.2 - 2026-08-30
 
 ### Packaging
