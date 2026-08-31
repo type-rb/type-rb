@@ -14,6 +14,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	if name == "trb.cli.run" {
 		return g.cliRun(call)
 	}
+	if name == "trb.cli.fail" {
+		g.cliFailure = true
+		failure := "panic(" + g.cliApplicationFailureTypeName() + "(" + arguments[0] + "))"
+		if call.ExprType().Kind == types.Never {
+			return failure
+		}
+		return "func() " + g.goType(call.ExprType()) + " { " + failure + " }()"
+	}
 	if generated, ok := g.testIntrinsic(name, call, arguments); ok {
 		return generated
 	}
@@ -24,6 +32,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return value
 	}
 	if name == "trb.internal.runtime.fail" {
+		if call.ExprType().Kind == types.Never {
+			return "panic(" + arguments[0] + ")"
+		}
 		return "func() " + g.goType(call.ExprType()) + " { panic(" + arguments[0] + ") }()"
 	}
 	if name == "trb.jobs.perform_later" || name == "trb.jobs.perform_in" || name == "trb.jobs.perform_at" {

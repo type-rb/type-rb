@@ -74,6 +74,317 @@ func TestCompileProjectGeneratesSingleBinaryCLI(t *testing.T) {
 	}
 }
 
+func TestCLIApplicationFailureUsesUnwindBoundary(t *testing.T) {
+	source := []byte(`import { fail, run } from trb/cli
+
+record Args
+end
+
+def main()
+	_args := run<Args>(name: "failure")
+	fail("stop")
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-failure", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(artifactForModule(artifacts, "main").Output)
+	fragments := []string{
+		"defer trb__cliApplicationFailureBoundary_",
+		`panic(trb__cliApplicationFailure_`,
+		`("stop"))`,
+		"recovered := recover()",
+		"fmt.Fprintln(os.Stderr, failure.TrbCLIApplicationFailure())",
+		"os.Exit(1)",
+	}
+	for _, fragment := range fragments {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("generated CLI failure boundary is missing %q:\n%s", fragment, output)
+		}
+	}
+	if strings.Index(output, fragments[1]) > strings.Index(output, fragments[5]) {
+		t.Fatalf("generated CLI exits before the failure signal unwinds:\n%s", output)
+	}
+}
+
+func TestCLIApplicationFailureSatisfiesNeverValuePositions(t *testing.T) {
+	source := []byte(`import { fail, run } from trb/cli
+
+record Args
+end
+
+record DeferredFailure
+	value: String = fail("record default failure")
+end
+
+def default_failure(value: String = fail("parameter default failure")): String
+	return value
+end
+
+def stopped(): String
+	return fail("returned failure")
+end
+
+def selected(stop: Boolean): String
+	value := if stop
+		fail("conditional failure")
+	else
+		"ok"
+	end
+	return value
+end
+
+def consume(value: String): String
+	return value
+end
+
+def compound_failure(): String
+	return consume("before") + fail("compound failure")
+end
+
+def compound_first_failure(): String
+	return fail("first compound failure") + consume("after")
+end
+
+def all_failed(stop: Boolean): String
+	value: String := if stop
+		fail("first failure")
+	else
+		fail("second failure")
+	end
+	return value
+end
+
+def inferred_binding()
+	value := fail("binding failure")
+	puts(value)
+end
+
+def condition_if()
+	if fail("if condition")
+		puts("unreachable")
+	end
+	puts("also unreachable")
+end
+
+def condition_while()
+	while fail("while condition")
+		puts("unreachable")
+	end
+	puts("also unreachable")
+end
+
+def unary_failure(): Integer
+	return -fail("unary failure")
+end
+
+def member_receiver(): String
+	return fail("member failure").to_s()
+end
+
+def index_receiver(): String
+	return fail("receiver failure")[0]
+end
+
+def index_position(): String
+	return "value"[fail("index failure")]
+end
+
+def call_callee(): String
+	return fail("callee failure")()
+end
+
+def range_start(): Range<Integer>
+	return fail("range start failure")..1
+end
+
+def range_end(): Range<Integer>
+	return 1..fail("range end failure")
+end
+
+def inferred_array()
+	values := [fail("array failure")]
+	puts(values.size())
+end
+
+def iteration_source(): Array<String>
+	return fail("source failure").map do |value|
+		value
+	end
+end
+
+def guarded(flag: Boolean): Boolean
+	return flag && fail("and failure")
+end
+
+def fallback(flag: Boolean): Boolean
+	return flag || fail("or failure")
+end
+
+def lazy_assignment_failure()
+	mut left := false
+	left &&= fail("skipped and assignment failure")
+	mut right := true
+	right ||= fail("skipped or assignment failure")
+	left = true
+	left &&= fail("taken assignment failure")
+end
+
+def main()
+	_args := run<Args>(name: "failure-values")
+	puts(selected(false))
+	puts(stopped())
+	puts(consume(fail("argument failure")))
+	puts(compound_failure())
+	puts(compound_first_failure())
+	puts(all_failed(false))
+	puts(guarded(false))
+	puts(fallback(true))
+	lazy_assignment_failure()
+	inferred_binding()
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-failure-values", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := artifactForModule(artifacts, "main")
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, main.Filename, main.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, main.Output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, main.Output)
+	}
+}
+
+func TestCLIApplicationFailureSupportsPackageInitializationBoundary(t *testing.T) {
+	source := []byte(`import { fail, run } from trb/cli
+
+direct := fail("direct global failure")
+
+def stop(): String
+	return fail("transitive global failure")
+end
+
+transitive: String := stop()
+
+record Args
+end
+
+def unreachable_reference(): String
+	return direct.to_s()
+end
+
+def later(): String
+	return "later"
+end
+
+def main()
+	_args := run<Args>(name: "global-failure")
+	puts(later())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-global-failure", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := artifactForModule(artifacts, "main")
+	output := string(main.Output)
+	if count := strings.Count(output, "defer trb__cliApplicationFailureBoundary_"); count < 3 {
+		t.Fatalf("generated Go has %d CLI failure boundaries, want main and two initializers:\n%s", count, output)
+	}
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, main.Filename, main.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, output)
+	}
+}
+
+func TestCLIApplicationFailureRuntimePropagatesFromNestedLambda(t *testing.T) {
+	source := []byte(`import { fail, run } from trb/cli
+
+record Args
+end
+
+def main()
+	_args := run<Args>(name: "nested-failure")
+	callback := fn(): String
+		return fail("nested failure")
+	end
+	puts(callback())
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-nested-failure", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := artifactForModule(artifacts, "main")
+	if !strings.Contains(string(main.Output), "type trb__cliApplicationFailure_") {
+		t.Fatalf("nested CLI failure did not request its runtime marker:\n%s", main.Output)
+	}
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, main.Filename, main.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, main.Output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, main.Output)
+	}
+}
+
+func TestCLIApplicationFailureRuntimePropagatesFromTransformBody(t *testing.T) {
+	source := []byte(`import { fail, run } from trb/cli
+
+record Args
+end
+
+def main()
+	_args := run<Args>(name: "transform-failure")
+	values := ["ok", "stop"].map do |value|
+		selected := if value == "stop"
+			fail("transform failure")
+		else
+			value
+		end
+		selected
+	end
+	puts(values.join(","))
+end
+`)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Package: "main", Source: source}}, Options{
+		Mode: "go", Package: "main", ModulePath: "main", GoModule: "example.com/cli-transform-failure", SourceRoot: "/project", ProjectRoot: "/project",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := artifactForModule(artifacts, "main")
+	if !strings.Contains(string(main.Output), "type trb__cliApplicationFailure_") {
+		t.Fatalf("transform CLI failure did not request its runtime marker:\n%s", main.Output)
+	}
+	fileSet := token.NewFileSet()
+	parsed, parseErr := parser.ParseFile(fileSet, main.Filename, main.Output, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatalf("generated Go does not parse: %v\n%s", parseErr, main.Output)
+	}
+	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); typeErr != nil {
+		t.Fatalf("generated Go does not type-check: %v\n%s", typeErr, main.Output)
+	}
+}
+
 func TestCLIRejectsUnsupportedRepeatedOptionShapes(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -180,20 +491,26 @@ end
 }
 
 func TestCLIRuntimeIsGeneratedOncePerGoPackage(t *testing.T) {
-	first := SourceUnit{Filename: "first.trb", ModulePath: "app/first", Package: "app", Source: []byte(`import { run } from trb/cli
+	first := SourceUnit{Filename: "first.trb", ModulePath: "app/first", Package: "app", Source: []byte(`import { fail, run } from trb/cli
 record FirstArgs
 	value: String
 end
 def parse_first(): FirstArgs
 	return run<FirstArgs>(name: "first")
 end
+def fail_first()
+	fail("first")
+end
 `)}
-	second := SourceUnit{Filename: "second.trb", ModulePath: "app/second", Package: "app", Source: []byte(`import { run } from trb/cli
+	second := SourceUnit{Filename: "second.trb", ModulePath: "app/second", Package: "app", Source: []byte(`import { fail, run } from trb/cli
 record SecondArgs
 	value: String
 end
 def parse_second(): SecondArgs
 	return run<SecondArgs>(name: "second")
+end
+def fail_second()
+	fail("second")
 end
 `)}
 	artifacts, err := CompileProject([]SourceUnit{first, second}, Options{Mode: "go", GoModule: "example.com/cli-app", SourceRoot: "/project", ProjectRoot: "/project"})
@@ -215,6 +532,9 @@ end
 	}
 	if count := strings.Count(output.String(), "type trb__cliField struct"); count != 1 {
 		t.Fatalf("CLI runtime generated %d times in one Go package:\n%s", count, output.String())
+	}
+	if count := strings.Count(output.String(), "type trb__cliApplicationFailure_"); count != 2 {
+		t.Fatalf("CLI failure marker generated %d times for two source modules:\n%s", count, output.String())
 	}
 	if _, typeErr := (&gotypes.Config{Importer: importer.Default()}).Check("app", fileSet, files, nil); typeErr != nil {
 		t.Fatalf("generated Go package does not type-check: %v\n%s", typeErr, output.String())

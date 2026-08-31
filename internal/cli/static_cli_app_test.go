@@ -114,6 +114,137 @@ end
 	}
 }
 
+func TestRunGeneratedStaticCLIReportsApplicationFailureAfterCleanup(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "go")
+	config.Name = "application-failure"
+	config.SourceDir = "src"
+	config.Go.Module = "example.com/type-rb/static-cli-application-failure"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `import { fail, run } from trb/cli
+import { File, FileMode } from trb/std/file
+import { Result } from trb/std/result
+
+record CleanupArgs
+	path: String
+end
+
+enum Command
+	Direct
+	Evaluation
+	SafeNavigation
+	Cleanup(args: CleanupArgs)
+end
+
+record AppArgs
+	command: Command @cli(:subcommand)
+end
+
+class Consumer
+	def take(value: String): String
+		return value
+	end
+end
+
+def no_consumer(): Consumer?
+	return nil
+end
+
+def before_failure(): String
+	puts("before")
+	return "value"
+end
+
+def consume(left: String, right: String): String
+	return left + right
+end
+
+def main()
+	args := run<AppArgs>(name: "application-failure")
+	case args.command
+	when Command::Direct
+		fail("application failed")
+	when Command::Evaluation
+		puts(consume(before_failure(), fail("argument failed")))
+	when Command::SafeNavigation
+		value := no_consumer()&.take(fail("skipped failure"))
+		puts(value == nil)
+	when Command::Cleanup(cleanup)
+		_result := File.open(cleanup.path, mode: FileMode::Write) do |file|
+			try file.write_text("written before failure")
+			fail("cleanup failed")
+		end
+		case _result
+		when Result::Ok(_value)
+			return
+		when Result::Err(error)
+			fail(error.message)
+		end
+	end
+end
+`
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"build", "--config", config.Path, "--compile"}); status != 0 {
+		t.Fatalf("compile status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+	}
+	executable := filepath.Join(root, "bin", config.Name)
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
+	run := func(arguments ...string) (int, string, string) {
+		t.Helper()
+		direct := exec.Command(executable, arguments...)
+		var directStdout, directStderr bytes.Buffer
+		direct.Stdout = &directStdout
+		direct.Stderr = &directStderr
+		err := direct.Run()
+		if err == nil {
+			return 0, directStdout.String(), directStderr.String()
+		}
+		exitError, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("run %v: %v", arguments, err)
+		}
+		return exitError.ExitCode(), directStdout.String(), directStderr.String()
+	}
+
+	status, directStdout, directStderr := run("direct")
+	if status != 1 || directStdout != "" || directStderr != "application failed\n" {
+		t.Fatalf("direct failure status=%d stdout=%q stderr=%q", status, directStdout, directStderr)
+	}
+	status, directStdout, directStderr = run("evaluation")
+	if status != 1 || directStdout != "before\n" || directStderr != "argument failed\n" {
+		t.Fatalf("evaluation failure status=%d stdout=%q stderr=%q", status, directStdout, directStderr)
+	}
+	status, directStdout, directStderr = run("safe-navigation")
+	if status != 0 || directStdout != "true\n" || directStderr != "" {
+		t.Fatalf("safe-navigation status=%d stdout=%q stderr=%q", status, directStdout, directStderr)
+	}
+	outputPath := filepath.Join(root, "cleanup-output.txt")
+	status, directStdout, directStderr = run("cleanup", outputPath)
+	if status != 1 || directStdout != "" || directStderr != "cleanup failed\n" {
+		t.Fatalf("cleanup failure status=%d stdout=%q stderr=%q", status, directStdout, directStderr)
+	}
+	content, err := os.ReadFile(outputPath)
+	if err != nil || string(content) != "written before failure" {
+		t.Fatalf("cleanup output content=%q error=%v", content, err)
+	}
+	renamed := outputPath + ".renamed"
+	if err := os.Rename(outputPath, renamed); err != nil {
+		t.Fatalf("file handle remained active after failure cleanup: %v", err)
+	}
+}
+
 func TestRunGeneratedStaticCLICollectsRepeatedOptions(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "go")
@@ -246,6 +377,85 @@ end
 	}
 	if !strings.Contains(directStderr.String(), "a command is required") {
 		t.Fatalf("unexpected missing subcommand error stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+	}
+}
+
+func TestRunGeneratedStaticCLIReportsPackageInitializationFailure(t *testing.T) {
+	tests := []struct {
+		name        string
+		declaration string
+		message     string
+	}{
+		{
+			name:        "direct",
+			declaration: `value := fail("direct initialization failed")`,
+			message:     "direct initialization failed\n",
+		},
+		{
+			name: "transitive",
+			declaration: `def initialize_value(): String
+	return fail("transitive initialization failed")
+end
+
+value: String := initialize_value()`,
+			message: "transitive initialization failed\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			config := project.New(root, "go")
+			config.Name = "initializer-" + test.name
+			config.SourceDir = "src"
+			config.Go.Module = "example.com/type-rb/static-cli-initializer-" + test.name
+			if err := config.Save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			source := `import { fail, run } from trb/cli
+
+` + test.declaration + `
+
+enum Command
+	Run
+end
+
+record AppArgs
+	command: Command @cli(:subcommand)
+end
+
+def main()
+	_args := run<AppArgs>(name: "initializer")
+	return
+end
+`
+			if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"build", "--config", config.Path, "--compile"}); status != 0 {
+				t.Fatalf("compile status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			executable := filepath.Join(root, "bin", config.Name)
+			if runtime.GOOS == "windows" {
+				executable += ".exe"
+			}
+			direct := exec.Command(executable, "run")
+			var directStdout, directStderr bytes.Buffer
+			direct.Stdout = &directStdout
+			direct.Stderr = &directStderr
+			err := direct.Run()
+			exitError, ok := err.(*exec.ExitError)
+			if !ok || exitError.ExitCode() != 1 {
+				t.Fatalf("initializer failure error=%v, want exit status 1; stdout=%s stderr=%s", err, directStdout.String(), directStderr.String())
+			}
+			if directStdout.Len() != 0 || directStderr.String() != test.message {
+				t.Fatalf("unexpected initializer failure stdout=%q stderr=%q", directStdout.String(), directStderr.String())
+			}
+		})
 	}
 }
 

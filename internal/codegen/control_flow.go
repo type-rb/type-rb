@@ -21,8 +21,9 @@ func normalizeDivergingControlFlow(program *ir.Program) *ir.Program {
 }
 
 type controlFlowNormalizer struct {
-	temporary int
-	reserved  map[string]bool
+	temporary  int
+	reserved   map[string]bool
+	executable int
 }
 
 type normalizedIfBranch struct {
@@ -42,6 +43,9 @@ func (n *controlFlowNormalizer) temporaryIdentifier(typ types.Type) (*ir.Tempora
 
 // materialize evaluates a value before a later compiler-lifted statement
 // prefix and returns a stable reference that can be used after that prefix.
+// This preserves the source language's left-to-right evaluation order even
+// when the later expression diverges or contains control flow that cannot stay
+// nested in a target-language expression.
 func (n *controlFlowNormalizer) materialize(value ir.Expression) ([]ir.Statement, ir.Expression) {
 	if value == nil {
 		return nil, nil
@@ -51,6 +55,151 @@ func (n *controlFlowNormalizer) materialize(value ir.Expression) ([]ir.Statement
 	}
 	temporary, identifier := n.temporaryIdentifier(value.ExprType())
 	return []ir.Statement{temporary, assignment(identifier, value)}, identifier
+}
+
+// evaluate preserves an earlier value's evaluation when a later expression
+// diverges and therefore removes the enclosing value-producing operation.
+// The generated identifier use keeps target languages with unused-local
+// diagnostics valid without adding observable behavior.
+func (n *controlFlowNormalizer) evaluate(value ir.Expression) []ir.Statement {
+	statements, identifier := n.materialize(value)
+	if identifier == nil {
+		return statements
+	}
+	statements = append(statements, &ir.ExpressionStatement{
+		Base:       ir.Base{Span: value.SourceSpan()},
+		Expression: identifier,
+	})
+	return statements
+}
+
+func (n *controlFlowNormalizer) finishExpression(prefix []ir.Statement, value ir.Expression) ([]ir.Statement, ir.Expression) {
+	if value == nil || value.ExprType().Kind != types.Never {
+		return prefix, value
+	}
+	return append(prefix, &ir.ExpressionStatement{
+		Base:       ir.Base{Span: value.SourceSpan()},
+		Expression: value,
+	}), nil
+}
+
+func (n *controlFlowNormalizer) executableStatements(input []ir.Statement) []ir.Statement {
+	n.executable++
+	defer func() { n.executable-- }()
+	return n.statements(input)
+}
+
+// deferredExpression retains statement prefixes inside a value expression
+// whose surrounding declaration (for example, a parameter or field default)
+// is emitted later inside an executable body. A compiler-owned zero-argument
+// lambda provides that local statement owner without changing evaluation time.
+func (n *controlFlowNormalizer) deferredExpression(value ir.Expression, expected types.Type) ir.Expression {
+	if value == nil {
+		return nil
+	}
+	prefix, result := n.expression(value)
+	if len(prefix) == 0 {
+		return result
+	}
+	body := append([]ir.Statement(nil), prefix...)
+	if result != nil {
+		body = append(body, &ir.Return{Base: ir.Base{Span: result.SourceSpan()}, Value: result})
+	}
+	functionType := types.FunctionOf(nil, expected)
+	lambda := &ir.Lambda{
+		ExprBase:   ir.NewExprBase(value.SourceSpan(), functionType),
+		ReturnType: expected,
+		Body:       body,
+	}
+	return &ir.Call{
+		ExprBase: ir.NewExprBase(value.SourceSpan(), expected),
+		Callee:   lambda,
+	}
+}
+
+func (n *controlFlowNormalizer) parameters(input []ir.Parameter) []ir.Parameter {
+	result := append([]ir.Parameter(nil), input...)
+	for index := range result {
+		result[index].Default = n.deferredExpression(result[index].Default, result[index].Type)
+	}
+	return result
+}
+
+func neverSurrogateType(typ types.Type) types.Type {
+	if typ.Kind == types.Never {
+		return types.FromName("Any")
+	}
+	copy := typ
+	copy.Args = append([]types.Type(nil), typ.Args...)
+	for index := range copy.Args {
+		copy.Args[index] = neverSurrogateType(copy.Args[index])
+	}
+	return copy
+}
+
+func transformResultSurrogateType(transform *ir.Transform) types.Type {
+	if transform == nil || transform.Result == nil {
+		return types.FromName("Void")
+	}
+	result := transform.Result.ExprType()
+	if result.Kind != types.Never {
+		return neverSurrogateType(result)
+	}
+	switch transform.Operation {
+	case "select", "any?", "all?", "none?", "find", "find_index":
+		return types.FromName("Boolean")
+	case "reduce":
+		if transform.Initial != nil {
+			return neverSurrogateType(transform.Initial.ExprType())
+		}
+	case "sort_by", "sort_by_descending":
+		return types.FromName("String")
+	}
+	return types.FromName("Any")
+}
+
+func (n *controlFlowNormalizer) stabilizeCallee(value ir.Expression) ([]ir.Statement, ir.Expression) {
+	switch node := value.(type) {
+	case *ir.Identifier:
+		if !node.Lexical {
+			return nil, value
+		}
+	case *ir.Member:
+		if node.Namespace {
+			return nil, value
+		}
+		if !node.ClassField {
+			prefix, receiver := n.materialize(node.Receiver)
+			copy := *node
+			copy.Receiver = receiver
+			return prefix, &copy
+		}
+	case *ir.TypeApply:
+		prefix, receiver := n.stabilizeCallee(node.Receiver)
+		copy := *node
+		copy.Receiver = receiver
+		return prefix, &copy
+	}
+	return n.materialize(value)
+}
+
+func (n *controlFlowNormalizer) evaluateCallee(value ir.Expression) []ir.Statement {
+	switch node := value.(type) {
+	case *ir.Identifier:
+		// IR callable identifiers carry the call's result type rather than a
+		// first-class function-value type. Resolving a static callable has no
+		// target-language effect of its own.
+		return nil
+	case *ir.Member:
+		if node.Namespace {
+			return nil
+		}
+		return n.evaluate(node.Receiver)
+	case *ir.TypeApply:
+		return n.evaluateCallee(node.Receiver)
+	default:
+		return n.evaluate(value)
+	}
 }
 
 func safeCalleeMember(value ir.Expression) (*ir.Member, bool) {
@@ -209,6 +358,70 @@ func (n *controlFlowNormalizer) safeNavigationMember(node *ir.Member) ([]ir.Stat
 	return n.safeNavigationExpression(prefix, stable, &present, node.ExprType(), node.SourceSpan())
 }
 
+func (n *controlFlowNormalizer) stabilizeAssignmentTarget(value ir.Expression) ([]ir.Statement, ir.Expression) {
+	switch node := value.(type) {
+	case *ir.Identifier:
+		return nil, value
+	case *ir.Member:
+		prefix, receiver := n.materialize(node.Receiver)
+		copy := *node
+		copy.Receiver = receiver
+		return prefix, &copy
+	case *ir.Index:
+		prefix, receiver := n.materialize(node.Receiver)
+		indexPrefix, index := n.materialize(node.Index)
+		prefix = append(prefix, indexPrefix...)
+		copy := *node
+		copy.Receiver = receiver
+		copy.Index = index
+		return prefix, &copy
+	default:
+		return n.materialize(value)
+	}
+}
+
+func (n *controlFlowNormalizer) evaluateAssignmentTarget(value ir.Expression) []ir.Statement {
+	switch node := value.(type) {
+	case *ir.Identifier:
+		return nil
+	case *ir.Member:
+		return n.evaluate(node.Receiver)
+	case *ir.Index:
+		result := n.evaluate(node.Receiver)
+		return append(result, n.evaluate(node.Index)...)
+	default:
+		return n.evaluate(value)
+	}
+}
+
+func (n *controlFlowNormalizer) lazyAssignment(prefix []ir.Statement, node *ir.Assignment, target ir.Expression, valuePrefix []ir.Statement, value ir.Expression) []ir.Statement {
+	targetPrefix, stable := n.stabilizeAssignmentTarget(target)
+	prefix = append(prefix, targetPrefix...)
+	body := append([]ir.Statement(nil), valuePrefix...)
+	if value != nil {
+		body = append(body, &ir.Assignment{
+			Base:     node.Base,
+			Target:   stable,
+			Operator: "=",
+			Value:    value,
+		})
+	}
+	condition := stable
+	if node.Operator == "||=" {
+		condition = &ir.Unary{
+			ExprBase: ir.NewExprBase(node.SourceSpan(), types.FromName("Boolean")),
+			Operator: "!",
+			Operand:  stable,
+		}
+	}
+	flow := &ir.If{
+		ExprBase:  ir.NewExprBase(node.SourceSpan(), types.FromName("Void")),
+		Condition: condition,
+		Then:      body,
+	}
+	return append(prefix, flow)
+}
+
 func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 	for _, statement := range statements {
 		switch node := statement.(type) {
@@ -268,7 +481,23 @@ func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 func (n *controlFlowNormalizer) statements(input []ir.Statement) []ir.Statement {
 	result := make([]ir.Statement, 0, len(input))
 	for _, statement := range input {
-		result = append(result, n.statement(statement)...)
+		normalized := n.statement(statement)
+		result = append(result, normalized...)
+		if n.executable > 0 {
+			variable, ok := statement.(*ir.Variable)
+			if ok && variable.Value != nil {
+				declared := false
+				for _, candidate := range normalized {
+					if value, declaration := candidate.(*ir.Variable); declaration && value.Name == variable.Name {
+						declared = true
+						break
+					}
+				}
+				if !declared {
+					break
+				}
+			}
+		}
 	}
 	return result
 }
@@ -293,22 +522,34 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 		return []ir.Statement{&copy}
 	case *ir.Method:
 		copy := *node
-		copy.Body = n.statements(node.Body)
+		copy.Parameters = n.parameters(node.Parameters)
+		copy.Body = n.executableStatements(node.Body)
+		return []ir.Statement{&copy}
+	case *ir.RecordField:
+		copy := *node
+		copy.Default = n.deferredExpression(node.Default, node.Type)
 		return []ir.Statement{&copy}
 	case *ir.Field:
 		copy := *node
-		prefix, value := n.expression(node.Value)
-		if value == nil && node.Value != nil {
-			return prefix
-		}
-		copy.Value = value
-		return append(prefix, &copy)
+		copy.Value = n.deferredExpression(node.Value, node.Type)
+		return []ir.Statement{&copy}
 	case *ir.Variable:
+		if n.executable == 0 {
+			copy := *node
+			copy.Type = neverSurrogateType(node.Type)
+			copy.Value = n.deferredExpression(node.Value, copy.Type)
+			return []ir.Statement{&copy}
+		}
 		prefix, value := n.expression(node.Value)
 		if value == nil {
 			return prefix
 		}
+		if node.Value != nil && node.Value.ExprType().Kind == types.Never {
+			failure := &ir.ExpressionStatement{Base: ir.Base{Span: node.SourceSpan()}, Expression: value}
+			return append(prefix, failure)
+		}
 		copy := *node
+		copy.Type = neverSurrogateType(node.Type)
 		copy.Value = value
 		return append(prefix, &copy)
 	case *ir.Assignment:
@@ -317,9 +558,18 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 			return prefix
 		}
 		valuePrefix, value := n.expression(node.Value)
-		prefix = append(prefix, valuePrefix...)
+		if node.Operator == "&&=" || node.Operator == "||=" {
+			return n.lazyAssignment(prefix, node, target, valuePrefix, value)
+		}
 		if value == nil {
-			return prefix
+			prefix = append(prefix, n.evaluateAssignmentTarget(target)...)
+			return append(prefix, valuePrefix...)
+		}
+		if len(valuePrefix) > 0 {
+			targetPrefix, stable := n.stabilizeAssignmentTarget(target)
+			prefix = append(prefix, targetPrefix...)
+			target = stable
+			prefix = append(prefix, valuePrefix...)
 		}
 		copy := *node
 		copy.Target = target
@@ -352,18 +602,19 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 	case *ir.While:
 		return n.whileStatement(node)
 	case *ir.Iterate:
-		prefix, source := n.expression(node.Source)
-		if source == nil {
-			return prefix
+		expressions := []ir.Expression{node.Source}
+		if node.SliceSize != nil {
+			expressions = append(expressions, node.SliceSize)
 		}
-		sizePrefix, size := n.expression(node.SliceSize)
-		prefix = append(prefix, sizePrefix...)
-		if node.SliceSize != nil && size == nil {
+		prefix, values, ok := n.expressions(expressions)
+		if !ok {
 			return prefix
 		}
 		copy := *node
-		copy.Source = source
-		copy.SliceSize = size
+		copy.Source = values[0]
+		if node.SliceSize != nil {
+			copy.SliceSize = values[1]
+		}
 		copy.Body = n.statements(node.Body)
 		if node.Result != nil && node.Result.Target != nil {
 			resultPrefix, target := n.expression(node.Result.Target)
@@ -527,11 +778,8 @@ func (n *controlFlowNormalizer) ifExpression(node *ir.If) ([]ir.Statement, ir.Ex
 		copy.ElseIf[index] = branchCopy
 		normalized[index] = normalizedIfBranch{branch: branchCopy, prefix: branchPrefix}
 	}
-	if !hasConditionPrefix && !containsTransferIf(&copy) {
-		return prefix, &copy
-	}
-	copy.Type = types.FromName("Void")
 	if node.ExprType().Kind == types.Never {
+		copy.Type = types.FromName("Void")
 		clearIfResults(&copy, nil)
 		if hasConditionPrefix {
 			for index := range normalized {
@@ -542,6 +790,10 @@ func (n *controlFlowNormalizer) ifExpression(node *ir.If) ([]ir.Statement, ir.Ex
 		}
 		return append(prefix, &copy), nil
 	}
+	if !hasConditionPrefix && !containsTransferIf(&copy) {
+		return prefix, &copy
+	}
+	copy.Type = types.FromName("Void")
 	temporary, identifier := n.temporaryIdentifier(node.ExprType())
 	clearIfResults(&copy, identifier)
 	if hasConditionPrefix {
@@ -587,14 +839,15 @@ func (n *controlFlowNormalizer) caseExpression(node *ir.Case) ([]ir.Statement, i
 		copy.Branches[index] = branchCopy
 	}
 	copy.Else, copy.ElseResult, copy.ElseDiverges = n.valueBranch(node.Else, node.ElseResult, node.ElseDiverges)
+	if node.ExprType().Kind == types.Never {
+		copy.Type = types.FromName("Void")
+		clearCaseResults(&copy, nil)
+		return append(leading, &copy), nil
+	}
 	if !containsTransferCase(&copy) {
 		return leading, &copy
 	}
 	copy.Type = types.FromName("Void")
-	if node.ExprType().Kind == types.Never {
-		clearCaseResults(&copy, nil)
-		return append(leading, &copy), nil
-	}
 	temporary, identifier := n.temporaryIdentifier(node.ExprType())
 	clearCaseResults(&copy, identifier)
 	return append(leading, temporary, &copy), identifier
@@ -639,6 +892,23 @@ func assignment(target *ir.Identifier, value ir.Expression) *ir.Assignment {
 
 func falseLiteral() ir.Expression {
 	return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, types.FromName("Boolean")), Kind: "boolean", Raw: "false"}
+}
+
+func unreachableNeverExpression(span token.Span) ir.Expression {
+	never := types.Type{Kind: types.Never, Name: "Never"}
+	return &ir.Call{
+		ExprBase: ir.NewExprBase(span, never),
+		Callee: &ir.Identifier{
+			ExprBase:  ir.NewExprBase(span, never),
+			Name:      "fail",
+			Reference: &ir.Reference{Intrinsic: "trb.internal.runtime.fail"},
+		},
+		Arguments: []ir.CallArgument{{Value: &ir.Literal{
+			ExprBase: ir.NewExprBase(span, types.FromName("String")),
+			Kind:     "string",
+			Raw:      `"unreachable Never value"`,
+		}}},
+	}
 }
 
 func containsTransferIf(node *ir.If) bool {
@@ -726,10 +996,16 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		return nil, nil
 	}
 	switch node := expression.(type) {
+	case *ir.Identifier:
+		if node.Lexical && node.ExprType().Kind == types.Never {
+			return n.finishExpression(nil, unreachableNeverExpression(node.SourceSpan()))
+		}
+		return nil, expression
 	case *ir.Lambda:
 		copy := *node
-		inner := &controlFlowNormalizer{temporary: n.temporary, reserved: n.reserved}
-		copy.Body = inner.statements(node.Body)
+		inner := &controlFlowNormalizer{temporary: n.temporary, reserved: n.reserved, executable: n.executable}
+		copy.Parameters = inner.parameters(node.Parameters)
+		copy.Body = inner.executableStatements(node.Body)
 		n.temporary = inner.temporary
 		return nil, &copy
 	case *ir.If:
@@ -739,16 +1015,22 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 	case *ir.InterpolatedString:
 		copy := *node
 		copy.Parts = append([]ir.StringPart(nil), node.Parts...)
-		prefix := []ir.Statement{}
-		for index := range copy.Parts {
-			partPrefix, value := n.expression(copy.Parts[index].Expression)
-			prefix = append(prefix, partPrefix...)
-			if copy.Parts[index].Expression != nil && value == nil {
-				return prefix, nil
+		expressions := make([]ir.Expression, 0, len(copy.Parts))
+		indexes := make([]int, 0, len(copy.Parts))
+		for index, part := range copy.Parts {
+			if part.Expression != nil {
+				expressions = append(expressions, part.Expression)
+				indexes = append(indexes, index)
 			}
-			copy.Parts[index].Expression = value
 		}
-		return prefix, &copy
+		prefix, values, ok := n.expressions(expressions)
+		if !ok {
+			return prefix, nil
+		}
+		for index, value := range values {
+			copy.Parts[indexes[index]].Expression = value
+		}
+		return n.finishExpression(prefix, &copy)
 	case *ir.Array:
 		copy := *node
 		prefix, values, ok := n.expressions(node.Elements)
@@ -756,25 +1038,22 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 			return prefix, nil
 		}
 		copy.Elements = values
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	case *ir.Hash:
 		copy := *node
 		copy.Entries = make([]ir.HashEntry, len(node.Entries))
-		prefix := []ir.Statement{}
-		for index, entry := range node.Entries {
-			keyPrefix, key := n.expression(entry.Key)
-			prefix = append(prefix, keyPrefix...)
-			if key == nil {
-				return prefix, nil
-			}
-			valuePrefix, value := n.expression(entry.Value)
-			prefix = append(prefix, valuePrefix...)
-			if value == nil {
-				return prefix, nil
-			}
-			copy.Entries[index] = ir.HashEntry{Key: key, Value: value}
+		expressions := make([]ir.Expression, 0, len(node.Entries)*2)
+		for _, entry := range node.Entries {
+			expressions = append(expressions, entry.Key, entry.Value)
 		}
-		return prefix, &copy
+		prefix, values, ok := n.expressions(expressions)
+		if !ok {
+			return prefix, nil
+		}
+		for index := range copy.Entries {
+			copy.Entries[index] = ir.HashEntry{Key: values[index*2], Value: values[index*2+1]}
+		}
+		return n.finishExpression(prefix, &copy)
 	case *ir.JSXElement:
 		copy := *node
 		prefix, component := n.expression(node.Component)
@@ -818,7 +1097,7 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		}
 		copy := *node
 		copy.Operand = operand
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	case *ir.Conversion:
 		prefix, value := n.expression(node.Value)
 		if value == nil {
@@ -826,7 +1105,7 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		}
 		copy := *node
 		copy.Value = value
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	case *ir.Binary:
 		prefix, left := n.expression(node.Left)
 		if left == nil {
@@ -837,30 +1116,31 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 			if isShortCircuitOperator(node.Operator) {
 				return n.shortCircuitExpression(node, prefix, left, rightPrefix, nil)
 			}
+			prefix = append(prefix, n.evaluate(left)...)
 			return append(prefix, rightPrefix...), nil
 		}
 		if len(rightPrefix) > 0 && isShortCircuitOperator(node.Operator) {
 			return n.shortCircuitExpression(node, prefix, left, rightPrefix, right)
 		}
-		prefix = append(prefix, rightPrefix...)
+		if len(rightPrefix) > 0 {
+			materialized, stable := n.materialize(left)
+			prefix = append(prefix, materialized...)
+			left = stable
+			prefix = append(prefix, rightPrefix...)
+		}
 		copy := *node
 		copy.Left = left
 		copy.Right = right
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	case *ir.Range:
-		prefix, start := n.expression(node.Start)
-		if start == nil {
-			return prefix, nil
-		}
-		endPrefix, end := n.expression(node.End)
-		prefix = append(prefix, endPrefix...)
-		if end == nil {
+		prefix, values, ok := n.expressions([]ir.Expression{node.Start, node.End})
+		if !ok {
 			return prefix, nil
 		}
 		copy := *node
-		copy.Start = start
-		copy.End = end
-		return prefix, &copy
+		copy.Start = values[0]
+		copy.End = values[1]
+		return n.finishExpression(prefix, &copy)
 	case *ir.RecordConstruct:
 		prefix, target := n.expression(node.Target)
 		if target == nil {
@@ -869,15 +1149,19 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy := *node
 		copy.Target = target
 		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
-		for index := range copy.Arguments {
-			argumentPrefix, value := n.expression(copy.Arguments[index].Value)
-			prefix = append(prefix, argumentPrefix...)
-			if value == nil {
-				return prefix, nil
-			}
+		arguments := make([]ir.Expression, len(copy.Arguments))
+		for index, argument := range copy.Arguments {
+			arguments[index] = argument.Value
+		}
+		argumentPrefix, values, ok := n.expressions(arguments)
+		prefix = append(prefix, argumentPrefix...)
+		if !ok {
+			return prefix, nil
+		}
+		for index, value := range values {
 			copy.Arguments[index].Value = value
 		}
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	case *ir.Call:
 		if member, safe := safeCalleeMember(node.Callee); safe {
 			return n.safeNavigationCall(node, member)
@@ -889,28 +1173,81 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy := *node
 		copy.Callee = callee
 		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
-		for index := range copy.Arguments {
-			argumentPrefix, value := n.expression(copy.Arguments[index].Value)
-			prefix = append(prefix, argumentPrefix...)
-			if value == nil {
+		arguments := make([]ir.Expression, len(copy.Arguments))
+		for index, argument := range copy.Arguments {
+			arguments[index] = argument.Value
+		}
+		argumentPrefix, values, ok := n.expressions(arguments)
+		if len(argumentPrefix) > 0 {
+			if !ok {
+				prefix = append(prefix, n.evaluateCallee(callee)...)
+				prefix = append(prefix, argumentPrefix...)
 				return prefix, nil
 			}
+			calleePrefix, stable := n.stabilizeCallee(callee)
+			prefix = append(prefix, calleePrefix...)
+			callee = stable
+			prefix = append(prefix, argumentPrefix...)
+		}
+		for index, value := range values {
 			copy.Arguments[index].Value = value
 		}
-		return prefix, &copy
+		copy.Callee = callee
+		if node.Block != nil {
+			block := *node.Block
+			block.Body = n.executableStatements(node.Block.Body)
+			copy.Block = &block
+		}
+		return n.finishExpression(prefix, &copy)
 	case *ir.EnumConstruct:
 		copy := *node
 		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
-		prefix := []ir.Statement{}
-		for index := range copy.Arguments {
-			argumentPrefix, value := n.expression(copy.Arguments[index].Value)
-			prefix = append(prefix, argumentPrefix...)
-			if value == nil {
-				return prefix, nil
-			}
+		arguments := make([]ir.Expression, len(copy.Arguments))
+		for index, argument := range copy.Arguments {
+			arguments[index] = argument.Value
+		}
+		prefix, values, ok := n.expressions(arguments)
+		if !ok {
+			return prefix, nil
+		}
+		for index, value := range values {
 			copy.Arguments[index].Value = value
 		}
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
+	case *ir.EnumCall:
+		copy := *node
+		prefix := []ir.Statement{}
+		if node.Receiver != nil {
+			receiverPrefix, receiver := n.expression(node.Receiver)
+			prefix = append(prefix, receiverPrefix...)
+			if receiver == nil {
+				return prefix, nil
+			}
+			copy.Receiver = receiver
+		}
+		copy.Arguments = append([]ir.CallArgument(nil), node.Arguments...)
+		arguments := make([]ir.Expression, len(copy.Arguments))
+		for index, argument := range copy.Arguments {
+			arguments[index] = argument.Value
+		}
+		argumentPrefix, values, ok := n.expressions(arguments)
+		if len(argumentPrefix) > 0 && copy.Receiver != nil {
+			if !ok {
+				prefix = append(prefix, n.evaluate(copy.Receiver)...)
+			} else {
+				receiverPrefix, receiver := n.materialize(copy.Receiver)
+				prefix = append(prefix, receiverPrefix...)
+				copy.Receiver = receiver
+			}
+		}
+		prefix = append(prefix, argumentPrefix...)
+		if !ok {
+			return prefix, nil
+		}
+		for index, value := range values {
+			copy.Arguments[index].Value = value
+		}
+		return n.finishExpression(prefix, &copy)
 	case *ir.TypeApply:
 		prefix, receiver := n.expression(node.Receiver)
 		if receiver == nil {
@@ -931,50 +1268,49 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy.Receiver = receiver
 		return prefix, &copy
 	case *ir.Index:
-		prefix, receiver := n.expression(node.Receiver)
-		if receiver == nil {
-			return prefix, nil
-		}
-		indexPrefix, index := n.expression(node.Index)
-		prefix = append(prefix, indexPrefix...)
-		if index == nil {
+		prefix, values, ok := n.expressions([]ir.Expression{node.Receiver, node.Index})
+		if !ok {
 			return prefix, nil
 		}
 		copy := *node
-		copy.Receiver = receiver
-		copy.Index = index
-		return prefix, &copy
+		copy.Receiver = values[0]
+		copy.Index = values[1]
+		return n.finishExpression(prefix, &copy)
 	case *ir.Block:
 		copy := *node
-		copy.Body = n.statements(node.Body)
+		copy.Body = n.executableStatements(node.Body)
 		return nil, &copy
 	case *ir.Transform:
 		copy := *node
-		prefix, source := n.expression(node.Source)
-		if source == nil {
+		expressions := []ir.Expression{node.Source}
+		initialIndex := -1
+		limitIndex := -1
+		if node.Initial != nil {
+			initialIndex = len(expressions)
+			expressions = append(expressions, node.Initial)
+		}
+		if node.Limit != nil {
+			limitIndex = len(expressions)
+			expressions = append(expressions, node.Limit)
+		}
+		prefix, values, ok := n.expressions(expressions)
+		if !ok {
 			return prefix, nil
 		}
-		initialPrefix, initial := n.expression(node.Initial)
-		prefix = append(prefix, initialPrefix...)
-		if node.Initial != nil && initial == nil {
-			return prefix, nil
+		copy.Source = values[0]
+		if initialIndex >= 0 {
+			copy.Initial = values[initialIndex]
 		}
-		copy.Source = source
-		copy.Initial = initial
-		limitPrefix, limit := n.expression(node.Limit)
-		prefix = append(prefix, limitPrefix...)
-		if node.Limit != nil && limit == nil {
-			return prefix, nil
+		if limitIndex >= 0 {
+			copy.Limit = values[limitIndex]
 		}
-		copy.Limit = limit
-		copy.Body = n.statements(node.Body)
-		resultPrefix, result := n.expression(node.Result)
-		copy.Body = append(copy.Body, resultPrefix...)
-		if result == nil {
-			return prefix, nil
+		copy.Body = n.executableStatements(node.Body)
+		resultType := transformResultSurrogateType(node)
+		copy.Result = n.deferredExpression(node.Result, resultType)
+		if !types.Equivalent(resultType, node.Result.ExprType()) {
+			copy.Type = neverSurrogateType(node.ExprType())
 		}
-		copy.Result = result
-		return prefix, &copy
+		return n.finishExpression(prefix, &copy)
 	default:
 		return nil, expression
 	}
@@ -1009,7 +1345,21 @@ func (n *controlFlowNormalizer) expressions(input []ir.Expression) ([]ir.Stateme
 	result := make([]ir.Expression, len(input))
 	for index, expression := range input {
 		expressionPrefix, value := n.expression(expression)
-		prefix = append(prefix, expressionPrefix...)
+		if len(expressionPrefix) > 0 {
+			if value == nil {
+				for previous := 0; previous < index; previous++ {
+					prefix = append(prefix, n.evaluate(result[previous])...)
+				}
+				prefix = append(prefix, expressionPrefix...)
+				return prefix, nil, false
+			}
+			for previous := 0; previous < index; previous++ {
+				materialized, stable := n.materialize(result[previous])
+				prefix = append(prefix, materialized...)
+				result[previous] = stable
+			}
+			prefix = append(prefix, expressionPrefix...)
+		}
 		if value == nil {
 			return prefix, nil, false
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	cliapp "github.com/type-rb/type-rb/internal/cliapp"
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
@@ -417,4 +418,34 @@ func (g *generator) cliRuntimeHelpers() {
 	g.line("if command == nil && len(spec.Commands) > 0 { fmt.Fprintln(os.Stdout); fmt.Fprintln(os.Stdout, \"Commands:\"); for _, item := range spec.Commands { fmt.Fprintf(os.Stdout, \"  %-24s %s\\n\", item.Name, item.About) } }")
 	g.indent--
 	g.line("}")
+}
+
+func (g *generator) cliApplicationFailureRuntimeSupport() {
+	typeName := g.cliApplicationFailureTypeName()
+	g.line("type " + typeName + " string")
+	g.line("func (failure " + typeName + ") TrbCLIApplicationFailure() string { return string(failure) }")
+}
+
+func (g *generator) cliApplicationFailureBoundarySupport() {
+	g.requireImport("fmt", "")
+	g.requireImport("os", "")
+	name := g.cliApplicationFailureBoundaryName()
+	g.line("func " + name + "() {")
+	g.indent++
+	g.line("recovered := recover()")
+	g.line("if recovered == nil { return }")
+	g.line("failure, ok := recovered.(interface{ TrbCLIApplicationFailure() string })")
+	g.line("if !ok { panic(recovered) }")
+	g.line("fmt.Fprintln(os.Stderr, failure.TrbCLIApplicationFailure())")
+	g.line("os.Exit(1)")
+	g.indent--
+	g.line("}")
+}
+
+func (g *generator) cliApplicationFailureBoundaryName() string {
+	return "trb__cliApplicationFailureBoundary_" + naming.PrivateSuffix("cli-application-failure-boundary:"+g.modulePath)
+}
+
+func (g *generator) cliApplicationFailureTypeName() string {
+	return "trb__cliApplicationFailure_" + naming.PrivateSuffix("cli-application-failure:"+g.modulePath)
 }

@@ -6298,7 +6298,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				actual := c.checkExpression(part.Expression, sc)
 				actual = c.requireValueExpression(part.Expression, actual, "be interpolated into a String")
 				expanded := scalarType(c.expandAlias(actual, map[string]bool{}))
-				if expanded.Kind != types.Invalid && !isNonNullable(expanded, types.String) {
+				if expanded.Kind != types.Invalid && expanded.Kind != types.Never && !isNonNullable(expanded, types.String) {
 					c.error(part.Expression.Span(), fmt.Sprintf("string interpolation requires String, got %s", actual))
 				}
 			}
@@ -6323,17 +6323,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		keyType := c.checkExpression(n.Entries[0].Key, sc)
 		keyType = c.requireValueExpression(n.Entries[0].Key, keyType, "be used as a Hash key")
-		if keyType.Kind != types.Invalid && !portableHashKey(keyType) && !c.rubyNativeSyntax() {
+		if keyType.Kind != types.Invalid && keyType.Kind != types.Never && !portableHashKey(keyType) && !c.rubyNativeSyntax() {
 			c.error(n.Entries[0].Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", keyType))
 		}
 		values := []ast.Expression{n.Entries[0].Value}
 		for _, entry := range n.Entries[1:] {
 			currentKey := c.checkExpression(entry.Key, sc)
 			currentKey = c.requireValueExpression(entry.Key, currentKey, "be used as a Hash key")
-			if currentKey.Kind != types.Invalid && !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
+			if currentKey.Kind != types.Invalid && currentKey.Kind != types.Never && !portableHashKey(currentKey) && !c.rubyNativeSyntax() {
 				c.error(entry.Key.Span(), fmt.Sprintf("Hash key must be String or Integer, got %s", currentKey))
 			}
-			if !types.Equivalent(keyType, currentKey) {
+			if keyType.Kind == types.Never && currentKey.Kind != types.Never {
+				keyType = currentKey
+			} else if currentKey.Kind != types.Never && !types.Equivalent(keyType, currentKey) {
 				c.error(entry.Key.Span(), fmt.Sprintf("Hash literal key type is %s, expected %s", currentKey, keyType))
 			}
 			values = append(values, entry.Value)
@@ -6514,7 +6516,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if n.Limit != nil {
 				limitType := c.checkExpression(n.Limit, sc)
 				limitType = c.requireValueExpression(n.Limit, limitType, "be used as a concurrent_map limit")
-				if limitType.Kind != types.Invalid && scalarType(limitType).Kind != types.Int {
+				if limitType.Kind != types.Invalid && limitType.Kind != types.Never && scalarType(limitType).Kind != types.Int {
 					c.error(n.Limit.Span(), fmt.Sprintf("concurrent_map limit must be Integer, got %s", limitType))
 				}
 				if literal, ok := n.Limit.(*ast.Literal); ok {
@@ -6547,7 +6549,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			} else {
 				sizeType := c.checkExpression(n.SliceSize, sc)
 				sizeType = c.requireValueExpression(n.SliceSize, sizeType, "be used as an each_slice size")
-				if sizeType.Kind != types.Invalid && scalarType(sizeType).Kind != types.Int {
+				if sizeType.Kind != types.Invalid && sizeType.Kind != types.Never && scalarType(sizeType).Kind != types.Int {
 					c.error(n.SliceSize.Span(), fmt.Sprintf("each_slice size must be Integer, got %s", sizeType))
 				}
 				if literal, ok := n.SliceSize.(*ast.Literal); ok {

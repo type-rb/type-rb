@@ -31,6 +31,13 @@ func cliSymbols() map[string]stdlib.Symbol {
 	optionalString := types.FromName("String")
 	optionalString.Nullable = true
 	return map[string]stdlib.Symbol{
+		"fail": {
+			Name:               "fail",
+			Intrinsic:          "trb.cli.fail",
+			RuntimeIndependent: true,
+			Parameters:         []stdlib.Parameter{{Name: "message", Type: types.FromName("String")}},
+			Return:             types.Type{Kind: types.Never, Name: "Never"},
+		},
 		"run": {
 			Name:               "run",
 			Intrinsic:          "trb.cli.run",
