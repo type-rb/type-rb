@@ -98,6 +98,37 @@ func TestRuntimeProviderOwnsConfigurationInvocationAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestSafeNavigationSkipsRuntimePropertyOnNilReceiver(t *testing.T) {
+	provider := &testRuntimeProvider{}
+	evaluator := NewEvaluator(nil, "go")
+	evaluator.runtimeProviders = []runtimeProvider{provider}
+	receiverType := types.FromName("String")
+	receiverType.Nullable = true
+	resultType := types.FromName("Integer")
+	resultType.Nullable = true
+	member := &ir.Member{
+		ExprBase: ir.NewExprBase(token.Span{}, resultType),
+		Receiver: &ir.Literal{
+			ExprBase: ir.NewExprBase(token.Span{}, receiverType), Kind: "nil", Raw: "nil",
+		},
+		Name: "page",
+		Safe: true,
+		Reference: &ir.Reference{
+			Intrinsic: "test.echo", ExportKind: "property", ReceiverMethod: true,
+		},
+	}
+	result, err := evaluator.Evaluate([]ir.Statement{&ir.ExpressionStatement{Expression: member}}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Value.Data != nil || !types.Equivalent(result.Value.Type, resultType) {
+		t.Fatalf("safe property result=%#v, want nil Integer?", result.Value)
+	}
+	if provider.invocation.Name != "" {
+		t.Fatalf("runtime provider was called for a nil safe receiver: %#v", provider.invocation)
+	}
+}
+
 func TestStructuredResultBoundaryNormalizesCallbackAliasAndTemporary(t *testing.T) {
 	provider := &testRuntimeProvider{}
 	evaluator := NewEvaluator(nil, "go")

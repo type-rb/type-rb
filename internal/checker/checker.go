@@ -29,6 +29,7 @@ type Result struct {
 	NullableUnwraps            map[ast.Expression]types.Type
 	NativeResultBridges        map[ast.Expression]NativeResultBridge
 	NativeCallResultBridges    map[*ast.CallExpression]NativeCallResultBridge
+	SafeNavigationCallTypes    map[*ast.CallExpression]types.Type
 	Variables                  map[*ast.VariableStatement]types.Type
 	Iterations                 map[*ast.IterationExpression]types.Type
 	IterationBindings          map[*ast.IterationExpression][]types.Type
@@ -64,6 +65,7 @@ type Result struct {
 	StructuredBlocks           map[*ast.CallExpression]StructuredBlock
 	ExternalMembers            map[ast.Expression]declaration.Member
 	ClassFieldAccesses         map[*ast.MemberExpression]bool
+	SafeNavigationPresentTypes map[*ast.MemberExpression]types.Type
 	UnionMemberAccesses        map[*ast.MemberExpression][]UnionMemberAccess
 	RuntimeDependencies        map[string]*stdlib.Package
 	ImportUses                 map[*ast.ImportStatement]map[string]bool
@@ -489,6 +491,7 @@ type Checker struct {
 	external                    map[ast.Expression]declaration.Member
 	declaredTypes               map[string]typeDeclaration
 	enumCallee                  int
+	safeCallCallee              *ast.MemberExpression
 	enumPattern                 int
 	enumPatternType             types.Type
 	usedImports                 map[*ast.ImportStatement]map[string]bool
@@ -833,6 +836,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			NullableUnwraps:            map[ast.Expression]types.Type{},
 			NativeResultBridges:        map[ast.Expression]NativeResultBridge{},
 			NativeCallResultBridges:    map[*ast.CallExpression]NativeCallResultBridge{},
+			SafeNavigationCallTypes:    map[*ast.CallExpression]types.Type{},
 			Variables:                  map[*ast.VariableStatement]types.Type{},
 			Iterations:                 map[*ast.IterationExpression]types.Type{},
 			IterationBindings:          map[*ast.IterationExpression][]types.Type{},
@@ -868,6 +872,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			StructuredBlocks:           map[*ast.CallExpression]StructuredBlock{},
 			ExternalMembers:            map[ast.Expression]declaration.Member{},
 			ClassFieldAccesses:         map[*ast.MemberExpression]bool{},
+			SafeNavigationPresentTypes: map[*ast.MemberExpression]types.Type{},
 			UnionMemberAccesses:        map[*ast.MemberExpression][]UnionMemberAccess{},
 			RuntimeDependencies:        map[string]*stdlib.Package{},
 			ImportUses:                 importUses,
@@ -6753,6 +6758,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		methodReceiverType := scalarType(c.expandAlias(receiverType, map[string]bool{}))
 		dataReceiverType := c.expandAlias(receiverType, map[string]bool{})
+		if n.Safe {
+			methodReceiverType.Nullable = false
+			dataReceiverType.Nullable = false
+		}
 		if dataReceiverType.Kind == types.Union && scalarType(dataReceiverType).Kind == types.Union && !n.Namespace && !n.Safe {
 			memberType, alternatives, classField, found := c.unionDataMember(dataReceiverType, n.Name)
 			if !found {
@@ -7003,7 +7012,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.enumCallee++
 		}
 		previousRecordDefaultCallee := c.recordDefaultCallee
+		previousSafeCallCallee := c.safeCallCallee
 		c.recordDefaultCallee = directCallIdentifier(n.Callee)
+		c.safeCallCallee = nil
+		if member, safe := safeNavigationMember(n.Callee); safe {
+			c.safeCallCallee = member
+		}
 		previousScopedReceiver := c.scopedResourceReceiver
 		previousFileResourceCallCallee := c.fileResourceCallCallee
 		c.fileResourceCallCallee = n.Callee
@@ -7013,6 +7027,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		calleeType := c.checkExpression(n.Callee, sc)
 		c.fileResourceCallCallee = previousFileResourceCallCallee
 		c.scopedResourceReceiver = previousScopedReceiver
+		c.safeCallCallee = previousSafeCallCallee
 		c.recordDefaultCallee = previousRecordDefaultCallee
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Namespace {
 			c.enumCallee--
@@ -7444,6 +7459,18 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	}
+	if member, ok := expression.(*ast.MemberExpression); ok && member.Safe {
+		c.result.SafeNavigationPresentTypes[member] = typ
+		if c.safeCallCallee != member {
+			typ = safeNavigationResultType(typ, c.result.Expressions[member.Receiver])
+		}
+	}
+	if call, ok := expression.(*ast.CallExpression); ok {
+		if member, safe := safeNavigationMember(call.Callee); safe {
+			c.result.SafeNavigationCallTypes[call] = typ
+			typ = safeNavigationResultType(typ, c.result.Expressions[member.Receiver])
+		}
+	}
 	typ = c.canonicalType(typ, c.activeTypeParameterSet())
 	if member, ok := expression.(*ast.MemberExpression); ok && typ.Nullable {
 		if key, _, stable := c.nullableMemberNarrowing(member, sc); stable {
@@ -7553,6 +7580,32 @@ func (c *Checker) fileResourceExpressionAllowed(expression ast.Expression, typ t
 	}
 	value, _, found := sc.lookupOwner(identifier.Name)
 	return found && value.scopedResource && c.scopedResourceReceiver == identifier && c.blockCallbackDepth == value.scopedBlockDepth
+}
+
+func safeNavigationMember(expression ast.Expression) (*ast.MemberExpression, bool) {
+	switch node := expression.(type) {
+	case *ast.MemberExpression:
+		return node, node.Safe
+	case *ast.GenericExpression:
+		return safeNavigationMember(node.Receiver)
+	default:
+		return nil, false
+	}
+}
+
+func safeNavigationResultType(result, receiver types.Type) types.Type {
+	if !receiver.Nullable {
+		return result
+	}
+	switch result.Kind {
+	case types.Invalid, types.Void, types.Nil:
+		return result
+	case types.Never:
+		return types.FromName("Nil")
+	default:
+		result.Nullable = true
+		return result
+	}
 }
 
 func (c *Checker) requireValueExpression(expression ast.Expression, typ types.Type, use string) types.Type {

@@ -364,6 +364,23 @@ end
 See [ADR 0010](decisions/0010-assignment-based-nullable-narrowing.md) for the
 declared-type and flow-type split.
 
+#### Safe navigation
+
+- `receiver&.member` and `receiver&.method(arguments)` use Ruby-shaped safe
+  navigation. The receiver is evaluated exactly once. When it is `nil`, the
+  member or method is not evaluated, call arguments are not evaluated, and the
+  expression produces `nil`.
+- When a nullable receiver is present, it is narrowed to its non-nullable type
+  for member selection and the call. A value result `T` therefore becomes
+  `T?`; an already nullable result remains nullable. Safe navigation on a
+  statically non-nullable receiver has the ordinary member or call result type.
+- A `Void` method remains statement-only: safe navigation may skip the call but
+  does not turn `Void` into a value. If the present branch has the internal
+  `Never` type, the only completing outcome is `nil`, so the safe expression
+  has the internal `Nil` type.
+- Go, Ruby, TypeScript, and the REPL preserve the same receiver-once and
+  argument-laziness rules. No backend substitutes a zero value for `nil`.
+
 #### Literal types and discriminated unions
 
 - An explicit Integer or String literal may appear in a type position, for

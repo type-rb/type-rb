@@ -40,6 +40,175 @@ func (n *controlFlowNormalizer) temporaryIdentifier(typ types.Type) (*ir.Tempora
 	return &ir.Temporary{Name: name, Type: typ}, &ir.Identifier{ExprBase: ir.NewExprBase(token.Span{}, typ), Name: name, Lexical: true, Generated: true}
 }
 
+// materialize evaluates a value before a later compiler-lifted statement
+// prefix and returns a stable reference that can be used after that prefix.
+func (n *controlFlowNormalizer) materialize(value ir.Expression) ([]ir.Statement, ir.Expression) {
+	if value == nil {
+		return nil, nil
+	}
+	if identifier, ok := value.(*ir.Identifier); ok && identifier.Generated {
+		return nil, value
+	}
+	temporary, identifier := n.temporaryIdentifier(value.ExprType())
+	return []ir.Statement{temporary, assignment(identifier, value)}, identifier
+}
+
+func safeCalleeMember(value ir.Expression) (*ir.Member, bool) {
+	switch node := value.(type) {
+	case *ir.Member:
+		return node, node.Safe
+	case *ir.TypeApply:
+		return safeCalleeMember(node.Receiver)
+	default:
+		return nil, false
+	}
+}
+
+func safePresentType(member *ir.Member) types.Type {
+	if member.PresentType.Kind != "" {
+		return member.PresentType
+	}
+	present := member.ExprType()
+	present.Nullable = false
+	return present
+}
+
+func safePresentReceiver(value ir.Expression) ir.Expression {
+	typ := value.ExprType()
+	if !typ.Nullable {
+		return value
+	}
+	present := typ
+	present.Nullable = false
+	return &ir.Conversion{
+		ExprBase: ir.NewExprBase(value.SourceSpan(), present),
+		Kind:     ir.NullableToNonNullableConversion,
+		Value:    value,
+	}
+}
+
+func replaceSafeCalleeReceiver(value ir.Expression, receiver ir.Expression) (ir.Expression, types.Type) {
+	switch node := value.(type) {
+	case *ir.Member:
+		present := safePresentType(node)
+		copy := *node
+		copy.Type = present
+		copy.Receiver = receiver
+		copy.Safe = false
+		copy.PresentType = types.Type{}
+		return &copy, present
+	case *ir.TypeApply:
+		inner, _ := replaceSafeCalleeReceiver(node.Receiver, receiver)
+		copy := *node
+		copy.Receiver = inner
+		return &copy, node.ExprType()
+	default:
+		return value, value.ExprType()
+	}
+}
+
+func safeNavigationNil(span token.Span) ir.Expression {
+	return &ir.Literal{ExprBase: ir.NewExprBase(span, types.FromName("Nil")), Kind: "nil", Raw: "nil"}
+}
+
+func safeNavigationCondition(receiver ir.Expression, span token.Span) ir.Expression {
+	return &ir.Binary{
+		ExprBase: ir.NewExprBase(span, types.FromName("Boolean")),
+		Left:     receiver,
+		Operator: "!=",
+		Right:    safeNavigationNil(span),
+	}
+}
+
+func safeNavigationPresentValue(value ir.Expression, target types.Type) ir.Expression {
+	if value == nil || types.Equivalent(value.ExprType(), target) {
+		return value
+	}
+	if target.Nullable && !value.ExprType().Nullable && value.ExprType().Kind != types.Nil {
+		return &ir.Conversion{
+			ExprBase: ir.NewExprBase(value.SourceSpan(), target),
+			Kind:     ir.NonNullableToNullableConversion,
+			Value:    value,
+		}
+	}
+	return value
+}
+
+func (n *controlFlowNormalizer) safeNavigationExpression(prefix []ir.Statement, receiver ir.Expression, present ir.Expression, resultType types.Type, span token.Span) ([]ir.Statement, ir.Expression) {
+	flow := &ir.If{
+		ExprBase:  ir.NewExprBase(span, resultType),
+		Condition: safeNavigationCondition(receiver, span),
+		HasElse:   true,
+	}
+	switch present.ExprType().Kind {
+	case types.Void:
+		flow.Then = []ir.Statement{&ir.ExpressionStatement{Base: ir.Base{Span: present.SourceSpan()}, Expression: present}}
+	case types.Never:
+		flow.ThenResult = present
+		flow.ThenDiverges = true
+		flow.ElseResult = safeNavigationNil(span)
+	default:
+		flow.ThenResult = safeNavigationPresentValue(present, resultType)
+		flow.ElseResult = safeNavigationNil(span)
+	}
+	flowPrefix, result := n.ifExpression(flow)
+	return append(prefix, flowPrefix...), result
+}
+
+func (n *controlFlowNormalizer) safeNavigationCall(node *ir.Call, member *ir.Member) ([]ir.Statement, ir.Expression) {
+	if !member.Receiver.ExprType().Nullable {
+		callee, calleeType := replaceSafeCalleeReceiver(node.Callee, member.Receiver)
+		presentType := node.PresentType
+		if presentType.Kind == "" {
+			presentType = calleeType
+		}
+		copy := *node
+		copy.Type = presentType
+		copy.Callee = callee
+		copy.PresentType = types.Type{}
+		return n.expression(&copy)
+	}
+	prefix, receiver := n.expression(member.Receiver)
+	if receiver == nil {
+		return prefix, nil
+	}
+	stablePrefix, stable := n.materialize(receiver)
+	prefix = append(prefix, stablePrefix...)
+	callee, calleeType := replaceSafeCalleeReceiver(node.Callee, safePresentReceiver(stable))
+	presentType := node.PresentType
+	if presentType.Kind == "" {
+		presentType = calleeType
+	}
+	present := *node
+	present.Type = presentType
+	present.Callee = callee
+	present.PresentType = types.Type{}
+	return n.safeNavigationExpression(prefix, stable, &present, node.ExprType(), node.SourceSpan())
+}
+
+func (n *controlFlowNormalizer) safeNavigationMember(node *ir.Member) ([]ir.Statement, ir.Expression) {
+	presentType := safePresentType(node)
+	if !node.Receiver.ExprType().Nullable {
+		copy := *node
+		copy.Type = presentType
+		copy.Safe = false
+		copy.PresentType = types.Type{}
+		return n.expression(&copy)
+	}
+	prefix, receiver := n.expression(node.Receiver)
+	if receiver == nil {
+		return prefix, nil
+	}
+	stablePrefix, stable := n.materialize(receiver)
+	prefix = append(prefix, stablePrefix...)
+	present := *node
+	present.Type = presentType
+	present.Receiver = safePresentReceiver(stable)
+	present.Safe = false
+	present.PresentType = types.Type{}
+	return n.safeNavigationExpression(prefix, stable, &present, node.ExprType(), node.SourceSpan())
+}
+
 func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 	for _, statement := range statements {
 		switch node := statement.(type) {
@@ -710,6 +879,9 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		}
 		return prefix, &copy
 	case *ir.Call:
+		if member, safe := safeCalleeMember(node.Callee); safe {
+			return n.safeNavigationCall(node, member)
+		}
 		prefix, callee := n.expression(node.Callee)
 		if callee == nil {
 			return prefix, nil
@@ -748,6 +920,9 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy.Receiver = receiver
 		return prefix, &copy
 	case *ir.Member:
+		if node.Safe {
+			return n.safeNavigationMember(node)
+		}
 		prefix, receiver := n.expression(node.Receiver)
 		if receiver == nil {
 			return prefix, nil

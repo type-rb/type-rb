@@ -938,6 +938,12 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			if reference.ReceiverMethod {
 				if member, ok := receiverMember(n.Callee); ok {
+					if member.Safe {
+						receiver := g.receiverOperand(member.Receiver)
+						safeParts := append([]string{"__trb_safe_receiver"}, parts...)
+						call := g.intrinsic(reference.Intrinsic, n, safeParts)
+						return "->(__trb_safe_receiver) { __trb_safe_receiver.nil? ? nil : " + call + " }.call(" + receiver + ")"
+					}
 					parts = append([]string{g.receiverOperand(member.Receiver)}, parts...)
 				}
 			}
