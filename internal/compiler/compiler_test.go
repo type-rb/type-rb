@@ -4014,12 +4014,10 @@ func TestStringInterpolationRequiresNonNullableStringAcrossModes(t *testing.T) {
 }
 
 func TestStringInterpolationAcceptsExplicitStringsAcrossModes(t *testing.T) {
-	source := []byte(`import trb/std/strings
-
-alias Label = String
+	source := []byte(`alias Label = String
 
 def render(label: Label, ratio: Float): String
-	return "#{Strings.uppercase(label)}:#{ratio.to_s()}"
+	return "#{label.upcase()}:#{ratio.to_s()}"
 end
 
 def render_optional(label: Label?): String
@@ -4311,9 +4309,7 @@ func TestConstantsAreRuntimeInitializedImmutableScopedBindings(t *testing.T) {
 		}
 	}
 
-	source := []byte(`import trb/std/strings
-
-APP_NAME := Strings.uppercase("typerb")
+	source := []byte(`APP_NAME := "typerb".upcase()
 
 module Limits
   MAX_ITEMS := 10

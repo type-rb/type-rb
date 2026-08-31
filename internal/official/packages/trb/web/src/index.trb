@@ -165,7 +165,7 @@ class Request
 
 	def text(): Result<String, RequestError>
 		value := @body.bytes()
-		if !value.valid_utf8()
+		if !value.valid_utf8?()
 			return Result<String, RequestError>::Err(RequestError::InvalidUtf8)
 		end
 		return Result<String, RequestError>::Ok(value.to_s())

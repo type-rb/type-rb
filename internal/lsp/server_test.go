@@ -1426,7 +1426,7 @@ func TestSemanticTokenDataSplitsMultilineSpans(t *testing.T) {
 
 func TestServerOffersDiagnosticFixesAsCodeActions(t *testing.T) {
 	filename := cleanPath("unused.trb")
-	source := "import trb/std/strings\n\ndef main()\n\treturn\nend\n"
+	source := "import trb/std/math\n\ndef main()\n\treturn\nend\n"
 	uri := uriFromPath(filename)
 	input := framedMessages(t,
 		message{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "initialize", Params: json.RawMessage(`{}`)},
