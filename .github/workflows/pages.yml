@@ -101,6 +101,7 @@ jobs:
           test -s dist/site/index.html
           test -s dist/site/docs/index.html
           test -s dist/site/docs/getting-started/index.html
+          test -s dist/site/docs/capabilities/index.html
           test -s dist/site/docs/guides/linting/index.html
           test -s dist/site/docs/lint-rules/index.html
           test -s dist/site/docs/lint-rules/prefer-conditional-transfer/index.html

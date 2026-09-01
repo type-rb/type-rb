@@ -5,6 +5,9 @@ Last updated: 2026-08-28
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 generated output, and command-line interface may change before beta.
 
+For a structured comparison between current behavior and the revisable 1.0
+target, see the [TypeRB 1.0 capability map](capabilities.md).
+
 ## Current capability
 
 TypeRB uses one portable grammar and typed IR for Go, Ruby, and TypeScript

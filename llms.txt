@@ -18,6 +18,7 @@ TypeRB source uses canonical, case-sensitive type names and explicit imports. Ta
 - [Command-line interface](https://type-rb.github.io/docs/cli/): Commands, options, and workflows.
 - [Project configuration](https://type-rb.github.io/docs/configuration/): `trbconfig.jsonc` and backend configuration.
 - [Lint rules](https://type-rb.github.io/docs/lint-rules/): Built-in maintainability rules and their stable identifiers.
+- [TypeRB 1.0 capability map](https://type-rb.github.io/docs/capabilities/): Revisable proposed 1.0 coverage with available, partial, planned, and exploring states.
 
 ## Build applications
 

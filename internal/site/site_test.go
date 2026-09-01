@@ -47,6 +47,7 @@ Use conditional transfer for a short guard.
 		"index.html",
 		"assets/site.css",
 		"assets/docs.js",
+		"assets/capabilities.js",
 		"docs/index.html",
 		"docs/lint-rules/index.html",
 		"docs/lint-rules/prefer-conditional-transfer/index.html",
@@ -107,6 +108,92 @@ Use conditional transfer for a short guard.
 	}
 	if !strings.Contains(rules, "<table>") {
 		t.Fatalf("GFM table was not rendered:\n%s", rules)
+	}
+}
+
+func TestExportBuildsCapabilityMapFromValidatedCatalog(t *testing.T) {
+	docsDir := t.TempDir()
+	writeTestFile(t, docsDir, "site.json", `{
+		"sections": [{
+			"title": "Reference",
+			"pages": [
+				{ "source": "capabilities.md", "label": "1.0 capabilities" },
+				{ "source": "status.md", "label": "Current status" }
+			]
+		}]
+	}`)
+	writeTestFile(t, docsDir, "README.md", "# Documentation\n")
+	writeTestFile(t, docsDir, "capabilities.md", "# TypeRB 1.0 capability map\n\nA revisable target.\n")
+	writeTestFile(t, docsDir, "status.md", "# Current status\n")
+	writeTestFile(t, docsDir, "roadmap.md", "# Roadmap\n")
+	writeTestFile(t, docsDir, "capabilities.json", `{
+		"schemaVersion": 1,
+		"updatedAt": "2026-09-01",
+		"target": "1.0",
+		"scopes": [{
+			"id": "language",
+			"label": "Language",
+			"eyebrow": "LANGUAGE",
+			"description": "Write portable programs."
+		}],
+		"areas": [{
+			"id": "core",
+			"title": "Language core",
+			"description": "Portable semantics.",
+			"items": [
+				{
+					"title": "Functions",
+					"status": "available",
+					"scopes": ["language"],
+					"description": "Typed functions work.",
+					"evidence": { "label": "Status", "source": "status.md" }
+				},
+				{
+					"title": "Generics",
+					"status": "partial",
+					"scopes": ["language"],
+					"description": "Some generic forms work.",
+					"evidence": { "label": "Status", "source": "status.md" }
+				},
+				{
+					"title": "Tuples",
+					"status": "planned",
+					"scopes": ["language"],
+					"description": "Typed tuples are planned.",
+					"evidence": { "label": "Roadmap", "source": "roadmap.md" }
+				},
+				{
+					"title": "Reflection",
+					"status": "exploring",
+					"scopes": ["language"],
+					"description": "The boundary needs design.",
+					"evidence": { "label": "Roadmap", "source": "roadmap.md" }
+				}
+			]
+		}]
+	}`)
+
+	output := t.TempDir()
+	if err := Export(Options{OutputDir: output, DocsDir: docsDir, Version: "1.0-test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := readTestFile(t, output, "docs/capabilities/index.html")
+	for _, expected := range []string{
+		`class="docs-page capabilities-page"`,
+		`<script defer src="/assets/capabilities.js"></script>`,
+		`data-capability-catalog`,
+		`<strong>4</strong>`,
+		`Language core`,
+		`data-status="available"`,
+		`data-status="partial"`,
+		`data-status="planned"`,
+		`data-status="exploring"`,
+		`href="/docs/status/"`,
+	} {
+		if !strings.Contains(page, expected) {
+			t.Fatalf("capability map is missing %s:\n%s", expected, page)
+		}
 	}
 }
 

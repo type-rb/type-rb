@@ -1,0 +1,107 @@
+<section class="capability-catalog" data-capability-catalog>
+	<div class="capability-snapshot" aria-label="Catalog snapshot">
+		<span>Proposed target · {{.Target}}</span>
+		<span>Reviewed · {{.UpdatedAt}}</span>
+	</div>
+
+	<section class="capability-summary-grid" aria-label="Capability summary">
+		<article class="capability-summary-card capability-summary-total">
+			<span>Candidate set</span>
+			<strong>{{.Total}}</strong>
+			<small>{{.AreaCount}} areas</small>
+		</article>
+		<article class="capability-summary-card capability-summary-available">
+			<span>Available</span>
+			<strong>{{.Available}}</strong>
+			<small>Complete now</small>
+		</article>
+		<article class="capability-summary-card capability-summary-partial">
+			<span>Partial</span>
+			<strong>{{.Partial}}</strong>
+			<small>Useful coverage exists</small>
+		</article>
+		<article class="capability-summary-card capability-summary-remaining">
+			<span>Remaining</span>
+			<strong>{{.Remaining}}</strong>
+			<small>Planned or exploring</small>
+		</article>
+	</section>
+
+	<section class="capability-scope-grid" aria-label="Coverage lenses">
+		{{range .Scopes}}
+		<button class="capability-scope-card" type="button" data-capability-scope="{{.ID}}" aria-pressed="false">
+			<span class="capability-eyebrow">{{.Eyebrow}}</span>
+			<span class="capability-scope-title">
+				<strong>{{.Label}}</strong>
+				<b>{{.Available}} / {{.Total}}</b>
+			</span>
+			<span class="capability-scope-description">{{.Description}}</span>
+			<span class="capability-progress-track" aria-hidden="true">
+				<span class="capability-progress-available" style="width: {{.AvailableWidth}}"></span>
+				<span class="capability-progress-partial" style="width: {{.PartialWidth}}"></span>
+			</span>
+			<span class="capability-progress-caption">{{.Available}} available · {{.Partial}} partial</span>
+		</button>
+		{{end}}
+	</section>
+
+	<section class="capability-coverage-surface">
+		<div class="capability-filter-bar">
+			<label class="capability-search">
+				<span aria-hidden="true">⌕</span>
+				<span class="capability-sr-only">Search capabilities</span>
+				<input data-capability-search type="search" placeholder="Search capabilities…" autocomplete="off">
+			</label>
+			<div class="capability-filter-row" aria-label="Filter by status">
+				<span class="capability-filter-caption">STATUS</span>
+				<button class="capability-filter-button" type="button" data-capability-status="all" aria-pressed="true">All</button>
+				{{range .Statuses}}<button class="capability-filter-button" type="button" data-capability-status="{{.ID}}" aria-pressed="false">{{.Label}}</button>{{end}}
+			</div>
+			<div class="capability-expand-actions">
+				<button class="capability-quiet-button" type="button" data-capability-expand>Expand all</button>
+				<button class="capability-quiet-button" type="button" data-capability-collapse>Collapse all</button>
+			</div>
+			<span class="capability-visible-count" data-capability-visible aria-live="polite">{{.Total}} shown</span>
+		</div>
+
+		<div class="capability-area-list" data-capability-area-list>
+			{{range .Areas}}
+			<details class="capability-area" data-capability-area open>
+				<summary class="capability-area-summary">
+					<span class="capability-area-icon" data-capability-area-icon>{{.Icon}}</span>
+					<span class="capability-area-heading">
+						<strong>{{.Title}}</strong>
+						<small>{{.Description}}</small>
+					</span>
+					<span class="capability-area-meta" data-capability-area-meta>{{.Available}} / {{.Total}} available</span>
+					<span class="capability-chevron" aria-hidden="true">⌄</span>
+				</summary>
+				<div class="capability-list">
+					{{range .Items}}
+					<details class="capability-item capability-status-{{.Status}}" data-capability-item data-status="{{.Status}}" data-scopes="{{.Scopes}}" data-search="{{.Search}}">
+						<summary>
+							<span class="capability-status-icon" aria-hidden="true">{{.StatusIcon}}</span>
+							<span class="capability-item-title">{{.Title}}</span>
+							<a class="capability-evidence" href="{{.EvidenceURL}}">{{.EvidenceLabel}}</a>
+							<span class="capability-status-label">{{.StatusLabel}}</span>
+							<span class="capability-chevron" aria-hidden="true">⌄</span>
+						</summary>
+						<div class="capability-detail">
+							<p>{{.Description}}</p>
+							<div class="capability-detail-meta">
+								<span>{{.StatusHelp}}</span>
+								<span class="capability-scope-list">{{range .ScopeLabels}}<span class="capability-scope-badge">{{.}}</span>{{end}}</span>
+							</div>
+						</div>
+					</details>
+					{{end}}
+				</div>
+			</details>
+			{{end}}
+			<div class="capability-empty" data-capability-empty hidden>
+				<strong>No matching capabilities</strong>
+				<span>Change the search or filters.</span>
+			</div>
+		</div>
+	</section>
+</section>

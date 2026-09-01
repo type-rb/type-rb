@@ -5,9 +5,11 @@ alpha compiler to a language that can be used for maintained production
 applications. Ordering may change as real Go, Ruby, and TypeScript projects
 expose missing language features.
 
-For implemented behavior, see [status.md](status.md). Language decisions belong
-in [specification.md](specification.md); this document tracks outcomes rather
-than detailed syntax.
+For a countable view of the proposed 1.0 target, see the
+[capability map](capabilities.md). For implemented behavior, see
+[status.md](status.md). Language decisions belong in
+[specification.md](specification.md); this document tracks outcomes rather than
+detailed syntax.
 
 ## 1. Complete the portable language core
 
