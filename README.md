@@ -205,7 +205,8 @@ require explicit imports.
 
 Follow the [learning path](https://type-rb.github.io/docs/learning/), or browse
 the [documentation](https://type-rb.github.io/docs/) for application guides,
-lint rules, references, current status, and the roadmap.
+lint rules, references, the [proposed 1.0 capability map](https://type-rb.github.io/docs/capabilities/),
+current status, and the roadmap.
 
 ## License
 

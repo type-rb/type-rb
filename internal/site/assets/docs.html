@@ -9,10 +9,11 @@
 		<link rel="icon" href="data:,">
 		<link rel="stylesheet" href="/assets/site.css">
 		<script defer src="/assets/docs.js"></script>
+		{{if .CapabilityMap}}<script defer src="/assets/capabilities.js"></script>{{end}}
 		<link rel="canonical" href="https://type-rb.github.io{{.URL}}">
 		<title>{{.Title}} — TypeRB</title>
 	</head>
-	<body class="docs-page">
+	<body class="docs-page{{if .CapabilityMap}} capabilities-page{{end}}">
 		<header class="site-header">
 			<a class="site-brand" href="/" aria-label="TypeRB home">
 				<span class="brand-mark" aria-hidden="true">trb</span>

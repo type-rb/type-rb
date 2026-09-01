@@ -53,11 +53,12 @@ type manifestPage struct {
 }
 
 type page struct {
-	Source     string
-	Title      string
-	URL        string
-	OutputPath string
-	Body       template.HTML
+	Source        string
+	Title         string
+	URL           string
+	OutputPath    string
+	Body          template.HTML
+	CapabilityMap bool
 }
 
 type navSection struct {
@@ -76,12 +77,13 @@ type landingData struct {
 }
 
 type docsData struct {
-	Title     string
-	URL       string
-	SourceURL string
-	Version   string
-	Body      template.HTML
-	Sections  []navSection
+	Title         string
+	URL           string
+	SourceURL     string
+	Version       string
+	Body          template.HTML
+	Sections      []navSection
+	CapabilityMap bool
 }
 
 func Export(options Options) error {
@@ -117,12 +119,20 @@ func Export(options Options) error {
 			return err
 		}
 		pages[index].Body = template.HTML(body) // Repository documentation is trusted input rendered without raw HTML.
+		if pages[index].Source == capabilityPageSource {
+			catalog, err := renderCapabilityCatalog(options.DocsDir, pageURLs)
+			if err != nil {
+				return err
+			}
+			pages[index].Body += catalog
+			pages[index].CapabilityMap = true
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Join(options.OutputDir, "assets"), 0o755); err != nil {
 		return err
 	}
-	for _, name := range []string{"site.css", "docs.js"} {
+	for _, name := range []string{"site.css", "docs.js", "capabilities.js"} {
 		asset, err := assets.ReadFile("assets/" + name)
 		if err != nil {
 			return err
@@ -137,12 +147,13 @@ func Export(options Options) error {
 
 	for _, current := range pages {
 		data := docsData{
-			Title:     current.Title,
-			URL:       current.URL,
-			SourceURL: "https://github.com/type-rb/type-rb/blob/main/docs/" + current.Source,
-			Version:   options.Version,
-			Body:      current.Body,
-			Sections:  navigation(configuration, pages, current.Source),
+			Title:         current.Title,
+			URL:           current.URL,
+			SourceURL:     "https://github.com/type-rb/type-rb/blob/main/docs/" + current.Source,
+			Version:       options.Version,
+			Body:          current.Body,
+			Sections:      navigation(configuration, pages, current.Source),
+			CapabilityMap: current.CapabilityMap,
 		}
 		if err := renderTemplate(options.OutputDir, current.OutputPath, "docs.html", data); err != nil {
 			return err

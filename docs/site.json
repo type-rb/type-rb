@@ -44,6 +44,7 @@
       "pages": [
         { "source": "specification.md", "label": "Language specification" },
         { "source": "standard-library.md", "label": "Standard library" },
+        { "source": "capabilities.md", "label": "1.0 capabilities" },
         { "source": "status.md", "label": "Current status" },
         { "source": "roadmap.md", "label": "Roadmap" }
       ]

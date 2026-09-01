@@ -44,5 +44,6 @@ larger applications.
 
 ## Project
 
+- [TypeRB 1.0 capability map](capabilities.md)
 - [Current status](status.md)
 - [Roadmap](roadmap.md)

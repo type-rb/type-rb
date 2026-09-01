@@ -1,0 +1,601 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-09-01",
+  "target": "1.0",
+  "scopes": [
+    {
+      "id": "language",
+      "label": "Language platform",
+      "eyebrow": "LANGUAGE + LIBRARY",
+      "description": "Write portable, typed programs with a practical standard foundation."
+    },
+    {
+      "id": "applications",
+      "label": "Application stack",
+      "eyebrow": "BUILD APPLICATIONS",
+      "description": "Build backend, browser, data, and background-work applications."
+    },
+    {
+      "id": "workflow",
+      "label": "Daily workflow",
+      "eyebrow": "DEVELOP + OPERATE",
+      "description": "Edit, test, ship, diagnose, and maintain real TypeRB projects."
+    }
+  ],
+  "areas": [
+    {
+      "id": "language",
+      "title": "Language and type system",
+      "description": "Portable semantics shared by Go, Ruby, TypeScript, and the evaluator.",
+      "items": [
+        {
+          "title": "Functions, closures, and structured collection blocks",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Use typed function values, lexical capture, and multi-statement map, select, reduce, predicate, and sort-key blocks.",
+          "evidence": { "label": "Specification", "source": "specification.md" }
+        },
+        {
+          "title": "Records, enums, payload enums, and pattern matching",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Model product and sum types with checked construction, exhaustive cases, raw values, and payload binding.",
+          "evidence": { "label": "Language guide", "source": "language.md" }
+        },
+        {
+          "title": "Classes, modules, and interfaces",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "The object model is usable, while superclass construction, override rules, initialization order, and some generic member semantics remain incomplete.",
+          "evidence": { "label": "Specification", "source": "specification.md" }
+        },
+        {
+          "title": "Generics and type inference",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "Generic aliases, records, enums, classes, functions, and instance methods exist; broader call-site inference and generic member forms remain.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Union, nullable, and discriminant narrowing",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "Normalized unions, nullable narrowing, literal types, and readonly discriminants exist, but structured and collection alternatives need broader flow analysis.",
+          "evidence": { "label": "Specification", "source": "specification.md" }
+        },
+        {
+          "title": "Result propagation and recovery",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Represent recoverable failures with Result and use prefix try and postfix catch across functions, callbacks, and application packages.",
+          "evidence": { "label": "Specification", "source": "specification.md" }
+        },
+        {
+          "title": "Aliases and nominal newtypes",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Choose transparent aliases for shorthand and nominal newtypes for distinct represented values, including typed serialization boundaries.",
+          "evidence": { "label": "Language guide", "source": "language.md" }
+        },
+        {
+          "title": "Checked numeric and value-type semantics",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "Integer and Float behavior is portable and checked, while exact large integers, decimal values, rounding, and richer validated value objects remain.",
+          "evidence": { "label": "Current status", "source": "status.md" }
+        },
+        {
+          "title": "Mutation, suspension, and structured concurrency effects",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Immutable parameters, explicit local mutation, hidden suspension propagation, cancellation, and bounded concurrent_map exist; general mutation and composition effects remain.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Tuples, destructuring, and typed projection",
+          "status": "planned",
+          "scopes": ["language", "applications"],
+          "description": "Add position-typed local products, destructured returns, and precise projection without replacing named records at public boundaries.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Module visibility, initialization, and minimal runtime type information",
+          "status": "exploring",
+          "scopes": ["language", "workflow"],
+          "description": "Complete public and file-local visibility, cross-file initialization, constant rules, and only the runtime type information justified by real workflows.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        }
+      ]
+    },
+    {
+      "id": "compiler",
+      "title": "Compiler and projects",
+      "description": "The shared compiler pipeline, project model, diagnostics, and development iteration.",
+      "items": [
+        {
+          "title": "Shared parser, checker, formatter, and typed IR",
+          "status": "available",
+          "scopes": ["language", "workflow"],
+          "description": "Use one compiler-owned grammar and semantic pipeline for formatting, checking, generation, the language server, and the evaluator.",
+          "evidence": { "label": "Current status", "source": "status.md" }
+        },
+        {
+          "title": "Go, Ruby, and TypeScript generation",
+          "status": "available",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Generate all three target modes from the same checked TypeRB program while keeping target-only APIs behind explicit platform imports.",
+          "evidence": { "label": "Current status", "source": "status.md" }
+        },
+        {
+          "title": "Configured projects and file-root workflows",
+          "status": "available",
+          "scopes": ["applications", "workflow"],
+          "description": "Discover trbconfig.jsonc projects or check, build, run, format, lint, and serve an explicit standalone source closure.",
+          "evidence": { "label": "CLI reference", "source": "cli.md" }
+        },
+        {
+          "title": "Deterministic diagnostics, linting, and safe fixes",
+          "status": "partial",
+          "scopes": ["language", "workflow"],
+          "description": "Structured diagnostics, suggestions, and a small built-in lint registry exist; the stable catalog and bounded third-party rule boundary need broader evidence.",
+          "evidence": { "label": "Linting guide", "source": "guides/linting.md" }
+        },
+        {
+          "title": "Incremental analysis and persistent build caching",
+          "status": "partial",
+          "scopes": ["workflow"],
+          "description": "Dependency-aware analysis and reusable compiler services exist, while phase-level invalidation, multi-file change sets, and persistent output caches remain.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "TypeRB source maps, stack traces, and debugging",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Generated ranges and Go debug artifacts map back to TypeRB; Ruby and TypeScript source maps, runtime failures, coverage, and complete stack traces remain.",
+          "evidence": { "label": "Editor support", "source": "editor-support.md" }
+        },
+        {
+          "title": "Workspace graph and coordinated development server",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Coordinate multiple applications and packages with affected builds, watch mode, process readiness, browser bundling, restart, and HMR where ordinary tools are insufficient.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Read-only compiler tooling protocol",
+          "status": "partial",
+          "scopes": ["language", "workflow"],
+          "description": "A versioned project snapshot exposes sources, modules, checked declarations, semantic types, and diagnostics; persistent queries and a stable SDK remain deferred.",
+          "evidence": { "label": "Tooling protocol", "source": "guides/compiler-tooling.md" }
+        },
+        {
+          "title": "Cross-backend conformance, reliability, and performance",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "A large shared test suite exercises the modes, but 1.0 still needs explicit end-to-end conformance, performance baselines, and supported-toolchain reliability gates.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        }
+      ]
+    },
+    {
+      "id": "standard-library",
+      "title": "Standard library and foundations",
+      "description": "Portable everyday APIs with the same types, failures, and resource behavior in every mode.",
+      "items": [
+        {
+          "title": "Scalars, Unicode text, Arrays, Hashes, Range, and iteration",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "The daily core is substantial, while Unicode normalization, additional collection aggregation, and a few common structures and text operations remain.",
+          "evidence": { "label": "Standard library", "source": "standard-library.md" }
+        },
+        {
+          "title": "Bytes, binary encoding, hashing, and secure randomness",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Use Bytes, hex and Base64, modern and compatibility digests, HMAC, constant-time comparison, and secure random generation portably.",
+          "evidence": { "label": "Standard library", "source": "standard-library.md" }
+        },
+        {
+          "title": "JSON, JSONC, and typed codecs",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Parse general JSON values and encode or decode typed records, enums, newtypes, collections, and standard values with structured errors.",
+          "evidence": { "label": "Standard library", "source": "standard-library.md" }
+        },
+        {
+          "title": "Date, time, duration, and time zones",
+          "status": "partial",
+          "scopes": ["language", "applications"],
+          "description": "Civil and exact time values, durations, named zones, parsing, formatting, and codecs exist; calendar periods, injectable clocks, and locale formatting remain.",
+          "evidence": { "label": "Standard library", "source": "standard-library.md" }
+        },
+        {
+          "title": "Filesystem, logical paths, and process access",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Scoped whole-file operations, bounded reads, entries, environment access, and shell-free processes exist; metadata, temporary files, atomic replacement, and streaming remain.",
+          "evidence": { "label": "Standard library", "source": "standard-library.md" }
+        },
+        {
+          "title": "Full URL, regular expression, and UUID values",
+          "status": "planned",
+          "scopes": ["language", "applications"],
+          "description": "Add strict cross-backend URL parsing and resolution, a portable regular-expression subset, and canonical UUID parsing and generation.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Streams, buffers, and scoped resource ownership",
+          "status": "exploring",
+          "scopes": ["language", "applications"],
+          "description": "Define bounded-memory byte sources and sinks, partial reads, cancellation, and reliable close semantics from concrete file and network workflows.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "CSV, compression, archives, MIME, and multipart data",
+          "status": "planned",
+          "scopes": ["applications"],
+          "description": "Process common structured and binary formats with explicit limits, encoding policy, safe archive paths, and streaming where input can be large.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Additional collections and exact numeric values",
+          "status": "planned",
+          "scopes": ["language", "applications"],
+          "description": "Add evidence-backed Set and queue structures, aggregation operations, BigInteger, and Decimal without changing current Integer or Float semantics.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Structured logging, metrics, and tracing foundations",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Web request JSONL logging exists; 1.0 needs application-wide levels, fields, redaction, context propagation, metrics, spans, and replaceable sinks.",
+          "evidence": { "label": "Web guide", "source": "guides/web.md" }
+        },
+        {
+          "title": "Typed configuration, internationalization, and locale services",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Provide typed startup configuration and evidence-backed message, pluralization, number, currency, date, and locale facilities without exposing secrets.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        }
+      ]
+    },
+    {
+      "id": "packages",
+      "title": "Packages and native interoperability",
+      "description": "Reproducible TypeRB packages and explicit, typed boundaries to existing ecosystems.",
+      "items": [
+        {
+          "title": "Distributed package resolution and canonical identity",
+          "status": "available",
+          "scopes": ["applications", "workflow"],
+          "description": "Resolve TypeRB source from Git or local paths with canonical manifests, scoped dependency aliases, and one checked package graph.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Lockfile, checksums, offline, and frozen installation",
+          "status": "available",
+          "scopes": ["applications", "workflow"],
+          "description": "Pin commits and content hashes, verify cached source, and install deterministically without network access or lockfile drift.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Selective updates and semantic version selection",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Selected direct dependency graphs can update while others remain pinned; semantic version constraints, solver policy, and compatibility guidance remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Per-mode native dependency integration",
+          "status": "available",
+          "scopes": ["applications", "workflow"],
+          "description": "Merge package-owned Go modules, gems, npm packages, and Bun packages into generated target manifests without changing portable imports.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "TypeScript declaration indexing and adapters",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Index installed declarations and apply package-owned generic, class, interface, component, alias, and Result bridge corrections; broader native shapes remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Ruby and Go native declaration import",
+          "status": "planned",
+          "scopes": ["language", "applications"],
+          "description": "Import ordinary public types from RBS-compatible metadata and Go type information while diagnosing unsupported shapes instead of producing Any.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Package-owned runtime adapters",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "A narrow String-to-String leaf ABI with Result and suspension propagation works in all modes; typed wire values, handles, streams, and lifecycle hooks remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Declarative project input and generated-source protocols",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Versioned declaration, project input, generated source, and call-specialization boundaries support bundled packages; external stability and incremental behavior remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Package author tooling and sandboxed providers",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Authors can validate and run explicit conformance projects; scaffold, inspection, capability permissions, and resource-bounded provider execution remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        },
+        {
+          "title": "Publishing, provenance, audit, and namespace-stable APIs",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Complete package publication, signatures, advisories, vulnerability checks, stable cross-package type identity, and production cache policy.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        }
+      ]
+    },
+    {
+      "id": "applications",
+      "title": "Application platform",
+      "description": "Official and ecosystem capabilities for full-stack services, tools, data, and browser applications.",
+      "items": [
+        {
+          "title": "Typed command-line applications",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Generate help, conversion, defaults, subcommands, and a Go single binary from records and payload enums; validation, aliases, completion, and more deployment profiles remain.",
+          "evidence": { "label": "CLI application guide", "source": "guides/cli-applications.md" }
+        },
+        {
+          "title": "Portable Web routing, middleware, and server lifecycle",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "File routes, middleware, cookies, CORS, security headers, compression, timeouts, cancellation, graceful shutdown, and in-process testing work across the modes; production hardening remains.",
+          "evidence": { "label": "Web guide", "source": "guides/web.md" }
+        },
+        {
+          "title": "Typed HTTP path, query, body, and JSON responses",
+          "status": "available",
+          "scopes": ["language", "applications"],
+          "description": "Bind route parameters, query values, and JSON bodies to checked records and return typed JSON through one portable dispatcher contract.",
+          "evidence": { "label": "Web guide", "source": "guides/web.md" }
+        },
+        {
+          "title": "Endpoint catalog, OpenAPI, and generated browser clients",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Versioned endpoint metadata, OpenAPI 3.1 output, and a generated TypeScript-browser client exist; validation policy, compatibility checks, and richer wire metadata remain.",
+          "evidence": { "label": "CLI reference", "source": "cli.md" }
+        },
+        {
+          "title": "Authentication, authorization, and server sessions",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Portable OIDC bearer validation and typed principals exist; authorization policy, browser login, rotating cookies, CSRF, session storage, and token lifecycle remain.",
+          "evidence": { "label": "Authentication guide", "source": "guides/authentication.md" }
+        },
+        {
+          "title": "Portable outbound HTTP",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Shared HTTP values and a typed browser client exist; Go, Ruby, and server-TypeScript transport, retry, streaming, close, interception, and test doubles remain.",
+          "evidence": { "label": "Browser HTTP", "source": "guides/browser-http.md" }
+        },
+        {
+          "title": "ORM models, queries, writes, relations, and transactions",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Typed models, associations, preload, locks, batches, writes, transactions, enums, time, and three database systems work across three modes; advanced queries and production policy remain.",
+          "evidence": { "label": "ORM guide", "source": "guides/orm.md" }
+        },
+        {
+          "title": "Database schema workflow",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Plan, apply, export, lock, and check schemas with explicit destructive changes; online compatibility, multi-database workflows, fixtures, and release validation remain.",
+          "evidence": { "label": "Database guide", "source": "guides/database.md" }
+        },
+        {
+          "title": "Background Jobs, schedules, retries, and recovery",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Typed jobs, SQL queues, scheduling, retry, heartbeat, stale recovery, operations commands, and graceful stop work across supported modes and databases; adapters and production profiles remain.",
+          "evidence": { "label": "Jobs guide", "source": "guides/jobs.md" }
+        },
+        {
+          "title": "Cache, object storage, uploads, mail, and notifications",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Add typed cache coordination, bounded streaming storage and uploads, and testable mail and notification contracts with provider adapters.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "React, JSX, components, events, and state",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Checked JSX, TSX generation, typed props, events, and use_state connect to React; lifecycle, broader hooks, accessibility diagnostics, and component-package coverage remain.",
+          "evidence": { "label": "React guide", "source": "guides/react.md" }
+        },
+        {
+          "title": "Browser routing, server state, forms, and platform APIs",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Native declaration and Result bridges prove initial router and query integration; typed route generation, form lifecycle, DOM breadth, and browser resource semantics remain.",
+          "evidence": { "label": "React guide", "source": "guides/react.md" }
+        },
+        {
+          "title": "Browser assets, bundling, development, and HMR",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Coordinate ordinary bundlers with TypeRB generation, CSS and static assets, code splitting, source maps, stale-chunk recovery, size budgets, and local HMR.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Shared wire contracts, validation, and compatibility",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Records, enums, newtypes, typed binders, endpoint metadata, and generated clients share a foundation; field validation, schema diff, versioning, and generic contract identity remain.",
+          "evidence": { "label": "Web guide", "source": "guides/web.md" }
+        },
+        {
+          "title": "External SDK and service integration",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Package-owned shims can normalize narrow SDK calls across modes; credentials, typed service models, pagination, streaming, cancellation, and reusable provider conformance remain.",
+          "evidence": { "label": "Package guide", "source": "guides/packages.md" }
+        }
+      ]
+    },
+    {
+      "id": "workflow",
+      "title": "Testing, editors, and learning",
+      "description": "The feedback loops required to understand, test, edit, and debug TypeRB every day.",
+      "items": [
+        {
+          "title": "Portable test declarations and runner",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Colocated tests, source-located failures, filtering, JSON events, backend execution, and editor integration exist; the language-level workflow still needs broader application evidence.",
+          "evidence": { "label": "Testing guide", "source": "guides/testing.md" }
+        },
+        {
+          "title": "Test lifecycle, assertions, doubles, and determinism",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Core assertions and in-process Web testing exist; setup and teardown, richer diffs, verified doubles, fake time and randomness, and external-call isolation remain.",
+          "evidence": { "label": "Testing guide", "source": "guides/testing.md" }
+        },
+        {
+          "title": "Application, component, browser, and end-to-end tests",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Web, ORM, Jobs, and native conformance fixtures cover important slices; browser hosts, component accessibility, Playwright integration, and standard full-stack fixtures remain.",
+          "evidence": { "label": "Tutorial", "source": "tutorials/web-orm-jobs.md" }
+        },
+        {
+          "title": "TypeRB coverage and scalable CI test operation",
+          "status": "planned",
+          "scopes": ["workflow"],
+          "description": "Map backend coverage to TypeRB source and add thresholds, affected selection, sharding, retries, flake visibility, and common CI report formats.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Language-server everyday editing",
+          "status": "available",
+          "scopes": ["language", "workflow"],
+          "description": "Use compiler-backed diagnostics, formatting, completion, hover, signature help, navigation, rename, symbols, selection, folding, highlights, and quick fixes.",
+          "evidence": { "label": "Editor support", "source": "editor-support.md" }
+        },
+        {
+          "title": "Ecosystem-aware language intelligence",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Project imports and generated ORM declarations participate in completion and navigation; packages, schemas, routes, jobs, contracts, components, and large workspaces need deeper indexing.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Visual Studio Code integration",
+          "status": "available",
+          "scopes": ["workflow"],
+          "description": "A thin extension supplies syntax, snippets, language-server features, standalone files, Test Explorer integration, and Go debug artifact support without duplicating compiler semantics.",
+          "evidence": { "label": "Editor support", "source": "editor-support.md" }
+        },
+        {
+          "title": "Neovim, JetBrains, and GitHub integrations",
+          "status": "available",
+          "scopes": ["workflow"],
+          "description": "Use the shared language server and TextMate grammar through a Neovim plugin, LSP4IJ setup, and a GitHub syntax-highlighting extension.",
+          "evidence": { "label": "Editor support", "source": "editor-support.md" }
+        },
+        {
+          "title": "Cross-target source debugging",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Go debug builds and Delve integration exist; Ruby and TypeScript adapters, target-standard maps, browser and worker process selection, and exception mapping remain.",
+          "evidence": { "label": "Editor support", "source": "editor-support.md" }
+        },
+        {
+          "title": "REPL, playground, and guided tour",
+          "status": "available",
+          "scopes": ["language", "workflow"],
+          "description": "Explore persistent typed state, completion, formatting, inspection, interrupts, and the same evaluator through local and hosted interactive surfaces.",
+          "evidence": { "label": "Current status", "source": "status.md" }
+        },
+        {
+          "title": "Searchable reference, guides, and maintained tutorials",
+          "status": "partial",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "The hosted documentation covers language, tooling, packages, and application slices; 1.0 needs complete searchable references, upgrade paths, and additional production-shaped tutorials.",
+          "evidence": { "label": "Documentation", "source": "README.md" }
+        }
+      ]
+    },
+    {
+      "id": "distribution",
+      "title": "Distribution, compatibility, and operation",
+      "description": "Reproducible installation, release, security, deployment, and long-term maintenance boundaries.",
+      "items": [
+        {
+          "title": "Direct binary, Homebrew, and container distribution",
+          "status": "available",
+          "scopes": ["applications", "workflow"],
+          "description": "Install TypeRB directly or with Homebrew and build or run projects through the published container workflow.",
+          "evidence": { "label": "Getting started", "source": "getting-started.md" }
+        },
+        {
+          "title": "Reproducible CI builds and deployable artifacts",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Frozen package installs and deterministic generated trees provide a base; production bundles, source maps, cache policy, and end-to-end artifact verification remain.",
+          "evidence": { "label": "Containers", "source": "containers.md" }
+        },
+        {
+          "title": "Supported operating-system, architecture, and toolchain matrix",
+          "status": "partial",
+          "scopes": ["workflow"],
+          "description": "Current toolchains and multiple installation paths are tested, while 1.0 needs an explicit supported matrix and complete target-runtime conformance.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Signed releases, provenance, and SBOMs",
+          "status": "partial",
+          "scopes": ["workflow"],
+          "description": "Release automation packages and attests important artifacts; the complete compiler, package, container, and dependency provenance story still needs a public support boundary.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Compatibility, deprecation, and migration policy",
+          "status": "planned",
+          "scopes": ["language", "applications", "workflow"],
+          "description": "Define version and upgrade rules independently for language semantics, the standard library, official packages, extension protocols, generated wires, and database contracts.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Security audit and supply-chain response",
+          "status": "partial",
+          "scopes": ["applications", "workflow"],
+          "description": "Checksums, secure primitives, typed Web defaults, and bounded extension principles exist; advisories, dependency audit, secret policy, and coordinated response remain.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Deployment, observability, and failure recovery",
+          "status": "planned",
+          "scopes": ["applications", "workflow"],
+          "description": "Document and verify health, readiness, telemetry, redaction, schema and queue operations, rollback, and recovery for representative deployed applications.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        },
+        {
+          "title": "Predictable release cadence and support policy",
+          "status": "planned",
+          "scopes": ["workflow"],
+          "description": "Publish supported versions, security-update expectations, deprecation windows, release cadence, and lifecycle commitments before 1.0 stability is claimed.",
+          "evidence": { "label": "Roadmap", "source": "roadmap.md" }
+        }
+      ]
+    }
+  ]
+}
