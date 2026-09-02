@@ -26,6 +26,25 @@ IR and do not inspect parser state or rewrite source text.
 Read the [language specification](specification.md) for semantics and the
 [architecture decisions](decisions/) for long-term implementation choices.
 
+## Alpha stability policy
+
+Treat every current language rule, standard-library and official-package API,
+tooling surface, generated form, and compiler-owned protocol as revisable until
+the project explicitly leaves alpha. Existing implementation is evidence about
+real use and implementation constraints, not a compatibility requirement.
+
+Choose the cleanest coherent target contract without weighing backward
+compatibility or migration cost. Do not retain an inferior shape through
+deprecated forms, compatibility aliases, shims, dual behavior, transitional
+diagnostics, or staged migrations. When a decision replaces current behavior,
+remove the old form and update every affected first-party implementation, test,
+example, and document in the same change so the repository describes only the
+new contract.
+
+Do not infer a stability-stage change from adoption, release count, or existing
+applications. Compatibility and migration policy become design constraints only
+after an explicit project decision moves TypeRB beyond alpha.
+
 ## Formatter guarantees
 
 `trb fmt` parses source and uses the lossless token stream when printing. It is
@@ -118,11 +137,11 @@ Tasks with settled behavior can proceed as focused pull requests. Keep each PR
 narrow enough to review as one outcome, and include invalid-input diagnostics
 when the change introduces a new rule.
 
-Test public phase boundaries rather than private helper structure. Depending on
-the change, this includes parsed AST shape, checker diagnostics and inferred
-types, typed IR, generated source for every affected backend, formatter
-idempotence and comment preservation, and REPL evaluation. Run the full Go test
-suite and any relevant target-toolchain checks before merging.
+Test the intended public phase boundaries rather than private helper structure.
+Depending on the change, this includes parsed AST shape, checker diagnostics
+and inferred types, typed IR, generated source for every affected backend,
+formatter idempotence and comment preservation, and REPL evaluation. Run the
+full Go test suite and any relevant target-toolchain checks before merging.
 
 For current gaps, see [status](status.md) and the [roadmap](roadmap.md).
 

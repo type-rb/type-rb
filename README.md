@@ -1,8 +1,10 @@
 # TypeRB
 
 > [!WARNING]
-> TypeRB is in alpha. The language, standard library, and tooling may change
-> without notice.
+> TypeRB is in alpha. No current language, standard-library, package, tooling,
+> generated-code, or protocol behavior is considered stable. Alpha releases
+> may replace existing behavior without deprecation, compatibility shims, or
+> migration support while the project converges on its beta and 1.0 design.
 
 TypeRB is a statically typed programming language that compiles to Go, Ruby,
 and TypeScript.

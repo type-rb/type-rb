@@ -65,7 +65,11 @@ Breaking: <Yes|No>
   `CLI`, `REPL`, `Standard library`, `Web`, `ORM`, `Jobs`, `Packages`, or
   `Tooling`. Add a new area when none of these fits naturally.
 - Set `Breaking: Yes` only when users must change existing code or operation.
-- Keep required migration guidance in the paragraph when a change is breaking.
+- During alpha, `Breaking` is descriptive release metadata only. Never alter
+  the chosen design, add compatibility behavior, or require migration guidance
+  because a change is breaking. Describe the resulting observable behavior;
+  provide transition instructions only when the maintainer explicitly asks for
+  them.
 
 If a needed change-type label does not exist, create it before assigning it. Keep label names identical to the prefixes above.
 

@@ -1,9 +1,15 @@
 # TypeRB Status
 
-Last updated: 2026-08-28
+Last updated: 2026-09-02
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
-generated output, and command-line interface may change before beta.
+official packages, generated output, command-line interface, and compiler-owned
+protocols may change before beta. Existing behavior is implementation evidence,
+not a stability commitment. During alpha, TypeRB chooses the cleanest coherent
+target design without preserving source, runtime, generated-code, package, or
+protocol compatibility and without providing migration paths, deprecation
+periods, compatibility aliases, or transitional shims. A stricter compatibility
+policy begins only when the project explicitly declares a later stability stage.
 
 For a structured comparison between current behavior and the revisable 1.0
 target, see the [TypeRB 1.0 capability map](capabilities.md).

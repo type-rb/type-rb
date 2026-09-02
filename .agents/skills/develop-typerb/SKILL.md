@@ -8,6 +8,20 @@ description: Evolve the TypeRB language and toolchain. Use when changing TypeRB 
 Read `docs/specification.md` and the relevant implementation before changing
 behavior.
 
+## Replace alpha behavior directly
+
+TypeRB is in alpha until the public project documentation explicitly says
+otherwise. Treat no existing syntax, semantic rule, standard-library or
+official-package API, tooling surface, generated form, or compiler-owned
+protocol as settled. Evaluate the desired target design without backward-
+compatibility or migration constraints.
+
+Do not preserve replaced behavior with deprecated forms, compatibility aliases,
+shims, dual paths, transitional diagnostics, or staged migrations. Remove the
+old form and update all affected first-party code, tests, examples, documents,
+and protocol fixtures in the same change. Repository consistency is required;
+support for the previous alpha behavior is not.
+
 Preserve these invariants:
 
 - Keep one grammar and portable semantics across every mode. Let `mode` select only the backend, toolchain, and package ecosystem.
@@ -43,11 +57,15 @@ Choose the narrowest package boundary that can implement a feature:
 6. When compiler integration is unavoidable, document the missing extension
    capability and preserve a path toward an ordinary package.
 
-Test stable behavior rather than incidental representation:
+Test intended behavior rather than incidental representation:
 
 - Prefer compiler and CLI integration tests for portable semantics and diagnostics across modes.
 - Add focused package unit tests when a boundary needs faster or more precise feedback.
-- Before refactoring, add characterization coverage for the behavior being preserved. Avoid full AST, IR, or generated-file snapshots unless that exact representation is the contract.
+- Before a behavior-preserving refactor, add characterization coverage for the
+  behavior that remains part of the target contract. For an intentional alpha
+  redesign, replace old expectations with coverage of the selected contract.
+  Avoid full AST, IR, or generated-file snapshots unless that exact
+  representation is the contract.
 
 For each coherent change:
 
