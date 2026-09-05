@@ -431,6 +431,8 @@ func (n *controlFlowNormalizer) reserveStatements(statements []ir.Statement) {
 			n.reserveStatements(node.Body)
 		case *ir.Enum:
 			n.reserveStatements(node.Body)
+		case *ir.Newtype:
+			n.reserveStatements(node.Body)
 		case *ir.Module:
 			n.reserveStatements(node.Body)
 		case *ir.Method:
@@ -513,6 +515,10 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 		copy.Body = n.statements(node.Body)
 		return []ir.Statement{&copy}
 	case *ir.Enum:
+		copy := *node
+		copy.Body = n.statements(node.Body)
+		return []ir.Statement{&copy}
+	case *ir.Newtype:
 		copy := *node
 		copy.Body = n.statements(node.Body)
 		return []ir.Statement{&copy}

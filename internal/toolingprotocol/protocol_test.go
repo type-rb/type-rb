@@ -93,6 +93,20 @@ func TestBuildRetainsInputsAndDiagnosticsWithoutCheckedArtifacts(t *testing.T) {
 	}
 }
 
+func TestBuildExposesClosedNewtypePolicyAndMembers(t *testing.T) {
+	unit := compiler.SourceUnit{Filename: "/project/labels.trb", ModulePath: "labels", Package: "main", Source: []byte("newtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend\nend\n")}
+	snapshot := compilerservice.New([]compiler.SourceUnit{unit}, compiler.Options{Mode: "go", GoModule: "example.com/tooling"}).Analyze()
+	if snapshot.HasErrors() {
+		t.Fatalf("diagnostics=%#v", snapshot.Diagnostics)
+	}
+	report := Build(BuildOptions{CompilerVersion: "test", Mode: "go"}, []compiler.SourceUnit{unit}, snapshot)
+	label := requireDeclaration(t, report, DeclarationNewtype, "Label")
+	method := requireDeclaration(t, report, DeclarationMethod, "text")
+	if !label.PrivateNew || method.OwnerID != label.ID || method.ReturnType == nil || method.ReturnType.Name != "String" {
+		t.Fatalf("newtype=%#v method=%#v", label, method)
+	}
+}
+
 func TestBuildPreservesInvalidUTF8SourceAsBase64(t *testing.T) {
 	root := t.TempDir()
 	unit := compiler.SourceUnit{Filename: filepath.Join(root, "invalid.trb"), ModulePath: "invalid", Source: []byte{0xff}}

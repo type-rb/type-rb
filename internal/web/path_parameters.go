@@ -173,6 +173,8 @@ func walkStatement(statement ast.Statement, visit func(*ast.CallExpression)) {
 		}
 	case *ast.EnumStatement:
 		walkStatements(node.Body, visit)
+	case *ast.NewtypeStatement:
+		walkStatements(node.Body, visit)
 	case *ast.EnumMemberStatement:
 		walkExpression(node.RawValue, visit)
 		for _, parameter := range node.Parameters {

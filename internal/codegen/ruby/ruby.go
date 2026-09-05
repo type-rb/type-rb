@@ -298,8 +298,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line(n.Name+" = "+n.Target.Name, n.TrailingComment)
 		}
 	case *ir.Newtype:
-		// Newtypes are source-level nominal types. Ruby uses the representation
-		// value directly, so no runtime declaration is required.
+		g.newtypeMethods(n)
 	case *ir.Module:
 		g.line("module "+n.Name, n.TrailingComment)
 		g.indent++
@@ -927,6 +926,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				value = argument.Name + ": " + value
 			}
 			parts[i] = value
+		}
+		if n.NewtypeMethod != nil {
+			return g.newtypeMethodCall(n, parts)
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
 			parts = g.executionArguments(n, parts)

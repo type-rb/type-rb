@@ -136,7 +136,9 @@ and generic interfaces, records with per-construction field defaults, ordinary
 and raw-value enums, payload enums as sum types with positional and named-only
 fields in constructors and patterns, enum instance methods, transparent
 `alias` declarations, nominal
-`newtype` declarations over concrete non-nullable representations, explicit
+`newtype` declarations over concrete non-nullable representations with optional
+class/instance methods and private raw construction over recursively immutable
+values, explicit
 generics for enums, aliases, records,
 classes, top-level functions and instance methods, normalized unions, immutable
 and mutable local bindings, first-constraint inference for fresh empty mutable

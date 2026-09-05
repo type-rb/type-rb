@@ -90,6 +90,7 @@ func (r projectInputResolver) exportStatements(modulePath, namespace string, sta
 			module.Newtypes = append(module.Newtypes, packageextension.ProjectNewtype{
 				Identity: projectDeclarationIdentity(modulePath, projectQualifiedName(namespace, node.Name)),
 				Name:     node.Name, Target: r.typeUse(modulePath, namespace, node.Target, nil), Span: exportSourceSpan(node.Span()),
+				PrivateNew: node.PrivateNew,
 			})
 		case *ast.RecordStatement:
 			module.Records = append(module.Records, r.exportRecord(modulePath, namespace, node))
@@ -408,6 +409,11 @@ func (r projectInputResolver) resolveRepresentation(modulePath, namespace string
 		return resolved, foundNewtype || found
 	}
 	if newtype := r.newtypes[reference.Identity.ModulePath][reference.Identity.Name]; newtype != nil {
+		if newtype.PrivateNew {
+			// Providers must not receive an automatically constructible wire
+			// representation for a closed nominal value.
+			return typ, foundNewtype
+		}
 		target := exportType(projectInputTypeRef(newtype.Target))
 		target.Nullable = target.Nullable || typ.Nullable
 		targetGenerated := r.compilerGenerated(reference.Identity.ModulePath, newtype.Target.Span())

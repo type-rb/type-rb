@@ -244,13 +244,31 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   may be any concrete, fully instantiated type, including
   `Array<ProductId>`, but the representation must not itself be nullable.
   Generic newtype declarations such as `newtype Id<T> = T` are not supported.
-- Construction is explicit with `Name.new(value)`, and `value()` returns the
-  representation. After ordinary argument type checking, `new()` is
-  infallible and performs no user-defined domain validation. Newtype
-  declarations cannot currently define custom members or replace these
-  generated methods; fallible invariant checks use ordinary Result-returning
-  functions. No other representation members are forwarded. Ordinary
-  parameters, returns, assignments, collection elements, and record fields do
+- Construction is explicit with `Name.new(value)`, and public `value()` returns
+  the representation. After ordinary argument type checking, generated `new()`
+  is infallible and performs no user-defined domain validation.
+- A declaration may append `do ... end` to define class and instance methods.
+  A body is optional and does not itself change construction policy. Within
+  an instance method, `self` has the nominal type and `value()` unwraps it.
+  No other representation members are forwarded. The generated names `new`
+  and `value`, and class-style `initialize`, cannot be defined by source.
+  Newtype bodies contain only methods, comments, and the construction directive
+  described below, not fields, inheritance, or arbitrary initialization code.
+- `private new`, written once before any method in the body, closes raw
+  construction to that same lexical newtype body, including nested lexical
+  blocks. Same-module or same-package code has no additional construction
+  authority. The directive does not change `value()` visibility or the ordinary
+  `_name` rule for authored private methods. External completion omits raw
+  `new`. The type author exposes ordinary factories, commonly returning
+  `Result<Name, Error>` or `Name?`; there is no implicit validation hook.
+- A closed newtype requires a recursively immutable representation: scalar
+  values, String, Bytes, Ranges, and recursively immutable records, enums,
+  newtypes, nullable fields, and unions. Arrays, Hashes, StringBuilder,
+  function values, `Any`, classes, and interfaces are rejected, including when
+  nested in another value. This prevents mutation through aliases or public
+  `value()` from invalidating a previously checked value. The compiler checks
+  construction access, not the author's domain validation logic.
+- Ordinary parameters, returns, assignments, collection elements, and record fields do
   not implicitly convert between a newtype, its representation, or a different
   newtype with the same representation.
 - Optionality is applied outside the nominal type as `Name?`. Rejecting a
@@ -259,17 +277,30 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - `==` and `!=` accept two values of the same newtype only when the recursively
   expanded representation supports portable equality. Ordering, arithmetic,
   indexing, iteration, and other representation operations require explicit
-  `value()` unless a future newtype API specifies them.
+  `value()` or an authored method. Equality is not overridable.
 - A package declaration may mark a typed serialization or persistence
   parameter as a representation boundary. At that boundary only, a newtype is
   checked through its recursively expanded representation. JSON codecs,
   `trb/web` binding, Jobs payload generation, and ORM column-value parameters
   use representation metadata rather than checker logic tied to those package
   names.
-- Typed IR retains construction, unwrapping, nominal identity, and
-  representation metadata. Go, Ruby, and TypeScript backends may erase the
+- Boundary direction matters. Outgoing values may project closed newtypes to
+  their representations. Generic incoming plans must not construct a closed
+  newtype, even inside a record, enum, collection, alias, or open newtype.
+  JSON decode, Web binding, Job input, and native or provider input reject such
+  uses at compile time, rather than invoking a guessed factory or raw `new`.
+  Decode an explicit representation DTO and call the domain factory in source.
+  Declaring a closed type and using it only for outgoing values is valid.
+  Native returns, values, property reads, and callback parameters follow the
+  same direction rule; a callback passed outward has incoming parameters and
+  an outgoing result. Providers receive the construction policy and must not
+  expose an automatic incoming representation for a closed type.
+- Typed IR retains construction, unwrapping, nominal owner and member identity,
+  and representation metadata. Go, Ruby, and TypeScript backends may erase the
   physical wrapper; target-native code is not a source-level nominality
-  guarantee.
+  or unforgeability guarantee. Custom members are statically selected and
+  lowered to nominal-owner helpers, including in the REPL; they are not added
+  to the representation's native prototype or class.
 
 #### Fresh empty mutable collections
 

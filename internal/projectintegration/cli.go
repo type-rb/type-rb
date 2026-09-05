@@ -112,6 +112,8 @@ func walkCLIStatement(statement ast.Statement, visit func(*ast.CallExpression)) 
 		}
 	case *ast.EnumStatement:
 		walkCLIStatements(node.Body, visit)
+	case *ast.NewtypeStatement:
+		walkCLIStatements(node.Body, visit)
 	case *ast.EnumMemberStatement:
 		walkCLIExpression(node.RawValue, visit)
 		for _, parameter := range node.Parameters {

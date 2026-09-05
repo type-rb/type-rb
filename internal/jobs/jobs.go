@@ -189,7 +189,7 @@ func Analyze(programs []*ast.Program, resolutions map[string]resolver.Result) (*
 		if binding.Export.Kind == resolver.TypeAliasExport {
 			return initialArgumentType(binding.Export.AliasTarget)
 		}
-		return binding.Export.Kind == resolver.NewtypeExport && initialArgumentType(binding.Export.NewtypeTarget)
+		return binding.Export.Kind == resolver.NewtypeExport && !binding.Export.NewtypePrivateNew && initialArgumentType(binding.Export.NewtypeTarget)
 	})
 	if err != nil {
 		return nil, err
@@ -376,6 +376,9 @@ func (r aliasResolver) expand(program *ast.Program, typ types.Type, visiting map
 	if alias != nil {
 		target = alias.Target
 	} else {
+		if newtype.PrivateNew {
+			return typ
+		}
 		target = newtype.Target
 	}
 	return r.expand(targetProgram, typeRef(target), visiting)

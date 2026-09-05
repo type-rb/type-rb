@@ -26,6 +26,8 @@ func NormalizeRubyNativeParameters(statements []ast.Statement) {
 				visit(node.Body)
 			case *ast.RecordStatement:
 				visit(node.Body)
+			case *ast.NewtypeStatement:
+				visit(node.Body)
 			case *ast.EnumStatement:
 				for _, member := range node.Body {
 					if payload, ok := member.(*ast.EnumMemberStatement); ok {

@@ -67,6 +67,16 @@ func TestDocumentSymbolsDescribeAliasesAndNewtypes(t *testing.T) {
 	}
 }
 
+func TestDocumentSymbolsIncludeNewtypeMethods(t *testing.T) {
+	symbols := DocumentSymbols("newtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend\nend\n")
+	if len(symbols) != 1 || len(symbols[0].Children) != 1 || symbols[0].Children[0].Name != "text" {
+		t.Fatalf("symbols=%#v", symbols)
+	}
+	if symbols[0].Children[0].Kind != DocumentSymbolMethod {
+		t.Fatalf("method=%#v", symbols[0].Children[0])
+	}
+}
+
 func TestDocumentSymbolsShowResultReturnTypes(t *testing.T) {
 	symbols := DocumentSymbols("def load(): Result<String, LoadError>\n\treturn\nend\n")
 	if len(symbols) != 1 || symbols[0].Detail != "(): Result<String, LoadError>" {

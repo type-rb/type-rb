@@ -1021,6 +1021,10 @@ func (p *Parser) parseNewtype() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	node := &ast.NewtypeStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
+	if len(line) > 0 && line[len(line)-1].Lexeme == "do" {
+		node.HasBody = true
+		line = line[:len(line)-1]
+	}
 	equal := topLevelIndex(line, "=")
 	if equal < 0 {
 		p.errorAt(spanOf(line), "newtype must be: newtype Name = Target")
@@ -1041,6 +1045,39 @@ func (p *Parser) parseNewtype() ast.Statement {
 		}
 	}
 	p.pos = next
+	if node.HasBody {
+		methodsStarted := false
+		for !p.atEOF() {
+			p.skipSeparators()
+			if p.atEOF() || p.current().Lexeme == "end" {
+				break
+			}
+			if p.current().Kind == token.Comment {
+				t := p.current()
+				p.pos++
+				node.Body = append(node.Body, &ast.CommentStatement{Base: ast.Base{SourceSpan: t.Span}, Text: t.Lexeme})
+				continue
+			}
+			if p.current().Lexeme == "def" {
+				methodsStarted = true
+				node.Body = append(node.Body, p.parseMethod())
+				continue
+			}
+			s, e, nx, _ := p.logicalLine(p.pos)
+			parts := p.codeTokens(s, e)
+			if len(parts) == 2 && parts[0].Lexeme == "private" && parts[1].Lexeme == "new" {
+				if node.PrivateNew || methodsStarted {
+					p.errorAt(spanOf(parts), "private new must occur once before newtype methods")
+				}
+				node.PrivateNew = true
+			} else {
+				p.errorAt(spanOf(parts), "newtype body may only contain private new and methods")
+			}
+			p.pos = nx
+		}
+		_, closeSpan := p.consumeTerminator("end")
+		node.SourceSpan.End = closeSpan.End
+	}
 	return node
 }
 

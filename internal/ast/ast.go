@@ -164,8 +164,11 @@ func (*TypeAliasStatement) statementNode() {}
 // assignments and calls do not implicitly cross the representation boundary.
 type NewtypeStatement struct {
 	Base
-	Name   string
-	Target TypeRef
+	Name       string
+	Target     TypeRef
+	HasBody    bool
+	PrivateNew bool
+	Body       []Statement
 }
 
 func (*NewtypeStatement) statementNode() {}

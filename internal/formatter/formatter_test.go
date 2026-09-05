@@ -400,6 +400,19 @@ func TestFormatConcreteNewtype(t *testing.T) {
 	}
 }
 
+func TestFormatNewtypeBodyAndConstructionPolicy(t *testing.T) {
+	source := []byte("newtype  Label=String do # label\nprivate new # factory-only\n\ndef to_s():String\nreturn value()\nend\nend\n")
+	want := "newtype Label = String do # label\n\tprivate new # factory-only\n\n\tdef to_s(): String\n\t\treturn value()\n\tend\nend\n"
+	formatted, diagnostics := Format(source)
+	if len(diagnostics) != 0 || string(formatted) != want {
+		t.Fatalf("format: %v\n%s", diagnostics, formatted)
+	}
+	again, diagnostics := Format(formatted)
+	if len(diagnostics) != 0 || string(again) != want {
+		t.Fatalf("format is not idempotent: %v\n%s", diagnostics, again)
+	}
+}
+
 func TestFormatResultSignaturesAndPropagation(t *testing.T) {
 	source := []byte("def load():Result<String,LoadError> # result\nvalue:=try read() # propagate\nreturn Result::Ok(value)\nend\n")
 	want := "def load(): Result<String, LoadError> # result\n\tvalue := try read() # propagate\n\treturn Result::Ok(value)\nend\n"

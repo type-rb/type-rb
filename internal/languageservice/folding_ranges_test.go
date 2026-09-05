@@ -49,6 +49,14 @@ func TestFoldingRangesRemainAvailableForIncompleteDocuments(t *testing.T) {
 	}
 }
 
+func TestFoldingRangesIncludeNewtypeBodies(t *testing.T) {
+	source := "newtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend\nend\n"
+	ranges := FoldingRanges(source)
+	if len(ranges) != 2 || lineAtOffset(source, ranges[0].Range.End) != 5 || lineAtOffset(source, ranges[1].Range.End) != 4 {
+		t.Fatalf("ranges=%#v", ranges)
+	}
+}
+
 func TestFoldingRangesIncludeResultCatchBodies(t *testing.T) {
 	source := "value := load() catch |error|\n\tputs(error)\nend\n"
 	ranges := FoldingRanges(source)

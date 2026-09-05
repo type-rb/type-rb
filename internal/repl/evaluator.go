@@ -398,6 +398,14 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 		case *ir.Method:
 			changed = true
 			e.definitions[symbolKey(module, node.Name)] = &functionDefinition{Module: module, Method: node}
+		case *ir.Newtype:
+			for _, statement := range node.Body {
+				if method, ok := statement.(*ir.Method); ok {
+					changed = true
+					key := symbolKey(module, method.Dispatch.Owner.Name+"#"+method.Name)
+					e.definitions[key] = &functionDefinition{Module: module, Method: method}
+				}
+			}
 		case *ir.Module:
 			changed = e.loadDefinitions(node.Body, module) || changed
 		}
@@ -1118,6 +1126,9 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		value.Type = node.ExprType()
 		return value, nil
 	case *ir.Call:
+		if node.NewtypeMethod != nil {
+			return e.newtypeMethodCall(node, module, sc)
+		}
 		reference := expressionReference(node.Callee)
 		var safeReceiver *Value
 		if member, safe := safeCallMember(node.Callee); safe {

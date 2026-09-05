@@ -53,10 +53,11 @@ type ProjectTypeAlias struct {
 }
 
 type ProjectNewtype struct {
-	Identity ProjectDeclarationIdentity `json:"identity"`
-	Name     string                     `json:"name"`
-	Target   ProjectTypeUse             `json:"target"`
-	Span     SourceSpan                 `json:"span"`
+	Identity   ProjectDeclarationIdentity `json:"identity"`
+	Name       string                     `json:"name"`
+	Target     ProjectTypeUse             `json:"target"`
+	Span       SourceSpan                 `json:"span"`
+	PrivateNew bool                       `json:"privateNew,omitempty"`
 }
 
 type ProjectRecord struct {

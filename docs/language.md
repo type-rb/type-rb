@@ -422,17 +422,56 @@ with the same representation, and the newtype itself are not interchangeable.
 Construct one with `UserId.new(value)` and unwrap it with `id.value()`.
 The generated `new()` is an infallible nominal wrap after its argument passes
 ordinary type checking; it does not validate domain invariants. Keep fallible
-validation in an ordinary Result-returning function and call `new()` only
-after that validation succeeds.
+validation in a factory and call `new()` only after that validation succeeds.
 Underlying members are not forwarded. Two values of the same newtype support
 `==` only when their representation has portable equality.
+
+Append `do ... end` when the nominal value needs methods. Use `private new`
+when callers must go through a factory:
+
+<!-- trb-doc-test: language-closed-newtypes -->
+```trb
+newtype Label = String do
+	private new
+
+	def self.parse(source: String): Label?
+		if source.empty?()
+			return nil
+		end
+		return self.new(source)
+	end
+
+	def text(): String
+		return value()
+	end
+end
+```
+
+`Label.parse` is an ordinary class method, not an automatically called hook.
+Other factories may coexist. Only methods and lexical blocks inside this
+newtype body can call its raw `new`; nearby functions and other types cannot.
+Public `value()` is still available. A body without `private new` keeps public
+construction. Generated `new` and `value`, `initialize`, and instance fields
+cannot be defined in the body. Private authored methods use `_name` as usual.
+
+Closed newtypes must have recursively immutable representations. For example,
+String and records of immutable values work, but `Array<Label>` does not:
+mutating an aliased Array after validation would break the invariant. Open
+newtypes may still wrap mutable collections.
 
 Typed serialization and persistence boundaries may explicitly use a
 newtype's representation. The built-in JSON codecs, `trb/web` binding, Jobs
 payloads, and ORM value parameters use this rule. Other functions and package
-APIs remain nominal unless their declaration marks the same boundary. Backend
-output may erase the physical wrapper while the TypeRB checker and typed IR
-retain the nominal distinction.
+APIs remain nominal unless their declaration marks the same boundary.
+For a closed newtype, only outgoing projection is automatic. Generic incoming
+boundaries cannot bypass the private constructor: decode a DTO with ordinary
+representation fields, then explicitly call the domain factory. This includes
+nested closed values and incoming native callback parameters. The compiler
+does not choose or invoke a factory for you.
+
+Backend output may erase the physical wrapper while the TypeRB checker and
+typed IR retain the nominal type and authored member identity. This does not
+make handwritten target-native code unable to forge a value.
 
 ## Conditions and operators
 

@@ -237,6 +237,8 @@ type Newtype struct {
 	Declaration identity.Declaration
 	Name        string
 	Target      types.Type
+	PrivateNew  bool
+	Body        []Statement
 }
 
 func (*Newtype) irStatement() {}
@@ -695,9 +697,36 @@ type Call struct {
 	Block           *Block
 	Codec           *CodecSchema
 	DeclarationOnly bool
+	// NewtypeMethod selects a statically dispatched authored nominal member.
+	// Storage erasure must not turn it into a representation method call.
+	NewtypeMethod *NewtypeMethodCall
 	// PresentType is the call result after a safe-navigation receiver is known
 	// to be non-nil. It remains zero for ordinary calls.
 	PresentType types.Type
+}
+
+type NewtypeMethodCall struct {
+	Dispatch  identity.Dispatch
+	Reference *Reference
+}
+
+// NewtypeReceiver follows the normalized callee, never a duplicate receiver
+// expression that could bypass safe-navigation or evaluate-once lowering.
+func (c *Call) NewtypeReceiver() Expression {
+	if c.NewtypeMethod == nil || c.NewtypeMethod.Dispatch.Class {
+		return nil
+	}
+	callee := c.Callee
+	if application, ok := callee.(*TypeApply); ok {
+		callee = application.Receiver
+	}
+	if member, ok := callee.(*Member); ok {
+		return member.Receiver
+	}
+	owner := c.NewtypeMethod.Dispatch.Owner
+	typ := types.FromName(owner.Name)
+	typ.Declaration = owner
+	return &Identifier{ExprBase: NewExprBase(c.SourceSpan(), typ), Name: "self", Lexical: true}
 }
 
 func (*Call) irExpression() {}

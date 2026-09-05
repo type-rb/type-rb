@@ -679,7 +679,13 @@ func (g *generator) statement(statement ir.Statement) {
 					continue
 				}
 				switch n.SymbolKinds[symbol] {
-				case "record", "interface", "type_alias", "newtype":
+				case "newtype":
+					if newtypeContractHasMethods(n.TypeContracts[symbol]) {
+						values = append(values, tsImportSpecifier(symbol, local))
+					} else {
+						types = append(types, tsImportSpecifier(symbol, local))
+					}
+				case "record", "interface", "type_alias":
 					types = append(types, tsImportSpecifier(symbol, local))
 					if n.SymbolKinds[symbol] == "record" && n.RecordDefaults[symbol] {
 						constructor := tsRecordConstructorName(symbol)
@@ -714,6 +720,10 @@ func (g *generator) statement(statement ir.Statement) {
 					// transitive enum dependencies as value imports even when the
 					// source only names their enclosing record.
 					target = &values
+				case "newtype":
+					if newtypeContractHasMethods(n.TypeContracts[symbol]) {
+						target = &values
+					}
 				}
 				if !containsString(*target, symbol) {
 					*target = append(*target, symbol)
@@ -835,6 +845,7 @@ func (g *generator) statement(statement ir.Statement) {
 		popTypeParameters()
 	case *ir.Newtype:
 		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
+		g.newtypeMethods(n)
 	case *ir.Module:
 		if methods, ok := functionOnlyModule(n); ok {
 			properties := make([]string, 0, len(methods))
@@ -1103,10 +1114,10 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 	if imported == nil || imported.Native && len(imported.RuntimeSymbols) > 0 {
 		return
 	}
+	standardIdentity := false
 	switch imported.Path {
 	case "trb/std/file/index", "trb/std/dir/index", "trb/std/errors/index", "trb/std/result/index":
-	default:
-		return
+		standardIdentity = true
 	}
 	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
 		return
@@ -1114,6 +1125,9 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 	runtimeAlias := "__trb_" + pathpkg.Base(pathpkg.Dir(imported.Path))
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		kind := identity.Kind(imported.SymbolKinds[symbol])
+		if !standardIdentity && kind != identity.Newtype {
+			continue
+		}
 		if !kind.IsType() || strings.Contains(symbol, "::") {
 			continue
 		}
@@ -2023,6 +2037,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				value = "..." + value
 			}
 			parts[i] = value
+		}
+		if n.NewtypeMethod != nil {
+			return g.newtypeMethodCall(n, parts)
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
 			parts = g.executionArguments(n, parts)
