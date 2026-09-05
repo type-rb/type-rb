@@ -118,9 +118,12 @@ func TestNewtypeMemberDispatchUsesImportedDeclarationIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != "remote:7\n8\nlocal:hello" {
-				t.Fatal(got)
-			}
+			t.Run("runtime", func(t *testing.T) {
+				requireEffectRuntime(t, mode)
+				if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != "remote:7\n8\nlocal:hello" {
+					t.Fatal(got)
+				}
+			})
 		})
 	}
 }
@@ -396,9 +399,12 @@ end
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != "hello" {
-				t.Fatal(got)
-			}
+			t.Run("runtime", func(t *testing.T) {
+				requireEffectRuntime(t, mode)
+				if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != "hello" {
+					t.Fatal(got)
+				}
+			})
 		})
 	}
 }
@@ -429,9 +435,12 @@ end
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != `{"label":"ok"}` {
-				t.Fatal(got)
-			}
+			t.Run("outbound runtime", func(t *testing.T) {
+				requireEffectRuntime(t, mode)
+				if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/labels")); got != `{"label":"ok"}` {
+					t.Fatal(got)
+				}
+			})
 			unit.Source = []byte(declaration + `def decode(source: String): Payload?
 	return JSON.decode<Payload>(source) catch |_error|
 		return nil
