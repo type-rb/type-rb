@@ -45,6 +45,7 @@ type generator struct {
 	declarationNames map[identity.Declaration]string
 	runtimeImports   map[string]bool
 	emittedImports   map[string]bool
+	namespaceValues  map[string]bool
 	standardResult   bool
 	browserRuntime   string
 	httpRuntime      bool
@@ -192,6 +193,13 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	g.integrationImports(program.Extensions)
 	statements := mergeTypeScriptImports(program.Statements)
+	g.namespaceValues = map[string]bool{}
+	for _, statement := range statements {
+		if imported, ok := statement.(*ir.Import); ok && imported.Namespace && imported.Alias != "" &&
+			(!(imported.Standard || imported.Official) || imported.Runtime && imported.RuntimeRequired) {
+			g.namespaceValues[imported.Path+"\x00"+imported.Alias] = true
+		}
+	}
 	// Generated required-import edges can be appended after the authored
 	// declaration that consumes them. Register their nominal type spellings
 	// before emitting any statement so annotation generation is independent of
@@ -1137,6 +1145,9 @@ func (g *generator) importNewtypeAnnotations(imported *ir.Import) {
 	}
 	importPath := strconv.Quote(tsImportPath(g.modulePath, imported.Path, g.moduleExtensions[imported.Path]))
 	if imported.Namespace && imported.Alias != "" {
+		if g.namespaceValues[imported.Path+"\x00"+imported.Alias] {
+			return
+		}
 		g.line("import type * as " + imported.Alias + " from " + importPath + ";")
 	} else {
 		g.line("import type { " + strings.Join(names, ", ") + " } from " + importPath + ";")
