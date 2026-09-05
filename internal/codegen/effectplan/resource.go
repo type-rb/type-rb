@@ -224,7 +224,7 @@ var resourceSyncIntrinsics = func() map[string]bool {
 		"trb.cli":                "fail",
 		"trb.internal.runtime":   "fail",
 		"trb.std.file":           "open read read_text write write_text",
-		"trb.std.dir":            "children create_all open open_file root_children root_create_all",
+		"trb.std.dir":            "children create_all open open_file root_children root_create_all try_lock",
 		"trb.std.path":           "join",
 		"trb.std.io":             "puts",
 		"trb.std.strings":        "length empty strip lstrip rstrip uppercase lowercase starts_with ends_with split codepoints characters reverse try_fetch slice try_slice index rindex contains replace_all",

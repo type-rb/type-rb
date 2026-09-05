@@ -11,8 +11,10 @@ import (
 )
 
 type Generated struct {
-	Output    []byte
-	SourceMap sourcemap.Map
+	Output             []byte
+	SourceMap          sourcemap.Map
+	SupportFiles       []SupportFile
+	NativeDependencies map[string]string
 }
 
 func Generate(program *ir.Program) (Generated, error) {
@@ -31,7 +33,8 @@ func Generate(program *ir.Program) (Generated, error) {
 		return Generated{Output: []byte(generated.Output), SourceMap: generated.Map}, err
 	case "go":
 		generated := golang.GenerateMapped(program)
-		return Generated{Output: []byte(generated.Output), SourceMap: generated.Map}, nil
+		files, dependencies := nativeSupport([]*ir.Program{program})
+		return Generated{Output: []byte(generated.Output), SourceMap: generated.Map, SupportFiles: files, NativeDependencies: dependencies}, nil
 	default:
 		return Generated{}, fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", program.Mode)
 	}
@@ -83,6 +86,9 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs := make([]Generated, len(generated))
 		for index, output := range generated {
 			outputs[index] = Generated{Output: []byte(output.Output), SourceMap: output.Map}
+		}
+		if len(outputs) > 0 {
+			outputs[0].SupportFiles, outputs[0].NativeDependencies = nativeSupport(programs)
 		}
 		return outputs, nil
 	}

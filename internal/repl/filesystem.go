@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/nativefs"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -49,6 +50,9 @@ func (*filesystemRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvocatio
 }
 
 func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtimeBlockInvocation) (Value, error) {
+	if invocation.Name == "trb.std.dir.try_lock" {
+		return evaluator.anchoredLockBlock(invocation)
+	}
 	if invocation.Name == "trb.std.dir.open" {
 		return evaluator.anchoredDirectoryBlock(invocation)
 	}
@@ -156,6 +160,10 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 
 func filesystemErrorKind(cause error) string {
 	switch {
+	case errors.Is(cause, nativefs.ErrBusy):
+		return "Busy"
+	case errors.Is(cause, nativefs.ErrUnsupported):
+		return "Unsupported"
 	case errors.Is(cause, os.ErrNotExist):
 		return "NotFound"
 	case errors.Is(cause, os.ErrPermission):

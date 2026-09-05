@@ -879,6 +879,20 @@ switches.
   be followed; absolute, escaping, or unresolvable symlinks are rejected.
   Listing classifies symlinks as Other and rejects any name outside the
   RelativePath component grammar with UnsupportedName.
+- `Dir#try_lock(RelativePath)` takes a parameterless structured block and
+  returns `Result<T, FileSystemError>`, where its final body value is T. It
+  acquires a nonblocking exclusive lock on a dedicated regular file, creating
+  that file if absent without truncating existing content. Leaf symlinks and
+  nonregular handles are rejected. Contention, including same-process reentry,
+  returns `Busy` without entering the body. There is no public lock handle.
+  The lock scope uses the same synchronous source and cleanup/error-priority
+  rules as File acquisition. Scope exit or process termination releases the
+  lock; the file is never removed or replaced by the operation.
+  This coordinates writers using the same stable file and protocol, not
+  independent clones, uncooperative writers, or distributed leases. The native
+  adapter accepts local APFS on macOS and ext-family/tmpfs on Linux; other
+  filesystem profiles return `Unsupported`, with no fallback protocol.
+  Nonblocking describes lock contention, not a bound on filesystem I/O time.
 - Anchored operations currently require the Go native Linux/macOS adapter
   (also used by the Go-mode typed-IR REPL). Other backends reject these operations
   at build time. Runtime hosts unable to supply the guarantee reject acquisition;

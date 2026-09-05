@@ -575,6 +575,7 @@ end
 			},
 			"open":      dirOpenSymbol(),
 			"open_file": dirOpenFileSymbol(),
+			"try_lock":  dirTryLockSymbol(),
 			"instance_children": {
 				Name: "children", Intrinsic: "trb.std.dir.root_children", Receiver: DirResourceType(),
 				Parameters: []Parameter{{Name: "path", Type: optionalRelativePathType(), Optional: true}, {Name: "max_entries", Type: integerType, Keyword: true}},

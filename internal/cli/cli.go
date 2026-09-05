@@ -570,7 +570,7 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 		return errors.New("compiler did not produce the test runner")
 	}
 	if config.Mode == "go" {
-		if err := copyGoModuleFiles(config, runRoot); err != nil {
+		if err := copyGoModuleFiles(config, runRoot, compiled); err != nil {
 			return err
 		}
 		if config.Go.Sqldef != nil {
@@ -754,7 +754,7 @@ func (c *CLI) buildGoTestExecutable(config *project.Config, compiled map[string]
 	if err != nil {
 		return err
 	}
-	if err := copyGoModuleFiles(config, buildRoot); err != nil {
+	if err := copyGoModuleFiles(config, buildRoot, compiled); err != nil {
 		return err
 	}
 	target := generated[runnerFilename]
@@ -1009,6 +1009,10 @@ func (c *CLI) runBuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	support, err := compiledSupportFiles(config, compiled)
+	if err != nil {
+		return err
+	}
 	type built struct {
 		input  string
 		output string
@@ -1031,6 +1035,11 @@ func (c *CLI) runBuild(args []string) error {
 		artifacts = append(artifacts, built{input: name, output: filepath.Join(outDir, rel), data: artifact.Output})
 	}
 	if *stdout {
+		// stdout is one selected source file, not a complete project bundle.
+		// Native support cannot be represented in that output stream.
+		if len(support) > 0 {
+			return errors.New("--stdout cannot emit compiler native support files; build a target tree instead")
+		}
 		_, err := c.Stdout.Write(artifacts[0].data)
 		return err
 	}
@@ -1052,6 +1061,9 @@ func (c *CLI) runBuild(args []string) error {
 			continue
 		}
 		artifacts = append(artifacts, built{input: name, output: filepath.Join(outDir, relative), data: artifact.Output})
+	}
+	for _, file := range support {
+		artifacts = append(artifacts, built{input: "compiler support: " + file.Path, output: filepath.Join(outDir, filepath.FromSlash(file.Path)), data: file.Output})
 	}
 	manifest := ""
 	if config.ManagesPackages() {
@@ -1085,6 +1097,9 @@ func (c *CLI) runBuild(args []string) error {
 			return err
 		}
 		fmt.Fprintf(c.Stdout, "%s -> %s\n", artifact.input, artifact.output)
+	}
+	if err := writeCompiledGoDependencies(config, outDir, compiled); err != nil {
+		return err
 	}
 	if manifest != "" {
 		fmt.Fprintf(c.Stdout, "packages -> %s\n", manifest)
@@ -1150,7 +1165,7 @@ func (c *CLI) buildGoExecutable(config *project.Config, outfile string, debug bo
 	if err != nil {
 		return err
 	}
-	if err := copyGoModuleFiles(config, buildRoot); err != nil {
+	if err := copyGoModuleFiles(config, buildRoot, compiled); err != nil {
 		return err
 	}
 	target := generated[entrySource]
@@ -1284,9 +1299,9 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	}
 	if config.Mode == "go" {
 		if standalone {
-			err = writeStandaloneGoModule(config, runRoot)
+			err = writeStandaloneGoModule(config, runRoot, compiled)
 		} else {
-			err = copyGoModuleFiles(config, runRoot)
+			err = copyGoModuleFiles(config, runRoot, compiled)
 		}
 		if err != nil {
 			return err
@@ -1373,13 +1388,16 @@ func loadCommandConfig(command, explicit, start, filename, mode, runtimeName str
 	return config, true, nil
 }
 
-func writeStandaloneGoModule(config *project.Config, root string) error {
+func writeStandaloneGoModule(config *project.Config, root string, compiled map[string]*compiler.Artifact) error {
 	version := project.DefaultGoVersion
 	if config.Go != nil && config.Go.Version != "" {
 		version = config.Go.Version
 	}
 	module := fmt.Sprintf("module trb.local/standalone\n\ngo %s\n", version)
-	return os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644)
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {
+		return err
+	}
+	return writeCompiledGoDependencies(config, root, compiled)
 }
 
 func rubyRunCommand(target string, programArgs []string) *exec.Cmd {
@@ -2836,6 +2854,10 @@ func jobsSQLNativeOptions(config *project.Config) (json.RawMessage, error) {
 }
 
 func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Artifact, root string, debug bool) (map[string]string, error) {
+	support, err := compiledSupportFiles(config, compiled)
+	if err != nil {
+		return nil, err
+	}
 	generated := make(map[string]string, len(compiled))
 	for _, sourceName := range sortedArtifactNames(compiled) {
 		artifact := compiled[sourceName]
@@ -2853,10 +2875,19 @@ func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Art
 		}
 		generated[sourceName] = output
 	}
+	for _, file := range support {
+		output := filepath.Join(root, filepath.FromSlash(file.Path))
+		if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(output, file.Output, 0o644); err != nil {
+			return nil, err
+		}
+	}
 	return generated, nil
 }
 
-func copyGoModuleFiles(config *project.Config, root string) error {
+func copyGoModuleFiles(config *project.Config, root string, compiled map[string]*compiler.Artifact) error {
 	for _, manifest := range []string{"go.mod", "go.sum"} {
 		sourcePath := filepath.Join(config.Root, manifest)
 		data, err := os.ReadFile(sourcePath)
@@ -2870,7 +2901,7 @@ func copyGoModuleFiles(config *project.Config, root string) error {
 			return err
 		}
 	}
-	return nil
+	return writeCompiledGoDependencies(config, root, compiled)
 }
 
 func sortedArtifactNames(compiled map[string]*compiler.Artifact) []string {

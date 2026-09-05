@@ -145,11 +145,20 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.requireImport("strings", "")
 	g.requireImport("runtime", "")
 	isDirectory := block.Intrinsic == "trb.std.dir.open"
+	isLock := block.Intrinsic == "trb.std.dir.try_lock"
+	if isLock {
+		supportPath := "trb/runtime/nativefs"
+		if g.goModule != "" {
+			supportPath = strings.TrimSuffix(g.goModule, "/") + "/" + supportPath
+		}
+		g.requireImport(supportPath, "__trb_nativefs")
+		g.requireImport("errors", "")
+	}
 	rooted := "false"
-	if block.Intrinsic == "trb.std.dir.open_file" {
+	if block.Intrinsic == "trb.std.dir.open_file" || isLock {
 		rooted = "true"
 	}
-	if !isDirectory {
+	if !isDirectory && !isLock {
 		g.requireImport("syscall", "")
 	}
 	g.temporary++
@@ -207,16 +216,19 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		g.line(anchor + " := " + g.expr(member.Receiver))
 	}
 	g.line(path + " := " + g.expr(block.Call.Arguments[0].Value))
-	modeValue := g.filesystemOpenMode("Read")
-	if len(block.Call.Arguments) > 1 {
-		modeValue = g.expr(block.Call.Arguments[1].Value)
-	}
-	if !isDirectory {
+	if !isDirectory && !isLock {
+		modeValue := g.filesystemOpenMode("Read")
+		if len(block.Call.Arguments) > 1 {
+			modeValue = g.expr(block.Call.Arguments[1].Value)
+		}
 		g.line(mode + " := " + modeValue)
 	}
 	operation := "open"
 	if rooted == "true" {
 		operation = "open_file"
+	}
+	if isLock {
+		operation = "try_lock"
 	}
 	invalidPath := g.filesystemResourceError(errorType, operation, path, strconv.Quote("path must be nonempty and contain no NUL"), "InvalidPath", rooted)
 	g.line("if " + path + " == \"\" || strings.IndexByte(" + path + ", 0) >= 0 { return " + g.filesystemResultErr(successType, errorType, invalidPath) + " }")
@@ -224,9 +236,16 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	if isDirectory {
 		unavailableMessage = "anchored-directory acquisition is unavailable on this host"
 	}
-	unavailable := g.filesystemResourceError(errorType, operation, path, strconv.Quote(unavailableMessage), "Other", rooted)
+	unavailableKind := "Other"
+	if isLock {
+		unavailableMessage = "cooperative locking is unavailable on this host"
+		unavailableKind = "Unsupported"
+	}
+	unavailable := g.filesystemResourceError(errorType, operation, path, strconv.Quote(unavailableMessage), unavailableKind, rooted)
 	g.line("if runtime.GOOS != \"linux\" && runtime.GOOS != \"darwin\" { return " + g.filesystemResultErr(successType, errorType, unavailable) + " }")
-	if isDirectory {
+	if isLock {
+		g.line(handle + ", " + openError + " := __trb_nativefs.TryLock(" + anchor + ", " + path + ")")
+	} else if isDirectory {
 		g.line(handle + ", " + openError + " := os.OpenRoot(" + path + ")")
 	} else {
 		g.line(flags + " := os.O_RDONLY")
@@ -246,11 +265,14 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		}
 	}
 	openFailure := g.filesystemResourceNativeError(operation, path, openError, rooted)
+	if isLock {
+		openFailure = "func() " + g.goType(errorType) + " { failure := " + openFailure + "; if errors.Is(" + openError + ", __trb_nativefs.ErrBusy) { failure.Kind = " + g.filesystemKind("Busy") + " } else if errors.Is(" + openError + ", __trb_nativefs.ErrUnsupported) { failure.Kind = " + g.filesystemKind("Unsupported") + " }; return failure }()"
+	}
 	g.line("if " + openError + " != nil { return " + g.filesystemResultErr(successType, errorType, openFailure) + " }")
 	g.line(completed + " := false")
 	closeFailure := g.filesystemResourceNativeError("close", path, "closeError", rooted)
 	g.line("defer func() { if closeError := " + handle + ".Close(); " + completed + " && closeError != nil { " + raw + " = " + g.filesystemResultErr(successType, errorType, closeFailure) + " } }()")
-	if !isDirectory {
+	if !isDirectory && !isLock {
 		info := "__trbFileInfo" + id
 		g.line(info + ", " + openError + " := " + handle + ".Stat()")
 		g.line("if " + openError + " != nil { return " + g.filesystemResultErr(successType, errorType, openFailure) + " }")
