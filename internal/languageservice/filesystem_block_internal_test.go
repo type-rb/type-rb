@@ -10,7 +10,7 @@ import (
 
 func TestCompilerBlockParameterInferenceTypesScopedFileBinding(t *testing.T) {
 	context := StandardImportCandidates("go")
-	source := "import trb/std/file\n\ndef inspect(path: String)\n\tFile.open(path) do |file|\n\t\tfile"
+	source := "import trb/std/path\nimport trb/std/file\n\ndef inspect(path: Path)\n\tFile.open(path) do |file|\n\t\tfile"
 	symbols := lexicalSymbols(source, len(source), context)
 	for _, symbol := range symbols {
 		if symbol.Name == "file" {
@@ -25,7 +25,7 @@ func TestCompilerBlockParameterInferenceTypesScopedFileBinding(t *testing.T) {
 
 func TestCompilerBlockParameterInferenceDoesNotEscapeClosedScope(t *testing.T) {
 	context := StandardImportCandidates("go")
-	source := "File.open(path) do |file|\n\tfile.read(max_bytes: 1)\nend\nfile"
+	source := "File.open(Path.new(path)) do |file|\n\tfile.read(max_bytes: 1)\nend\nfile"
 	for _, symbol := range lexicalSymbols(source, len(source), context) {
 		if symbol.Name == "file" && symbol.Kind == CompletionParameter {
 			t.Fatalf("closed scoped binding escaped into completion: %#v", symbol)

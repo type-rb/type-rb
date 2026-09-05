@@ -56,14 +56,15 @@ func TestRunDirChildrenPreservesSymlinkParentResolutionAcrossBackends(t *testing
 	directory := filepath.Join(dataRoot, "route") + separator + ".." + separator + "listed"
 	expectedChild := directory + separator + "value.txt"
 
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import trb/std/dir
 import { DirEntryKind } from trb/std/dir
 import { Result } from trb/std/result
 
 def read(path: String): String
-	result := File.open(path, mode: FileMode::Read) do |file|
+	result := File.open(Path.new(path), mode: FileMode::Read) do |file|
 		try file.read_text(max_bytes: 5)
 	end
 	case result
@@ -75,14 +76,14 @@ def read(path: String): String
 end
 
 def listed(directory: String, expected: String): String
-	case Dir.children(directory)
+	case Dir.children(Path.new(directory), max_entries: 1000)
 	when Result::Err(error)
 		return error.operation
 	when Result::Ok(entries)
 		mut labels: Array<String> := []
 		entries.each do |entry|
 			if entry.kind == DirEntryKind::File
-				labels.push(entry.name + ":" + read(entry.path) + ":" + (entry.path == expected).to_s())
+				labels.push(entry.name + ":" + read(entry.path.to_s()) + ":" + (entry.path.to_s() == expected).to_s())
 			end
 		end
 		return labels.join(",")
@@ -120,22 +121,28 @@ func TestRunDirChildrenRejectsNonUTF8NamesAcrossBackends(t *testing.T) {
 		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
 	}
 
-	source := `import trb/std/dir
-import { FileSystemErrorKind } from trb/std/errors
+	source := `import trb/std/path
+import trb/std/dir
+import { FileSystemErrorKind, FileSystemTarget } from trb/std/errors
 import { Result } from trb/std/result
 
 def listed(path: String): String
-	case Dir.children(path)
+	case Dir.children(Path.new(path), max_entries: 1000)
 	when Result::Ok(_entries)
 		return "ok"
 	when Result::Err(error)
 		kind := case error.kind
-		when FileSystemErrorKind::Other
-			"other"
+		when FileSystemErrorKind::UnsupportedName
+			"unsupported_name"
 		else
 			"unexpected"
 		end
-		return error.operation + ":" + kind + ":" + (error.path == path).to_s() + ":" + error.message
+		return error.operation + ":" + kind + ":" + (case error.target
+		when FileSystemTarget::Host(target_path)
+			target_path.to_s() == path
+		else
+			false
+		end).to_s() + ":" + error.message
 	end
 end
 
@@ -149,7 +156,7 @@ end
 		t.Run(backend.name, func(t *testing.T) {
 			requireDirBoundaryRuntime(t, backend)
 			stdout := runDirBoundaryProject(t, backend, source)
-			want := "children:other:true:directory entry name is not valid UTF-8\n"
+			want := "children:unsupported_name:true:directory entry name is not valid UTF-8\n"
 			if stdout != want {
 				t.Fatalf("unexpected output: want %q, got %q", want, stdout)
 			}

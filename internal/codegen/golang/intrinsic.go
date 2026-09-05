@@ -118,12 +118,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		value := g.goType(types.FromName("KeyLookupError")) + "{Key: " + key + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
-	filesystemError := func(operation, path, message string) string {
-		_, successType, errorType := filesystemResultType()
-		alias := g.filesystemResultAlias()
-		value := errorType + "{Operation: " + strconv.Quote(operation) + ", Path: " + path + ", Message: " + message + ", Kind: " + g.filesystemKind("Other") + "}"
-		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
-	}
+
 	processError := func(operation, command, message string) string {
 		_, successType, errorType := filesystemResultType()
 		alias := g.typeAliases["Result"]
@@ -171,22 +166,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
 		return "func() " + resultType + " { input := " + arguments[0] + "; characters := []rune(input); value := make([]byte, 0, len(input)); hexadecimal := func(character rune) (byte, bool) { switch { case character >= '0' && character <= '9': return byte(character - '0'), true; case character >= 'A' && character <= 'F': return byte(character - 'A' + 10), true; case character >= 'a' && character <= 'f': return byte(character - 'a' + 10), true; default: return 0, false } }; for index := 0; index < len(characters); index++ { character := characters[index]; if character != '%' { value = append(value, []byte(string(character))...); continue }; if index+2 >= len(characters) { return " + invalidEscape + " }; high, highOK := hexadecimal(characters[index+1]); low, lowOK := hexadecimal(characters[index+2]); if !highOK || !lowOK { return " + invalidEscape + " }; value = append(value, high<<4|low); index += 2 }; if !utf8.Valid(value) { return " + invalidUtf8 + " }; return " + filesystemOK("string(value)") + " }()"
 	case "trb.std.dir.children":
-		g.requireImport("os", "")
-		g.requireImport("path/filepath", "filepath")
-		g.requireImport("slices", "")
-		g.requireImport("unicode/utf8", "utf8")
-		resultType, _, _ := filesystemResultType()
-		result := call.ExprType()
-		entrySemantic := types.FromName("DirEntry")
-		if len(result.Args) == 2 && result.Args[0].Kind == types.Array && len(result.Args[0].Args) == 1 {
-			entrySemantic = result.Args[0].Args[0]
-		}
-		entryType := g.goType(entrySemantic)
-		other := g.filesystemDirectoryEntryKind("Other")
-		file := g.filesystemDirectoryEntryKind("File")
-		directory := g.filesystemDirectoryEntryKind("Directory")
-		invalidName := filesystemError("children", "path", strconv.Quote("directory entry name is not valid UTF-8"))
-		return "func() " + resultType + " { path := " + arguments[0] + "; source, err := os.ReadDir(path); if err != nil { return " + filesystemError("children", "path", "err.Error()") + " }; for _, sourceEntry := range source { if !utf8.ValidString(sourceEntry.Name()) { return " + invalidName + " } }; entries := make([]" + entryType + ", 0, len(source)); for _, sourceEntry := range source { name := sourceEntry.Name(); childPath := path; volume := filepath.VolumeName(path); driveRelativeRoot := volume == path && len(volume) == 2 && volume[1] == ':'; if !driveRelativeRoot && (len(childPath) == 0 || !os.IsPathSeparator(childPath[len(childPath)-1])) { childPath += string(os.PathSeparator) }; childPath += name; info, infoErr := sourceEntry.Info(); if infoErr != nil { return " + filesystemError("children", "childPath", "infoErr.Error()") + " }; kind := " + other + "; if info.Mode().IsRegular() { kind = " + file + " } else if info.IsDir() { kind = " + directory + " }; entries = append(entries, " + entryType + "{Name: name, Path: childPath, Kind: kind}) }; slices.SortStableFunc(entries, func(left, right " + entryType + ") int { if left.Name < right.Name { return -1 }; if left.Name > right.Name { return 1 }; return 0 }); return " + filesystemOK(g.arrayReference("entries")) + " }()"
+		return g.filesystemChildren(call, arguments)
+	case "trb.std.dir.create_all":
+		return g.filesystemCreateAll(call, arguments)
 	case "trb.std.file.read", "trb.std.file.read_text":
 		g.requireImport("io", "")
 		g.temporary++
@@ -205,12 +187,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		operation := strings.TrimPrefix(name, "trb.std.file.")
 		invalid := g.filesystemError(errorType, operation, path, strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
 		tooLarge := g.filesystemError(errorType, operation, path, strconv.Quote("file exceeds max_bytes"), "TooLarge")
-		failure := g.filesystemError(errorType, operation, path, readError+".Error()", "Other")
+		failure := g.filesystemNativeError(operation, path, readError)
 		value := data
+		failureCheck := ""
 		if name == "trb.std.file.read_text" {
-			value = g.utf8WithReplacement(data)
+			g.requireImport("unicode/utf8", "utf8")
+			invalidEncoding := g.filesystemError(errorType, operation, path, strconv.Quote("file is not valid UTF-8"), "InvalidEncoding")
+			value = "string(" + data + ")"
+			failureCheck = "if !utf8.Valid(" + data + ") { return " + resultError(invalidEncoding) + " }; "
 		}
-		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + limit + " := " + arguments[1] + "; " + path + " := " + handle + ".Name(); if " + limit + " < 0 { return " + resultError(invalid) + " }; " + data + ", " + readError + " := io.ReadAll(io.LimitReader(" + handle + ", int64(" + limit + ")+1)); if " + readError + " != nil { return " + resultError(failure) + " }; if len(" + data + ") > " + limit + " { return " + resultError(tooLarge) + " }; return " + filesystemOK(value) + " }()"
+		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + limit + " := " + arguments[1] + "; " + path + " := " + handle + ".Name(); if " + limit + " < 0 { return " + resultError(invalid) + " }; " + data + ", " + readError + " := io.ReadAll(io.LimitReader(" + handle + ", int64(" + limit + ")+1)); if " + readError + " != nil { return " + resultError(failure) + " }; if len(" + data + ") > " + limit + " { return " + resultError(tooLarge) + " }; " + failureCheck + "return " + filesystemOK(value) + " }()"
 	case "trb.std.file.write", "trb.std.file.write_text":
 		g.requireImport("io", "")
 		g.temporary++
@@ -221,13 +207,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		written := "__trbFileWriteCount" + id
 		writeError := "__trbFileWriteError" + id
 		resultType, successType, _ := filesystemResultType()
-		result := call.ExprType()
-		errorType := types.FromName("FileSystemError")
-		if len(result.Args) == 2 {
-			errorType = result.Args[1]
-		}
 		operation := strings.TrimPrefix(name, "trb.std.file.")
-		failure := g.filesystemError(errorType, operation, path, writeError+".Error()", "Other")
+		failure := g.filesystemNativeError(operation, path, writeError)
 		value := arguments[1]
 		if name == "trb.std.file.write_text" {
 			value = "[]byte(" + value + ")"

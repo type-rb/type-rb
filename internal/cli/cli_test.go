@@ -2936,9 +2936,9 @@ func TestReplEvaluatesPortableFilesystemAcrossModes(t *testing.T) {
 			"import trb/std/dir",
 			"import { FileSystemErrorKind } from trb/std/errors",
 			"import { Result } from trb/std/result",
-			"def create_label(path: String, text: String): String; result := File.open(path, mode: FileMode::CreateNew) do |file|; try file.write_text(text); end; case result; when Result::Ok(_unit); return \"created\"; when Result::Err(error); case error.kind; when FileSystemErrorKind::AlreadyExists; return \"exists\"; else; return error.operation; end; end; end",
-			"def read_label(path: String): String; result := File.open(path) do |file|; try file.read_text(max_bytes: 16); end; case result; when Result::Ok(text); return text; when Result::Err(_error); return \"missing\"; end; end",
-			"def child_names(path: String): Array<String>; case Dir.children(path); when Result::Err(error); return [error.operation]; when Result::Ok(entries); mut names: Array<String> := []; entries.each do |entry|; names.push(entry.name); end; return names; end; end",
+			"def create_label(path: String, text: String): String; result := File.open(Path.new(path), mode: FileMode::CreateNew) do |file|; try file.write_text(text); end; case result; when Result::Ok(_unit); return \"created\"; when Result::Err(error); case error.kind; when FileSystemErrorKind::AlreadyExists; return \"exists\"; else; return error.operation; end; end; end",
+			"def read_label(path: String): String; result := File.open(Path.new(path)) do |file|; try file.read_text(max_bytes: 16); end; case result; when Result::Ok(text); return text; when Result::Err(_error); return \"missing\"; end; end",
+			"def child_names(path: String): Array<String>; case Dir.children(Path.new(path), max_entries: 1000); when Result::Err(error); return [error.operation]; when Result::Ok(entries); mut names: Array<String> := []; entries.each do |entry|; names.push(entry.name); end; return names; end; end",
 			"create_label(" + strconv.Quote(textPath) + ", \"A😀\")",
 			"read_label(" + strconv.Quote(textPath) + ")",
 			"child_names(" + strconv.Quote(directory) + ")",
@@ -6359,14 +6359,14 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 		if err := os.WriteFile(invalidTextPath, []byte{0xff}, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		source := "import trb/std/file\n" +
+		source := "import trb/std/path\nimport trb/std/file\n" +
 			"import { FileMode } from trb/std/file\n" +
 			"import trb/std/dir\n" +
 			"import { DirEntryKind } from trb/std/dir\n" +
 			"import { FileSystemErrorKind } from trb/std/errors\n" +
 			"import { Result } from trb/std/result\n\n" +
 			"def create(path: String): String\n" +
-			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
+			"\tresult := File.open(Path.new(path), mode: FileMode::CreateNew) do |file|\n" +
 			"\t\ttry file.write_text(\"hello\")\n" +
 			"\tend\n" +
 			"\tcase result\n" +
@@ -6381,7 +6381,7 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 			"\tend\n" +
 			"\treturn results.sort().join(\",\")\nend\n\n" +
 			"def bounded(path: String, maximum: Integer): String\n" +
-			"\tresult := File.open(path) do |file|\n" +
+			"\tresult := File.open(Path.new(path)) do |file|\n" +
 			"\t\ttry file.read_text(max_bytes: maximum)\n\tend\n" +
 			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
 			"\twhen Result::Err(error)\n\t\tcase error.kind\n" +
@@ -6389,23 +6389,23 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 			"\t\twhen FileSystemErrorKind::InvalidLimit\n\t\t\treturn \"invalid-limit\"\n" +
 			"\t\telse\n\t\t\treturn error.operation\n\t\tend\n\tend\nend\n\n" +
 			"def create_bytes(path: String): String\n" +
-			"\tresult := File.open(path, mode: FileMode::CreateNew) do |file|\n" +
+			"\tresult := File.open(Path.new(path), mode: FileMode::CreateNew) do |file|\n" +
 			"\t\ttry file.write(\"B\".to_bytes())\n\tend\n" +
 			"\tcase result\n\twhen Result::Ok(_unit)\n\t\treturn \"bytes-created\"\n" +
 			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
 			"def bounded_bytes(path: String): String\n" +
-			"\tresult := File.open(path) do |file|\n" +
+			"\tresult := File.open(Path.new(path)) do |file|\n" +
 			"\t\tbytes := try file.read(max_bytes: 1)\n\t\tbytes.to_s()\n\tend\n" +
 			"\tcase result\n\twhen Result::Ok(text)\n\t\treturn text\n" +
 			"\twhen Result::Err(error)\n\t\treturn error.operation\n\tend\nend\n\n" +
 			"def entry_labels(path: String): Array<String>\n" +
-			"\tcase Dir.children(path)\n" +
+			"\tcase Dir.children(Path.new(path), max_entries: 1000)\n" +
 			"\twhen Result::Err(error)\n\t\treturn [error.operation]\n" +
 			"\twhen Result::Ok(entries)\n" +
 			"\t\tmut labels: Array<String> := []\n" +
 			"\t\tentries.each do |entry|\n" +
 			"\t\t\tkind := case entry.kind\n" +
-			"\t\t\twhen DirEntryKind::File\n\t\t\t\t\"file:\" + bounded(entry.path, 5)\n" +
+			"\t\t\twhen DirEntryKind::File\n\t\t\t\t\"file:\" + bounded(entry.path.to_s(), 5)\n" +
 			"\t\t\twhen DirEntryKind::Directory\n\t\t\t\t\"directory\"\n" +
 			"\t\t\twhen DirEntryKind::Other\n\t\t\t\t\"other\"\n\t\t\tend\n" +
 			"\t\t\tlabels.push(entry.name + \":\" + kind)\n\t\tend\n\t\treturn labels\n\tend\nend\n\n" +
@@ -6433,7 +6433,7 @@ func TestRunScopedFilesystemAcrossAvailableBackends(t *testing.T) {
 		if symlinkAvailable {
 			entryLabels = "child:directory,link:other,note.txt:file:hello,\uE000:file:,\U00010000:file:"
 		}
-		want := "created\nexists\ncreated,exists\nhello\ntoo-large\ninvalid-limit\nbytes-created\nB\n�\n" + entryLabels + "\n"
+		want := "created\nexists\ncreated,exists\nhello\ntoo-large\ninvalid-limit\nbytes-created\nB\nread_text\n" + entryLabels + "\n"
 		if stdout.String() != want {
 			t.Fatalf("unexpected %s scoped filesystem output: want %q, got %q", mode, want, stdout.String())
 		}

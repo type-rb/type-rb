@@ -158,8 +158,12 @@ Unicode or consulting the filesystem. Host joining preserves the parent text
 and chooses separators on the target host, including Windows drive-relative
 paths. Go, Ruby, Node/Bun TypeScript, and the typed-IR REPL share conformance
 tests; browser builds retain the pure operations and reject host joining.
-These values do not promise filesystem containment. Existing I/O operations
-still consume host-native Strings.
+These values do not promise filesystem containment. Ambient File/Dir operations
+now require Path, listing returns DirEntry<Path> with a required entry bound,
+and errors retain a typed FileSystemTarget. Recursive directory creation and
+strict, byte-bounded UTF-8 text reads are implemented across host backends and
+the REPL. Opened directory anchors, non-escaping resource borrowing, regular-file
+acquisition hardening, atomic publication, and locking remain unimplemented.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

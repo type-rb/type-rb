@@ -40,14 +40,15 @@ func TestEvaluateDirChildrenPreservesSymlinkParentResolution(t *testing.T) {
 	separator := string(os.PathSeparator)
 	directory := filepath.Join(root, "route") + separator + ".." + separator + "listed"
 	expectedChild := directory + separator + "value.txt"
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import trb/std/dir
 import { DirEntryKind } from trb/std/dir
 import { Result } from trb/std/result
 
 def read(path: String): String
-	result := File.open(path, mode: FileMode::Read) do |file|
+	result := File.open(Path.new(path), mode: FileMode::Read) do |file|
 		try file.read_text(max_bytes: 5)
 	end
 	case result
@@ -59,14 +60,14 @@ def read(path: String): String
 end
 
 def listed(directory: String, expected: String): String
-	case Dir.children(directory)
+	case Dir.children(Path.new(directory), max_entries: 1000)
 	when Result::Err(error)
 		return error.operation
 	when Result::Ok(entries)
 		mut labels: Array<String> := []
 		entries.each do |entry|
 			if entry.kind == DirEntryKind::File
-				labels.push(entry.name + ":" + read(entry.path) + ":" + (entry.path == expected).to_s())
+				labels.push(entry.name + ":" + read(entry.path.to_s()) + ":" + (entry.path.to_s() == expected).to_s())
 			end
 		end
 		return labels.join(",")
@@ -96,22 +97,28 @@ func TestEvaluateDirChildrenRejectsNonUTF8Name(t *testing.T) {
 	if err := os.WriteFile(directory+string(os.PathSeparator)+string([]byte{0xff}), nil, 0o644); err != nil {
 		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
 	}
-	source := `import trb/std/dir
-import { FileSystemErrorKind } from trb/std/errors
+	source := `import trb/std/path
+import trb/std/dir
+import { FileSystemErrorKind, FileSystemTarget } from trb/std/errors
 import { Result } from trb/std/result
 
 def listed(path: String): String
-	case Dir.children(path)
+	case Dir.children(Path.new(path), max_entries: 1000)
 	when Result::Ok(_entries)
 		return "ok"
 	when Result::Err(error)
 		kind := case error.kind
-		when FileSystemErrorKind::Other
-			"other"
+		when FileSystemErrorKind::UnsupportedName
+			"unsupported_name"
 		else
 			"unexpected"
 		end
-		return error.operation + ":" + kind + ":" + (error.path == path).to_s() + ":" + error.message
+		return error.operation + ":" + kind + ":" + (case error.target
+		when FileSystemTarget::Host(target_path)
+			target_path.to_s() == path
+		else
+			false
+		end).to_s() + ":" + error.message
 	end
 end
 
@@ -120,11 +127,35 @@ listed(` + strconv.Quote(directory) + `)
 
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
-			want := `"children:other:true:directory entry name is not valid UTF-8"`
+			want := `"children:unsupported_name:true:directory entry name is not valid UTF-8"`
 			if got := evaluateDirBoundarySource(t, mode, source); got != want {
 				t.Fatalf("result=%s, want %s", got, want)
 			}
 		})
+	}
+}
+
+func TestEvaluateBoundedDirectoryCreationAndListing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new", "nested")
+	source := `import trb/std/path
+import trb/std/dir
+
+def inspect(path: Path): String
+	Dir.create_all(path) catch |error|
+		return error.operation
+	end
+	entries := Dir.children(path, max_entries: 0) catch |error|
+		return error.operation
+	end
+	return entries.size().to_s()
+end
+
+inspect(Path.new(` + strconv.Quote(path) + `))
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if got := evaluateDirBoundarySource(t, mode, source); got != `"0"` {
+			t.Fatalf("%s: %s", mode, got)
+		}
 	}
 }
 

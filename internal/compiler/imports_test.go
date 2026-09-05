@@ -836,6 +836,7 @@ func TestCompilerOwnedNamespaceImportsRetainRequiredRuntimeAcrossBackends(t *tes
 		ModulePath: "main",
 		Package:    "main",
 		Source: []byte(`import trb/std/encoding/hex
+import trb/std/path
 import trb/std/dir
 import { DirEntry } from trb/std/dir
 import { FileSystemError } from trb/std/errors
@@ -845,8 +846,8 @@ def decoded(value: String): Result<Bytes, Hex::DecodeError>
 	return Hex.decode(value)
 end
 
-def listed(path: String): Result<Array<DirEntry>, FileSystemError>
-	return Dir.children(path)
+def listed(path: String): Result<Array<DirEntry<Path>>, FileSystemError>
+	return Dir.children(Path.new(path), max_entries: 1000)
 end
 `),
 	}
@@ -2798,14 +2799,15 @@ func TestTypeScriptUsesCanonicalFilesystemDeclarationModules(t *testing.T) {
 		Filename:   "/project/main.trb",
 		ModulePath: "main",
 		Package:    "main",
-		Source: []byte(`import trb/std/file
+		Source: []byte(`import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError, FileSystemErrorKind } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def create(path: String, value: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: FileMode::CreateNew) do |file|
+	return File.open(Path.new(path), mode: FileMode::CreateNew) do |file|
 		try file.write_text(value)
 	end
 end
@@ -2861,7 +2863,8 @@ func TestPortableFilesystemPackageDiagnosticsAreModeIndependent(t *testing.T) {
 	}{
 		{
 			name: "open path",
-			source: `import trb/std/file
+			source: `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
@@ -2871,16 +2874,17 @@ def bad(): Result<String, FileSystemError>
 	end
 end
 `,
-			want: "argument 1 to open() has type Integer, expected String",
+			want: "argument 1 to open() has type Integer, expected Path",
 		},
 		{
 			name: "open mode",
-			source: `import trb/std/file
+			source: `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def bad(): Result<String, FileSystemError>
-	return File.open("input.txt", mode: "read") do |file|
+	return File.open(Path.new("input.txt"), mode: "read") do |file|
 		try file.read_text(max_bytes: 10)
 	end
 end
@@ -2889,12 +2893,13 @@ end
 		},
 		{
 			name: "bounded read",
-			source: `import trb/std/file
+			source: `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def bad(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: "ten")
 	end
 end
@@ -2903,14 +2908,15 @@ end
 		},
 		{
 			name: "bytes write",
-			source: `import trb/std/file
+			source: `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def bad(path: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: FileMode::Write) do |file|
+	return File.open(Path.new(path), mode: FileMode::Write) do |file|
 		try file.write("not bytes")
 	end
 end
@@ -2919,16 +2925,17 @@ end
 		},
 		{
 			name: "children path",
-			source: `import trb/std/dir
+			source: `import trb/std/path
+import trb/std/dir
 import { DirEntry } from trb/std/dir
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
-def bad(): Result<Array<DirEntry>, FileSystemError>
-	return Dir.children(1)
+def bad(): Result<Array<DirEntry<Path>>, FileSystemError>
+	return Dir.children(1, max_entries: 1000)
 end
 `,
-			want: "argument 1 to children() has type Integer, expected String",
+			want: "argument 1 to children() has type Integer, expected Path",
 		},
 	}
 	for _, test := range tests {

@@ -10,7 +10,8 @@ import (
 	"testing"
 )
 
-const scopedFilesystemSource = `import trb/std/file
+const scopedFilesystemSource = `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import trb/std/dir
 import { DirEntry, DirEntryKind } from trb/std/dir
@@ -19,23 +20,23 @@ import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def read_bounded(path: String, maximum: Integer): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: maximum)
 	end
 end
 
 def create(path: String, value: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: FileMode::CreateNew) do |file|
+	return File.open(Path.new(path), mode: FileMode::CreateNew) do |file|
 		try file.write_text(value)
 	end
 end
 
-def children(path: String): Result<Array<DirEntry>, FileSystemError>
-	return Dir.children(path)
+def children(path: String): Result<Array<DirEntry<Path>>, FileSystemError>
+	return Dir.children(Path.new(path), max_entries: 1000)
 end
 
-def synthetic_entry(name: String, path: String): DirEntry
-	return DirEntry.new(name: name, path: path, kind: DirEntryKind::Other)
+def synthetic_entry(name: String, path: String): DirEntry<Path>
+	return DirEntry<Path>.new(name: name, path: Path.new(path), kind: DirEntryKind::Other)
 end
 `
 
@@ -47,9 +48,9 @@ func TestScopedFilesystemCompilesAcrossPortableBackends(t *testing.T) {
 				t.Fatalf("Compile() error = %v", err)
 			}
 			for _, fragment := range map[string][]string{
-				"go":         {"defer func()", ".Close()", "os.O_EXCL", "utf8.ValidString(sourceEntry.Name())", "filepath.VolumeName(path)", "volume == path && len(volume) == 2 && volume[1] == ':'", "os.IsPathSeparator", "childPath += name", "sourceEntry.Info()", "directory entry name is not valid UTF-8"},
-				"ruby":       {"ensure", ".close", `"wbx"`, "encoding: Encoding::BINARY", "name.valid_encoding?", "native_separator = ::File::ALT_SEPARATOR.nil? ? ::File::SEPARATOR : ::File::ALT_SEPARATOR", `!::File::ALT_SEPARATOR.nil? && path.match?(/\A[A-Za-z]:\z/)`, "path.end_with?(::File::SEPARATOR)", `: native_separator`, "path + separator + name", "active_path = child_path", "::File.lstat(child_path)", "path: active_path", "directory entry name is not valid UTF-8", "while data.bytesize <= max_bytes", "request_bytes = remaining == 0 ? 1 : [65536, remaining].min", "file.read(request_bytes)"},
-				"typescript": {"finally", ".closeSync(", `"wx"`, `encoding: "buffer"`, `new TextDecoder("utf-8", { fatal: true })`, `__trbDirDriveRelativeRoot`, `.sep === "\\" && /^[A-Za-z]:$/.test(__trbDirPath`, `.endsWith(__trbDirPathModule`, ` + __trbDirSeparator`, `.lstatSync(__trbDirChildPath`, `.isFile()`, `.isDirectory()`, `path: __trbDirActivePath`, "directory entry name is not valid UTF-8", "new Uint8Array(65536)", "while (__trbFileReadCount", "=== 0 ? 1 : Math.min(__trbFileReadBuffer", ".readSync(__trbFileReadHandle"},
+				"go":         {"defer func()", ".Close()", "os.O_EXCL", "utf8.ValidString(name)", "filepath.VolumeName(path)", "volume == path && len(volume) == 2 && volume[1] == ':'", "os.IsPathSeparator", "childPath += name", "os.Lstat(childPath)", "directory entry name is not valid UTF-8"},
+				"ruby":       {"ensure", ".close", `"wbx"`, "encoding: Encoding::BINARY", "name.valid_encoding?", "native_separator = ::File::ALT_SEPARATOR.nil? ? ::File::SEPARATOR : ::File::ALT_SEPARATOR", `!::File::ALT_SEPARATOR.nil? && path.match?(/\A[A-Za-z]:\z/)`, "path.end_with?(::File::SEPARATOR)", `: native_separator`, "path + separator + name", "active_path = child_path", "::File.lstat(child_path)", "target: FileSystemTarget::Host.new(active_path)", "directory entry name is not valid UTF-8", "while data.bytesize <= max_bytes", "request_bytes = remaining == 0 ? 1 : [65536, remaining].min", "file.read(request_bytes)"},
+				"typescript": {"finally", ".closeSync(", `"wx"`, `encoding: "buffer"`, `new TextDecoder("utf-8", {fatal: true, ignoreBOM: true})`, `driveRelativeRoot`, `.sep === "\\" && /^[A-Za-z]:$/.test(path)`, `.endsWith(pathModule`, ` + separator`, `.lstatSync(childPath`, `.isFile()`, `.isDirectory()`, `.Host(activePath)`, "directory entry name is not valid UTF-8", "new Uint8Array(65536)", "while (__trbFileReadCount", "=== 0 ? 1 : Math.min(__trbFileReadBuffer", ".readSync(__trbFileReadHandle"},
 			}[mode] {
 				if !strings.Contains(string(artifact.Output), fragment) {
 					t.Fatalf("generated %s resource block is missing %q:\n%s", mode, fragment, artifact.Output)
@@ -139,11 +140,12 @@ end
 }
 
 func TestFileOpenRejectsFileModeDeclarationAsModeAcrossPortableBackends(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 
 def open_invalid(path: String)
-	File.open(path, mode: FileMode) do |_file|
+	File.open(Path.new(path), mode: FileMode) do |_file|
 		return
 	end
 	return
@@ -161,7 +163,8 @@ end
 }
 
 func TestScopedFilesystemAliasesCompileAcrossPortableBackends(t *testing.T) {
-	source := `import trb/std/file as HostFile
+	source := `import trb/std/path
+import trb/std/file as HostFile
 import { FileMode as OpenMode } from trb/std/file
 import trb/std/dir as HostDir
 import { DirEntry as Entry, DirEntryKind as EntryKind } from trb/std/dir
@@ -170,16 +173,16 @@ import { Result as Outcome } from trb/std/result
 import { Unit } from trb/std/unit
 
 def create(path: String, value: String): Outcome<Unit, IOError>
-	return HostFile.open(path, mode: OpenMode::CreateNew) do |file|
+	return HostFile.open(Path.new(path), mode: OpenMode::CreateNew) do |file|
 		try file.write_text(value)
 	end
 end
 
-def children(path: String): Outcome<Array<Entry>, IOError>
-	return HostDir.children(path)
+def children(path: String): Outcome<Array<Entry<Path>>, IOError>
+	return HostDir.children(Path.new(path), max_entries: 1000)
 end
 
-def entry_label(entry: Entry): String
+def entry_label(entry: Entry<Path>): String
 	case entry.kind
 	when EntryKind::File
 		return "file"
@@ -215,12 +218,13 @@ end
 }
 
 func TestScopedFilesystemDefaultModeImportsItsRuntimeDeclaration(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def read_default(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 16)
 	end
 end
@@ -238,12 +242,13 @@ end
 }
 
 func TestScopedFilesystemHandleCannotEscape(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def invalid(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		copy := file
 		try copy.read_text(max_bytes: 10)
 	end
@@ -262,24 +267,25 @@ func TestScopedFilesystemHandleRejectsPassingReturningAndCollectionStorage(t *te
 end
 
 def invalid(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		consume(file)
 	end
 end`,
 		"return": `def invalid(path: String): Result<Any, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		file
 	end
 end`,
 		"collection": `def invalid(path: String): Result<Array<Any>, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		[file]
 	end
 end`,
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
@@ -318,7 +324,7 @@ end`,
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for name, body := range tests {
 			t.Run(mode+"/"+name, func(t *testing.T) {
-				source := "import trb/std/file\n\n" + body + "\n"
+				source := "import trb/std/path\nimport trb/std/file\n\n" + body + "\n"
 				_, err := Compile("main.trb", []byte(source), mode)
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("Compile() error = %v, want %q", err, want)
@@ -329,7 +335,8 @@ end`,
 }
 
 func TestScopedFileImportAliasCannotAppearInAuthoredValueTypes(t *testing.T) {
-	source := `import { File as HostFile } from trb/std/file
+	source := `import trb/std/path
+import { File as HostFile } from trb/std/file
 
 def invalid(_value: HostFile)
 	return
@@ -372,7 +379,8 @@ end
 }
 
 func TestScopedFilesystemHandleCannotBeConstructed(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 
 value := File.new()
 `
@@ -383,7 +391,8 @@ value := File.new()
 }
 
 func TestDirectoryOwnerCannotBeConstructedAsAnEmptyValue(t *testing.T) {
-	source := `import trb/std/dir
+	source := `import trb/std/path
+import trb/std/dir
 
 value := Dir.new()
 `
@@ -394,12 +403,13 @@ value := Dir.new()
 }
 
 func TestScopedFilesystemHandleCannotBeCaptured(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def invalid(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		callback := fn(): Result<String, FileSystemError>
 			return file.read_text(max_bytes: 10)
 		end
@@ -424,12 +434,13 @@ func TestScopedFilesystemRejectsOpaqueRubyNativeSyntaxInResourceScope(t *testing
 	for name, nested := range tests {
 		t.Run(name, func(t *testing.T) {
 			source := `activate trb/platform/ruby/native
+import trb/std/path
 import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def invalid(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		` + nested + `
 		"done"
 	end
@@ -458,12 +469,13 @@ func TestScopedFilesystemHandleCannotBeCapturedByIterationBlock(t *testing.T) {
 	}
 	for name, nested := range tests {
 		t.Run(name, func(t *testing.T) {
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def invalid(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		` + nested + `
 		"done"
 	end
@@ -480,14 +492,15 @@ end
 func TestSuspendingTypeScriptFileBlockUsesAwaitedAsyncCleanupBoundary(t *testing.T) {
 	source := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
-		Source: []byte(`import trb/std/file
+		Source: []byte(`import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def create(path: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: FileMode::Write) do |file|
+	return File.open(Path.new(path), mode: FileMode::Write) do |file|
 		values := [1, 2].concurrent_map(limit: 2) do |value|
 			value.to_s()
 		end
@@ -519,7 +532,8 @@ end
 }
 
 func TestTypeScriptFileArgumentsAreEvaluatedBeforeHostChecksAndErrorCatch(t *testing.T) {
-	source := `import trb/std/file
+	source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
@@ -536,7 +550,7 @@ def payload(): String
 end
 
 def write(path: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: selected_mode()) do |file|
+	return File.open(Path.new(path), mode: selected_mode()) do |file|
 		try file.write_text(payload())
 	end
 end
@@ -587,7 +601,8 @@ end
 }
 
 func TestScopedFileIdentityDoesNotAffectAnUnrelatedFileDeclaration(t *testing.T) {
-	source := `import trb/std/file as HostFile
+	source := `import trb/std/path
+import trb/std/file as HostFile
 import { File as BrowserFile } from trb/platform/typescript/browser
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
@@ -597,7 +612,7 @@ def browser_file(): BrowserFile
 end
 
 def load(path: String): Result<String, FileSystemError>
-	return HostFile.open(path) do |file|
+	return HostFile.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 5)
 	end
 end

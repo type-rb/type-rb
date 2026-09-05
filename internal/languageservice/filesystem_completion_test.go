@@ -92,23 +92,26 @@ func TestFilesystemCompletionUsesDeclarationRootsAndExactPeerImports(t *testing.
 }
 
 func TestScopedFileBlockBindingCompletesReceiverMethodsAcrossModes(t *testing.T) {
-	const checkedSource = `import trb/std/file
+	const checkedSource = `import trb/std/path
+import trb/std/file
 import trb/std/dir
 
 def main()
 	return
 end
 `
-	const completionSource = `import trb/std/file
+	const completionSource = `import trb/std/path
+import trb/std/file
 
 def inspect(path: String)
-	File.open(path) do |file|
+	File.open(Path.new(path)) do |file|
 		file.
 `
-	const signatureSource = `import trb/std/file
+	const signatureSource = `import trb/std/path
+import trb/std/file
 
 def inspect(path: String)
-	File.open(path) do |file|
+	File.open(Path.new(path)) do |file|
 		file.read(max_bytes: 1)
 	end
 end

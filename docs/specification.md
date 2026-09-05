@@ -643,7 +643,7 @@ switches.
   value is an instance method on that value. An operation naturally associated
   with an actual nominal type but not an existing instance is a class member on
   that type; this includes factories such as `File.open` and associated
-  operations such as `Dir.children`. An algorithm with no natural value or
+  operations such as `Dir.children` and `Dir.create_all`. An algorithm with no natural value or
   nominal-type owner is a module member. A type-associated operation does not
   justify inventing a utility class when no actual nominal type exists. A
   second public spelling is permitted only when it expresses a documented
@@ -831,6 +831,24 @@ switches.
   to the local unused-binding rule. The REPL also permits an import-only
   submission because a later submission may use it; project builds still
   enforce ordinary import usage.
+
+#### Typed filesystem boundary
+
+- Ambient `File.open`, `Dir.children`, and `Dir.create_all` require the exact
+  standard `Path` value. Neither String nor `RelativePath` converts implicitly.
+- `DirEntry<P>` retains its path domain; ambient listing returns
+  `DirEntry<Path>`. Listing requires named `max_entries`, checks that bound
+  during enumeration, and returns `InvalidLimit` or `TooLarge` for invalid
+  bounds or overflow. It never returns a silently truncated listing.
+- `FileSystemError.target` is the sum `FileSystemTarget::Host(Path)`,
+  `Relative(RelativePath)`, or `Root`. Currently implemented ambient APIs
+  produce Host targets; the other value variants do not introduce a resource.
+- `File#read_text` uses strict UTF-8, preserving a leading BOM and returning
+  `InvalidEncoding` for invalid bytes after enforcing `max_bytes`. Explicit
+  Bytes conversion retains its separate replacement policy.
+- `Dir.create_all` returns `Result<Unit, FileSystemError>`, follows ordinary
+  host path resolution, preserves existing directory permissions, and does not
+  roll back completed ancestor creation on failure. It is not a containment API.
 
 ### 3.8 Program Entry
 

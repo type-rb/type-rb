@@ -44,10 +44,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	filesystemOK := func(value string) string {
 		return "Result::Ok.new(" + value + ")"
 	}
-	filesystemError := func(operation, path, message string) string {
-		value := rubyFilesystemError(operation, path, message, "Other")
-		return "Result::Err.new(" + value + ")"
-	}
+
 	processError := func(operation, command, message string) string {
 		value := "Process::Error.new(operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + ")"
 		return "Result::Err.new(" + value + ")"
@@ -98,23 +95,24 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
 		return "->(input) { characters = input.each_char.to_a; bytes = []; failure = nil; index = 0; while index < characters.length; character = characters[index]; if character != \"%\"; bytes.concat(character.encode(Encoding::UTF_8).bytes); index += 1; next; end; if index + 2 >= characters.length || !characters[index + 1].match?(/\\A[0-9A-Fa-f]\\z/) || !characters[index + 2].match?(/\\A[0-9A-Fa-f]\\z/); failure = " + invalidEscape + "; break; end; bytes << (characters[index + 1] + characters[index + 2]).to_i(16); index += 3; end; if failure; failure; else; value = bytes.pack(\"C*\").force_encoding(Encoding::UTF_8); if value.valid_encoding?; Result::Ok.new(value); else; " + invalidUtf8 + "; end; end }.call(" + arguments[0] + ")"
 	case "trb.std.dir.children":
-		entry := "DirEntry.new(name: name, path: child_path, kind: kind)"
-		invalidName := filesystemError("children", "path", strconv.Quote("directory entry name is not valid UTF-8"))
-		value := "raw_names = Dir.children(path, encoding: Encoding::BINARY).sort; names = raw_names.map { |raw_name| name = raw_name.dup.force_encoding(Encoding::UTF_8); return " + invalidName + " unless name.valid_encoding?; name }; entries = names.map { |name| native_separator = ::File::ALT_SEPARATOR.nil? ? ::File::SEPARATOR : ::File::ALT_SEPARATOR; drive_relative_root = !::File::ALT_SEPARATOR.nil? && path.match?(/\\A[A-Za-z]:\\z/); separator = path.end_with?(::File::SEPARATOR) || (!::File::ALT_SEPARATOR.nil? && path.end_with?(::File::ALT_SEPARATOR)) || drive_relative_root ? \"\" : native_separator; child_path = path + separator + name; active_path = child_path; info = ::File.lstat(child_path); active_path = path; kind = info.file? ? DirEntryKind::File : (info.directory? ? DirEntryKind::Directory : DirEntryKind::Other); " + entry + " }; " + filesystemOK("entries")
-		return "->(path) { active_path = path; begin; " + value + "; rescue StandardError => error; " + filesystemError("children", "active_path", "error.message") + "; end }.call(" + arguments[0] + ")"
+		return rubyFilesystemChildren(arguments)
+	case "trb.std.dir.create_all":
+		return rubyFilesystemCreateAll(arguments[0])
 	case "trb.std.file.read", "trb.std.file.read_text":
 		operation := strings.TrimPrefix(name, "trb.std.file.")
 		invalid := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("max_bytes must be non-negative"), "InvalidLimit") + ")"
 		tooLarge := "Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("file exceeds max_bytes"), "TooLarge") + ")"
-		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		failure := "Result::Err.new(" + rubyFilesystemNativeError(operation, "path", "error") + ")"
 		value := "data"
+		failureCheck := ""
 		if name == "trb.std.file.read_text" {
-			value = rubyUTF8WithReplacement("data")
+			value = "data.force_encoding(Encoding::UTF_8)"
+			failureCheck = "return Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("file is not valid UTF-8"), "InvalidEncoding") + ") unless data.dup.force_encoding(Encoding::UTF_8).valid_encoding?; "
 		}
-		return "->(file, max_bytes) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = \"\".b; while data.bytesize <= max_bytes; remaining = max_bytes - data.bytesize; request_bytes = remaining == 0 ? 1 : [65536, remaining].min; chunk = file.read(request_bytes); break if chunk.nil? || chunk.empty?; data << chunk; end; if data.bytesize > max_bytes; " + tooLarge + "; else; " + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(file, max_bytes) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = \"\".b; while data.bytesize <= max_bytes; remaining = max_bytes - data.bytesize; request_bytes = remaining == 0 ? 1 : [65536, remaining].min; chunk = file.read(request_bytes); break if chunk.nil? || chunk.empty?; data << chunk; end; if data.bytesize > max_bytes; " + tooLarge + "; else; " + failureCheck + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.file.write", "trb.std.file.write_text":
 		operation := strings.TrimPrefix(name, "trb.std.file.")
-		failure := "Result::Err.new(" + rubyFilesystemError(operation, "path", "error.message", "Other") + ")"
+		failure := "Result::Err.new(" + rubyFilesystemNativeError(operation, "path", "error") + ")"
 		value := arguments[1]
 		if name == "trb.std.file.write_text" {
 			value += ".encode(Encoding::UTF_8)"

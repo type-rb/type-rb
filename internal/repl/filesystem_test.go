@@ -18,12 +18,13 @@ func TestEvaluateScopedFileAcrossModes(t *testing.T) {
 	}
 	source := compiler.SourceUnit{
 		Filename: "/project/.trb-repl.trb", ModulePath: "__trb_repl__", Package: "main",
-		Source: []byte(`import trb/std/file
+		Source: []byte(`import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def bounded(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 5)
 	end
 end
@@ -72,7 +73,7 @@ end
 	}
 }
 
-func TestEvaluateFilesystemUTF8ReplacementAcrossModes(t *testing.T) {
+func TestEvaluateFilesystemStrictUTF8AndExplicitReplacementAcrossModes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid.bin")
 	input := []byte{
 		0x80, 0x80, '|',
@@ -87,11 +88,12 @@ func TestEvaluateFilesystemUTF8ReplacementAcrossModes(t *testing.T) {
 	}
 	source := compiler.SourceUnit{
 		Filename: "/project/.trb-repl.trb", ModulePath: "__trb_repl__", Package: "main",
-		Source: []byte(`import trb/std/file
+		Source: []byte(`import trb/std/path
+import trb/std/file
 import { Result } from trb/std/result
 
 def decoded_text(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 21)
 	end
 	case result
@@ -103,7 +105,7 @@ def decoded_text(path: String): String
 end
 
 def decoded_bytes(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		bytes := try file.read(max_bytes: 21)
 		bytes.to_s()
 	end
@@ -147,9 +149,57 @@ decoded_text(` + strconv.Quote(path) + `) + "|" + decoded_bytes(` + strconv.Quot
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := Inspect(result.Value); !result.Display || got != `"��|�|�(�|���|�|�|��|�|�(�|���|�|�"` {
-				t.Fatalf("result=%s display=%t, want maximal-subpart replacements", got, result.Display)
+			if got := Inspect(result.Value); !result.Display || got != `"read_text|��|�|�(�|���|�|�"` {
+				t.Fatalf("result=%s display=%t, want strict text failure and explicit byte replacement", got, result.Display)
 			}
 		})
+	}
+}
+
+func TestEvaluateFilesystemPropagationAndResultValuedSuccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "input")
+	if err := os.WriteFile(path, []byte{0xff}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := `import trb/std/path
+import trb/std/file
+import trb/std/result
+
+def inspect_result(path: Path): String
+	result := File.open(path) do |file|
+		text := try file.read_text(max_bytes: 10)
+		text
+	end
+	case result
+	when Result::Err(error)
+		return error.operation
+	when Result::Ok(_text)
+		return "wrong"
+	end
+end
+
+def nested_result(path: Path): String
+	result := File.open(path) do |_file|
+		Result<String, String>::Err("domain-value")
+	end
+	case result
+	when Result::Err(_error)
+		return "wrong"
+	when Result::Ok(inner)
+		case inner
+		when Result::Ok(text)
+			return text
+		when Result::Err(error)
+			return error
+		end
+	end
+end
+
+inspect_result(Path.new(` + strconv.Quote(path) + `)) + ":" + nested_result(Path.new(` + strconv.Quote(path) + `))
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		if got := evaluateDirBoundarySource(t, mode, source); got != `"read_text:domain-value"` {
+			t.Fatalf("%s: %s", mode, got)
+		}
 	}
 }

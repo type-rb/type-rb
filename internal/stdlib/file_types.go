@@ -21,6 +21,7 @@ var (
 	dirEntryKindDeclaration        = identity.Declaration{Module: dirModulePath, Name: "DirEntryKind", Kind: identity.Enum}
 	fileSystemErrorDeclaration     = identity.Declaration{Module: errorsModulePath, Name: "FileSystemError", Kind: identity.Record}
 	fileSystemErrorKindDeclaration = identity.Declaration{Module: errorsModulePath, Name: "FileSystemErrorKind", Kind: identity.Enum}
+	fileSystemTargetDeclaration    = identity.Declaration{Module: errorsModulePath, Name: "FileSystemTarget", Kind: identity.Enum}
 	resultDeclaration              = identity.Declaration{Module: resultModulePath, Name: "Result", Kind: identity.Enum}
 )
 
@@ -42,8 +43,12 @@ func FileModeType() types.Type {
 
 // DirEntryType returns the exact standard DirEntry declaration.
 func DirEntryType() types.Type {
-	return declaredType(dirEntryDeclaration)
+	entry := declaredType(dirEntryDeclaration)
+	entry.Args = []types.Type{PathType()}
+	return entry
 }
+
+func FileSystemTargetType() types.Type { return declaredType(fileSystemTargetDeclaration) }
 
 // DirEntryKindType returns the exact standard DirEntryKind declaration.
 func DirEntryKindType() types.Type {
@@ -80,6 +85,7 @@ func IsFilesystemContractType(typ types.Type) bool {
 		dirEntryKindDeclaration,
 		fileSystemErrorDeclaration,
 		fileSystemErrorKindDeclaration,
+		fileSystemTargetDeclaration,
 		resultDeclaration:
 		return true
 	default:

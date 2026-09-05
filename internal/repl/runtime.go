@@ -26,6 +26,9 @@ type runtimeBlockInvocation struct {
 	Type      types.Type
 	Block     *ir.StructuredBlock
 	Evaluate  func(bindings []Value) (Value, error)
+	// BodyReturned distinguishes propagation from an ordinary Result-valued
+	// success expression. Type/variant inspection cannot distinguish them.
+	BodyReturned func() bool
 }
 
 // runtimeIterationInvocation lets a host provider stream values while the

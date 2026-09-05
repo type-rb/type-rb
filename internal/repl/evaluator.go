@@ -18,6 +18,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -645,6 +646,7 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 		}
 		arguments = append(arguments, evaluatedArgument{Name: argument.Name, Value: value})
 	}
+	bodyReturned := false
 	evaluate := func(bindings []Value) (Value, error) {
 		blockScope := &scope{parent: sc, values: map[string]Value{}}
 		for index, binding := range node.Bindings {
@@ -663,6 +665,7 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 			return Value{}, errors.New("loop transfer escaped a structured block")
 		}
 		if flow.Returned {
+			bodyReturned = true
 			value := flow.Result.Value
 			if node.CaptureEffect {
 				// A Result-boundary block may expose an alias such as DbResult
@@ -673,12 +676,20 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 			}
 			return value, nil
 		}
-		return e.expression(node.Value, module, blockScope)
+		value, err := e.expression(node.Value, module, blockScope)
+		var transfer *controlTransfer
+		if errors.As(err, &transfer) && transfer.flow.Returned && transfer.flow.Loop == loopNone {
+			bodyReturned = true
+			value = transfer.flow.Result.Value
+			value.Type = node.Call.ExprType()
+			return value, nil
+		}
+		return value, err
 	}
 	resultType := node.Call.ExprType()
 	value, handled, err := e.runtimeBlock(runtimeBlockInvocation{
 		Name: reference.Intrinsic, Arguments: arguments, Type: resultType,
-		Block: node, Evaluate: evaluate,
+		Block: node, Evaluate: evaluate, BodyReturned: func() bool { return bodyReturned },
 	})
 	if err != nil {
 		return flowResult{}, err
@@ -2635,7 +2646,7 @@ func portableFloatText(value float64) string {
 }
 
 func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string, cause error) (Value, error) {
-	return e.filesystemErrKind(resultType, operation, path, cause, "Other")
+	return e.filesystemErrKind(resultType, operation, path, cause, filesystemErrorKind(cause))
 }
 
 func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path string, cause error, kind string) (Value, error) {
@@ -2651,6 +2662,10 @@ func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path str
 	if !ok {
 		return Value{}, errors.New("filesystem error kinds are not loaded")
 	}
+	targetDefinition, ok := e.definitions[symbolKey("trb/std/errors/index", "FileSystemTarget")].(*enumDefinition)
+	if !ok {
+		return Value{}, errors.New("filesystem targets are not loaded")
+	}
 	errorType := types.FromName("FileSystemError")
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
@@ -2661,7 +2676,7 @@ func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path str
 			Definition: fileErrorDefinition,
 			Fields: map[string]Value{
 				"operation": {Type: types.FromName("String"), Data: operation},
-				"path":      {Type: types.FromName("String"), Data: path},
+				"target":    {Type: stdlib.FileSystemTargetType(), Data: &enumValue{Definition: targetDefinition, Name: "Host", Payload: map[string]Value{"path": {Type: stdlib.PathType(), Data: path}}}},
 				"message":   {Type: types.FromName("String"), Data: cause.Error()},
 				"kind": {Type: types.Type{Kind: types.Named, Name: "FileSystemErrorKind", Declaration: fileErrorKindDefinition.Node.Declaration}, Data: &enumValue{
 					Definition: fileErrorKindDefinition,

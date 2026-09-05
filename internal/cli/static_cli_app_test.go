@@ -127,6 +127,7 @@ func TestRunGeneratedStaticCLIReportsApplicationFailureAfterCleanup(t *testing.T
 		t.Fatal(err)
 	}
 	source := `import { fail, run } from trb/cli
+import trb/std/path
 import { File, FileMode } from trb/std/file
 import { Result } from trb/std/result
 
@@ -175,7 +176,7 @@ def main()
 		value := no_consumer()&.take(fail("skipped failure"))
 		puts(value == nil)
 	when Command::Cleanup(cleanup)
-		_result := File.open(cleanup.path, mode: FileMode::Write) do |file|
+		_result := File.open(Path.new(cleanup.path), mode: FileMode::Write) do |file|
 			try file.write_text("written before failure")
 			fail("cleanup failed")
 		end

@@ -54,6 +54,7 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 		"shared-http-values":            false,
 		"specification-result-baseline": false,
 		"stdlib-dir-children":           false,
+		"stdlib-dir-create-all":         false,
 		"stdlib-exclusive-create-new":   false,
 		"stdlib-file-read":              false,
 		"stdlib-path-values":            false,

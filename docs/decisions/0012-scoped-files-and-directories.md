@@ -49,11 +49,12 @@ second file type:
 
 <!-- trb-doc-test: adr-scoped-file-read -->
 ```trb
+import trb/std/path
 import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
-def read_config(path: String): Result<String, FileSystemError>
+def read_config(path: Path): Result<String, FileSystemError>
 	return File.open(path) do |file|
 		try file.read_text(max_bytes: 1048576)
 	end
@@ -68,13 +69,14 @@ replacement and makes no durability promise:
 
 <!-- trb-doc-test: adr-exclusive-create-new -->
 ```trb
+import trb/std/path
 import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
-def create_output(path: String, value: String): Result<Unit, FileSystemError>
+def create_output(path: Path, value: String): Result<Unit, FileSystemError>
 	return File.open(path, mode: FileMode::CreateNew) do |file|
 		try file.write_text(value)
 	end
@@ -105,22 +107,22 @@ the outer `Result` boundary propagate the error. A body error wins over a
 simultaneous close error. A close error replaces a successful body result.
 
 `file.read(max_bytes:)` returns `Bytes`; `file.read_text(max_bytes:)` applies
-the same UTF-8 replacement policy as `Bytes#to_s`: one U+FFFD for each maximal
-subpart of an ill-formed sequence. Thus adjacent stray continuation bytes are
-replaced separately, while a truncated multibyte prefix is replaced once.
+strict UTF-8 decoding, returning `InvalidEncoding` for an invalid sequence.
+A leading BOM is preserved. Explicit `Bytes#to_s` remains the replacement
+conversion when the application chooses that display policy.
 Both return `InvalidLimit` for a negative bound and `TooLarge` after observing
 one byte beyond the bound. `file.write` accepts `Bytes`, while
 `file.write_text` accepts `String`. Writes do not imply locking, flushing, or
 durable storage.
 
 `trb/std/dir` is separate because directory enumeration is neither required by
-every file operation nor part of a file handle. `Dir.children` returns sorted
-immediate `DirEntry` records with `File`, `Directory`, or `Other`. Symbolic
+every file operation nor part of a file handle. `Dir.children(path, max_entries:)` returns sorted
+immediate `DirEntry<Path>` records with `File`, `Directory`, or `Other`. Symbolic
 links and non-regular, non-directory entries are `Other`; callers must opt into
 any traversal policy. Entry names cross the TypeRB `String` boundary only when
 their host representation is lossless valid UTF-8. If any name cannot be
-represented, the whole operation returns `FileSystemErrorKind::Other` with
-operation `children`, the supplied directory as `path`, and the message
+represented, the whole operation returns `FileSystemErrorKind::UnsupportedName` with
+operation `children`, `Host(directory)` as the error target, and the message
 `directory entry name is not valid UTF-8`; it never replacement-decodes a name
 into a path for a different entry. Valid entries are sorted by their UTF-8
 bytes.
@@ -135,16 +137,26 @@ deliberately does not use a lexically cleaning join: a parent containing
 to `File.open`. It also avoids the slash-only logical path rules of the former
 `trb/std/path` package.
 
-The filesystem boundary accepts host-native path strings. It does not
+The filesystem boundary requires nominal `Path` values. It does not
 normalize separators, resolve `..` before the host does, or promise containment
 across symbolic links. The separate nominal
 [path values](../standard-library.md#path-values) now provide exact host text
-and validated logical descendants; callers pass `Path#to_s()` to these I/O
+and validated logical descendants; callers pass `Path` directly to these I/O
 operations. They do not add resource acquisition or containment guarantees.
 
-`FileSystemError`, `FileSystemErrorKind`, `DirEntry`, `DirEntryKind`, and
+`FileSystemError`, `FileSystemErrorKind`, `FileSystemTarget`, `DirEntry`, `DirEntryKind`, and
 `FileMode` are peer declarations. Class-owned nested declarations are deferred
 rather than approximated with a module or declaration merging.
+
+Enumeration requires a nonnegative entry limit, rejects overflow with
+`TooLarge`, and applies the bound during iteration. `Dir.create_all(Path)`
+creates missing ancestors without rollback, preserving host resolution and
+existing permissions. The shared error target is `Host(Path)`,
+`Relative(RelativePath)`, or `Root`; ambient operations use `Host`.
+`NotFound`, `PermissionDenied`, and `AlreadyExists` map corresponding native
+errors. Empty/NUL paths are `InvalidPath`, not a blanket mapping of native
+invalid-argument errors. See the [filesystem reference](../standard-library.md#filesystem)
+for the complete bounds and error contract.
 
 ## Deferred scope
 

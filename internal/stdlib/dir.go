@@ -10,9 +10,9 @@ enum DirEntryKind
 	Other
 end
 
-record DirEntry
+record DirEntry<P>
 	name: String
-	path: String
+	path: P
 	kind: DirEntryKind
 end
 `

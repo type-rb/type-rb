@@ -54,7 +54,8 @@ func TestRunScopedFilesystemAliasesAcrossAvailableBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			createdPath := filepath.Join(root, "created.txt")
-			source := `import trb/std/file as HostFile
+			source := `import trb/std/path
+import trb/std/file as HostFile
 import { FileMode as OpenMode } from trb/std/file
 import trb/std/dir as HostDir
 import { DirEntry as Entry, DirEntryKind as EntryKind } from trb/std/dir
@@ -62,7 +63,7 @@ import { FileSystemError as IOError, FileSystemErrorKind as IOErrorKind } from t
 import { Result as Outcome } from trb/std/result
 
 def create(path: String): Outcome<String, IOError>
-	return HostFile.open(path, mode: OpenMode::CreateNew) do |file|
+	return HostFile.open(Path.new(path), mode: OpenMode::CreateNew) do |file|
 		try file.write_text("created")
 		"created"
 	end
@@ -78,7 +79,7 @@ def create_label(path: String): String
 	end
 end
 
-def entry_label(entry: Entry): String
+def entry_label(entry: Entry<Path>): String
 	case entry.kind
 	when EntryKind::File
 		return entry.name + ":file"
@@ -90,7 +91,7 @@ def entry_label(entry: Entry): String
 end
 
 def entry_labels(path: String): String
-	entries := HostDir.children(path) catch |error|
+	entries := HostDir.children(Path.new(path), max_entries: 1000) catch |error|
 		return error.operation
 	end
 	mut labels: Array<String> := []
@@ -150,12 +151,13 @@ func TestRunScopedFilesystemDefaultModeAcrossAvailableBackends(t *testing.T) {
 			if err := os.WriteFile(seedPath, []byte("seed"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def read_default(path: String): Result<String, FileSystemError>
-	return File.open(path) do |file|
+	return File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 16)
 	end
 end
@@ -215,11 +217,12 @@ func TestRunFilesystemMaximumReadBoundAcrossAvailableBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			maximum := strconv.FormatInt(maximumReadBound, 10)
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { Result } from trb/std/result
 
 def read_text_at_maximum(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: ` + maximum + `)
 	end
 	case result
@@ -231,7 +234,7 @@ def read_text_at_maximum(path: String): String
 end
 
 def read_bytes_at_maximum(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		bytes := try file.read(max_bytes: ` + maximum + `)
 		bytes.to_s()
 	end
@@ -265,7 +268,7 @@ end
 	}
 }
 
-func TestRunFilesystemUTF8ReplacementAcrossAvailableBackends(t *testing.T) {
+func TestRunFilesystemStrictUTF8AndExplicitReplacementAcrossAvailableBackends(t *testing.T) {
 	for _, backend := range filesystemRuntimeBackends {
 		t.Run(backend.name, func(t *testing.T) {
 			if _, err := exec.LookPath(backend.executable); err != nil {
@@ -301,12 +304,13 @@ func TestRunFilesystemUTF8ReplacementAcrossAvailableBackends(t *testing.T) {
 			if err := os.WriteFile(inputPath, input, 0o644); err != nil {
 				t.Fatal(err)
 			}
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def decoded_text(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 21)
 	end
 	case result
@@ -318,7 +322,7 @@ def decoded_text(path: String): String
 end
 
 def decoded_bytes(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		bytes := try file.read(max_bytes: 21)
 		bytes.to_s()
 	end
@@ -345,7 +349,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			if want := "��|�|�(�|���|�|�\n��|�|�(�|���|�|�\n"; stdout.String() != want {
+			if want := "read_text\n��|�|�(�|���|�|�\n"; stdout.String() != want {
 				t.Fatalf("unexpected output: want %q, got %q", want, stdout.String())
 			}
 		})
@@ -376,14 +380,15 @@ func TestRunSuspendingScopedFileAcrossTypeScriptRuntimes(t *testing.T) {
 				t.Fatal(err)
 			}
 			outputPath := filepath.Join(root, "output.txt")
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def create(path: String): Result<Unit, FileSystemError>
-	return File.open(path, mode: FileMode::Write) do |file|
+	return File.open(Path.new(path), mode: FileMode::Write) do |file|
 		values := [1, 2].concurrent_map(limit: 2) do |value|
 			value.to_s()
 		end
@@ -392,7 +397,7 @@ def create(path: String): Result<Unit, FileSystemError>
 end
 
 def read(path: String): String
-	result := File.open(path) do |file|
+	result := File.open(Path.new(path)) do |file|
 		try file.read_text(max_bytes: 16)
 	end
 	case result
@@ -453,13 +458,14 @@ func TestRunScopedFilesystemWithNaturalSourceNamesAcrossAvailableBackends(t *tes
 			}
 
 			outputPath := filepath.Join(root, "output.txt")
-			source := `import trb/std/file
+			source := `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def write(fs: String, flags: String, file: String, data: String): Result<String, FileSystemError>
-	return File.open(fs, mode: FileMode::Write) do |handle|
+	return File.open(Path.new(fs), mode: FileMode::Write) do |handle|
 		error := "error-ok"
 		try handle.write_text(data)
 		flags + ":" + file + ":" + error
@@ -467,7 +473,7 @@ def write(fs: String, flags: String, file: String, data: String): Result<String,
 end
 
 def read(fs: String, file: Integer): Result<String, FileSystemError>
-	return File.open(fs) do |handle|
+	return File.open(Path.new(fs)) do |handle|
 		try handle.read_text(max_bytes: file)
 	end
 end
