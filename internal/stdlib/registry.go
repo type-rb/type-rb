@@ -500,6 +500,17 @@ end
 			"decode_component": unary("decode_component", "trb.std.url.decode_component", stringType, structuredErrorResult(stringType, percentDecodeErrorType)),
 		},
 	},
+	"trb/std/path": {
+		Path: "trb/std/path", Root: "Path", ModulePath: pathModulePath,
+		RuntimeAlias: "__trb_path",
+		RuntimeExports: []RuntimeExport{
+			{Name: "Path", Kind: "newtype"},
+			{Name: "RelativePath", Kind: "newtype"},
+			{Name: "RelativePathError", Kind: "enum"},
+		},
+		Source: pathSource(), Kind: Portable,
+		Symbols: map[string]Symbol{"join": pathJoinSymbol()},
+	},
 	"trb/std/file": {
 		Path:       "trb/std/file",
 		Root:       "File",
@@ -1658,6 +1669,17 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 	}
 	target, ok := receiverMethods[receiver.Kind][name]
 	if !ok {
+		// Exact nominal receiver contracts also apply when the value was
+		// returned by another module and its package was not directly imported.
+		if receiver.Kind == types.Named && !receiver.Declaration.Empty() {
+			for _, definition := range registry {
+				symbol, found := definition.Symbols[name]
+				if found && symbol.HasReceiver() && symbol.Receiver.Declaration == receiver.Declaration && receiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
+					symbol.Receiver = receiver
+					return definition, symbol, true
+				}
+			}
+		}
 		return nil, Symbol{}, false
 	}
 	definition, ok := Lookup(target.PackagePath)

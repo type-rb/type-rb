@@ -1,6 +1,6 @@
 # TypeRB Status
 
-Last updated: 2026-09-02
+Last updated: 2026-09-05
 
 TypeRB is an alpha compiler implemented in Go. The language, standard library,
 official packages, generated output, command-line interface, and compiler-owned
@@ -149,6 +149,17 @@ propagation and recovery with prefix `try` and postfix `catch`. See the
 current semantics. Generated Go targets Go 1.27 and represents generic class
 instance methods directly with native generic methods instead of package-level
 helper functions.
+
+`trb/std/path` provides nominal host `Path` values and closed `RelativePath`
+values with explicit Result-returning parsing, validated child construction,
+logical joining, and nullable parents. Its fixed logical grammar rejects
+traversal components and conservative reserved filenames without normalizing
+Unicode or consulting the filesystem. Host joining preserves the parent text
+and chooses separators on the target host, including Windows drive-relative
+paths. Go, Ruby, Node/Bun TypeScript, and the typed-IR REPL share conformance
+tests; browser builds retain the pure operations and reject host joining.
+These values do not promise filesystem containment. Existing I/O operations
+still consume host-native Strings.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

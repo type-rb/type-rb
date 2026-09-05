@@ -62,9 +62,14 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 
 	modules := make([]resolver.Module, 0, len(units))
 	for _, source := range units {
+		aliases := options.PackageAliases
+		if source.PackageAliases != nil {
+			aliases = source.PackageAliases
+		}
 		modules = append(modules, resolver.Module{
 			Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
-			CompilerOwned: source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
+			PackageAliases: aliases,
+			CompilerOwned:  source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
 		})
 	}
 	catalog, catalogDiagnostics := resolver.NewCatalog(modules)

@@ -1,7 +1,7 @@
 # 0013: Canonical operation owners
 
 Status: accepted; implemented for built-in value operations, `StringBuilder`,
-`File`, and `Dir`
+`File`, `Dir`, and nominal path values
 
 ## Context
 
@@ -137,7 +137,10 @@ There is no separate `File` module or aggregate `FileSystem` owner.
 
 `trb/std/dir` is a separate package with the `Dir` root because directory
 enumeration is not coupled to opening every file. The static-only `Path` holder
-is removed; `Path` remains available for a future nominal host-path value.
+is removed. `trb/std/path` now uses actual `Path` and `RelativePath` newtypes:
+`Path.new` and `RelativePath.parse` construct values, and `join`, `child`,
+`parent`, and `to_s` are methods on the appropriate receiver. There is no
+parallel static utility surface.
 
 Supporting declarations are exact named peer imports in this initial API.
 `FileMode`, `DirEntry`, and `DirEntryKind` are not made class-owned nested
@@ -162,7 +165,8 @@ declarations by merging a module with `File` or `Dir`.
 
 ## Deferred work
 
-- Methods and factories on nominal non-class value declarations.
+- Additional nominal non-class value APIs beyond the implemented newtype
+  methods, explicit factories, and closed construction.
 - A general source declaration for opaque or scoped resource types.
 - Portable class-owned nested declarations and any declaration-merging model.
 - Re-evaluating domain module roots when a same-named nominal value is

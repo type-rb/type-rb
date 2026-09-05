@@ -6884,6 +6884,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype {
+			if !classAccess && !n.Namespace {
+				if binding, exists := c.resolution.ReceiverMethod(methodReceiverType, n.Name); exists {
+					typ = c.resolvedBindingType(binding)
+					c.recordReference(n, binding)
+					break
+				}
+			}
 			switch {
 			case classAccess && n.Name == "new":
 				c.checkNewtypeConstructionAccess(n.Span(), receiverType)
@@ -7146,7 +7153,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = calleeType
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.result.Expressions[member.Receiver]
-			if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype {
+			if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype && c.result.References[n.Callee].Library == nil {
 				switch member.Name {
 				case "new":
 					for _, argument := range n.Arguments {

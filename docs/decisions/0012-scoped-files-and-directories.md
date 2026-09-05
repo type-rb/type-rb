@@ -135,11 +135,12 @@ deliberately does not use a lexically cleaning join: a parent containing
 to `File.open`. It also avoids the slash-only logical path rules of the former
 `trb/std/path` package.
 
-The initial filesystem boundary accepts host-native path strings. It does not
-normalize separators, resolve `..` before the host does, promise containment
-across symbolic links, or provide a general `Path` value. The `Path` name
-remains available for a future nominal host-path value after TypeRB can attach
-methods to non-class value declarations.
+The filesystem boundary accepts host-native path strings. It does not
+normalize separators, resolve `..` before the host does, or promise containment
+across symbolic links. The separate nominal
+[path values](../standard-library.md#path-values) now provide exact host text
+and validated logical descendants; callers pass `Path#to_s()` to these I/O
+operations. They do not add resource acquisition or containment guarantees.
 
 `FileSystemError`, `FileSystemErrorKind`, `DirEntry`, `DirEntryKind`, and
 `FileMode` are peer declarations. Class-owned nested declarations are deferred

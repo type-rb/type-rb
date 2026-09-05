@@ -214,9 +214,10 @@ import trb/std/file
 import { FileMode } from trb/std/file
 ```
 
-The `Path` name is reserved for a future host-path value with defined value
-semantics. A static-only `Path` class is not used as a placeholder for path
-functions.
+`trb/std/path` exposes a genuine nominal `Path` value with `new` and receiver
+methods, plus the validated peer `RelativePath`. Host composition is
+`path.join(relative)`, not a static `Path.join` utility. See
+[path values](standard-library.md#path-values) for their distinct contracts.
 
 Portable libraries use `trb/std/*`. Target-specific APIs use
 `trb/platform/<mode>/*` and are rejected when imported from another mode:

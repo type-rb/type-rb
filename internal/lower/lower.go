@@ -262,7 +262,7 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 		if definition == nil || definition.ModulePath == "" {
 			continue
 		}
-		if imported := loaded[definition.ModulePath]; imported != nil {
+		if imported := loaded[definition.ModulePath]; imported != nil && !hasNominalRuntimeExport(definition) {
 			imported.RuntimeRequired = true
 			for _, exported := range definition.RuntimeExports {
 				if !contains(imported.Symbols, exported.Name) {
@@ -295,6 +295,15 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 			SymbolTypeParameters:      map[string][]string{},
 			RecordDefaults:            map[string]bool{},
 		}
+		// Nominal helpers need runtime values as well as type annotations. Use
+		// an independent compiler-owned namespace: source may have a different
+		// local declaration with the same name or import only a peer type.
+		if hasNominalRuntimeExport(definition) {
+			imported.Namespace = true
+			if imported.Alias == "" {
+				imported.Alias = "__trb_runtime_" + strings.ReplaceAll(definition.Path, "/", "_")
+			}
+		}
 		for _, exported := range definition.RuntimeExports {
 			imported.Symbols = append(imported.Symbols, exported.Name)
 			imported.SymbolKinds[exported.Name] = exported.Kind
@@ -302,6 +311,15 @@ func (l *lowerer) runtimeImports(statements []ir.Statement) []ir.Statement {
 		imports = append(imports, imported)
 	}
 	return imports
+}
+
+func hasNominalRuntimeExport(definition *stdlib.Package) bool {
+	for _, exported := range definition.RuntimeExports {
+		if exported.Kind == "newtype" {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(values []string, target string) bool {

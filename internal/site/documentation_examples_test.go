@@ -56,6 +56,7 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 		"stdlib-dir-children":           false,
 		"stdlib-exclusive-create-new":   false,
 		"stdlib-file-read":              false,
+		"stdlib-path-values":            false,
 		"stdlib-scalars":                false,
 		"web-update-todo":               false,
 	}

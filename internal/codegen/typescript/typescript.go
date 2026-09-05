@@ -124,6 +124,11 @@ func analyzeProject(programs []*ir.Program) (*SuspensionPlan, error) {
 		}
 	}
 	for _, program := range programs {
+		if !interactive {
+			if err := validateHostPathOperations(program); err != nil {
+				return nil, err
+			}
+		}
 		if !interactive && ormintegration.ManifestFrom(program.Extensions) != nil && program.TypeScriptRuntime != "bun" {
 			return nil, fmt.Errorf(`trb/orm in mode: typescript currently requires typescript.runtime: "bun"`)
 		}
@@ -1116,7 +1121,7 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 	}
 	standardIdentity := false
 	switch imported.Path {
-	case "trb/std/file/index", "trb/std/dir/index", "trb/std/errors/index", "trb/std/result/index":
+	case "trb/std/file/index", "trb/std/dir/index", "trb/std/errors/index", "trb/std/result/index", "trb/std/path/index":
 		standardIdentity = true
 	}
 	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
