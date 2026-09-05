@@ -364,11 +364,12 @@ end
 		const commands = await vscode.commands.getCommands(true);
 		assert.ok(commands.includes("workbench.debug.panel.action.clearReplAction"), "the supported VS Code host should expose Debug Console clearing");
 		const marker = path.join(workspaceRoot, "extension-host-run.txt");
-		const runSource = `import trb/std/file
+		const runSource = `import trb/std/path
+import trb/std/file
 import { FileMode } from trb/std/file
 
 def main()
-\t_result := File.open(${JSON.stringify(marker)}, mode: FileMode::Write) do |file|
+\t_result := File.open(Path.new(${JSON.stringify(marker)}), mode: FileMode::Write) do |file|
 \t\ttry file.write_text("extension-host-ok")
 \tend catch |_error|
 \t\treturn
