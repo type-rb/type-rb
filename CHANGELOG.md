@@ -2,6 +2,31 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.5 - 2026-09-05
+
+### Go code generation
+
+- Nullable date fields exposed by imported records retain their defining
+  module in generated type references, including direct formatting and safe
+  navigation. Programs no longer need an otherwise-unused direct date import
+  to compile. ([#641](https://github.com/type-rb/type-rb/pull/641))
+- Nil arguments remain valid when later arguments use safe navigation or
+  lifted control flow; generated code no longer declares temporaries with
+  the internal `Nil` type.
+  ([#642](https://github.com/type-rb/type-rb/pull/642))
+- String and Array slicing, safe lookup, and String splitting preserve the
+  caller's variable bindings and argument evaluation order. Receiver names
+  such as `value` and `values` no longer collide with generated locals, and
+  Array changes made while evaluating an argument remain visible.
+  ([#643](https://github.com/type-rb/type-rb/pull/643))
+
+### Testing
+
+- `expect(value).to_be_nil()` recognizes absent nullable values in Go,
+  including strings, records, and arrays. Present values and empty
+  collections remain distinct from nil.
+  ([#644](https://github.com/type-rb/type-rb/pull/644))
+
 ## 0.4.4 - 2026-09-05
 
 ### Language and diagnostics
