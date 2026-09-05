@@ -39,6 +39,7 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 	}
 
 	required := map[string]bool{
+		"language-closed-newtypes":      false,
 		"adr-exclusive-create-new":      false,
 		"adr-scoped-file-read":          false,
 		"getting-started-project":       false,

@@ -67,6 +67,7 @@ type Export struct {
 	AliasTarget            types.Type
 	AliasEnum              bool
 	NewtypeTarget          types.Type
+	NewtypePrivateNew      bool
 	Superclass             string
 	Interfaces             []types.Type
 	Span                   token.Span
@@ -2119,14 +2120,29 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 			if public(node.Name) {
 				typ := types.FromName(node.Name)
 				target := typeRef(node.Target)
-				result[node.Name] = Export{
+				exported := Export{
 					Name: node.Name, Kind: NewtypeExport, Type: typ, NewtypeTarget: target,
+					NewtypePrivateNew: node.PrivateNew,
 					Members: map[string]Member{
 						"new":   {Name: "new", Kind: FunctionExport, Type: typ, Parameters: callsignature.FromPositionalTypes([]types.Type{target}, 1), Class: true, Generated: "newtype_new"},
 						"value": {Name: "value", Kind: FunctionExport, Type: target, Generated: "newtype_value"},
 					},
 					Span: node.Span(),
 				}
+				if node.PrivateNew {
+					delete(exported.Members, "new")
+				}
+				for _, statement := range node.Body {
+					if method, ok := statement.(*ast.MethodStatement); ok && public(method.Name) {
+						params, variadic := parameters(method.Parameters)
+						member := Member{Name: method.Name, Kind: FunctionExport, Type: returnTypeRef(method.ReturnType), Parameters: params, Variadic: variadic, Class: method.Class}
+						for _, parameter := range method.TypeParameters {
+							member.TypeParameters = append(member.TypeParameters, parameter.Name)
+						}
+						exported.Members[method.Name] = member
+					}
+				}
+				result[node.Name] = exported
 			}
 		case *ast.ModuleStatement:
 			if public(node.Name) {

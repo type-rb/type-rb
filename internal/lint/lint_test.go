@@ -40,6 +40,22 @@ end
 	}
 }
 
+func TestPreferConditionalTransferVisitsNewtypeBodies(t *testing.T) {
+	source := []byte("newtype Label = String do\nprivate new\ndef self.parse(source: String): Label?\nif source.empty?()\nreturn nil\nend\nreturn self.new(source)\nend\nend\n")
+	program, diagnostics := parser.Parse(source)
+	if len(diagnostics) != 0 {
+		t.Fatalf("parse diagnostics=%v", diagnostics)
+	}
+	options, err := Resolve(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := Analyze(program, source, "/project/main.trb", options)
+	if len(items) != 1 || items[0].Code != diagnostic.Code(PreferConditionalTransferRuleID) {
+		t.Fatalf("diagnostics=%#v", items)
+	}
+}
+
 func TestPreferConditionalTransferHonorsConfigurationAndSafetyBoundary(t *testing.T) {
 	source := []byte(`def classify(enabled: Boolean): String
 	if enabled # explanation

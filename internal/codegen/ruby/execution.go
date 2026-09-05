@@ -61,6 +61,10 @@ func (g *generator) programUsesExecutionScope(statements []ir.Statement) bool {
 			if g.programUsesExecutionScope(node.Body) {
 				return true
 			}
+		case *ir.Newtype:
+			if g.programUsesExecutionScope(node.Body) {
+				return true
+			}
 		case *ir.Record:
 			if g.execution != nil && g.execution.RecordDefaultFor(node) {
 				return true

@@ -150,6 +150,54 @@ func TestCompletionHandlesIncompleteFunctionParameters(t *testing.T) {
 	}
 }
 
+func TestCompletionOffersNewtypeMembersWithoutPrivateConstruction(t *testing.T) {
+	source := `newtype Label = String do
+	private new
+	def self.from(value: String): Label
+		return self.new(value)
+	end
+	def text(): String
+		return value()
+	end
+	def _internal(): String
+		return value()
+	end
+end
+label := Label.from("hello")
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifact := compile(t, mode, source)
+			service := languageservice.New(mode)
+			service.Update([]*ir.Program{artifact.IR}, "repl")
+			for _, test := range []struct {
+				source string
+				want   string
+			}{
+				{"Label.fr", "from"},
+				{"label.te", "text"},
+				{"label.va", "value"},
+			} {
+				if _, ok := findCompletion(service.Complete(test.source, len(test.source)), test.want); !ok {
+					t.Errorf("Complete(%q) did not include %s", test.source, test.want)
+				}
+			}
+			for _, test := range []struct {
+				source string
+				omit   string
+			}{
+				{"Label.ne", "new"},
+				{"label._i", "_internal"},
+				{"label.si", "size"},
+			} {
+				if _, ok := findCompletion(service.Complete(test.source, len(test.source)), test.omit); ok {
+					t.Errorf("Complete(%q) included %s", test.source, test.omit)
+				}
+			}
+		})
+	}
+}
+
 func TestCompletionOffersResultControlFlowKeywords(t *testing.T) {
 	service := languageservice.New("go")
 	for _, keyword := range []string{"try", "catch"} {

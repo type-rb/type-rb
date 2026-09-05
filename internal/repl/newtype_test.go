@@ -54,3 +54,28 @@ ids := UserIds.new([id])
 		})
 	}
 }
+
+func TestEvaluateClosedNewtypeMembersAcrossModes(t *testing.T) {
+	source := `newtype Label = String do
+	private new
+	def self.from(source: String): Label
+		return self.new(source)
+	end
+	def append(other: String): Label
+		return Label.new(value() + other)
+	end
+	def to_s(): String
+		return value()
+	end
+end
+label := Label.from("a").append("b")
+label.to_s()
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if got := evaluateDirBoundarySource(t, mode, source); got != `"ab"` {
+				t.Fatal(got)
+			}
+		})
+	}
+}

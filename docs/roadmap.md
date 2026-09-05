@@ -24,11 +24,11 @@ detailed syntax.
   semantics.
 - Add type-argument inference, generic interface methods, and generic class
   methods.
-- Continue dogfooding nominal newtypes before adding more syntax. If concrete
-  applications require richer value-object behavior, compare validated
-  newtypes, record extensions, and ordinary Result-returning factories as
-  alternatives rather than assuming one declaration should serve every shape.
-  Evaluate generic newtype declarations separately.
+- Dogfood newtype methods, closed construction, and explicit domain factories.
+  Evaluate generic newtype declarations separately. Mutable representations
+  for closed newtypes require an ownership and projection contract before they
+  can preserve validated invariants. Automatic inbound factory registration
+  is not part of the current model.
 - Define mutation effects for methods and shared reference parameters so
   immutable values remain safe across calls, beyond the implemented
   immutable-by-default parameter bindings and known collection operations.

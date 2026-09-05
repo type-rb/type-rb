@@ -294,6 +294,11 @@ func (a *analyzer) collect(module, namespace string, owner declarationIdentity, 
 			a.declarations[identity] = true
 			a.typeDeclarations[identity] = true
 			a.collect(module, identity.name, identity, node.Body)
+		case *ir.Newtype:
+			identity := effectDeclarationIdentity(node.Declaration, module, qualifiedDeclarationName(namespace, node.Name))
+			a.declarations[identity] = true
+			a.typeDeclarations[identity] = true
+			a.collect(module, identity.name, identity, node.Body)
 		case *ir.Record:
 			record := recordContext{
 				module: module, namespace: namespace,

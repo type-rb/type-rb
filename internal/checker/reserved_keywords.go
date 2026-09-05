@@ -96,6 +96,7 @@ func (c *Checker) validateReservedKeywordStatement(statement ast.Statement) {
 	case *ast.NewtypeStatement:
 		c.validateReservedKeywordName(node.Name, "a newtype", node.Span())
 		c.validateReservedKeywordType(node.Target)
+		c.validateReservedKeywords(node.Body)
 	case *ast.ModuleStatement:
 		c.validateReservedKeywordName(node.Name, "a module name", node.Span())
 		c.validateReservedKeywords(node.Body)

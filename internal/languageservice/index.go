@@ -1139,13 +1139,28 @@ func collectSymbols(statements []ir.Statement, owner, sourcePath string, context
 				Name: "value", Kind: CompletionMethod, Detail: "value(): " + displayType(node.Target), Type: node.Target,
 				Call: &CallInfo{}, Definition: definition,
 			}
-			context.TypeMembers[qualified] = []Symbol{value}
-			context.TypeMembers[node.Name] = []Symbol{value}
+			instance := []Symbol{value}
 			constructor := Symbol{
 				Name: "new", Kind: CompletionMethod, Detail: "new(value: " + displayType(node.Target) + "): " + qualified,
 				Type: types.FromName(qualified), Call: &CallInfo{ParameterCount: 1, Parameters: []CallParameter{{Name: "value", Label: "value: " + displayType(node.Target)}}}, Definition: definition,
 			}
-			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "newtype " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: []Symbol{constructor}, Definition: definition})
+			var namespace []Symbol
+			if !node.PrivateNew {
+				namespace = append(namespace, constructor)
+			}
+			for _, statement := range node.Body {
+				if method, ok := statement.(*ir.Method); ok && !privateName(method.Name) {
+					symbol := methodSymbol(method, CompletionMethod, sourcePath)
+					if method.Class {
+						namespace = append(namespace, symbol)
+					} else {
+						instance = append(instance, symbol)
+					}
+				}
+			}
+			context.TypeMembers[qualified] = instance
+			context.TypeMembers[node.Name] = instance
+			result = append(result, Symbol{Name: node.Name, Kind: CompletionType, Detail: "newtype " + qualified + " = " + displayType(node.Target), Type: types.FromName(qualified), Members: namespace, Definition: definition})
 		case *ir.Interface:
 			qualified := qualify(owner, node.Name)
 			rememberType(context, qualified, node.Name, node.TypeParameters, nil)

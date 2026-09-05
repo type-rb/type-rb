@@ -60,6 +60,7 @@ type Result struct {
 	InterfaceImplementations   map[*ast.ClassStatement][]InterfaceImplementation
 	Newtypes                   map[*ast.NewtypeStatement]Newtype
 	NewtypeCalls               map[*ast.CallExpression]NewtypeCall
+	NewtypeMethodCalls         map[*ast.CallExpression]NewtypeMethodCall
 	ResultTries                map[*ast.TryExpression]ResultTry
 	ResultCatches              map[*ast.CatchExpression]ResultCatch
 	StructuredBlocks           map[*ast.CallExpression]StructuredBlock
@@ -133,6 +134,11 @@ type NewtypeCall struct {
 	Operation      string
 	Type           types.Type
 	Representation types.Type
+}
+
+type NewtypeMethodCall struct {
+	Dispatch  identity.Dispatch
+	Reference *resolver.Binding
 }
 
 // ResultTry describes the two Result variants used by a prefix try expression
@@ -455,6 +461,7 @@ type aliasInfo struct {
 type newtypeInfo struct {
 	statement *ast.NewtypeStatement
 	target    types.Type
+	methods   map[string]*ast.MethodStatement
 }
 
 type typeDeclaration struct {
@@ -477,6 +484,7 @@ type Checker struct {
 	functions                   map[string]*ast.MethodStatement
 	current                     *classInfo
 	currentEnum                 *enumInfo
+	currentNewtype              *newtypeInfo
 	classMethod                 bool
 	initializing                int
 	loopDepth                   int
@@ -614,6 +622,10 @@ func statementsHaveFreshEmptyMutableCollection(statements []ast.Statement) bool 
 				return true
 			}
 		case *ast.EnumStatement:
+			if statementsHaveFreshEmptyMutableCollection(node.Body) {
+				return true
+			}
+		case *ast.NewtypeStatement:
 			if statementsHaveFreshEmptyMutableCollection(node.Body) {
 				return true
 			}
@@ -867,6 +879,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			InterfaceImplementations:   map[*ast.ClassStatement][]InterfaceImplementation{},
 			Newtypes:                   map[*ast.NewtypeStatement]Newtype{},
 			NewtypeCalls:               map[*ast.CallExpression]NewtypeCall{},
+			NewtypeMethodCalls:         map[*ast.CallExpression]NewtypeMethodCall{},
 			ResultTries:                map[*ast.TryExpression]ResultTry{},
 			ResultCatches:              map[*ast.CatchExpression]ResultCatch{},
 			StructuredBlocks:           map[*ast.CallExpression]StructuredBlock{},
@@ -992,7 +1005,10 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 		case *ast.TypeAliasStatement:
 			c.registerAuthoredType(node, node.Name, nestedAuthoredOwner(owner, node.Name), identity.TypeAlias)
 		case *ast.NewtypeStatement:
-			c.registerAuthoredType(node, node.Name, nestedAuthoredOwner(owner, node.Name), identity.Newtype)
+			qualified := nestedAuthoredOwner(owner, node.Name)
+			c.registerAuthoredType(node, node.Name, qualified, identity.Newtype)
+			c.authoredTypes[qualified] = node.Name
+			c.indexAuthoredMethods(node.Body, qualified)
 		case *ast.ModuleStatement:
 			qualified := nestedAuthoredOwner(owner, node.Name)
 			declaration := identity.Declaration{Module: c.result.Program.ModulePath, Name: qualified, Kind: identity.Module}
@@ -1236,6 +1252,9 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 			if node.Target.Name != "Nil" && node.Target.Name != "Void" {
 				c.validateTypeReferenceInScope(node.Target, typeParameters)
 			}
+			popOwner := c.pushActiveTypeOwner(nestedAuthoredOwner(c.activeTypeOwner, node.Name))
+			c.validateTypeReferences(node.Body, typeParameters)
+			popOwner()
 		case *ast.EnumMemberStatement:
 			for _, parameter := range node.Parameters {
 				c.validateTypeReferenceInScope(parameter.Type, typeParameters)
@@ -1731,7 +1750,19 @@ func (c *Checker) collect(statements []ast.Statement) {
 			if !c.declareType(n.Name, "newtype", n.Span()) {
 				continue
 			}
-			c.newtypes[n.Name] = &newtypeInfo{statement: n, target: fromTypeRef(n.Target)}
+			info := &newtypeInfo{statement: n, target: fromTypeRef(n.Target), methods: map[string]*ast.MethodStatement{}}
+			for _, statement := range n.Body {
+				if method, ok := statement.(*ast.MethodStatement); ok {
+					if method.Name == "new" || method.Name == "value" || method.Name == "initialize" {
+						c.error(method.Span(), "newtype method name "+method.Name+" is reserved")
+					}
+					if info.methods[method.Name] != nil {
+						c.error(method.Span(), "duplicate newtype method "+method.Name)
+					}
+					info.methods[method.Name] = method
+				}
+			}
+			c.newtypes[n.Name] = info
 		case *ast.InterfaceStatement:
 			if c.declareType(n.Name, "interface", n.Span()) {
 				declaration := c.declaredTypes[n.Name]
@@ -2022,6 +2053,25 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Target.Span(), "newtype representation cycle involving "+n.Name)
 			}
 			c.result.Newtypes[n] = Newtype{Target: target}
+			if n.PrivateNew && !c.immutableNewtypeRepresentation(target, map[string]string{}) {
+				c.error(n.Target.Span(), "closed newtype "+n.Name+" requires a recursively immutable representation")
+			}
+			previousClass, previousNewtype := c.current, c.currentNewtype
+			info := c.newtypes[n.Name]
+			c.currentNewtype = info
+			c.current = &classInfo{name: n.Name, methods: info.methods, fields: map[string]*ast.FieldStatement{}}
+			owner := c.result.Declarations[n]
+			selfType := types.FromName(n.Name)
+			selfType.Declaration = owner
+			memberScope := &scope{parent: sc, values: map[string]symbol{"self": {typ: selfType}}, constantOwner: owner.Name}
+			popOwner := c.pushActiveTypeOwner(owner.Name)
+			for _, statement := range n.Body {
+				if method, ok := statement.(*ast.MethodStatement); ok {
+					c.checkMethod(method, memberScope)
+				}
+			}
+			popOwner()
+			c.current, c.currentNewtype = previousClass, previousNewtype
 		case *ast.RecordFieldStatement:
 			// Checked as part of its enclosing record.
 		case *ast.ModuleStatement:
@@ -3477,7 +3527,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 		}
 		return result, true
 	}
-	if info := c.enums[typ.Name]; info != nil {
+	if info := c.enums[typ.Name]; info != nil && (typ.Declaration.Empty() || typ.Declaration == c.authoredTypeIdentities[typ.Name]) {
 		substitutions := typeSubstitutions(info.typeParameters, typ.Args)
 		variants := make([]EnumVariant, 0, len(info.members))
 		for _, name := range info.members {
@@ -3937,6 +3987,9 @@ func (c *Checker) checkCodecApplication(call *ast.CallExpression, intrinsic stri
 	default:
 		return
 	}
+	if operation != "encode" && c.rejectClosedInbound(call.Span(), typ) {
+		return
+	}
 	var schema CodecSchema
 	var ok bool
 	if operation == "path_parameters" || operation == "query_parameters" {
@@ -3983,9 +4036,11 @@ func (c *Checker) callSpecializationType(typ types.Type, includeRecord bool) pac
 		result.Arguments = append(result.Arguments, c.callSpecializationType(argument, false))
 	}
 	expanded := c.expandAlias(typ, map[string]bool{})
-	if _, _, newtype := c.newtypeDefinition(expanded.Name); newtype {
-		representation := c.callSpecializationType(c.expandRepresentation(expanded, map[string]bool{}), false)
-		result.Representation = &representation
+	if _, _, newtype := c.newtypeDefinitionForType(expanded); newtype {
+		if c.closedInboundPath(expanded, map[string]bool{}) == "" {
+			representation := c.callSpecializationType(c.expandRepresentation(expanded, map[string]bool{}), false)
+			result.Representation = &representation
+		}
 	}
 	if typ.Kind != types.Named {
 		return result
@@ -4916,7 +4971,7 @@ func (c *Checker) portableEqualityOperands(left, right types.Type) bool {
 		return false
 	}
 	if types.Equivalent(left, right) {
-		if _, _, newtype := c.newtypeDefinition(left.Name); newtype {
+		if _, _, newtype := c.newtypeDefinitionForType(left); newtype {
 			representation := c.expandRepresentation(left, map[string]bool{})
 			return representation.Kind != types.Invalid && c.portableEqualityOperands(representation, representation)
 		}
@@ -5550,6 +5605,12 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 		return classMember{}, false
 	}
 	seen[className] = true
+	if info := c.newtypes[className]; info != nil {
+		if method := info.methods[memberName]; method != nil && method.Class == class {
+			signature := c.signatureFromMethod(method)
+			return classMember{typ: signature.returnType, method: method, sig: &signature}, true
+		}
+	}
 	if info := c.interfaces[className]; info != nil && !class {
 		for _, method := range info.Methods {
 			if method.Name != memberName {
@@ -6822,19 +6883,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 		}
-		if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
+		if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype {
 			switch {
 			case classAccess && n.Name == "new":
+				c.checkNewtypeConstructionAccess(n.Span(), receiverType)
 				typ = receiverType
 			case !classAccess && n.Name == "value":
 				typ = target
 			default:
-				kind := "instance"
-				if classAccess {
-					kind = "class"
-				}
-				c.error(n.Span(), fmt.Sprintf("newtype %s has no %s member %s", receiverType.Name, kind, n.Name))
-				typ = invalidType()
+				typ = c.checkNewtypeMember(n, receiverType, classAccess)
 			}
 			break
 		}
@@ -7014,6 +7071,18 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	case *ast.CallExpression:
+		if identifier, ok := n.Callee.(*ast.Identifier); ok && identifier.Name == "value" && c.currentNewtype != nil && !c.classMethod {
+			if _, shadowed := sc.lookup("value"); !shadowed {
+				if len(n.Arguments) != 0 || n.Block != nil {
+					c.error(n.Span(), "newtype value() accepts no arguments or block")
+				}
+				typ = c.expandAlias(c.currentNewtype.target, map[string]bool{})
+				owner := types.FromName(c.currentNewtype.statement.Name)
+				owner.Declaration = c.result.Declarations[c.currentNewtype.statement]
+				c.result.NewtypeCalls[n] = NewtypeCall{Operation: "value", Type: owner, Representation: typ}
+				break
+			}
+		}
 		libraryBlockChecked := false
 		if !c.rubyNativeSyntax() {
 			seenNamed := false
@@ -7077,7 +7146,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		typ = calleeType
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.result.Expressions[member.Receiver]
-			if target, _, newtype := c.newtypeDefinition(receiverType.Name); newtype {
+			if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype {
 				switch member.Name {
 				case "new":
 					for _, argument := range n.Arguments {
@@ -7098,6 +7167,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					}
 					typ = target
 					c.result.NewtypeCalls[n] = NewtypeCall{Operation: "value", Type: receiverType, Representation: target}
+				default:
+					typ = c.checkNewtypeMethodCall(n, receiverType, member.Name, c.classMemberAccess(member.Receiver, sc), argumentTypes)
 				}
 				break
 			}
@@ -7390,6 +7461,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 							OwnerIdentity: c.authoredTypeIdentities[c.currentEnum.name], Method: identifier.Name,
 						}
 					}
+					if c.currentNewtype != nil {
+						c.result.NewtypeMethodCalls[n] = NewtypeMethodCall{Dispatch: c.result.MethodDispatches[method]}
+					}
 				}
 			} else if method := c.functions[identifier.Name]; method != nil {
 				if len(method.TypeParameters) > 0 {
@@ -7492,6 +7566,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	}
 	typ = c.canonicalType(typ, c.activeTypeParameterSet())
+	c.checkClosedNativeIngress(expression, typ)
 	if member, ok := expression.(*ast.MemberExpression); ok && typ.Nullable {
 		if key, _, stable := c.nullableMemberNarrowing(member, sc); stable {
 			if fact, narrowed := sc.nullableMember(key); narrowed {
@@ -8829,7 +8904,7 @@ func (c *Checker) concurrencySafeType(typ types.Type, visiting map[string]bool) 
 	case types.Range:
 		return len(typ.Args) == 1 && c.concurrencySafeType(typ.Args[0], visiting)
 	case types.Named:
-		if target, binding, newtype := c.newtypeDefinition(typ.Name); newtype {
+		if target, binding, newtype := c.newtypeDefinitionForType(typ); newtype {
 			if visiting[typ.Name] {
 				return false
 			}
@@ -9128,6 +9203,9 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		parameterType := types.Type{Kind: types.Any, Name: "Any"}
 		if index < len(member.Block.Parameters) {
 			parameterType = instantiateDeclarationType(member.Block.Parameters[index], bindings)
+		}
+		if c.nativeRepresentationBoundary(call.Callee) {
+			c.rejectClosedInbound(call.Block.Span(), parameterType)
 		}
 		scoped := index < len(member.Block.ScopedParameters) && member.Block.ScopedParameters[index]
 		if c.containsFileResourceType(parameterType) && !(trustedFileOpen && scoped && stdlib.IsFileResourceType(parameterType)) {
@@ -10020,6 +10098,16 @@ func (c *Checker) authoredAliasTargetBinding(target types.Type) (resolver.Bindin
 	return c.resolution.ImportedType(target.Name)
 }
 
+func (c *Checker) newtypeDefinitionForType(typ types.Type) (types.Type, *resolver.Binding, bool) {
+	if binding, ok := c.resolution.ImportedTypeIdentity(typ.Declaration); ok && binding.Export != nil {
+		if binding.Export.Kind != resolver.NewtypeExport {
+			return types.Type{}, nil, false
+		}
+		return binding.Export.NewtypeTarget, &binding, true
+	}
+	return c.newtypeDefinition(typ.Name)
+}
+
 func (c *Checker) newtypeDefinition(name string) (types.Type, *resolver.Binding, bool) {
 	if defined := c.newtypes[name]; defined != nil {
 		return defined.target, nil, true
@@ -10045,7 +10133,7 @@ func (c *Checker) expandRepresentation(typ types.Type, visiting map[string]bool)
 		arguments[index] = c.expandRepresentation(argument, visiting)
 	}
 	typ.Args = arguments
-	target, _, newtype := c.newtypeDefinition(typ.Name)
+	target, _, newtype := c.newtypeDefinitionForType(typ)
 	if !newtype {
 		return typ
 	}

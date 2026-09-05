@@ -93,6 +93,7 @@ type Declaration struct {
 	ClassMember    bool                    `json:"classMember,omitempty"`
 	Readonly       bool                    `json:"readonly,omitempty"`
 	External       bool                    `json:"external,omitempty"`
+	PrivateNew     bool                    `json:"privateNew,omitempty"`
 }
 
 type Parameter struct {
@@ -302,7 +303,9 @@ func (w *declarationWalker) statements(statements []ir.Statement, owner *Declara
 		case *ir.Newtype:
 			declared := w.base(owner, ownerName, DeclarationNewtype, node.Name, node.SourceSpan())
 			declared.Type = typePointer(node.Target)
+			declared.PrivateNew = node.PrivateNew
 			w.add(declared)
+			w.statements(node.Body, &declared, declared.QualifiedName)
 		case *ir.Module:
 			declared := w.base(owner, ownerName, DeclarationModule, node.Name, node.SourceSpan())
 			w.add(declared)

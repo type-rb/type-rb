@@ -74,6 +74,11 @@ func (c *foldingCollector) statement(statement ast.Statement) {
 	case *ast.EnumStatement:
 		c.add(node)
 		c.statements(node.Body)
+	case *ast.NewtypeStatement:
+		if node.HasBody {
+			c.add(node)
+			c.statements(node.Body)
+		}
 	case *ast.ModuleStatement:
 		c.add(node)
 		c.statements(node.Body)

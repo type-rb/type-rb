@@ -400,6 +400,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Newtype:
 		g.line("type " + goDeclaredTypeName(n.Declaration.Name, n.Name) + " = " + g.goType(n.Target) + goTrailingComment(n.TrailingComment))
 		g.b.WriteByte('\n')
+		g.newtypeMethods(n)
 	case *ir.Module:
 		g.line("// module " + n.Name)
 		previousModule := g.moduleName
@@ -1782,6 +1783,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			parts[i] = g.expr(argument.Value)
 		}
 		args := strings.Join(parts, ", ")
+		if n.NewtypeMethod != nil {
+			return g.newtypeMethodCall(n, parts)
+		}
 		if application, ok := n.Callee.(*ir.TypeApply); ok && application.Kind == "method" && g.typeKinds[application.Owner] == "enum" && referenceIntrinsic(n.Callee) == "" {
 			if member, method := application.Receiver.(*ir.Member); method {
 				name := goIdentifier(application.Owner, true) + goMethodName(member.Name)

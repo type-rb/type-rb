@@ -19,6 +19,10 @@ func TestCompleteTracksBlocksAndDelimiters(t *testing.T) {
 		want   bool
 	}{
 		{"1 + 2", true},
+		{"newtype Label = String", true},
+		{"newtype Label = String do", false},
+		{"newtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend", false},
+		{"newtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend\nend", true},
 		{"class User", false},
 		{"class User\nend", true},
 		{"class User;", false},

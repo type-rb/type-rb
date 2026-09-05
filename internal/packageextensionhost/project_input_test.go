@@ -22,6 +22,24 @@ func TestProjectSourceSpanBoundaryRoundTrips(t *testing.T) {
 	}
 }
 
+func TestClosedNewtypeDoesNotExportAnInboundRepresentation(t *testing.T) {
+	program := parseProjectInputTest(t, "labels", `newtype Label = String do
+	private new
+end
+def use_label(label: Label)
+	puts(label)
+end
+`)
+	input, err := ExportProjectDeclarationInput("example", []*ast.Program{program}, ProjectDeclarationInputOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	module := input.Modules[0]
+	if !module.Newtypes[0].PrivateNew || module.Functions[0].Parameters[0].Type.Representation != nil {
+		t.Fatalf("closed construction metadata was erased: %#v", module)
+	}
+}
+
 func TestExportProjectDeclarationInputCopiesDeclarationFacts(t *testing.T) {
 	ids := parseProjectInputTest(t, "contracts/ids", `newtype ReceiptID = Integer
 

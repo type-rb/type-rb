@@ -74,3 +74,21 @@ func TestParseLegacyTypeAliasReportsMigration(t *testing.T) {
 		t.Fatalf("diagnostics=%v", diagnostics)
 	}
 }
+
+func TestNewtypeBodyMarkerDoesNotCaptureFollowingFunction(t *testing.T) {
+	source := "newtype Count = Integer\ndef following(): Integer\nreturn 1\nend\nnewtype Label = String do\nprivate new\ndef text(): String\nreturn value()\nend\nend\n"
+	program, diagnostics := Parse([]byte(source))
+	if len(diagnostics) != 0 || len(program.Statements) != 3 {
+		t.Fatalf("statements=%#v diagnostics=%v", program.Statements, diagnostics)
+	}
+	if first := program.Statements[0].(*ast.NewtypeStatement); first.HasBody || len(first.Body) != 0 {
+		t.Fatalf("bodyless newtype = %#v", first)
+	}
+	if method, ok := program.Statements[1].(*ast.MethodStatement); !ok || method.Name != "following" {
+		t.Fatalf("top-level function = %#v", program.Statements[1])
+	}
+	last := program.Statements[2].(*ast.NewtypeStatement)
+	if !last.HasBody || !last.PrivateNew || len(last.Body) != 1 {
+		t.Fatalf("newtype body = %#v", last)
+	}
+}

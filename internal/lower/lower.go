@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/checker"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
@@ -631,7 +632,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		return result
 	case *ast.NewtypeStatement:
 		semantic := l.checked.Newtypes[n]
-		return &ir.Newtype{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Target: semantic.Target}
+		return &ir.Newtype{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Target: semantic.Target, PrivateNew: n.PrivateNew, Body: l.statements(n.Body)}
 	case *ast.ModuleStatement:
 		return &ir.Module{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Body: l.statements(n.Body)}
 	case *ast.InterfaceStatement:
@@ -1082,6 +1083,8 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				kind = ir.NewtypeValueConversion
 				if member, memberCall := n.Callee.(*ast.MemberExpression); memberCall {
 					value = l.expression(member.Receiver)
+				} else {
+					value = &ir.Identifier{ExprBase: ir.NewExprBase(n.Span(), semantic.Type), Name: "self", Lexical: true}
 				}
 			}
 			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value}
@@ -1177,6 +1180,12 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			CallSignature:   append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
 			PresentType:     l.checked.SafeNavigationCallTypes[n],
+		}
+		if semantic, ok := l.checked.NewtypeMethodCalls[n]; ok {
+			result.NewtypeMethod = &ir.NewtypeMethodCall{Dispatch: semantic.Dispatch, Reference: referenceFromBinding(semantic.Reference)}
+		}
+		if application, ok := result.Callee.(*ir.TypeApply); ok && application.Dispatch.Owner.Kind == identity.Newtype {
+			result.NewtypeMethod = &ir.NewtypeMethodCall{Dispatch: application.Dispatch, Reference: l.reference(n.Callee)}
 		}
 		if codec, ok := l.checked.CodecApplications[n]; ok {
 			result.Codec = l.lowerCodecSchema(codec.Schema)
