@@ -3392,6 +3392,14 @@ func (g *generator) goType(t types.Type) string {
 			if g.typeKinds[t.Name] == "class" {
 				result = "*" + result
 			}
+		} else if t.Declaration.Kind.IsType() && t.Declaration.Module != "" {
+			result = goIdentifier(t.Declaration.Name, true)
+			if alias := g.declarationAlias(t.Declaration); alias != "" {
+				result = alias + "." + result
+			}
+			if t.Declaration.Kind == identity.Class {
+				result = "*" + result
+			}
 		} else {
 			name := t.Name
 			if t.Declaration.Kind.IsType() && t.Declaration.Name != "" {
