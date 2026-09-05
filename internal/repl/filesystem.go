@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -65,10 +63,11 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 	if path == "" || strings.IndexByte(path, 0) >= 0 {
 		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
 	}
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+	acquisitionFlags, supported := regularFileOpenFlags()
+	if !supported {
 		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("regular-file acquisition is unavailable on this host"), "Other")
 	}
-	flags |= syscall.O_NONBLOCK | syscall.O_NOCTTY
+	flags |= acquisitionFlags
 	file, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
 		kind := filesystemErrorKind(err)
