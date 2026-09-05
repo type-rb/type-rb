@@ -34,6 +34,45 @@ end
 	}
 }
 
+func TestNilArgumentsSurviveLiftedControlFlowAcrossBackends(t *testing.T) {
+	source := SourceUnit{
+		Filename: "main.trb", ModulePath: "main", Package: "main",
+		Source: []byte(`record Display
+	prefix: String?
+	label: String?
+end
+
+def display(value: String?): Display
+	return Display.new(prefix: nil, label: value&.upcase())
+end
+
+def main()
+	empty := display(nil)
+	full := display("hello")
+	puts(empty.prefix == nil)
+	puts(empty.label == nil)
+	puts(full.prefix == nil)
+	puts(full.label)
+end
+`),
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireEffectRuntime(t, mode)
+			artifacts, err := CompileProject([]SourceUnit{source}, Options{
+				Mode: mode, GoModule: "example.com/nil-arguments", RubyLoader: "require_relative",
+				SourceRoot: "/project", ProjectRoot: "/project",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/nil-arguments")), "true\ntrue\ntrue\nHELLO"; got != want {
+				t.Fatalf("generated %s output=%q, want %q", mode, got, want)
+			}
+		})
+	}
+}
+
 func TestNilOnlyBindingInferenceIsRejectedAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		_, err := Compile("nil_binding.trb", []byte("value := nil\n"), mode)

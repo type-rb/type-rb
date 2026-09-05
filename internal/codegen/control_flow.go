@@ -50,6 +50,11 @@ func (n *controlFlowNormalizer) materialize(value ir.Expression) ([]ir.Statement
 	if value == nil {
 		return nil, nil
 	}
+	if literal, ok := value.(*ir.Literal); ok && literal.Kind == "nil" {
+		// Nil is already stable and needs the enclosing expression's target
+		// type; it cannot be stored in a temporary of the internal Nil type.
+		return nil, value
+	}
 	if identifier, ok := value.(*ir.Identifier); ok && identifier.Generated {
 		return nil, value
 	}
@@ -64,6 +69,9 @@ func (n *controlFlowNormalizer) materialize(value ir.Expression) ([]ir.Statement
 func (n *controlFlowNormalizer) evaluate(value ir.Expression) []ir.Statement {
 	statements, identifier := n.materialize(value)
 	if identifier == nil {
+		return statements
+	}
+	if literal, ok := identifier.(*ir.Literal); ok && literal.Kind == "nil" {
 		return statements
 	}
 	statements = append(statements, &ir.ExpressionStatement{
