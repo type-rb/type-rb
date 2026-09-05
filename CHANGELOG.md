@@ -2,6 +2,67 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.4 - 2026-09-05
+
+### Language and diagnostics
+
+- Newtypes support optional `do ... end` bodies with class and instance
+  methods. `private new` closes raw construction to the type implementation
+  and requires a recursively immutable representation. Closed values use
+  explicit factories at input boundaries; outbound projection remains
+  available. Compiler output, the REPL, formatting, and editor tooling retain
+  nominal type and member identity.
+  ([#631](https://github.com/type-rb/type-rb/pull/631))
+- Undeclared values are diagnosed at their identifiers without secondary
+  operator errors obscuring the cause.
+  ([#628](https://github.com/type-rb/type-rb/pull/628))
+
+### Paths and scoped filesystem operations
+
+- `trb/std/path` provides host `Path` and validated `RelativePath` values,
+  explicit parsing, child construction, joining, and nullable parents.
+  Host joining preserves the parent spelling, including drive-relative
+  paths. Relative paths reject traversal components, NUL, backslash, and
+  colon, without imposing reserved-filename or display policies.
+  ([#632](https://github.com/type-rb/type-rb/pull/632),
+  [#638](https://github.com/type-rb/type-rb/pull/638))
+- Ambient filesystem operations take `Path`; directory entries and errors
+  retain their host or relative path domain. Listings require `max_entries`
+  and fail on overflow instead of truncating. Text reads enforce their byte
+  bound and strict UTF-8 while preserving a leading BOM. `Dir.create_all`
+  creates missing ancestors without changing existing directory permissions
+  or rolling back completed creation after a failure.
+  ([#633](https://github.com/type-rb/type-rb/pull/633))
+- Scoped file acquisition validates a regular-file handle before entering
+  the body or truncating a write target. File and directory resources can be
+  borrowed by checked synchronous helpers and immutable local aliases,
+  while acquisition scopes retain cleanup ownership and reject escaping or
+  suspending uses.
+  ([#634](https://github.com/type-rb/type-rb/pull/634),
+  [#635](https://github.com/type-rb/type-rb/pull/635))
+- On Go-native Linux/macOS and the Go-mode REPL, `Dir.open` provides an
+  opened directory anchor for relative listing, creation, and file access.
+  Resolution cannot leave that anchor, including under concurrent pathname
+  replacement. Unsupported backends reject anchored operations rather than
+  falling back to pathname-prefix checks.
+  ([#636](https://github.com/type-rb/type-rb/pull/636))
+- `Dir#try_lock` provides a nonblocking, scoped host lock for cooperating
+  writers using one stable regular file. Contention and reentry return
+  `Busy`; leaf symlinks are rejected. Generated Go builds include the support
+  source and minimum OS-library dependency, preserve newer application
+  requirements, and require no C compiler. Filesystem names are not an
+  allowlist. Locks do not promise network exclusion, atomic publication,
+  or crash durability.
+  ([#637](https://github.com/type-rb/type-rb/pull/637),
+  [#638](https://github.com/type-rb/type-rb/pull/638))
+
+### Documentation
+
+- The documentation includes a proposed TypeRB 1.0 capability map with
+  evidence links and searchable status/scope filters. The target remains
+  revisable rather than a release commitment.
+  ([#629](https://github.com/type-rb/type-rb/pull/629))
+
 ## 0.4.3 - 2026-08-31
 
 ### Breaking changes
