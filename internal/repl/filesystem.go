@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
@@ -54,7 +56,7 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 	switch modeName {
 	case "Read":
 	case "Write":
-		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		flags = os.O_WRONLY | os.O_CREATE
 	case "CreateNew":
 		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	default:
@@ -63,13 +65,36 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 	if path == "" || strings.IndexByte(path, 0) >= 0 {
 		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
 	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("regular-file acquisition is unavailable on this host"), "Other")
+	}
+	flags |= syscall.O_NONBLOCK | syscall.O_NOCTTY
 	file, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
 		kind := filesystemErrorKind(err)
 		return evaluator.filesystemErrKind(invocation.Type, "open", path, err, kind)
 	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = file.Close()
+		}
+	}()
+	info, err := file.Stat()
+	if err != nil {
+		return evaluator.filesystemErrKind(invocation.Type, "open", path, err, filesystemErrorKind(err))
+	}
+	if !info.Mode().IsRegular() {
+		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("opened handle is not a regular file"), "Other")
+	}
+	if modeName == "Write" {
+		if err := file.Truncate(0); err != nil {
+			return evaluator.filesystemErrKind(invocation.Type, "open", path, err, filesystemErrorKind(err))
+		}
+	}
 	value, evaluateErr := invocation.Evaluate([]Value{{Type: stdlib.FileResourceType(), Data: file}})
 	closeErr := file.Close()
+	closed = true
 	if evaluateErr != nil {
 		return Value{}, evaluateErr
 	}

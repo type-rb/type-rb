@@ -85,7 +85,10 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(mode+" = "+modeValue, "")
 	invalidPath := rubyFilesystemError("open", path, strconv.Quote("path must be nonempty and contain no NUL"), "InvalidPath")
 	g.line("return Result::Err.new("+invalidPath+") if "+path+".empty? || "+path+".include?(\"\\0\")", "")
-	g.line(flags+" = "+mode+" == FileMode::Read ? \"rb\" : ("+mode+" == FileMode::Write ? \"wb\" : \"wbx\")", "")
+	unavailable := rubyFilesystemError("open", path, strconv.Quote("regular-file acquisition is unavailable on this host"), "Other")
+	g.line("return Result::Err.new("+unavailable+") unless RUBY_PLATFORM.match?(/linux|darwin/) && ::File.const_defined?(:NONBLOCK) && ::File.const_defined?(:NOCTTY)", "")
+	g.line(flags+" = "+mode+" == FileMode::Read ? ::File::RDONLY : ("+mode+" == FileMode::Write ? ::File::WRONLY | ::File::CREAT : ::File::WRONLY | ::File::CREAT | ::File::EXCL)", "")
+	g.line(flags+" |= ::File::NONBLOCK | ::File::NOCTTY | ::File::BINARY", "")
 	g.line("begin", "")
 	g.indent++
 	g.line(handle+" = ::File.open("+path+", "+flags+", 0o644)", "")
@@ -103,6 +106,17 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(result+" = nil", "")
 	g.line("begin", "")
 	g.indent++
+	g.line("begin", "")
+	g.indent++
+	notRegular := rubyFilesystemError("open", path, strconv.Quote("opened handle is not a regular file"), "Other")
+	g.line("return Result::Err.new("+notRegular+") unless "+handle+".stat.file?", "")
+	g.line(handle+".truncate(0) if "+mode+" == FileMode::Write", "")
+	g.indent--
+	g.line("rescue StandardError => "+openError, "")
+	g.indent++
+	g.line("return Result::Err.new("+rubyFilesystemNativeError("open", path, openError)+")", "")
+	g.indent--
+	g.line("end", "")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
 		g.line(block.Bindings[0].Name+" = "+handle, "")
 	}

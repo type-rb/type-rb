@@ -150,7 +150,10 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(`const ` + filesystem + ` = (globalThis as any).process?.getBuiltinModule?.("fs");`)
 	unavailable := g.filesystemErrorValue(errorTypeName, "open", path, strconv.Quote("filesystem is unavailable"), "Other")
 	g.line("if (" + filesystem + " === undefined) return " + g.filesystemResultErr(successType, errorType, unavailable) + ";")
-	g.line("const " + flags + " = " + mode + " === " + modeName + ".Read ? \"r\" : " + mode + " === " + modeName + ".Write ? \"w\" : \"wx\";")
+	hostUnavailable := g.filesystemErrorValue(errorTypeName, "open", path, strconv.Quote("regular-file acquisition is unavailable on this host"), "Other")
+	g.line("if (![\"linux\", \"darwin\"].includes((globalThis as any).process?.platform) || !" + filesystem + ".constants.O_NONBLOCK || !" + filesystem + ".constants.O_NOCTTY) return " + g.filesystemResultErr(successType, errorType, hostUnavailable) + ";")
+	constants := filesystem + ".constants."
+	g.line("const " + flags + " = (" + mode + " === " + modeName + ".Read ? " + constants + "O_RDONLY : " + constants + "O_WRONLY | " + constants + "O_CREAT | (" + mode + " === " + modeName + ".CreateNew ? " + constants + "O_EXCL : 0)) | " + constants + "O_NONBLOCK | " + constants + "O_NOCTTY;")
 	openOther := g.filesystemNativeError("open", path, openError)
 	openExists := g.filesystemErrorValue(errorTypeName, "open", path, openMessage, "AlreadyExists")
 	g.line("let " + handle + ": number;")
@@ -159,6 +162,13 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line("let " + completed + " = false;")
 	g.line("try {")
 	g.indent++
+	notRegular := g.filesystemErrorValue(errorTypeName, "open", path, strconv.Quote("opened handle is not a regular file"), "Other")
+	g.line("try {")
+	g.indent++
+	g.line("if (!" + filesystem + ".fstatSync(" + handle + ").isFile()) return " + g.filesystemResultErr(successType, errorType, notRegular) + ";")
+	g.line("if (" + mode + " === " + modeName + ".Write) " + filesystem + ".ftruncateSync(" + handle + ", 0);")
+	g.indent--
+	g.line("} catch (" + openError + ") { return " + g.filesystemResultErr(successType, errorType, openOther) + "; }")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
 		binding := block.Bindings[0].Name
 		g.line("const " + binding + " = { fd: " + handle + ", path: " + path + " };")
