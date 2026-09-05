@@ -173,10 +173,13 @@ declaration identity.
 Resource packages follow the same rule. `import trb/std/file` binds the opaque
 `File` type used by `File.open` and by its block parameter; it does not bind a
 module containing a second file-handle type. Source cannot construct the
-standard resource with `File.new()`. Its exact value type is inferred only for
-the trusted `File.open` block parameter and cannot appear recursively in
-authored parameters, returns, fields, collections, function types, or
-transparent aliases.
+standard resource with `File.new()`. The trusted `File.open` block acquires and
+closes it. An immutable required `File` parameter borrows it for a checked
+synchronous source call; an immutable local alias shares that lifetime. It
+cannot escape through returns, fields, collections, nullable/function types,
+transparent aliases, `Any`, or first-class callbacks. Nested acquisition and
+synchronous inline iteration can borrow an outer resource; suspension and
+unverified native calls while holding it are rejected.
 
 ## Choosing an operation owner
 

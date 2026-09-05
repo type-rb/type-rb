@@ -5,12 +5,15 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/callsignature"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
 // Bind nominal signatures in their defining module before callers see them.
-// A source import alias is not a global type name, and a same-named newtype in
-// another module must not change a returned value's methods or construction.
+// Include the scoped File contract: an imported borrow parameter must retain
+// its exact resource identity. A source import alias is not a global type name;
+// another module's same-named newtype must not change a returned value's
+// methods or construction.
 func canonicalizeNewtypeContracts(catalog *Catalog) {
 	for _, module := range catalog.Modules {
 		scope := map[string]Binding{}
@@ -38,7 +41,7 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 				}
 				for _, name := range names {
 					exported, found := exportNamed(dependency.Exports, name)
-					if !found || exported.Kind != NewtypeExport {
+					if !found || exported.Kind != NewtypeExport && !catalogFileExport(dependency, exported) {
 						continue
 					}
 					local := name
@@ -61,6 +64,14 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 			module.Exports[name] = canonicalNewtypeExport(exported, scope, nil)
 		}
 	}
+}
+
+func catalogFileExport(module *Module, exported Export) bool {
+	if !module.CompilerOwned {
+		return false
+	}
+	binding := catalogNewtypeBinding(module, exported)
+	return binding.DeclarationIdentity() == stdlib.FileResourceType().Declaration
 }
 
 func catalogNewtypeBinding(module *Module, exported Export) Binding {

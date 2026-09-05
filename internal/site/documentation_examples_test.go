@@ -57,6 +57,7 @@ func TestPublishedDocumentationExamplesCompile(t *testing.T) {
 		"stdlib-dir-create-all":         false,
 		"stdlib-exclusive-create-new":   false,
 		"stdlib-file-read":              false,
+		"stdlib-file-borrow":            false,
 		"stdlib-path-values":            false,
 		"stdlib-scalars":                false,
 		"web-update-todo":               false,

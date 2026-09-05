@@ -356,7 +356,7 @@ end
 	}
 }
 
-func TestRunSuspendingScopedFileAcrossTypeScriptRuntimes(t *testing.T) {
+func TestRunSuspensionBeforeScopedFileAcrossTypeScriptRuntimes(t *testing.T) {
 	for _, backend := range filesystemRuntimeBackends {
 		if backend.mode != "typescript" {
 			continue
@@ -388,10 +388,10 @@ import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
 def create(path: String): Result<Unit, FileSystemError>
+	values := [1, 2].concurrent_map(limit: 2) do |value|
+		value.to_s()
+	end
 	return File.open(Path.new(path), mode: FileMode::Write) do |file|
-		values := [1, 2].concurrent_map(limit: 2) do |value|
-			value.to_s()
-		end
 		try file.write_text(values.join(","))
 	end
 end

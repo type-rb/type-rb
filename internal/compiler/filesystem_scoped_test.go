@@ -241,7 +241,7 @@ end
 	}
 }
 
-func TestScopedFilesystemHandleCannotEscape(t *testing.T) {
+func TestScopedFilesystemHandleLocalAlias(t *testing.T) {
 	source := `import trb/std/path
 import trb/std/file
 import { FileSystemError } from trb/std/errors
@@ -255,8 +255,8 @@ def invalid(path: String): Result<String, FileSystemError>
 end
 `
 	_, err := Compile("main.trb", []byte(source), "go")
-	if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used as a direct method receiver") {
-		t.Fatalf("Compile() error = %v, want scoped resource diagnostic", err)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -291,7 +291,7 @@ import { Result } from trb/std/result
 
 ` + body + "\n"
 			_, err := Compile("main.trb", []byte(source), "go")
-			if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used as a direct method receiver") {
+			if err == nil || !strings.Contains(err.Error(), "scoped resource") {
 				t.Fatalf("Compile() error = %v, want scoped escape diagnostic", err)
 			}
 		})
@@ -300,7 +300,7 @@ import { Result } from trb/std/result
 
 func TestScopedFileCannotAppearInAuthoredValueTypes(t *testing.T) {
 	tests := map[string]string{
-		"parameter": `def invalid(_value: File)
+		"nullable parameter": `def invalid(_value: File?)
 	return
 end`,
 		"return": `def invalid(): File
@@ -338,7 +338,7 @@ func TestScopedFileImportAliasCannotAppearInAuthoredValueTypes(t *testing.T) {
 	source := `import trb/std/path
 import { File as HostFile } from trb/std/file
 
-def invalid(_value: HostFile)
+def invalid(_value: Array<HostFile>)
 	return
 end
 `
@@ -418,7 +418,7 @@ def invalid(path: String): Result<String, FileSystemError>
 end
 `
 	_, err := Compile("main.trb", []byte(source), "go")
-	if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used as a direct method receiver") {
+	if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used") {
 		t.Fatalf("Compile() error = %v, want scoped capture diagnostic", err)
 	}
 }
@@ -454,7 +454,7 @@ end
 	}
 }
 
-func TestScopedFilesystemHandleCannotBeCapturedByIterationBlock(t *testing.T) {
+func TestScopedFilesystemIterationBorrowBoundary(t *testing.T) {
 	tests := map[string]string{
 		"each": `[1].each do |_value|
 			file.read_text(max_bytes: 10) catch |_error|
@@ -482,14 +482,20 @@ def invalid(path: String): Result<String, FileSystemError>
 end
 `
 			_, err := Compile("main.trb", []byte(source), "go")
-			if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used as a direct method receiver") {
+			if name == "each" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "scoped resource file may only be used") {
 				t.Fatalf("Compile() error = %v, want scoped iteration-block capture diagnostic", err)
 			}
 		})
 	}
 }
 
-func TestSuspendingTypeScriptFileBlockUsesAwaitedAsyncCleanupBoundary(t *testing.T) {
+func TestSuspendingFileBlockIsRejectedInEveryMode(t *testing.T) {
 	source := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`import trb/std/path
@@ -509,26 +515,12 @@ def create(path: String): Result<Unit, FileSystemError>
 end
 `),
 	}
-	artifacts, err := CompileProject([]SourceUnit{source}, Options{Mode: "typescript"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	consumer := findArtifactByModule(artifacts, "main")
-	if consumer == nil {
-		t.Fatal("missing TypeScript consumer artifact")
-	}
-	output := string(consumer.Output)
-	for _, fragment := range []string{
-		`= await (async (): Promise<Result<Unit, FileSystemError>> => {`,
-		`await Promise.all`,
-		`} finally {`,
-		`.closeSync(`,
-	} {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("generated suspending File.open is missing %q:\n%s", fragment, output)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		_, err := CompileProject([]SourceUnit{source}, Options{Mode: mode})
+		if err == nil || !strings.Contains(err.Error(), "scoped resource scope or borrow method reaches") {
+			t.Fatalf("%s: %v", mode, err)
 		}
 	}
-	checkTypeScriptArtifacts(t, artifacts, "suspending_scoped_file")
 }
 
 func TestTypeScriptFileArgumentsAreEvaluatedBeforeHostChecksAndErrorCatch(t *testing.T) {

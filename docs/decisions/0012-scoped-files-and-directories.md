@@ -83,17 +83,21 @@ def create_output(path: Path, value: String): Result<Unit, FileSystemError>
 end
 ```
 
-Source cannot construct `File`. Inside its declaring block the value may only
-be the direct receiver of the file methods; it cannot be aliased, passed,
-stored, returned, or captured by a nested callback. The compiler identifies
-this exact declaration rather than every unrelated type named `File`. This
-prevents a target handle from escaping the cleanup scope without introducing a
-general public lifetime syntax. The same identity may not appear recursively in
-authored value-type positions such as parameters, returns, fields, collections,
-function types, or transparent aliases. Compiler-generated and external
-declaration contracts cannot mint it either. `File` remains available as the
-class owner in `File.open`; the trusted block parameter is its only value
-origin.
+Source cannot construct `File`. The acquisition block owns cleanup; required
+immutable `File` parameters borrow for the duration of a checked source call.
+Immutable local aliases and nested synchronous blocks preserve that lifetime.
+There is no separate borrow syntax and no implicit close in a helper. Resources
+cannot escape through return, storage, `Any`, nullable/container/function types,
+transparent aliases, first-class callbacks, or concurrent blocks. The rule uses
+the exact declaration identity and leaves unrelated types named `File` alone.
+External declarations cannot mint values or certify non-retention.
+
+A shared typed-IR call-graph pass verifies operations reached while holding a
+resource, including source helpers, generated/imported source, defaults and
+constructors. Suspension, unknown/native edges and unclassified operations are
+rejected independently of mode. Compiler-owned synchronous intrinsics are
+explicitly admitted; provider effect flags are not proof. This is not a
+deterministic validation profile, purity rule, or termination guarantee.
 
 Opaque Ruby-native fallback syntax is rejected while the resource is in scope.
 The compiler cannot prove whether raw native text stores or retains the handle;

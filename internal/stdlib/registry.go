@@ -37,10 +37,9 @@ type Block struct {
 	Return          types.Type
 	ResultBoundary  types.Type
 	Structured      bool
-	// ScopedParameters marks values that may only be used as direct method
-	// receivers in this block. This keeps compiler-owned resource handles from
-	// escaping through assignment, arguments, collections, returns, or nested
-	// callbacks.
+	// ScopedParameters marks acquisition-owned resources. Source borrows and
+	// immutable local aliases preserve that origin; storage, return, native
+	// escape and retaining callbacks are forbidden by shared checking.
 	ScopedParameters []bool
 }
 

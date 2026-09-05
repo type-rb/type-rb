@@ -162,8 +162,13 @@ These values do not promise filesystem containment. Ambient File/Dir operations
 now require Path, listing returns DirEntry<Path> with a required entry bound,
 and errors retain a typed FileSystemTarget. Recursive directory creation and
 strict, byte-bounded UTF-8 text reads are implemented across host backends and
-the REPL. Opened directory anchors, non-escaping resource borrowing, regular-file
-acquisition hardening, atomic publication, and locking remain unimplemented.
+the REPL. Regular-file acquisition is handle-validated before body execution or
+truncation on Linux/macOS. Required immutable File parameters and local aliases
+support non-escaping source borrowing, verified by a mode-independent transitive
+call-graph check; nested acquisition and synchronous inline iteration retain the
+acquisition scope's cleanup ownership. Suspension and unverified native edges
+are rejected while holding a resource. Opened directory anchors, atomic
+publication, and locking remain unimplemented.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

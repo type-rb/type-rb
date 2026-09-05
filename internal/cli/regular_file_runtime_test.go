@@ -27,7 +27,7 @@ func TestRunRegularFileAcquisitionFailureCleanup(t *testing.T) {
 		if backend.name != "ruby" && backend.name != "typescript-node" {
 			continue
 		}
-		for _, failure := range []string{"metadata", "truncate"} {
+		for _, failure := range []string{"metadata", "truncate", "borrow-body", "borrow-close"} {
 			t.Run(backend.name+"/"+failure, func(t *testing.T) {
 				requireDirBoundaryRuntime(t, backend)
 				root := t.TempDir()
@@ -109,7 +109,36 @@ def main()
 	end
 end
 `
-				if got := runDirBoundaryProject(t, backend, source); got != "open:"+failure+"-fault\n" {
+				want := "open:" + failure + "-fault\n"
+				if failure == "borrow-body" || failure == "borrow-close" {
+					limit := "100"
+					want = "close\n"
+					if failure == "borrow-body" {
+						limit = "-1"
+						want = "read_text\n"
+					}
+					source = `import trb/std/path
+import trb/std/file
+import { Result } from trb/std/result
+import { FileSystemError } from trb/std/errors
+def read(file: File): Result<String, FileSystemError>
+	handle := file
+	return handle.read_text(max_bytes: ` + limit + `)
+end
+def main()
+	result := File.open(Path.new(` + strconv.Quote(path) + `)) do |file|
+		try read(file)
+	end
+	case result
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.operation)
+	end
+end
+`
+				}
+				if got := runDirBoundaryProject(t, backend, source); got != want {
 					t.Fatalf("acquisition failure must win over close failure: %q", got)
 				}
 				if closed, err := os.ReadFile(trace); err != nil || string(closed) != "closed" {

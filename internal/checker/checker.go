@@ -552,6 +552,8 @@ type Checker struct {
 	voidValueUses               map[ast.Expression]bool
 	declarationOwnerReceiver    ast.Expression
 	scopedResourceReceiver      ast.Expression
+	scopedResourceUse           ast.Expression
+	scopedResourceType          *ast.TypeRef
 	fileResourceCallCallee      ast.Expression
 	blockCallbackDepth          int
 }
@@ -1292,7 +1294,7 @@ func (c *Checker) validateTypeReferences(statements []ast.Statement, typeParamet
 			c.validateMethodTypes(node, methodTypes)
 			c.validateTypeReferences(node.Body, methodTypes)
 		case *ast.VariableStatement:
-			c.validateTypeReferenceInScope(node.Type, typeParameters)
+			c.validateBorrowTypeReference(node.Type, typeParameters)
 			c.validateExpressionTypeReferences(node.Value, typeParameters)
 		case *ast.AssignmentStatement:
 			c.validateExpressionTypeReferences(node.Target, typeParameters)
@@ -1427,9 +1429,18 @@ func (c *Checker) validateExpressionTypeReferences(expression ast.Expression, ty
 func (c *Checker) validateMethodTypes(method *ast.MethodStatement, typeParameters map[string]bool) {
 	c.validateTypeReferenceInScope(method.ReturnType, typeParameters)
 	for _, parameter := range method.Parameters {
-		c.validateTypeReferenceInScope(parameter.Type, typeParameters)
+		c.validateBorrowTypeReference(parameter.Type, typeParameters)
 		c.validateExpressionTypeReferences(parameter.Default, typeParameters)
 	}
+}
+
+// Only an exact, nonnullable resource annotation is a borrow position. Nested
+// type references still pass through the ordinary non-escape restriction.
+func (c *Checker) validateBorrowTypeReference(ref ast.TypeRef, parameters map[string]bool) {
+	previous := c.scopedResourceType
+	c.scopedResourceType = &ref
+	c.validateTypeReferenceInScope(ref, parameters)
+	c.scopedResourceType = previous
 }
 
 func (c *Checker) validateTypeReferenceInScope(ref ast.TypeRef, typeParameters map[string]bool) {
@@ -1444,6 +1455,9 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 		resolved := c.typeFromRefWithParameters(ref, typeParameters)
 		c.requireStandardResultRuntimeForSourceType(resolved)
 		if c.containsFileResourceType(resolved) && !c.typeReferenceChildContainsFileResource(ref, typeParameters) {
+			if c.scopedResourceType != nil && c.scopedResourceType.Span() == ref.Span() && stdlib.IsFileResourceType(resolved) && !resolved.Nullable {
+				return
+			}
 			c.error(ref.Span(), "scoped File may only be introduced as the File.open() block parameter; it cannot appear in an authored value type")
 		}
 	}()
@@ -2123,7 +2137,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.MethodStatement:
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
+			previousResourceUse := c.scopedResourceUse
+			if !n.Mutable && !n.Constant {
+				c.scopedResourceUse = n.Value
+			}
 			valueType := c.checkDirectStructuredResultValue(n.Value, sc, "variable declaration")
+			c.scopedResourceUse = previousResourceUse
 			c.checkStructuredBlockValue(n.Value)
 			valueType = c.requireValueExpression(n.Value, valueType, "initialize "+n.Name)
 			variableType := valueType
@@ -2151,6 +2170,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				if !c.assignable(n.Value, variableType, valueType) {
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
+			}
+			if c.containsFileResourceType(valueType) && (!stdlib.IsFileResourceType(variableType) || variableType.Nullable || n.Mutable || n.Constant) {
+				c.error(n.Span(), "a scoped resource alias must be an immutable local binding with the exact resource type")
+			}
+			if stdlib.IsFileResourceType(variableType) && !stdlib.IsFileResourceType(valueType) {
+				c.error(n.Span(), "a scoped resource alias requires an existing checked resource origin; a type annotation cannot acquire a File")
 			}
 			if n.Mutable && n.Type.Empty() && emptyKind != "" {
 				outcome, inferred := c.emptyCollectionOutcomes[n]
@@ -2197,6 +2222,10 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
+				if stdlib.IsFileResourceType(variableType) {
+					declared.scopedResource = true
+					declared.scopedBlockDepth = c.blockCallbackDepth
+				}
 				if c.concurrentBorrowedType(variableType) {
 					declared.concurrentBorrowed = c.concurrentBorrowedExpression(n.Value, sc)
 				}
@@ -5113,11 +5142,17 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if !parameter.Mutable && isReferenceType(bindingType) {
 			bindingType.Readonly = true
 		}
+		resource := stdlib.IsFileResourceType(typ) && !typ.Nullable
+		if resource && (parameter.Mutable || parameter.Default != nil || c.interfaceDepth > 0 || parameter.Rest || parameter.KeywordRest) {
+			c.error(parameter.Span(), "a scoped resource parameter must be an immutable required parameter of a source method")
+		}
 		methodScope.values[parameter.Name] = symbol{
 			typ:                bindingType,
 			mutable:            parameter.Mutable,
 			span:               parameter.Span(),
 			concurrentBorrowed: c.concurrentFunctions[method] && c.concurrentBorrowedType(typ),
+			scopedResource:     resource,
+			scopedBlockDepth:   c.blockCallbackDepth,
 		}
 	}
 	returnType := c.typeFromRef(method.ReturnType)
@@ -6297,8 +6332,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		if value, owner, ok := sc.lookupOwner(n.Name); ok {
 			typ = value.typ
-			if value.scopedResource && (c.scopedResourceReceiver != n || c.blockCallbackDepth != value.scopedBlockDepth) {
-				c.error(n.Span(), fmt.Sprintf("scoped resource %s may only be used as a direct method receiver in its declaring block", n.Name))
+			if value.scopedResource && ((c.scopedResourceReceiver != n && c.scopedResourceUse != n) || c.blockCallbackDepth != value.scopedBlockDepth) {
+				c.error(n.Span(), fmt.Sprintf("scoped resource %s may only be used as a receiver, local alias, or checked borrow argument; it cannot escape or be captured by a callback", n.Name))
 				typ = invalidType()
 			}
 			if root := c.currentConcurrentBlockScope(); root != nil && !scopeWithin(owner, root) && !c.concurrentInitTargets[n] {
@@ -6701,7 +6736,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.concurrentBlockScopes = append(c.concurrentBlockScopes, blockScope)
 				c.concurrentMapDepth++
 			}
-			c.blockCallbackDepth++
+			if n.Operation == "concurrent_map" {
+				c.blockCallbackDepth++
+			}
 			if transform {
 				blockType := types.Type{Kind: types.Any, Name: "Any"}
 				var resultExpression ast.Expression
@@ -6771,7 +6808,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.loopDepth--
 				c.result.Expressions[n.Block] = types.Type{Kind: types.Void, Name: "Void"}
 			}
-			c.blockCallbackDepth--
+			if n.Operation == "concurrent_map" {
+				c.blockCallbackDepth--
+			}
 			if transform {
 				c.valueTransformDepth--
 			}
@@ -7142,7 +7181,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if declarationReference {
 				c.declarationReferences++
 			}
+			previousResourceUse := c.scopedResourceUse
+			c.scopedResourceUse = arg.Value
 			argumentType := c.checkExpression(arg.Value, sc)
+			c.scopedResourceUse = previousResourceUse
 			argumentType = c.requireValueExpression(arg.Value, argumentType, "be used as an argument")
 			argumentTypes = append(argumentTypes, argumentType)
 			if declarationReference {
@@ -7572,6 +7614,24 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = safeNavigationResultType(typ, c.result.Expressions[member.Receiver])
 		}
 	}
+	if call, ok := expression.(*ast.CallExpression); ok {
+		position := 0
+		for _, argument := range call.Arguments {
+			parameter := types.Type{}
+			for index, candidate := range c.result.CallSignatures[call] {
+				if argument.Name != "" && candidate.Kind == callsignature.NamedOnly && candidate.Label == argument.Name || argument.Name == "" && candidate.Kind == callsignature.Positional && index == position {
+					parameter = candidate.Type
+					break
+				}
+			}
+			if argument.Name == "" {
+				position++
+			}
+			if c.containsFileResourceType(c.result.Expressions[argument.Value]) && (!stdlib.IsFileResourceType(parameter) || parameter.Nullable) {
+				c.error(argument.Value.Span(), "scoped resource argument requires an exact File borrow parameter; Any, generic storage, and native arguments cannot retain a resource")
+			}
+		}
+	}
 	typ = c.canonicalType(typ, c.activeTypeParameterSet())
 	c.checkClosedNativeIngress(expression, typ)
 	if member, ok := expression.(*ast.MemberExpression); ok && typ.Nullable {
@@ -7681,7 +7741,7 @@ func (c *Checker) fileResourceExpressionAllowed(expression ast.Expression, typ t
 		return false
 	}
 	value, _, found := sc.lookupOwner(identifier.Name)
-	return found && value.scopedResource && c.scopedResourceReceiver == identifier && c.blockCallbackDepth == value.scopedBlockDepth
+	return found && value.scopedResource && (c.scopedResourceReceiver == identifier || c.scopedResourceUse == identifier) && c.blockCallbackDepth == value.scopedBlockDepth
 }
 
 func safeNavigationMember(expression ast.Expression) (*ast.MemberExpression, bool) {
@@ -9227,7 +9287,8 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		declared := symbol{typ: parameterType, mutable: true, span: call.Block.Span()}
 		if scoped {
 			declared.scopedResource = true
-			declared.scopedBlockDepth = c.blockCallbackDepth + 1
+			declared.scopedBlockDepth = c.blockCallbackDepth
+			declared.mutable = false
 		}
 		if tracksUnusedBinding(name) {
 			used := false
@@ -9236,8 +9297,10 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		}
 		blockScope.values[name] = declared
 	}
-	c.blockCallbackDepth++
-	defer func() { c.blockCallbackDepth-- }()
+	if !trustedFileOpen {
+		c.blockCallbackDepth++
+		defer func() { c.blockCallbackDepth-- }()
+	}
 	if member.Block.Return.Name == "" {
 		callType := instantiateDeclarationType(member.Return, bindings)
 		declaresResultBoundary := boundaryError.Kind != "" && boundaryError.Kind != types.Never
