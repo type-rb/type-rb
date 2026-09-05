@@ -470,7 +470,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "strings.HasSuffix(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.strings.split":
 		g.requireImport("strings", "")
-		return g.arrayReference("func() []string { value := " + arguments[0] + "; separator := " + arguments[1] + "; if separator == \"\" { panic(\"String split separator is empty\") }; return strings.Split(value, separator) }()")
+		return g.arrayReference("func(value, separator string) []string { if separator == \"\" { panic(\"String split separator is empty\") }; return strings.Split(value, separator) }(" + arguments[0] + ", " + arguments[1] + ")")
 	case "trb.std.strings.contains":
 		g.requireImport("strings", "")
 		return "strings.Contains(" + arguments[0] + ", " + arguments[1] + ")"
@@ -488,7 +488,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "func(value string) string { characters := []rune(value); slices.Reverse(characters); return string(characters) }(" + arguments[0] + ")"
 	case "trb.std.strings.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { value := []rune(" + arguments[0] + "); requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(value) }; if index < 0 || index >= len(value) { return " + indexLookupError("requested", "len(value)", "String index is out of bounds") + " }; return " + filesystemOK("string(value[index])") + " }()"
+		return "func(value []rune, requested int) " + resultType + " { index := requested; if index < 0 { index += len(value) }; if index < 0 || index >= len(value) { return " + indexLookupError("requested", "len(value)", "String index is out of bounds") + " }; return " + filesystemOK("string(value[index])") + " }([]rune(" + arguments[0] + "), " + arguments[1] + ")"
 	case "trb.std.strings.slice", "trb.std.strings.try_slice":
 		safe := name == "trb.std.strings.try_slice"
 		returnType := "string"
@@ -499,7 +499,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			invalid = "return " + sliceRangeError("start", "end", "exclusive", "len(value)", "String slice range is out of bounds")
 			success = "return " + filesystemOK("string(value[start:stop])")
 		}
-		return "func() " + returnType + " { value := []rune(" + arguments[0] + "); bounds := " + arguments[1] + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(value) || !exclusive && end < len(value)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }()"
+		return "func(value []rune, bounds [3]int) " + returnType + " { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(value) || !exclusive && end < len(value)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }([]rune(" + arguments[0] + "), " + arguments[1] + ")"
 	case "trb.std.strings.index", "trb.std.strings.rindex":
 		reverse := name == "trb.std.strings.rindex"
 		return "func(value, substring string) *int { characters, needle := []rune(value), []rune(substring); if len(needle) == 0 { index := 0; if " + strconv.FormatBool(reverse) + " { index = len(characters) }; return &index }; if len(needle) > len(characters) { return nil }; start, stop, step := 0, len(characters)-len(needle), 1; if " + strconv.FormatBool(reverse) + " { start, stop, step = stop, 0, -1 }; for index := start; ; index += step { matched := true; for offset := range needle { if characters[index+offset] != needle[offset] { matched = false; break } }; if matched { result := index; return &result }; if index == stop { break } }; return nil }(" + arguments[0] + ", " + arguments[1] + ")"
@@ -617,7 +617,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "len(" + g.arrayValues(arguments[0]) + ") == 0"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { values := " + g.arrayValues(arguments[0]) + "; requested := " + arguments[1] + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }()"
+		valuesType := call.Arguments[0].Value.ExprType()
+		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
+			valuesType = member.Receiver.ExprType()
+		}
+		receiverType := g.goType(valuesType)
+		return "func(receiver " + receiverType + ", requested int) " + resultType + " { values := " + g.arrayValues("receiver") + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		g.requireImport("slices", "")
 		safe := name == "trb.std.arrays.try_slice"
@@ -629,7 +634,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			invalid = "return " + sliceRangeError("start", "end", "exclusive", "len(values)", "Array slice range is out of bounds")
 			success = "return " + filesystemOK(g.arrayReference("slices.Clone(values[start:stop])"))
 		}
-		return "func() " + returnType + " { values := " + g.arrayValues(arguments[0]) + "; bounds := " + arguments[1] + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }()"
+		valuesType := call.Arguments[0].Value.ExprType()
+		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
+			valuesType = member.Receiver.ExprType()
+		}
+		receiverType := g.goType(valuesType)
+		return "func(receiver " + receiverType + ", bounds [3]int) " + returnType + " { values := " + g.arrayValues("receiver") + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.first":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + g.arrayValues(arguments[0]) + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
 	case "trb.std.arrays.last":
