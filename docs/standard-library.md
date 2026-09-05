@@ -634,6 +634,28 @@ external declaration contracts cannot supply it as a value; only the trusted
 `File.open` block introduces it. An unrelated declaration with the same name
 is unaffected.
 
+Acquisition accepts only regular files. The runtime checks the opened handle,
+not a preceding path lookup, before entering the block. Directories, FIFOs,
+devices, and other non-regular handles fail with operation `open` and kind
+`Other` (unless opening itself produces another classified host error).
+`Write` truncates the validated handle, never the pathname before validation.
+Validation or truncation failure closes the handle without running the body;
+that failure takes precedence over a simultaneous close failure.
+
+Go, Ruby, Node, Bun, and the REPL currently provide this acquisition contract
+on Linux and macOS. They request nonblocking acquisition, so a FIFO cannot wait
+for a peer before its type is checked, and do not acquire a controlling
+terminal. Other hosts fail closed with an `open` error of kind `Other`, before
+opening the path. There is no weaker path-check-then-open fallback.
+This is not a wall-clock bound on host filesystem operations, a device-access
+sandbox, or a prohibition on special filesystems whose handles report as
+regular files.
+
+Ambient `Read` and `Write` follow ordinary host symlink resolution; a symlink
+to a regular file is accepted. `CreateNew` retains exclusive creation and
+rejects an existing symlink, including a dangling one. These operations do not
+confine path resolution to a directory anchor.
+
 Ruby-native fallback syntax is opaque to resource analysis, so it is rejected
 while the scoped file is in scope. Compute native values before `File.open`, or
 move native work after the block has returned a non-resource value.

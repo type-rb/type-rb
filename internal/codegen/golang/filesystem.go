@@ -124,6 +124,8 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	}
 	g.requireImport("os", "")
 	g.requireImport("strings", "")
+	g.requireImport("runtime", "")
+	g.requireImport("syscall", "")
 	g.temporary++
 	id := strconv.Itoa(g.temporary)
 	raw := "__trbFileEffect" + id
@@ -173,9 +175,12 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(mode + " := " + modeValue)
 	invalidPath := g.filesystemError(errorType, "open", path, strconv.Quote("path must be nonempty and contain no NUL"), "InvalidPath")
 	g.line("if " + path + " == \"\" || strings.IndexByte(" + path + ", 0) >= 0 { return " + g.filesystemResultErr(successType, errorType, invalidPath) + " }")
+	unavailable := g.filesystemError(errorType, "open", path, strconv.Quote("regular-file acquisition is unavailable on this host"), "Other")
+	g.line("if runtime.GOOS != \"linux\" && runtime.GOOS != \"darwin\" { return " + g.filesystemResultErr(successType, errorType, unavailable) + " }")
 	g.line(flags + " := os.O_RDONLY")
-	g.line("if " + mode + " == " + g.filesystemOpenMode("Write") + " { " + flags + " = os.O_WRONLY | os.O_CREATE | os.O_TRUNC }")
+	g.line("if " + mode + " == " + g.filesystemOpenMode("Write") + " { " + flags + " = os.O_WRONLY | os.O_CREATE }")
 	g.line("if " + mode + " == " + g.filesystemOpenMode("CreateNew") + " { " + flags + " = os.O_WRONLY | os.O_CREATE | os.O_EXCL }")
+	g.line(flags + " |= syscall.O_NONBLOCK | syscall.O_NOCTTY")
 	g.line(handle + ", " + openError + " := os.OpenFile(" + path + ", " + flags + ", 0o644)")
 	openFailure := g.filesystemNativeError("open", path, openError)
 	existsFailure := g.filesystemError(errorType, "open", path, openError+".Error()", "AlreadyExists")
@@ -183,6 +188,12 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.line(completed + " := false")
 	closeFailure := g.filesystemNativeError("close", path, "closeError")
 	g.line("defer func() { if closeError := " + handle + ".Close(); " + completed + " && closeError != nil { " + raw + " = " + g.filesystemResultErr(successType, errorType, closeFailure) + " } }()")
+	info := "__trbFileInfo" + id
+	g.line(info + ", " + openError + " := " + handle + ".Stat()")
+	g.line("if " + openError + " != nil { return " + g.filesystemResultErr(successType, errorType, openFailure) + " }")
+	notRegular := g.filesystemError(errorType, "open", path, strconv.Quote("opened handle is not a regular file"), "Other")
+	g.line("if !" + info + ".Mode().IsRegular() { return " + g.filesystemResultErr(successType, errorType, notRegular) + " }")
+	g.line("if " + mode + " == " + g.filesystemOpenMode("Write") + " { if " + openError + " := " + handle + ".Truncate(0); " + openError + " != nil { return " + g.filesystemResultErr(successType, errorType, openFailure) + " } }")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
 		binding := g.bindingIdentifier(block.Bindings[0].Name)
 		g.line(binding + " := " + handle)

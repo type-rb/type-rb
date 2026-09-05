@@ -836,6 +836,13 @@ switches.
 
 - Ambient `File.open`, `Dir.children`, and `Dir.create_all` require the exact
   standard `Path` value. Neither String nor `RelativePath` converts implicitly.
+- `File.open` exposes only an acquired regular-file handle. It checks handle
+  metadata before the body and, for `Write`, before truncation. Non-regular
+  handles fail with `open` / `Other`; failed acquisition does not run the body,
+  and any acquired handle is closed. FIFO acquisition must not wait for a peer
+  before validation. Host implementations unable to provide this contract
+  reject acquisition before opening, rather than using a pathname precheck.
+  This is not a general filesystem time bound or path-containment guarantee.
 - `DirEntry<P>` retains its path domain; ambient listing returns
   `DirEntry<Path>`. Listing requires named `max_entries`, checks that bound
   during enumeration, and returns `InvalidLimit` or `TooLarge` for invalid

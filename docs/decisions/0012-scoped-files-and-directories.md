@@ -106,6 +106,20 @@ from the structured operation, the backend closes the file, and only then may
 the outer `Result` boundary propagate the error. A body error wins over a
 simultaneous close error. A close error replaces a successful body result.
 
+Acquisition validates the opened handle as a regular file before exposing it
+or truncating it for `Write`. A prior `stat(path)` cannot establish this
+property across a pathname replacement. The supported Linux/macOS adapters
+use nonblocking acquisition and suppress controlling-terminal acquisition;
+validation failure closes the handle and returns `open` / `Other` without
+running the body. Unsupported hosts reject before opening. Ambient symlinks
+are still followed for Read/Write; exclusive CreateNew rejects existing links.
+This does not provide a device sandbox, filesystem latency bound, or directory
+containment. In particular, a special filesystem can expose regular handles.
+The [POSIX open contract](https://pubs.opengroup.org/onlinepubs/9799919799/functions/open.html)
+distinguishes FIFO peer waiting from other device-specific behavior, and makes
+`O_TRUNC` effects on some non-regular objects implementation-defined. Therefore
+truncation is a separate operation on the successfully validated handle.
+
 `file.read(max_bytes:)` returns `Bytes`; `file.read_text(max_bytes:)` applies
 strict UTF-8 decoding, returning `InvalidEncoding` for an invalid sequence.
 A leading BOM is preserved. Explicit `Bytes#to_s` remains the replacement
