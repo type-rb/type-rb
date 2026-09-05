@@ -320,7 +320,7 @@ end`,
 end`,
 		"transparent alias": `alias SavedFile = File`,
 	}
-	want := "scoped File may only be introduced as the File.open() block parameter; it cannot appear in an authored value type"
+	want := "scoped resource cannot appear in a stored or escaping value type; use a required immutable borrow parameter"
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for name, body := range tests {
 			t.Run(mode+"/"+name, func(t *testing.T) {
@@ -345,7 +345,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := Compile("main.trb", []byte(source), mode)
-			if err == nil || !strings.Contains(err.Error(), "scoped File may only be introduced as the File.open() block parameter") {
+			if err == nil || !strings.Contains(err.Error(), "scoped resource cannot appear in a stored or escaping value type") {
 				t.Fatalf("Compile() error = %v, want scoped File type diagnostic", err)
 			}
 		})
@@ -371,7 +371,7 @@ end
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			_, err := CompileProject([]SourceUnit{unit}, Options{Mode: mode, GoModule: "example.com/scoped-file-origin", SourceRoot: "/project", ProjectRoot: "/project"})
-			if err == nil || !strings.Contains(err.Error(), "scoped File may only be introduced as the File.open() block parameter") {
+			if err == nil || !strings.Contains(err.Error(), "scoped resource cannot appear in a stored or escaping value type") {
 				t.Fatalf("CompileProject() error = %v, want generated File origin diagnostic", err)
 			}
 		})
@@ -397,7 +397,7 @@ import trb/std/dir
 value := Dir.new()
 `
 	_, err := Compile("main.trb", []byte(source), "go")
-	if err == nil || !strings.Contains(err.Error(), "Dir cannot be constructed directly; use Dir.children()") {
+	if err == nil || !strings.Contains(err.Error(), "Dir cannot be constructed directly; use Dir.open() with a block") {
 		t.Fatalf("Compile() error = %v, want opaque resource diagnostic", err)
 	}
 }

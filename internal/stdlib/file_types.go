@@ -36,6 +36,26 @@ func FileResourceType() types.Type {
 	return declaredType(fileDeclaration)
 }
 
+func DirResourceType() types.Type { return declaredType(dirDeclaration) }
+
+func IsScopedResourceType(typ types.Type) bool {
+	return IsFileResourceType(typ) || typ.Kind == types.Named && typ.Declaration == dirDeclaration
+}
+
+func IsResourceAcquisition(intrinsic string) bool {
+	return intrinsic == "trb.std.file.open" || intrinsic == "trb.std.dir.open" || intrinsic == "trb.std.dir.open_file"
+}
+
+// IsTrustedResourceContract admits only compiler-owned acquisition origins;
+// copying a descriptor or naming a matching intrinsic cannot mint authority.
+func IsTrustedResourceContract(definition *Package, symbol *Symbol) bool {
+	if definition == nil || symbol == nil || !symbol.trustedResourceOrigin {
+		return false
+	}
+	return definition == registry["trb/std/file"] && symbol.Intrinsic == "trb.std.file.open" ||
+		definition == registry["trb/std/dir"] && (symbol.Intrinsic == "trb.std.dir.open" || symbol.Intrinsic == "trb.std.dir.open_file")
+}
+
 // FileModeType returns the exact standard FileMode declaration.
 func FileModeType() types.Type {
 	return declaredType(fileModeDeclaration)
@@ -96,13 +116,4 @@ func IsFilesystemContractType(typ types.Type) bool {
 // IsFileResourceType reports whether typ is the standard scoped host File.
 func IsFileResourceType(typ types.Type) bool {
 	return typ.Kind == types.Named && typ.Declaration == fileDeclaration
-}
-
-// IsTrustedFileOpenContract reports whether a library block is the bundled
-// declaration that owns standard File values. Extension and native declaration
-// providers cannot opt into this contract merely by returning the same type or
-// marking one of their own block parameters as scoped.
-func IsTrustedFileOpenContract(definition *Package, symbol *Symbol) bool {
-	return definition != nil && definition == registry["trb/std/file"] &&
-		symbol != nil && symbol.trustedScopedFileOrigin && symbol.Intrinsic == "trb.std.file.open"
 }

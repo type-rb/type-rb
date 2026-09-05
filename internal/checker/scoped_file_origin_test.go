@@ -29,7 +29,7 @@ end
 	resolved.Symbols["external_file"] = resolver.Binding{Import: provider, Name: "external_file", Export: exported}
 
 	_, diagnostics := checker.Check(program, resolved)
-	if !diagnosticsContain(diagnostics, "a scoped File value can only be obtained as the File.open() block parameter") {
+	if !diagnosticsContain(diagnostics, "a scoped resource value requires a checked acquisition or borrow origin") {
 		t.Fatalf("check diagnostics = %#v, want external File origin diagnostic", diagnostics)
 	}
 }
@@ -52,7 +52,7 @@ end
 	resolved.Symbols["external_files"] = resolver.Binding{Import: provider, Name: "external_files", Export: exported}
 
 	_, diagnostics := checker.Check(program, resolved)
-	if !diagnosticsContain(diagnostics, "a scoped File value can only be obtained as the File.open() block parameter") {
+	if !diagnosticsContain(diagnostics, "a scoped resource value requires a checked acquisition or borrow origin") {
 		t.Fatalf("check diagnostics = %#v, want nested File origin diagnostic", diagnostics)
 	}
 }
@@ -78,7 +78,7 @@ end
 	resolved.Symbols["borrow"] = resolver.Binding{Import: provider, Name: "borrow", Library: declared}
 
 	_, diagnostics := checker.Check(program, resolved)
-	if !diagnosticsContain(diagnostics, "only the standard File.open() contract may introduce a scoped File block parameter") {
+	if !diagnosticsContain(diagnostics, "only trusted standard resource acquisition contracts may introduce scoped resource block parameters") {
 		t.Fatalf("check diagnostics = %#v, want untrusted block origin diagnostic", diagnostics)
 	}
 }

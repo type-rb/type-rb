@@ -167,8 +167,12 @@ truncation on Linux/macOS. Required immutable File parameters and local aliases
 support non-escaping source borrowing, verified by a mode-independent transitive
 call-graph check; nested acquisition and synchronous inline iteration retain the
 acquisition scope's cleanup ownership. Suspension and unverified native edges
-are rejected while holding a resource. Opened directory anchors, atomic
-publication, and locking remain unimplemented.
+are rejected while holding a resource. The same borrow rules apply to opened
+Dir anchors, with bounded RelativePath listing, recursive creation, and scoped
+regular-file opening on Go native Linux/macOS and the Go-mode REPL. Anchored
+pathname resolution cannot escape the opened directory, and error targets retain
+their relative domain. Other backends reject anchored operations; there is no
+weak containment fallback. Atomic publication and locking remain unimplemented.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

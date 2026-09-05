@@ -632,7 +632,15 @@ func (e *Evaluator) structuredBlock(node *ir.StructuredBlock, module string, sc 
 		return flowResult{}, errors.New("structured block is missing its runtime intrinsic")
 	}
 	arguments := make([]evaluatedArgument, 0, len(node.Call.Arguments)+1)
-	if member, ok := node.Call.Callee.(*ir.Member); ok && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic) && !reference.ClassMember) {
+	callee := node.Call.Callee
+	for {
+		application, ok := callee.(*ir.TypeApply)
+		if !ok {
+			break
+		}
+		callee = application.Receiver
+	}
+	if member, ok := callee.(*ir.Member); ok && (reference.ReceiverMethod || e.runtimeHandles(reference.Intrinsic) && !reference.ClassMember) {
 		receiver, err := e.expression(member.Receiver, module, sc)
 		if err != nil {
 			return flowResult{}, err
@@ -2650,6 +2658,10 @@ func (e *Evaluator) filesystemErr(resultType types.Type, operation, path string,
 }
 
 func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path string, cause error, kind string) (Value, error) {
+	return e.filesystemDomainError(resultType, operation, path, cause, kind, false, false)
+}
+
+func (e *Evaluator) filesystemDomainError(resultType types.Type, operation, path string, cause error, kind string, rooted, native bool) (Value, error) {
 	resultDefinition, ok := e.definitions[symbolKey("trb/std/result/index", "Result")].(*enumDefinition)
 	if !ok {
 		return Value{}, errors.New("filesystem requires trb/std/result")
@@ -2670,14 +2682,27 @@ func (e *Evaluator) filesystemErrKind(resultType types.Type, operation, path str
 	if len(resultType.Args) == 2 {
 		errorType = resultType.Args[1]
 	}
+	target := &enumValue{Definition: targetDefinition, Name: "Host", Payload: map[string]Value{"path": {Type: stdlib.PathType(), Data: path}}}
+	message := cause.Error()
+	if rooted {
+		target.Name = "Relative"
+		target.Payload["path"] = Value{Type: stdlib.RelativePathType(), Data: path}
+		if path == "" {
+			target.Name = "Root"
+			target.Payload = map[string]Value{}
+		}
+		if native {
+			message = "filesystem operation failed"
+		}
+	}
 	errorValue := Value{
 		Type: errorType,
 		Data: &recordInstance{
 			Definition: fileErrorDefinition,
 			Fields: map[string]Value{
 				"operation": {Type: types.FromName("String"), Data: operation},
-				"target":    {Type: stdlib.FileSystemTargetType(), Data: &enumValue{Definition: targetDefinition, Name: "Host", Payload: map[string]Value{"path": {Type: stdlib.PathType(), Data: path}}}},
-				"message":   {Type: types.FromName("String"), Data: cause.Error()},
+				"target":    {Type: stdlib.FileSystemTargetType(), Data: target},
+				"message":   {Type: types.FromName("String"), Data: message},
 				"kind": {Type: types.Type{Kind: types.Named, Name: "FileSystemErrorKind", Declaration: fileErrorKindDefinition.Node.Declaration}, Data: &enumValue{
 					Definition: fileErrorKindDefinition,
 					Name:       kind,

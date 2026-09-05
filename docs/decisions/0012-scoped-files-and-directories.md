@@ -83,13 +83,13 @@ def create_output(path: Path, value: String): Result<Unit, FileSystemError>
 end
 ```
 
-Source cannot construct `File`. The acquisition block owns cleanup; required
-immutable `File` parameters borrow for the duration of a checked source call.
+Source cannot construct `File` or `Dir`. The acquisition block owns cleanup;
+required immutable `File` and `Dir` parameters borrow for the duration of a checked source call.
 Immutable local aliases and nested synchronous blocks preserve that lifetime.
 There is no separate borrow syntax and no implicit close in a helper. Resources
 cannot escape through return, storage, `Any`, nullable/container/function types,
 transparent aliases, first-class callbacks, or concurrent blocks. The rule uses
-the exact declaration identity and leaves unrelated types named `File` alone.
+the exact declaration identity and leaves unrelated types named `File` or `Dir` alone.
 External declarations cannot mint values or certify non-retention.
 
 A shared typed-IR call-graph pass verifies operations reached while holding a
@@ -176,6 +176,54 @@ errors. Empty/NUL paths are `InvalidPath`, not a blanket mapping of native
 invalid-argument errors. See the [filesystem reference](../standard-library.md#filesystem)
 for the complete bounds and error contract.
 
+### Opened directory capabilities
+
+`Dir` is also the opened resource returned to `Dir.open(Path)`'s block. There
+is no parallel `RootDir` declaration or second acquisition factory. Pure Path
+values name host paths; RelativePath values validate logical descendants; a
+held Dir provides anchored authority. These are independent responsibilities.
+
+Instance `children`, `create_all`, and `open_file` accept RelativePath values.
+Root listing uses omitted/nil path, not an empty relative value. Entries retain
+paths relative to the original anchor. Listing acquires its own child-directory
+anchor so enumeration and metadata lookup cannot cross into a replacement
+directory. Nonportable names fail the entire listing; the existing RelativePath
+factory defines the grammar rather than a second native validator.
+
+The guarantee is that pathname resolution performed by these APIs cannot leave
+the opened anchor, including under concurrent name replacement and anchor
+rename. Internal relative symlinks are allowed; absolute, escaping, and
+unresolvable symlinks fail. Enumeration does not follow symlinks. Anchored Write
+uses existing-file acquisition followed, on NotFound, by exclusive creation;
+it cannot create a dangling symlink's target. Competing creation may fail with
+AlreadyExists instead of retrying implicitly.
+
+The native Go adapter uses [os.Root](https://pkg.go.dev/os#Root) on Linux/macOS.
+Ruby and TypeScript currently reject the anchored operations at build time;
+other runtime hosts reject acquisition. Go's JavaScript implementation is not
+treated as a native secure adapter. The contract does not change by mode: a
+backend either implements it or reports unsupported. Realpath checks followed
+by pathname reopen and string-prefix checks are not acceptable fallbacks.
+
+Mounts, bind mounts, hardlink provenance, devices, special filesystems, and
+other ambient APIs are outside this pathname-resolution guarantee. Acquiring a
+Dir is itself ambient, not a restricted execution policy. See the
+[Go containment discussion](https://go.dev/blog/osroot) for the distinction
+between traversal resistance and a general filesystem sandbox.
+
+Errors from anchored operations retain Relative/Root targets. A File acquired
+through Dir carries that origin across helper calls, rather than reconstructing
+a Host target from its native handle name. Native error messages are sanitized
+to prevent absolute-anchor disclosure. Dir.open's own acquisition and cleanup
+errors retain its ambient Host target. Existing portable error classifications
+are preserved; containment errors without a stable native category use Other.
+
+Resource acquisition, handle lifetime, and anchored metadata access require
+compiler integration because the extension protocol cannot express them.
+Providers cannot register a weaker origin or certify non-retention. The narrow
+bridge can move to an ordinary package only when that protocol can enforce
+equivalent lifetime and authority guarantees.
+
 ## Deferred scope
 
 This decision does not add watchers, permissions, arbitrary open-flag
@@ -186,8 +234,10 @@ general path parsing or joining.
 ## Consequences
 
 - Applications can implement a complete bounded file flow directly in TypeRB.
-- Go, Ruby, TypeScript, and the typed-IR REPL share the same filesystem result,
-  entry classification, exclusive-create, UTF-8, and cleanup semantics.
+- Go, Ruby, TypeScript, and the typed-IR REPL share the ambient filesystem
+  result, entry classification, exclusive-create, UTF-8, and cleanup semantics.
+  Anchored operations currently have a secure Go native/Go-mode REPL adapter;
+  unsupported backends reject rather than weakening their semantics.
 - The aggregate `trb/std/filesystem` API, its unbounded one-shot reads, and the
   slash-only static `Path` package are removed rather than retained as
   compatibility aliases.

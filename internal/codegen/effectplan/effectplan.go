@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/runtimeoperation"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -992,7 +993,7 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 			blockSuspends = bodySuspends || blockSuspends
 			if record && blockSuspends {
 				a.plan.StructuredBlocks[node] = true
-				if a.options.ResourceSafety && bodySuspends && node.Intrinsic == "trb.std.file.open" {
+				if a.options.ResourceSafety && bodySuspends && stdlib.IsResourceAcquisition(node.Intrinsic) {
 					a.plan.ResourceFailures[node] = context.module
 				}
 			}

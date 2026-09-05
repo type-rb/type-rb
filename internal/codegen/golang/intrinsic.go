@@ -169,6 +169,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.filesystemChildren(call, arguments)
 	case "trb.std.dir.create_all":
 		return g.filesystemCreateAll(call, arguments)
+	case "trb.std.dir.root_children":
+		return g.anchoredChildren(call, arguments)
+	case "trb.std.dir.root_create_all":
+		return g.anchoredCreateAll(call, arguments)
 	case "trb.std.file.read", "trb.std.file.read_text":
 		g.requireImport("io", "")
 		g.temporary++
@@ -185,18 +189,18 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			errorType = result.Args[1]
 		}
 		operation := strings.TrimPrefix(name, "trb.std.file.")
-		invalid := g.filesystemError(errorType, operation, path, strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
-		tooLarge := g.filesystemError(errorType, operation, path, strconv.Quote("file exceeds max_bytes"), "TooLarge")
-		failure := g.filesystemNativeError(operation, path, readError)
+		invalid := g.filesystemResourceError(errorType, operation, path, strconv.Quote("max_bytes must be non-negative"), "InvalidLimit", handle+".Rooted")
+		tooLarge := g.filesystemResourceError(errorType, operation, path, strconv.Quote("file exceeds max_bytes"), "TooLarge", handle+".Rooted")
+		failure := g.filesystemResourceNativeError(operation, path, readError, handle+".Rooted")
 		value := data
 		failureCheck := ""
 		if name == "trb.std.file.read_text" {
 			g.requireImport("unicode/utf8", "utf8")
-			invalidEncoding := g.filesystemError(errorType, operation, path, strconv.Quote("file is not valid UTF-8"), "InvalidEncoding")
+			invalidEncoding := g.filesystemResourceError(errorType, operation, path, strconv.Quote("file is not valid UTF-8"), "InvalidEncoding", handle+".Rooted")
 			value = "string(" + data + ")"
 			failureCheck = "if !utf8.Valid(" + data + ") { return " + resultError(invalidEncoding) + " }; "
 		}
-		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + limit + " := " + arguments[1] + "; " + path + " := " + handle + ".Name(); if " + limit + " < 0 { return " + resultError(invalid) + " }; " + data + ", " + readError + " := io.ReadAll(io.LimitReader(" + handle + ", int64(" + limit + ")+1)); if " + readError + " != nil { return " + resultError(failure) + " }; if len(" + data + ") > " + limit + " { return " + resultError(tooLarge) + " }; " + failureCheck + "return " + filesystemOK(value) + " }()"
+		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + limit + " := " + arguments[1] + "; " + path + " := " + handle + ".Path; if " + limit + " < 0 { return " + resultError(invalid) + " }; " + data + ", " + readError + " := io.ReadAll(io.LimitReader(" + handle + ", int64(" + limit + ")+1)); if " + readError + " != nil { return " + resultError(failure) + " }; if len(" + data + ") > " + limit + " { return " + resultError(tooLarge) + " }; " + failureCheck + "return " + filesystemOK(value) + " }()"
 	case "trb.std.file.write", "trb.std.file.write_text":
 		g.requireImport("io", "")
 		g.temporary++
@@ -208,12 +212,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		writeError := "__trbFileWriteError" + id
 		resultType, successType, _ := filesystemResultType()
 		operation := strings.TrimPrefix(name, "trb.std.file.")
-		failure := g.filesystemNativeError(operation, path, writeError)
+		failure := g.filesystemResourceNativeError(operation, path, writeError, handle+".Rooted")
 		value := arguments[1]
 		if name == "trb.std.file.write_text" {
 			value = "[]byte(" + value + ")"
 		}
-		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + data + " := " + value + "; " + path + " := " + handle + ".Name(); " + written + ", " + writeError + " := " + handle + ".Write(" + data + "); if " + writeError + " == nil && " + written + " != len(" + data + ") { " + writeError + " = io.ErrShortWrite }; if " + writeError + " != nil { return " + resultError(failure) + " }; return " + filesystemOK(successType+"{}") + " }()"
+		return "func() " + resultType + " { " + handle + " := " + arguments[0] + "; " + data + " := " + value + "; " + path + " := " + handle + ".Path; " + written + ", " + writeError + " := " + handle + ".Write(" + data + "); if " + writeError + " == nil && " + written + " != len(" + data + ") { " + writeError + " = io.ErrShortWrite }; if " + writeError + " != nil { return " + resultError(failure) + " }; return " + filesystemOK(successType+"{}") + " }()"
 	case "trb.internal.process.arguments":
 		g.requireImport("os", "")
 		return g.arrayReference("append([]string{}, os.Args[1:]...)")

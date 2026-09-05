@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -1471,7 +1472,7 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 }
 
 func (g *generator) structuredBlock(block *ir.StructuredBlock) {
-	if block != nil && block.Intrinsic == "trb.std.file.open" {
+	if block != nil && stdlib.IsResourceAcquisition(block.Intrinsic) {
 		g.filesystemStructuredBlock(block)
 		return
 	}

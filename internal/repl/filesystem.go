@@ -16,6 +16,20 @@ import (
 
 type filesystemRuntimeProvider struct{}
 
+type scopedFile struct {
+	*os.File
+	path   string
+	rooted bool
+}
+
+func (file *scopedFile) failure(e *Evaluator, typ types.Type, operation string, cause error, kind string) (Value, error) {
+	native := kind == ""
+	if native {
+		kind = filesystemErrorKind(cause)
+	}
+	return e.filesystemDomainError(typ, operation, file.path, cause, kind, file.rooted, native)
+}
+
 func init() {
 	registerRuntimeProvider(func() runtimeProvider { return &filesystemRuntimeProvider{} })
 }
@@ -23,7 +37,7 @@ func init() {
 func (*filesystemRuntimeProvider) Name() string { return "trb/std/file" }
 
 func (*filesystemRuntimeProvider) Handles(intrinsic string) bool {
-	return intrinsic == "trb.std.file.open"
+	return stdlib.IsResourceAcquisition(intrinsic)
 }
 
 func (*filesystemRuntimeProvider) Configure([]*ir.Program) error { return nil }
@@ -35,12 +49,35 @@ func (*filesystemRuntimeProvider) Call(_ *Evaluator, invocation runtimeInvocatio
 }
 
 func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtimeBlockInvocation) (Value, error) {
+	if invocation.Name == "trb.std.dir.open" {
+		return evaluator.anchoredDirectoryBlock(invocation)
+	}
+	var anchor *os.Root
+	if invocation.Name == "trb.std.dir.open_file" {
+		if len(invocation.Arguments) == 0 {
+			return Value{}, errors.New("Dir.open_file requires a receiver")
+		}
+		var ok bool
+		anchor, ok = invocation.Arguments[0].Value.Data.(*os.Root)
+		if !ok {
+			return Value{}, errors.New("Dir.open_file receiver is not an open directory")
+		}
+		invocation.Arguments = invocation.Arguments[1:]
+	}
 	if len(invocation.Arguments) < 1 {
 		return Value{}, errors.New("File.open requires a path")
 	}
 	path, ok := invocation.Arguments[0].Value.Data.(string)
 	if !ok {
 		return Value{}, errors.New("File.open path must be String")
+	}
+	resource := &scopedFile{path: path, rooted: anchor != nil}
+	operation := "open"
+	if anchor != nil {
+		operation = "open_file"
+	}
+	fail := func(cause error, kind string) (Value, error) {
+		return resource.failure(evaluator, invocation.Type, operation, cause, kind)
 	}
 	modeName := "Read"
 	if len(invocation.Arguments) > 1 {
@@ -61,18 +98,28 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 		return Value{}, fmt.Errorf("unknown FileMode %s", modeName)
 	}
 	if path == "" || strings.IndexByte(path, 0) >= 0 {
-		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
+		return fail(errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
 	}
 	acquisitionFlags, supported := regularFileOpenFlags()
 	if !supported {
-		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("regular-file acquisition is unavailable on this host"), "Other")
+		return fail(errors.New("regular-file acquisition is unavailable on this host"), "Other")
 	}
 	flags |= acquisitionFlags
-	file, err := os.OpenFile(path, flags, 0o644)
-	if err != nil {
-		kind := filesystemErrorKind(err)
-		return evaluator.filesystemErrKind(invocation.Type, "open", path, err, kind)
+	open := os.OpenFile
+	if anchor != nil {
+		open = anchor.OpenFile
+		if modeName == "Write" {
+			flags &^= os.O_CREATE
+		}
 	}
+	file, err := open(path, flags, 0o644)
+	if anchor != nil && modeName == "Write" && errors.Is(err, os.ErrNotExist) {
+		file, err = open(path, flags|os.O_CREATE|os.O_EXCL, 0o644)
+	}
+	if err != nil {
+		return fail(err, "")
+	}
+	resource.File = file
 	closed := false
 	defer func() {
 		if !closed {
@@ -81,17 +128,17 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 	}()
 	info, err := file.Stat()
 	if err != nil {
-		return evaluator.filesystemErrKind(invocation.Type, "open", path, err, filesystemErrorKind(err))
+		return fail(err, "")
 	}
 	if !info.Mode().IsRegular() {
-		return evaluator.filesystemErrKind(invocation.Type, "open", path, errors.New("opened handle is not a regular file"), "Other")
+		return fail(errors.New("opened handle is not a regular file"), "Other")
 	}
 	if modeName == "Write" {
 		if err := file.Truncate(0); err != nil {
-			return evaluator.filesystemErrKind(invocation.Type, "open", path, err, filesystemErrorKind(err))
+			return fail(err, "")
 		}
 	}
-	value, evaluateErr := invocation.Evaluate([]Value{{Type: stdlib.FileResourceType(), Data: file}})
+	value, evaluateErr := invocation.Evaluate([]Value{{Type: stdlib.FileResourceType(), Data: resource}})
 	closeErr := file.Close()
 	closed = true
 	if evaluateErr != nil {
@@ -102,7 +149,7 @@ func (*filesystemRuntimeProvider) Block(evaluator *Evaluator, invocation runtime
 		return value, nil
 	}
 	if closeErr != nil {
-		return evaluator.filesystemErrKind(invocation.Type, "close", path, closeErr, filesystemErrorKind(closeErr))
+		return resource.failure(evaluator, invocation.Type, "close", closeErr, "")
 	}
 	return evaluator.filesystemOK(invocation.Type, value)
 }

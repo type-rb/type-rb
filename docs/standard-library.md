@@ -806,11 +806,78 @@ def prepare(directory: Path): Result<Unit, FileSystemError>
 end
 ```
 
+### Opened directory anchors
+
+`Dir.open(path: Path) do |root| ... end` acquires an opaque directory resource.
+The block owns cleanup and returns `Result<T, FileSystemError>`. Required
+immutable `Dir` parameters and immutable aliases borrow that anchor under the
+same non-escape and synchronous-call-graph rules as `File`.
+
+The instance surface is:
+
+- `root.children(path: RelativePath? = nil, *, max_entries: Integer)` returns
+  `Result<Array<DirEntry<RelativePath>>, FileSystemError>`.
+- `root.create_all(path: RelativePath)` returns `Result<Unit, FileSystemError>`.
+- `root.open_file(path: RelativePath, *, mode: FileMode = Read) do |file| ... end`
+  returns `Result<T, FileSystemError>` with the same regular-file validation,
+  bounded reads, and cleanup precedence as `File.open`.
+
+<!-- trb-doc-test: stdlib-dir-anchor modes=go -->
+```trb
+import trb/std/path
+import { RelativePath } from trb/std/path
+import trb/std/dir
+import trb/std/result
+import { FileSystemError } from trb/std/errors
+
+def read_input(root: Dir, path: RelativePath): Result<String, FileSystemError>
+	return root.open_file(path) do |file|
+		try file.read_text(max_bytes: 4096)
+	end
+end
+
+def load(directory: Path, path: RelativePath): Result<String, FileSystemError>
+	return Dir.open(directory) do |root|
+		try read_input(root, path)
+	end
+end
+```
+
+Instance pathname resolution cannot escape the opened directory anchor, even
+if the anchor is renamed or pathname components are concurrently replaced.
+Relative symlinks resolving inside it may be followed. Absolute, escaping, and
+unresolvable symlinks fail; listing reports symlinks as `Other`. Anchored `Write`
+opens an existing file first and uses exclusive creation for an absent leaf,
+so it never creates a dangling symlink's target. A concurrent creator may make
+that exclusive attempt return `AlreadyExists`; there is no implicit retry.
+
+Listing the root uses no path argument or `nil`. Listing a child directory
+returns paths relative to the original root, not relative to that child.
+The operation opens the listed directory as a stable anchor for both enumeration
+and metadata checks. Results are immediate, bounded, and sorted by UTF-8 bytes.
+A name that fails the RelativePath component grammar, including a non-UTF-8
+host name, fails the whole listing with `UnsupportedName`; names are neither
+filtered nor normalized. A vanished entry fails the whole operation.
+
+Anchored errors have `Relative(path)` or, for root listing, `Root` targets.
+Files retain this domain through borrowed helpers. Native error text is replaced
+by a generic message while preserving classified error kinds; it does not leak
+an absolute root path. `Dir.open` itself is ambient and retains the input Host
+target for acquisition and cleanup errors. Containment failures without a
+portable native classification use `Other`.
+
+The secure adapter is currently available for Go native Linux/macOS and the
+Go-mode typed-IR REPL. Ruby and TypeScript builds reject anchored operations;
+unsupported runtime hosts reject acquisition before opening. There is no weaker
+realpath/prefix fallback. Mounts, bind mounts, hardlink provenance, device or
+special-filesystem behavior, and other ambient APIs are outside this guarantee.
+Holding a Dir does not activate a restricted execution profile or sandbox.
+
 These host operations need privileged runtime bridges: ordinary packages cannot
 yet acquire scoped descriptors or enumerate native directory entries through
 the extension protocol. The integration does not grant that authority to
-external providers. Scoped File borrowing is supported; an opened `Dir`
-capability, atomic publication, locks, and a sandbox are not yet implemented.
+external providers. Scoped File/Dir borrowing and opened directory anchors are
+supported; atomic publication, locks, and a sandbox are not yet implemented.
 
 ## Process
 

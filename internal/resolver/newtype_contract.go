@@ -10,7 +10,7 @@ import (
 )
 
 // Bind nominal signatures in their defining module before callers see them.
-// Include the scoped File contract: an imported borrow parameter must retain
+// Include the scoped File/Dir contracts: an imported borrow parameter must retain
 // its exact resource identity. A source import alias is not a global type name;
 // another module's same-named newtype must not change a returned value's
 // methods or construction.
@@ -41,7 +41,7 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 				}
 				for _, name := range names {
 					exported, found := exportNamed(dependency.Exports, name)
-					if !found || exported.Kind != NewtypeExport && !catalogFileExport(dependency, exported) {
+					if !found || exported.Kind != NewtypeExport && !catalogScopedResourceExport(dependency, exported) {
 						continue
 					}
 					local := name
@@ -66,12 +66,12 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 	}
 }
 
-func catalogFileExport(module *Module, exported Export) bool {
+func catalogScopedResourceExport(module *Module, exported Export) bool {
 	if !module.CompilerOwned {
 		return false
 	}
 	binding := catalogNewtypeBinding(module, exported)
-	return binding.DeclarationIdentity() == stdlib.FileResourceType().Declaration
+	return binding.DeclarationIdentity() == stdlib.FileResourceType().Declaration || binding.DeclarationIdentity() == stdlib.DirResourceType().Declaration
 }
 
 func catalogNewtypeBinding(module *Module, exported Export) Binding {
