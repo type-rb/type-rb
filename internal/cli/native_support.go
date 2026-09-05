@@ -13,6 +13,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/project"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 func compiledSupportFiles(config *project.Config, compiled map[string]*compiler.Artifact) ([]codegen.SupportFile, error) {
@@ -54,10 +55,12 @@ func writeCompiledGoDependencies(config *project.Config, root string, compiled m
 	dependencies := map[string]string{}
 	for _, artifact := range compiled {
 		for name, version := range artifact.NativeDependencies {
-			if old, found := dependencies[name]; found && old != version {
-				return fmt.Errorf("conflicting compiler support dependency %s", name)
+			if !semver.IsValid(version) {
+				return fmt.Errorf("invalid compiler support version %q for %s", version, name)
 			}
-			dependencies[name] = version
+			if old := dependencies[name]; old == "" || semver.Compare(version, old) > 0 {
+				dependencies[name] = version
+			}
 		}
 	}
 	if len(dependencies) == 0 {
@@ -83,14 +86,16 @@ func writeCompiledGoDependencies(config *project.Config, root string, compiled m
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		// The adapter is conformance-tested against this version. Do not
-		// silently replace an application's different explicit requirement.
+		// Support source declares a minimum, like an ordinary Go dependency.
+		// Preserve a newer application requirement and leave replace/exclude
+		// directives to the Go toolchain's normal module resolution.
+		version := dependencies[name]
 		for _, requirement := range file.Require {
-			if requirement.Mod.Path == name && requirement.Mod.Version != dependencies[name] {
-				return fmt.Errorf("compiler support requires %s %s; module requires %s", name, dependencies[name], requirement.Mod.Version)
+			if requirement.Mod.Path == name && semver.Compare(requirement.Mod.Version, version) > 0 {
+				version = requirement.Mod.Version
 			}
 		}
-		if err := file.AddRequire(name, dependencies[name]); err != nil {
+		if err := file.AddRequire(name, version); err != nil {
 			return err
 		}
 	}

@@ -22,21 +22,6 @@ func lockRoot(t *testing.T) (*os.Root, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = root.Close() })
-	probe, err := root.Create("probe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = localLockProfile(probe)
-	_ = probe.Close()
-	if errors.Is(err, ErrUnsupported) {
-		if os.Getenv("CI") != "" {
-			t.Fatal("CI must exercise a supported local lock filesystem")
-		}
-		t.Skip("host filesystem is outside the verified lock profile")
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
 	return root, directory
 }
 

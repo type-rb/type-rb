@@ -3,7 +3,6 @@
 package nativefs
 
 import (
-	"errors"
 	"os"
 	"testing"
 )
@@ -24,15 +23,4 @@ func TestTmpfsLockConformance(t *testing.T) {
 	t.Run("killed-process", TestTryLockKilledProcessReleases)
 	t.Run("leaf-race", TestTryLockRejectsConcurrentLeafSymlinks)
 	t.Run("anchor-parents", TestTryLockUsesRenamedAnchorAndContainedParents)
-}
-
-func TestProcfsLockProfileUnsupported(t *testing.T) {
-	file, err := os.Open("/proc/version")
-	if err != nil {
-		t.Skipf("procfs fixture unavailable: %v", err)
-	}
-	defer file.Close()
-	if err := localLockProfile(file); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("procfs admitted: %v", err)
-	}
 }

@@ -20,10 +20,6 @@ def error_name(error: RelativePathError): String
 		return "DotComponent"
 	when RelativePathError::InvalidCharacter
 		return "InvalidCharacter"
-	when RelativePathError::TrailingDotOrSpace
-		return "TrailingDotOrSpace"
-	when RelativePathError::ReservedName
-		return "ReservedName"
 	when RelativePathError::MultipleComponents
 		return "MultipleComponents"
 	end
@@ -45,25 +41,21 @@ func TestRelativePathValidationAcrossBackends(t *testing.T) {
 		" leading/name", "CONsole", "CONIN", "COM10", "COM⁴", "cоn", "conın$",
 		"日本語/😀.md", "e\u0301/é", "a\u0085", "a\u007f", "a/ b", ".CON",
 		strings.Repeat("a/", 256) + "leaf",
+		"a?b", "a*b", "a<b", "a>b", "a|b", "a\"b", "a.", "a ", "a /b", "CON", "con.txt", "PrN", "aux.tar.gz", "NUL", "CONIN$", "conout$.txt", "CON .txt", "con..txt", "dir/lpt¹.log",
 	}
 	invalid := []struct{ input, kind string }{
 		{"", "Empty"}, {"/a", "EmptyComponent"}, {"a/", "EmptyComponent"}, {"a//b", "EmptyComponent"},
 		{".", "DotComponent"}, {"..", "DotComponent"}, {"a/../b", "DotComponent"}, {"a/./b", "DotComponent"},
 		{"C:/a", "InvalidCharacter"}, {`a\b`, "InvalidCharacter"}, {`\\server\share`, "InvalidCharacter"},
-		{"a:b", "InvalidCharacter"}, {"a?b", "InvalidCharacter"}, {"a*b", "InvalidCharacter"},
-		{"a<b", "InvalidCharacter"}, {"a>b", "InvalidCharacter"}, {"a|b", "InvalidCharacter"}, {"a\"b", "InvalidCharacter"},
-		{"a.", "TrailingDotOrSpace"}, {"a ", "TrailingDotOrSpace"}, {"a /b", "TrailingDotOrSpace"},
-		{"CON", "ReservedName"}, {"con.txt", "ReservedName"}, {"PrN", "ReservedName"}, {"aux.tar.gz", "ReservedName"},
-		{"NUL", "ReservedName"}, {"CONIN$", "ReservedName"}, {"conout$.txt", "ReservedName"},
-		{"CON .txt", "ReservedName"}, {"con..txt", "ReservedName"}, {"dir/lpt¹.log", "ReservedName"},
-		{"CON" + strings.Repeat(" ", 1024) + ".txt", "ReservedName"},
+		{"a:b", "InvalidCharacter"},
 	}
-	for point := 0; point <= 31; point++ {
-		invalid = append(invalid, struct{ input, kind string }{"a" + string(rune(point)) + "b", "InvalidCharacter"})
+	invalid = append(invalid, struct{ input, kind string }{"a\x00b", "InvalidCharacter"})
+	for point := 1; point <= 31; point++ {
+		valid = append(valid, "a"+string(rune(point))+"b")
 	}
 	for _, prefix := range []string{"COM", "lpt"} {
 		for _, suffix := range []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "¹", "²", "³"} {
-			invalid = append(invalid, struct{ input, kind string }{prefix + suffix + ".txt", "ReservedName"})
+			valid = append(valid, prefix+suffix+".txt")
 		}
 	}
 	var source strings.Builder
@@ -173,7 +165,7 @@ func TestPathValueDiagnosticsAcrossBackends(t *testing.T) {
 		{"extra child", "import { Path, RelativePath } from trb/std/path\ndef main()\nchild := RelativePath.parse(\"a\") catch |_error|\nreturn\nend\nputs(Path.new(\"a\").join(child, child).to_s())\nend", "argument"},
 		{"unrelated nominal receiver", "import { RelativePath } from trb/std/path\nnewtype Path = String\ndef main()\nchild := RelativePath.parse(\"a\") catch |_error|\nreturn\nend\nputs(Path.new(\"a\").join(child))\nend", "join"},
 		{"no static mirror", "import trb/std/path\ndef main()\nputs(Path.join(\"a\", \"b\"))\nend", "join"},
-		{"private validation helper", "import { RelativePath } from trb/std/path\ndef main()\nputs(RelativePath._reserved_name(\"CON\"))\nend", "private"},
+		{"private validation helper", "import { RelativePath } from trb/std/path\ndef main()\nputs(RelativePath._component_error(\"CON\"))\nend", "private"},
 		{"no implicit inbound", "import { RelativePath } from trb/std/path\nimport trb/std/json\ndef main()\nvalue := JSON.decode<RelativePath>(\"x\")\nputs(value)\nend", "cannot construct closed newtype"},
 		{"must use", "import { RelativePath } from trb/std/path\ndef main()\nRelativePath.parse(\"a\")\nend", "Result"},
 	} {

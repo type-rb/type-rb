@@ -311,11 +311,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   representation equality, not filesystem identity.
 - `RelativePath.parse(String)` returns `Result<RelativePath, RelativePathError>`
   and preserves accepted text. Its host-independent slash-component grammar
-  rejects empty input/components, `.`/`..`, control characters U+0000–U+001F,
-  backslash, `< > : " | ? *`, trailing component dot/ASCII space, and the fixed
-  ASCII-case-insensitive reserved stems specified in the
-  [standard-library reference](standard-library.md#logical-descendant-grammar).
-  It does not normalize Unicode or guarantee creation on every filesystem.
+  rejects empty input/components, `.`/`..`, NUL, backslash, and colon.
+  Backslash and colon are excluded to avoid alternate separators, drive prefixes,
+  and stream syntax. Filename policies such as reserved device names, trailing
+  dots/spaces and display-safe characters belong to the application or host,
+  not this value type. Parsing does not guarantee creation on every filesystem.
 - `RelativePath#join(RelativePath)` composes validated paths infallibly;
   `child(String)` validates a single component and returns a Result.
   `parent()` returns `RelativePath?`, with `nil` for a one-component path.
@@ -890,8 +890,9 @@ switches.
   lock; the file is never removed or replaced by the operation.
   This coordinates writers using the same stable file and protocol, not
   independent clones, uncooperative writers, or distributed leases. The native
-  adapter accepts local APFS on macOS and ext-family/tmpfs on Linux; other
-  filesystem profiles return `Unsupported`, with no fallback protocol.
+  Linux/macOS adapter uses the host's advisory flock operation. Unsupported
+  host operations return Unsupported; filesystem names are not an allowlist.
+  Cross-machine/network locking semantics are not guaranteed by TypeRB.
   Nonblocking describes lock contention, not a bound on filesystem I/O time.
 - Anchored operations currently require the Go native Linux/macOS adapter
   (also used by the Go-mode typed-IR REPL). Other backends reject these operations

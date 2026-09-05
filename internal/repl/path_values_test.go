@@ -37,7 +37,7 @@ end
 			for _, fixture := range []struct{ expression, result string }{
 				{`inspect_path("日本語/docs")`, `"日本語/docs/leaf.md:true"`},
 				{`inspect_path("../x")`, `"dot and parent components are not allowed"`},
-				{`inspect_path("con.txt")`, `"relative path contains a reserved component name"`},
+				{`inspect_path("con.txt")`, `"con.txt/leaf.md:true"`},
 				{`inspect_path("x/")`, `"relative path components must not be empty"`},
 				{`Path.new("a/../").to_s()`, `"a/../"`},
 			} {

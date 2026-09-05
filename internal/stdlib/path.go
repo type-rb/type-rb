@@ -37,8 +37,6 @@ enum RelativePathError
 	EmptyComponent
 	DotComponent
 	InvalidCharacter
-	TrailingDotOrSpace
-	ReservedName
 	MultipleComponents
 
 	def to_s(): String
@@ -51,10 +49,6 @@ enum RelativePathError
 			return "dot and parent components are not allowed"
 		when RelativePathError::InvalidCharacter
 			return "relative path contains a prohibited character"
-		when RelativePathError::TrailingDotOrSpace
-			return "relative path components must not end in a dot or ASCII space"
-		when RelativePathError::ReservedName
-			return "relative path contains a reserved component name"
 		when RelativePathError::MultipleComponents
 			return "child requires exactly one component"
 		end
@@ -117,46 +111,11 @@ newtype RelativePath = String do
 		end
 		points := name.codepoints()
 		points.each do |point|
-			if point <= 31 || point == 60 || point == 62 || point == 58 || point == 34 || point == 124 || point == 63 || point == 42 || point == 92
+			if point == 0 || point == 58 || point == 92
 				return RelativePathError::InvalidCharacter
 			end
 		end
-		if name.end_with?(".") || name.end_with?(" ")
-			return RelativePathError::TrailingDotOrSpace
-		end
-		dot := name.index(".")
-		mut stem_end := points.size()
-		if dot != nil
-			stem_end = dot
-		end
-		while stem_end > 0 && points[stem_end - 1] == 32
-			stem_end = stem_end - 1
-		end
-		if stem_end <= 7 && self._reserved_name(name.slice(0...stem_end))
-			return RelativePathError::ReservedName
-		end
 		return nil
-	end
-
-	def self._reserved_name(stem: String): Boolean
-		mut folded := ""
-		stem.chars().each do |character|
-			index := "abcdefghijklmnopqrstuvwxyz".index(character)
-			if index == nil
-				folded = folded + character
-			else
-				folded = folded + "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[index]
-			end
-		end
-		case folded
-		when "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"
-			return true
-		else
-			if folded.size() == 4 && (folded.start_with?("COM") || folded.start_with?("LPT"))
-				return "0123456789¹²³".include?(folded[3])
-			end
-			return false
-		end
 	end
 end
 `

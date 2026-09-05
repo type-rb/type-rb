@@ -187,8 +187,9 @@ Instance `children`, `create_all`, and `open_file` accept RelativePath values.
 Root listing uses omitted/nil path, not an empty relative value. Entries retain
 paths relative to the original anchor. Listing acquires its own child-directory
 anchor so enumeration and metadata lookup cannot cross into a replacement
-directory. Nonportable names fail the entire listing; the existing RelativePath
-factory defines the grammar rather than a second native validator.
+directory. Names outside the structural descendant grammar fail the entire
+listing; the existing RelativePath factory defines the grammar rather than a
+second native validator.
 
 The guarantee is that pathname resolution performed by these APIs cannot leave
 the opened anchor, including under concurrent name replacement and anchor
@@ -245,12 +246,15 @@ single leaf after resolving the parent through os.Root. Passing O_NOFOLLOW to
 os.Root.OpenFile alone is insufficient: Root intentionally resolves in-root
 symlinks. [Openat](https://man7.org/linux/man-pages/man2/open.2.html) and
 [flock](https://man7.org/linux/man-pages/man2/flock.2.html) supply the required
-leaf and open-file-description semantics. The adapter admits local APFS on
-macOS and ext-family/tmpfs on Linux; other profiles fail Unsupported. This
-allowlist does not prove arbitrary or malicious filesystem behavior.
+leaf and open-file-description semantics. The adapter attempts the host lock
+operation rather than selecting filesystem names. Host-reported unsupported
+operations remain Unsupported. The contract does not establish network or
+cross-machine locking semantics; applications requiring them own that choice.
 
 The same compiler-owned Go source is compiled into the REPL and emitted in
-generated projects, with OS build tags and a fixed x/sys dependency. These are
+generated projects, with OS build tags and a minimum x/sys dependency. Newer
+application requirements are preserved; ordinary Go module resolution selects
+the dependency. These are
 explicit support artifacts, not forged portable IR modules or provider-owned
 native declarations. CLI artifact writers include them and reject package
 collisions; source-only stdout cannot represent this multi-file output.
@@ -260,7 +264,7 @@ collisions; source-only stdout cannot represent this multi-file output.
 This decision does not add watchers, permissions, arbitrary open-flag
 combinations, seeking, general streaming or incremental text decoding,
 temporary-file management, `fsync`, atomic replacement, recursive walking, or
-general path parsing or joining.
+general host path parsing beyond the documented Path/RelativePath operations.
 
 ## Consequences
 

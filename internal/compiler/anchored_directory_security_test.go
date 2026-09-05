@@ -216,8 +216,37 @@ end
 	}
 }
 
-func TestAnchoredDirectoryRejectsNonportableNames(t *testing.T) {
-	for _, name := range []string{"CON", "file:stream", "trailing.", "trailing ", "a\\b", string([]byte{0xff})} {
+func TestAnchoredDirectoryAcceptsHostFilenamePolicies(t *testing.T) {
+	root := t.TempDir()
+	names := []string{"CON.txt", "trailing.", "trailing ", "draft?.txt"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := `
+def main()
+	result := Dir.open(Path.new(` + strconv.Quote(root) + `)) do |root|
+		entries := try root.children(max_entries: 10)
+		entries.map do |entry|
+			read(root, entry.path.to_s(), FileMode::Read)
+		end.sort().join(",")
+	end
+	case result
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.message)
+	end
+end
+`
+	if got := runAnchoredSecuritySource(t, source, nil); got != "CON.txt,draft?.txt,trailing ,trailing." {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestAnchoredDirectoryRejectsNamesOutsideRelativeGrammar(t *testing.T) {
+	for _, name := range []string{"file:stream", "a\\b", string([]byte{0xff})} {
 		t.Run(strconv.Quote(name), func(t *testing.T) {
 			root := t.TempDir()
 			if err := os.WriteFile(filepath.Join(root, name), nil, 0o600); err != nil {
