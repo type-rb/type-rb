@@ -47,6 +47,9 @@ func (e *Evaluator) intrinsic(name string, arguments []evaluatedArgument, typ ty
 }
 
 func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, typ types.Type, codec *ir.CodecSchema, call *ir.Call) (Value, error) {
+	if name == "trb.std.dir.root_children" || name == "trb.std.dir.root_create_all" {
+		return e.anchoredDirectoryCall(name, arguments, typ)
+	}
 	if value, handled, err := e.runtimeCall(runtimeInvocation{
 		Name: name, Arguments: arguments, Type: typ, Codec: codec, Call: call,
 	}); handled {
@@ -194,7 +197,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
-		file, ok := values[0].Data.(*os.File)
+		file, ok := values[0].Data.(*scopedFile)
 		if !ok {
 			return Value{}, errors.New("filesystem read receiver is not an open file")
 		}
@@ -204,18 +207,18 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		operation := strings.TrimPrefix(name, "trb.std.file.")
 		if maxBytes < 0 {
-			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("max_bytes must be non-negative"), "InvalidLimit")
+			return file.failure(e, typ, operation, errors.New("max_bytes must be non-negative"), "InvalidLimit")
 		}
 		data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 		if err != nil {
-			return e.filesystemErr(typ, operation, file.Name(), err)
+			return file.failure(e, typ, operation, err, "")
 		}
 		if int64(len(data)) > maxBytes {
-			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file exceeds max_bytes"), "TooLarge")
+			return file.failure(e, typ, operation, errors.New("file exceeds max_bytes"), "TooLarge")
 		}
 		if name == "trb.std.file.read_text" {
 			if !utf8.Valid(data) {
-				return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file is not valid UTF-8"), "InvalidEncoding")
+				return file.failure(e, typ, operation, errors.New("file is not valid UTF-8"), "InvalidEncoding")
 			}
 			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: string(data)})
 		}
@@ -224,7 +227,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if err := require(2); err != nil {
 			return Value{}, err
 		}
-		file, ok := values[0].Data.(*os.File)
+		file, ok := values[0].Data.(*scopedFile)
 		if !ok {
 			return Value{}, errors.New("filesystem write receiver is not an open file")
 		}
@@ -248,7 +251,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			err = io.ErrShortWrite
 		}
 		if err != nil {
-			return e.filesystemErr(typ, operation, file.Name(), err)
+			return file.failure(e, typ, operation, err, "")
 		}
 		unit, err := e.unitValue()
 		if err != nil {

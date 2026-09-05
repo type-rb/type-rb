@@ -3325,7 +3325,10 @@ func (g *generator) goType(t types.Type) string {
 			result = "any"
 		} else if stdlib.IsFileResourceType(t) {
 			g.requireImport("os", "")
-			result = "*os.File"
+			result = "struct { *os.File; Path string; Rooted bool }"
+		} else if t.Declaration == stdlib.DirResourceType().Declaration {
+			g.requireImport("os", "")
+			result = "*os.Root"
 		} else if t.Declaration.Kind.IsType() && t.Declaration.Module == g.modulePath && t.Declaration.Name != "" {
 			result = goIdentifier(t.Declaration.Name, true)
 			if t.Declaration.Kind == identity.Class {

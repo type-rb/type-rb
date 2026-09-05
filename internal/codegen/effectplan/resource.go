@@ -44,7 +44,7 @@ func ValidateResources(programs []*ir.Program) []diagnostic.Diagnostic {
 
 func borrowsResource(method *ir.Method) bool {
 	for _, parameter := range method.Parameters {
-		if stdlib.IsFileResourceType(parameter.Type) {
+		if stdlib.IsScopedResourceType(parameter.Type) {
 			return true
 		}
 	}
@@ -195,11 +195,11 @@ func (a *analyzer) resourceCallReaches(call *ir.Call, callee ir.Expression, cont
 		// bodies are checked with the exact File parameter as a borrow origin.
 		position := 0
 		for _, argument := range call.Arguments {
-			if stdlib.IsFileResourceType(argument.Value.ExprType()) {
+			if stdlib.IsScopedResourceType(argument.Value.ExprType()) {
 				found := false
 				for index, parameter := range target.Parameters {
 					matches := argument.Name == "" && !parameter.NamedOnly && index == position || argument.Name != "" && parameter.NamedOnly && parameter.Name == argument.Name
-					if matches && stdlib.IsFileResourceType(parameter.Type) && !parameter.Type.Nullable {
+					if matches && stdlib.IsScopedResourceType(parameter.Type) && !parameter.Type.Nullable {
 						found = true
 					}
 				}
@@ -224,7 +224,7 @@ var resourceSyncIntrinsics = func() map[string]bool {
 		"trb.cli":                "fail",
 		"trb.internal.runtime":   "fail",
 		"trb.std.file":           "open read read_text write write_text",
-		"trb.std.dir":            "children create_all",
+		"trb.std.dir":            "children create_all open open_file root_children root_create_all",
 		"trb.std.path":           "join",
 		"trb.std.io":             "puts",
 		"trb.std.strings":        "length empty strip lstrip rstrip uppercase lowercase starts_with ends_with split codepoints characters reverse try_fetch slice try_slice index rindex contains replace_all",

@@ -631,8 +631,9 @@ switches.
   annotations. It does not reserve that type name for a static-only utility
   namespace. In particular, `trb/std/file` exposes the opaque resource class
   `File`; source cannot construct it with `File.new()`.
-- The trusted `File.open` block acquires the exact standard `File` resource and
-  owns its close. A required immutable `File` parameter of an authored method
+- Trusted `File.open`, `Dir.open`, and `Dir#open_file` blocks acquire exact
+  standard `File` or `Dir` resources and own their close. A required immutable
+  `File` or `Dir` parameter of an authored method
   borrows an existing resource for that call; it does not acquire or close it.
   Immutable local aliases preserve that origin. Borrow annotations use the
   ordinary parameter/local syntax, without a public lifetime annotation.
@@ -641,7 +642,7 @@ switches.
   Nested acquisition blocks and synchronous inline collection blocks can use
   outer resources; `concurrent_map` and first-class closures cannot capture them.
   External declaration providers cannot mint resource values or certify borrows.
-  These rules use declaration identity, not the spelling `File`.
+  These rules use declaration identity, not the spelling `File` or `Dir`.
 - While a resource is held, reached operations must be verified synchronous
   TypeRB source or explicitly admitted compiler-owned intrinsics. The shared
   typed-IR pass checks imported/generated helper bodies, constructors, defaults,
@@ -845,7 +846,7 @@ switches.
 
 #### Typed filesystem boundary
 
-- Ambient `File.open`, `Dir.children`, and `Dir.create_all` require the exact
+- Ambient `File.open`, `Dir.open`, `Dir.children`, and `Dir.create_all` require the exact
   standard `Path` value. Neither String nor `RelativePath` converts implicitly.
 - `File.open` exposes only an acquired regular-file handle. It checks handle
   metadata before the body and, for `Write`, before truncation. Non-regular
@@ -855,18 +856,35 @@ switches.
   reject acquisition before opening, rather than using a pathname precheck.
   This is not a general filesystem time bound or path-containment guarantee.
 - `DirEntry<P>` retains its path domain; ambient listing returns
-  `DirEntry<Path>`. Listing requires named `max_entries`, checks that bound
+  `DirEntry<Path>` and anchored listing returns `DirEntry<RelativePath>`.
+  Listing requires named `max_entries`, checks that bound
   during enumeration, and returns `InvalidLimit` or `TooLarge` for invalid
   bounds or overflow. It never returns a silently truncated listing.
 - `FileSystemError.target` is the sum `FileSystemTarget::Host(Path)`,
-  `Relative(RelativePath)`, or `Root`. Currently implemented ambient APIs
-  produce Host targets; the other value variants do not introduce a resource.
+  `Relative(RelativePath)`, or `Root`. Ambient operations produce Host targets.
+  Anchored operations, including operations on a borrowed File acquired from
+  a Dir, preserve their Relative or Root domain and do not expose native error
+  text containing the absolute anchor path.
 - `File#read_text` uses strict UTF-8, preserving a leading BOM and returning
   `InvalidEncoding` for invalid bytes after enforcing `max_bytes`. Explicit
   Bytes conversion retains its separate replacement policy.
 - `Dir.create_all` returns `Result<Unit, FileSystemError>`, follows ordinary
   host path resolution, preserves existing directory permissions, and does not
   roll back completed ancestor creation on failure. It is not a containment API.
+- `Dir.open(Path)` acquires an opened directory anchor. `Dir#children`,
+  `Dir#create_all`, and `Dir#open_file` resolve validated RelativePath values
+  without escaping that anchor, including under concurrent pathname replacement.
+  Root listing uses omitted/nil path, not an empty RelativePath. Child entry
+  paths remain relative to the original anchor. Internal relative symlinks may
+  be followed; absolute, escaping, or unresolvable symlinks are rejected.
+  Listing classifies symlinks as Other and rejects any name outside the
+  RelativePath component grammar with UnsupportedName.
+- Anchored operations currently require the Go native Linux/macOS adapter
+  (also used by the Go-mode typed-IR REPL). Other backends reject these operations
+  at build time. Runtime hosts unable to supply the guarantee reject acquisition;
+  no pathname-prefix or realpath-check fallback is permitted. This guarantee
+  concerns pathname resolution, not mounts, hardlink provenance, special
+  filesystems, other ambient authority, or a general sandbox.
 
 ### 3.8 Program Entry
 

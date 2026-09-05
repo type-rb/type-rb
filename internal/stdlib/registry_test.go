@@ -40,13 +40,13 @@ func TestFilesystemContractOwnsScopedFileOperations(t *testing.T) {
 	if len(open.RuntimeDependencies) != 1 || open.RuntimeDependencies[0].Declaration != fileModeDeclaration {
 		t.Fatalf("File.open runtime dependencies = %#v", open.RuntimeDependencies)
 	}
-	if !IsTrustedFileOpenContract(definition, &open) {
+	if !IsTrustedResourceContract(definition, &open) {
 		t.Fatal("standard File.open was not recognized as the trusted File origin")
 	}
 	spoofed := open
 	spoofed.Intrinsic = "example.file.open"
 	clonedDefinition := *definition
-	if IsTrustedFileOpenContract(definition, &spoofed) || IsTrustedFileOpenContract(&clonedDefinition, &open) || IsTrustedFileOpenContract(nil, &open) {
+	if IsTrustedResourceContract(definition, &spoofed) || IsTrustedResourceContract(&clonedDefinition, &open) || IsTrustedResourceContract(nil, &open) {
 		t.Fatal("a non-standard block was recognized as the trusted File origin")
 	}
 	read := definition.Symbols["read_text"]
@@ -91,6 +91,43 @@ func TestScopedFileContractUsesDeclarationIdentity(t *testing.T) {
 	}
 	if ReceiverMatches(definition.Symbols["read"].Receiver, unrelated, nil) {
 		t.Fatal("an unrelated File declaration received host file methods")
+	}
+}
+
+func TestAnchoredDirectoryContracts(t *testing.T) {
+	directory, _ := Lookup("trb/std/dir")
+	for _, key := range []string{"open", "open_file"} {
+		symbol := directory.Symbols[key]
+		if !IsTrustedResourceContract(directory, &symbol) || symbol.Block == nil || !symbol.Block.ScopedParameters[0] {
+			t.Fatalf("untrusted acquisition %s", key)
+		}
+		clone := *directory
+		if IsTrustedResourceContract(&clone, &symbol) {
+			t.Fatal("cloned package acquired authority")
+		}
+	}
+	for name, intrinsic := range map[string]string{"children": "trb.std.dir.root_children", "create_all": "trb.std.dir.root_create_all", "open_file": "trb.std.dir.open_file"} {
+		definition, symbol, ok := LookupReceiverMethod(DirResourceType(), name)
+		if !ok || definition != directory || symbol.Intrinsic != intrinsic || symbol.StaticOwner != "" {
+			t.Fatalf("%s: %#v", name, symbol)
+		}
+	}
+	methods := ReceiverMethods(DirResourceType())
+	if len(methods) != 3 {
+		t.Fatalf("Dir completions: %#v", methods)
+	}
+	for _, method := range methods {
+		if method.Name == "instance_children" || method.Name == "instance_create_all" {
+			t.Fatalf("registry key leaked: %s", method.Name)
+		}
+	}
+	if !IsScopedResourceType(DirResourceType()) {
+		t.Fatal("Dir is not a resource")
+	}
+	unrelated := DirResourceType()
+	unrelated.Declaration.Module = "example/dir"
+	if IsScopedResourceType(unrelated) {
+		t.Fatal("unrelated Dir became a resource")
 	}
 }
 

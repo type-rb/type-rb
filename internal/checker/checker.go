@@ -554,7 +554,7 @@ type Checker struct {
 	scopedResourceReceiver      ast.Expression
 	scopedResourceUse           ast.Expression
 	scopedResourceType          *ast.TypeRef
-	fileResourceCallCallee      ast.Expression
+	resourceCallCallee          ast.Expression
 	blockCallbackDepth          int
 }
 
@@ -1454,11 +1454,11 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 	defer func() {
 		resolved := c.typeFromRefWithParameters(ref, typeParameters)
 		c.requireStandardResultRuntimeForSourceType(resolved)
-		if c.containsFileResourceType(resolved) && !c.typeReferenceChildContainsFileResource(ref, typeParameters) {
-			if c.scopedResourceType != nil && c.scopedResourceType.Span() == ref.Span() && stdlib.IsFileResourceType(resolved) && !resolved.Nullable {
+		if c.containsScopedResourceType(resolved) && !c.typeReferenceChildContainsScopedResource(ref, typeParameters) {
+			if c.scopedResourceType != nil && c.scopedResourceType.Span() == ref.Span() && stdlib.IsScopedResourceType(resolved) && !resolved.Nullable {
 				return
 			}
-			c.error(ref.Span(), "scoped File may only be introduced as the File.open() block parameter; it cannot appear in an authored value type")
+			c.error(ref.Span(), "scoped resource cannot appear in a stored or escaping value type; use a required immutable borrow parameter")
 		}
 	}()
 	if len(ref.Union) > 0 {
@@ -1554,20 +1554,20 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 	}
 }
 
-func (c *Checker) containsFileResourceType(typ types.Type) bool {
+func (c *Checker) containsScopedResourceType(typ types.Type) bool {
 	typ = c.expandAlias(typ, map[string]bool{})
-	if stdlib.IsFileResourceType(typ) {
+	if stdlib.IsScopedResourceType(typ) {
 		return true
 	}
 	for _, argument := range typ.Args {
-		if c.containsFileResourceType(argument) {
+		if c.containsScopedResourceType(argument) {
 			return true
 		}
 	}
 	return false
 }
 
-func (c *Checker) typeReferenceChildContainsFileResource(ref ast.TypeRef, typeParameters map[string]bool) bool {
+func (c *Checker) typeReferenceChildContainsScopedResource(ref ast.TypeRef, typeParameters map[string]bool) bool {
 	children := append([]ast.TypeRef(nil), ref.Union...)
 	children = append(children, ref.FunctionParameters...)
 	if ref.FunctionReturn != nil {
@@ -1575,7 +1575,7 @@ func (c *Checker) typeReferenceChildContainsFileResource(ref ast.TypeRef, typePa
 	}
 	children = append(children, ref.Arguments...)
 	for _, child := range children {
-		if c.containsFileResourceType(c.typeFromRefWithParameters(child, typeParameters)) {
+		if c.containsScopedResourceType(c.typeFromRefWithParameters(child, typeParameters)) {
 			return true
 		}
 	}
@@ -2171,11 +2171,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", valueType, variableType))
 				}
 			}
-			if c.containsFileResourceType(valueType) && (!stdlib.IsFileResourceType(variableType) || variableType.Nullable || n.Mutable || n.Constant) {
+			if c.containsScopedResourceType(valueType) && (!stdlib.IsScopedResourceType(variableType) || variableType.Nullable || n.Mutable || n.Constant) {
 				c.error(n.Span(), "a scoped resource alias must be an immutable local binding with the exact resource type")
 			}
-			if stdlib.IsFileResourceType(variableType) && !stdlib.IsFileResourceType(valueType) {
-				c.error(n.Span(), "a scoped resource alias requires an existing checked resource origin; a type annotation cannot acquire a File")
+			if stdlib.IsScopedResourceType(variableType) && !stdlib.IsScopedResourceType(valueType) {
+				c.error(n.Span(), "a scoped resource alias requires an existing checked resource origin; a type annotation cannot acquire a resource")
 			}
 			if n.Mutable && n.Type.Empty() && emptyKind != "" {
 				outcome, inferred := c.emptyCollectionOutcomes[n]
@@ -2222,7 +2222,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
-				if stdlib.IsFileResourceType(variableType) {
+				if stdlib.IsScopedResourceType(variableType) {
 					declared.scopedResource = true
 					declared.scopedBlockDepth = c.blockCallbackDepth
 				}
@@ -5142,7 +5142,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 		if !parameter.Mutable && isReferenceType(bindingType) {
 			bindingType.Readonly = true
 		}
-		resource := stdlib.IsFileResourceType(typ) && !typ.Nullable
+		resource := stdlib.IsScopedResourceType(typ) && !typ.Nullable
 		if resource && (parameter.Mutable || parameter.Default != nil || c.interfaceDepth > 0 || parameter.Rest || parameter.KeywordRest) {
 			c.error(parameter.Span(), "a scoped resource parameter must be an immutable required parameter of a source method")
 		}
@@ -7154,13 +7154,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			c.safeCallCallee = member
 		}
 		previousScopedReceiver := c.scopedResourceReceiver
-		previousFileResourceCallCallee := c.fileResourceCallCallee
-		c.fileResourceCallCallee = n.Callee
-		if member, ok := n.Callee.(*ast.MemberExpression); ok && !member.Namespace {
+		previousResourceCallCallee := c.resourceCallCallee
+		c.resourceCallCallee = n.Callee
+		if member, _ := safeNavigationMember(n.Callee); member != nil && !member.Namespace {
 			c.scopedResourceReceiver = member.Receiver
 		}
 		calleeType := c.checkExpression(n.Callee, sc)
-		c.fileResourceCallCallee = previousFileResourceCallCallee
+		c.resourceCallCallee = previousResourceCallCallee
 		c.scopedResourceReceiver = previousScopedReceiver
 		c.safeCallCallee = previousSafeCallCallee
 		c.directCallCallee = previousDirectCallCallee
@@ -7257,6 +7257,25 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if application.Specializer != "" {
 				c.recordCallSpecialization(n, generic, application)
 			}
+			if binding, imported := c.result.References[generic.Receiver]; imported && binding.Library != nil && stdlib.IsResourceAcquisition(binding.Library.Intrinsic) {
+				library := binding.Library
+				member := libraryBlockDeclaration(*library, typ)
+				bindings := map[string]types.Type{}
+				for index, name := range library.TypeParameters {
+					if index < len(application.TypeArguments) {
+						bindings[name] = application.TypeArguments[index]
+					}
+				}
+				c.result.ExternalMembers[n.Callee] = member
+				var definition *stdlib.Package
+				if binding.Import != nil {
+					definition = binding.Import.Definition
+				}
+				if blockType, checked := c.checkDeclarationBlock(n, member, sc, bindings, stdlib.IsTrustedResourceContract(definition, library)); checked {
+					typ = blockType
+				}
+				libraryBlockChecked = true
+			}
 			break
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
@@ -7320,27 +7339,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.checkLibraryEqualityRequirements(n.Span(), binding.Name, *library)
 				c.checkLibraryOrderingRequirements(n.Span(), binding.Name, *library)
 				if library.Block != nil {
-					member := declaration.Member{
-						Name:           binding.Name,
-						Intrinsic:      library.Intrinsic,
-						Return:         typ,
-						TypeParameters: append([]string(nil), library.TypeParameters...),
-						Block: &declaration.Block{
-							Parameters:       append([]types.Type(nil), library.Block.Parameters...),
-							ControlBoundary:  library.Block.ControlBoundary,
-							Return:           library.Block.Return,
-							ResultBoundary:   library.Block.ResultBoundary,
-							Structured:       library.Block.Structured,
-							ScopedParameters: append([]bool(nil), library.Block.ScopedParameters...),
-						},
-					}
+					member := libraryBlockDeclaration(*library, typ)
 					c.result.ExternalMembers[n.Callee] = member
 					var definition *stdlib.Package
 					if binding.Import != nil {
 						definition = binding.Import.Definition
 					}
-					trustedFileOpen := stdlib.IsTrustedFileOpenContract(definition, library)
-					if blockType, checked := c.checkDeclarationBlock(n, member, sc, map[string]types.Type{}, trustedFileOpen); checked {
+					trustedResourceAcquisition := stdlib.IsTrustedResourceContract(definition, library)
+					if blockType, checked := c.checkDeclarationBlock(n, member, sc, map[string]types.Type{}, trustedResourceAcquisition); checked {
 						typ = blockType
 					}
 					libraryBlockChecked = true
@@ -7627,8 +7633,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if argument.Name == "" {
 				position++
 			}
-			if c.containsFileResourceType(c.result.Expressions[argument.Value]) && (!stdlib.IsFileResourceType(parameter) || parameter.Nullable) {
-				c.error(argument.Value.Span(), "scoped resource argument requires an exact File borrow parameter; Any, generic storage, and native arguments cannot retain a resource")
+			if c.containsScopedResourceType(c.result.Expressions[argument.Value]) && (!stdlib.IsScopedResourceType(parameter) || parameter.Nullable) {
+				c.error(argument.Value.Span(), "scoped resource argument requires an exact resource borrow parameter; Any, generic storage, and native arguments cannot retain a resource")
 			}
 		}
 	}
@@ -7646,8 +7652,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.error(expression.Span(), fmt.Sprintf("declaration %s cannot be used as a value; select one of its members", expressionTypeName(expression)))
 		typ = invalidType()
 	}
-	if c.containsFileResourceType(typ) && !c.fileResourceExpressionAllowed(expression, typ, sc) {
-		c.error(expression.Span(), "a scoped File value can only be obtained as the File.open() block parameter")
+	if c.containsScopedResourceType(typ) && !c.scopedResourceExpressionAllowed(expression, typ, sc) {
+		c.error(expression.Span(), "a scoped resource value requires a checked acquisition or borrow origin")
 		typ = invalidType()
 	}
 	c.result.Expressions[expression] = typ
@@ -7719,21 +7725,20 @@ func (c *Checker) declarationOwnerUsedAsValue(expression ast.Expression, sc *sco
 	return c.declarationOwnerExpression(expression, sc)
 }
 
-func (c *Checker) fileResourceExpressionAllowed(expression ast.Expression, typ types.Type, sc *scope) bool {
-	// A call target denotes an operation declaration, not the File value that
+func (c *Checker) scopedResourceExpressionAllowed(expression ast.Expression, typ types.Type, sc *scope) bool {
+	// A call target denotes an operation declaration, not the resource value that
 	// the operation may return. The enclosing CallExpression is checked again
 	// after invocation and therefore remains the value-origin boundary.
-	if expression == c.fileResourceCallCallee {
+	if expression == c.resourceCallCallee {
 		return true
 	}
 	expanded := c.expandAlias(typ, map[string]bool{})
-	if !stdlib.IsFileResourceType(expanded) {
+	if !stdlib.IsScopedResourceType(expanded) {
 		return false
 	}
-	// File itself remains the declaration root used to select File.open, and an
-	// explicit declaration-reference argument is metadata rather than a runtime
-	// File value.
-	if (expression == c.declarationOwnerReceiver || c.declarationReferences > 0) && c.result.ExpressionDeclarations[expression] == stdlib.FileResourceType().Declaration {
+	// A resource declaration remains the root used to select its factory. An
+	// explicit declaration-reference argument is metadata, not a resource value.
+	if (expression == c.declarationOwnerReceiver || c.declarationReferences > 0) && c.result.ExpressionDeclarations[expression] == expanded.Declaration {
 		return true
 	}
 	identifier, ok := expression.(*ast.Identifier)
@@ -9222,7 +9227,20 @@ func (c *Checker) checkDeclarationArgumentsWithBindings(span token.Span, member 
 	return instantiateDeclarationType(member.Return, bindings), bindings
 }
 
-func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope, bindings map[string]types.Type, trustedFileOpen bool) (types.Type, bool) {
+func libraryBlockDeclaration(library stdlib.Symbol, returned types.Type) declaration.Member {
+	return declaration.Member{
+		Name: library.Name, Intrinsic: library.Intrinsic, Return: returned,
+		TypeParameters: append([]string(nil), library.TypeParameters...),
+		Block: &declaration.Block{
+			Parameters:      append([]types.Type(nil), library.Block.Parameters...),
+			ControlBoundary: library.Block.ControlBoundary, Return: library.Block.Return,
+			ResultBoundary: library.Block.ResultBoundary, Structured: library.Block.Structured,
+			ScopedParameters: append([]bool(nil), library.Block.ScopedParameters...),
+		},
+	}
+}
+
+func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declaration.Member, sc *scope, bindings map[string]types.Type, trustedResourceAcquisition bool) (types.Type, bool) {
 	if bindings == nil {
 		bindings = map[string]types.Type{}
 	}
@@ -9275,8 +9293,8 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 			c.rejectClosedInbound(call.Block.Span(), parameterType)
 		}
 		scoped := index < len(member.Block.ScopedParameters) && member.Block.ScopedParameters[index]
-		if c.containsFileResourceType(parameterType) && !(trustedFileOpen && scoped && stdlib.IsFileResourceType(parameterType)) {
-			c.error(call.Block.Span(), "only the standard File.open() contract may introduce a scoped File block parameter")
+		if c.containsScopedResourceType(parameterType) && !(trustedResourceAcquisition && scoped && stdlib.IsScopedResourceType(parameterType)) {
+			c.error(call.Block.Span(), "only trusted standard resource acquisition contracts may introduce scoped resource block parameters")
 			parameterType = invalidType()
 			scoped = false
 		}
@@ -9297,7 +9315,7 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		}
 		blockScope.values[name] = declared
 	}
-	if !trustedFileOpen {
+	if !trustedResourceAcquisition {
 		c.blockCallbackDepth++
 		defer func() { c.blockCallbackDepth-- }()
 	}

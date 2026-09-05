@@ -16,6 +16,9 @@ type Generated struct {
 }
 
 func Generate(program *ir.Program) (Generated, error) {
+	if err := validateAnchoredDirectories([]*ir.Program{program}); err != nil {
+		return Generated{}, err
+	}
 	if program.Mode == "go" || program.Mode == "typescript" {
 		program = normalizeDivergingControlFlow(program)
 	}
@@ -38,6 +41,9 @@ func Generate(program *ir.Program) (Generated, error) {
 // target source. Backends without generation-time validation return directly;
 // TypeScript receives the same normalized lowered IR as GenerateProject.
 func ValidateProject(programs []*ir.Program) error {
+	if err := validateAnchoredDirectories(programs); err != nil {
+		return err
+	}
 	if len(programs) == 0 {
 		return nil
 	}
@@ -56,6 +62,9 @@ func ValidateProject(programs []*ir.Program) error {
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([]Generated, error) {
+	if err := validateAnchoredDirectories(programs); err != nil {
+		return nil, err
+	}
 	if len(programs) > 0 && programs[0].Mode == "typescript" {
 		normalized := normalizeProjectDivergingControlFlow(programs)
 		generated, err := typescript.GenerateProjectMapped(normalized)

@@ -42,7 +42,7 @@ alias Resource = File
 class Child < Resource
 end
 `,
-			diagnostic: "scoped File may only be introduced as the File.open() block parameter",
+			diagnostic: "scoped resource cannot appear in a stored or escaping value type",
 		},
 		"directory direct": {
 			source: `import { Dir } from trb/std/dir
@@ -76,7 +76,7 @@ alias Resource = Dir
 class Child < Resource
 end
 `,
-			diagnostic: "Resource cannot be used as a superclass because it is nonconstructible",
+			diagnostic: "scoped resource cannot appear in a stored or escaping value type",
 		},
 	}
 

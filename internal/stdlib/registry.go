@@ -54,10 +54,10 @@ type Symbol struct {
 	// language-service completion while allowing compiler-owned source to use
 	// the same checked package boundary.
 	CompilerOnly bool
-	// trustedScopedFileOrigin is an internal capability token copied only from
-	// the bundled File.open registry symbol. Declaration and native providers
+	// trustedResourceOrigin is an internal capability token copied only from
+	// bundled resource acquisition symbols. Declaration and native providers
 	// cannot manufacture it through their public protocols.
-	trustedScopedFileOrigin bool
+	trustedResourceOrigin bool
 	// RuntimeIndependent marks an intrinsic that is fully lowered by every
 	// backend even when its public package also provides a source wrapper.
 	RuntimeIndependent  bool
@@ -526,11 +526,11 @@ end
 		},
 		Symbols: map[string]Symbol{
 			"open": {
-				Name:                    "open",
-				Intrinsic:               "trb.std.file.open",
-				StaticOwner:             "File",
-				TypeParameters:          []string{"T"},
-				trustedScopedFileOrigin: true,
+				Name:                  "open",
+				Intrinsic:             "trb.std.file.open",
+				StaticOwner:           "File",
+				TypeParameters:        []string{"T"},
+				trustedResourceOrigin: true,
 				Parameters: []Parameter{
 					{Name: "path", Type: PathType()},
 					{Name: "mode", Type: fileModeType, Optional: true, Keyword: true},
@@ -563,7 +563,7 @@ end
 		Source: dirSource(),
 		Kind:   Portable,
 		OpaqueTypes: map[identity.Declaration]string{
-			dirDeclaration: "Dir cannot be constructed directly; use Dir.children()",
+			dirDeclaration: "Dir cannot be constructed directly; use Dir.open() with a block",
 		},
 		Symbols: map[string]Symbol{
 			"children": {
@@ -572,6 +572,17 @@ end
 				StaticOwner: "Dir",
 				Parameters:  []Parameter{{Name: "path", Type: PathType()}, {Name: "max_entries", Type: integerType, Keyword: true}},
 				Return:      filesystemResult(arrayOf(dirEntryType)),
+			},
+			"open":      dirOpenSymbol(),
+			"open_file": dirOpenFileSymbol(),
+			"instance_children": {
+				Name: "children", Intrinsic: "trb.std.dir.root_children", Receiver: DirResourceType(),
+				Parameters: []Parameter{{Name: "path", Type: optionalRelativePathType(), Optional: true}, {Name: "max_entries", Type: integerType, Keyword: true}},
+				Return:     filesystemResult(arrayOf(rootedDirEntryType())),
+			},
+			"instance_create_all": {
+				Name: "create_all", Intrinsic: "trb.std.dir.root_create_all", Receiver: DirResourceType(),
+				Parameters: []Parameter{{Name: "path", Type: RelativePathType()}}, Return: filesystemResult(unitType),
 			},
 			"create_all": {
 				Name: "create_all", Intrinsic: "trb.std.dir.create_all", StaticOwner: "Dir",
@@ -1678,10 +1689,11 @@ func LookupReceiverMethod(receiver types.Type, name string) (*Package, Symbol, b
 		// returned by another module and its package was not directly imported.
 		if receiver.Kind == types.Named && !receiver.Declaration.Empty() {
 			for _, definition := range registry {
-				symbol, found := definition.Symbols[name]
-				if found && symbol.HasReceiver() && symbol.Receiver.Declaration == receiver.Declaration && receiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
-					symbol.Receiver = receiver
-					return definition, symbol, true
+				for _, symbol := range definition.Symbols {
+					if symbol.Name == name && symbol.HasReceiver() && symbol.Receiver.Declaration == receiver.Declaration && receiverMatches(symbol.Receiver, receiver, symbol.TypeParameters) {
+						symbol.Receiver = receiver
+						return definition, symbol, true
+					}
 				}
 			}
 		}
@@ -1732,13 +1744,12 @@ func ReceiverMethods(receiver types.Type) []Symbol {
 	// Discover those contracts directly and retain the same exact matching used
 	// by the checker so an unrelated File declaration receives no host methods.
 	for _, definition := range registry {
-		for name, method := range definition.Symbols {
+		for _, method := range definition.Symbols {
 			if !method.HasReceiver() || !ReceiverMatches(method.Receiver, receiver, method.TypeParameters) {
 				continue
 			}
-			method.Name = name
 			method.Receiver = receiver
-			methodsByName[name] = method
+			methodsByName[method.Name] = method
 		}
 	}
 	names = names[:0]
