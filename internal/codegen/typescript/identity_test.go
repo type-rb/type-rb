@@ -4,8 +4,28 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
+
+func TestFileHandleTypeOverridesNominalImportName(t *testing.T) {
+	file := stdlib.FileResourceType()
+	generator := &generator{
+		modulePath: "main", declarationNames: map[identity.Declaration]string{file.Declaration: "Handle"},
+	}
+	const handle = "{ readonly fd: number; readonly path: string }"
+	if got := generator.tsType(file); got != handle {
+		t.Fatalf("scoped File type = %q, want %q", got, handle)
+	}
+	if got := generator.tsTypeWithIdentity(file, &typescriptTypeIdentity{name: "File"}); got != handle {
+		t.Fatalf("scoped File expression type = %q, want %q", got, handle)
+	}
+	userFile := file
+	userFile.Declaration.Module = "main"
+	if got := generator.tsType(userFile); got != "File" {
+		t.Fatalf("unrelated File type = %q, want File", got)
+	}
+}
 
 func TestTypeNameUsesLocalCanonicalDeclarationIdentity(t *testing.T) {
 	generator := &generator{modulePath: "main", typeAliases: map[string]string{}, typeMappings: map[string]string{}}

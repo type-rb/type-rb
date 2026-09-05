@@ -46,6 +46,17 @@ func TestResourceBorrowSourceHelpers(t *testing.T) {
 	}
 }
 
+func TestResourceBorrowTypeScriptImportAliases(t *testing.T) {
+	source := strings.Replace(resourceBorrowImports, "import trb/std/path", "import { Path as HostPath } from trb/std/path", 1)
+	source = strings.Replace(source, "import trb/std/file", "import { File as Handle } from trb/std/file", 1)
+	source += strings.NewReplacer("path: Path", "path: HostPath", "file: File", "file: Handle", "File.open", "Handle.open").Replace(resourceBorrowHelpers)
+	artifacts, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: []byte(source)}}, Options{Mode: "typescript"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkTypeScriptArtifacts(t, artifacts, "resource_borrow_aliases")
+}
+
 func TestResourceBorrowRejectsEscapeAndTransitiveSuspension(t *testing.T) {
 	cases := map[string]string{
 		"forged annotated alias": `def read(value: Any)
@@ -233,6 +244,9 @@ end
 			artifacts, err := CompileProject([]SourceUnit{helper, main}, Options{Mode: mode, GoModule: "example.com/borrow", RubyLoader: "require_relative", AllowUnusedImports: true})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if mode == "typescript" {
+				checkTypeScriptArtifacts(t, artifacts, "imported_resource_borrow")
 			}
 			requireEffectRuntime(t, mode)
 			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, "example.com/borrow")); got != "imported" {

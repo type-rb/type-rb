@@ -610,6 +610,7 @@ func (g *generator) statement(statement ir.Statement) {
 			return
 		}
 		if (n.Standard || n.Official) && (!n.Runtime || !n.RuntimeRequired) && !nestedTypeRequired {
+			g.importNewtypeAnnotations(n)
 			return
 		}
 		importPath := n.Path
@@ -1115,6 +1116,33 @@ func (g *generator) registerNestedTypeMappings(imported *ir.Import) {
 	}
 }
 
+// Newtypes retain nominal declaration names in type annotations even when no
+// runtime member is used. Import those names without acquiring runtime values.
+func (g *generator) importNewtypeAnnotations(imported *ir.Import) {
+	if !imported.Runtime {
+		return
+	}
+	var names []string
+	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
+		if imported.SymbolKinds[symbol] != "newtype" || strings.Contains(symbol, "::") {
+			continue
+		}
+		name := tsImportSpecifier(symbol, imported.SymbolAliases[symbol])
+		if !containsString(names, name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	importPath := strconv.Quote(tsImportPath(g.modulePath, imported.Path, g.moduleExtensions[imported.Path]))
+	if imported.Namespace && imported.Alias != "" {
+		g.line("import type * as " + imported.Alias + " from " + importPath + ";")
+	} else {
+		g.line("import type { " + strings.Join(names, ", ") + " } from " + importPath + ";")
+	}
+}
+
 func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 	if imported == nil || imported.Native && len(imported.RuntimeSymbols) > 0 {
 		return
@@ -1124,12 +1152,16 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 	case "trb/std/file/index", "trb/std/dir/index", "trb/std/errors/index", "trb/std/result/index", "trb/std/path/index":
 		standardIdentity = true
 	}
-	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
+	typeOnly := (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired)
+	if typeOnly && !imported.Runtime {
 		return
 	}
 	runtimeAlias := "__trb_" + pathpkg.Base(pathpkg.Dir(imported.Path))
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		kind := identity.Kind(imported.SymbolKinds[symbol])
+		if typeOnly && kind != identity.Newtype {
+			continue
+		}
 		if !standardIdentity && kind != identity.Newtype {
 			continue
 		}
@@ -2955,6 +2987,9 @@ func (g *generator) expressionType(typ types.Type, expression ir.Expression) str
 }
 
 func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeIdentity) string {
+	if stdlib.IsFileResourceType(typ) {
+		return g.tsTypeWithoutSemanticIdentity(typ)
+	}
 	if !typeScriptTypeIdentityPresent(identity) {
 		return g.tsType(typ)
 	}

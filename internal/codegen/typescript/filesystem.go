@@ -138,7 +138,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	}
 	g.line("const " + raw + ": " + resultType + " = " + invocation)
 	g.indent++
-	g.line("const " + path + " = " + g.expr(block.Call.Arguments[0].Value) + ";")
+	g.line("const " + path + ": string = " + g.expr(block.Call.Arguments[0].Value) + ";")
 	modeName := g.filesystemRuntimeName(stdlib.FileModeType())
 	modeValue := modeName + ".Read"
 	if len(block.Call.Arguments) > 1 {
