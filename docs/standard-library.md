@@ -459,6 +459,127 @@ decoded bytes that are not valid UTF-8 return `URL::DecodeError`.
 
 Complete URL parsing remains a future addition to the package.
 
+## Path values
+
+`trb/std/path` provides two distinct String-backed nominal values. A `Path`
+contains host-native path text. A `RelativePath` contains a validated logical
+descendant, independent of the host's separator rules. Neither represents an
+opened resource or grants filesystem access.
+
+<!-- trb-doc-test: stdlib-path-values -->
+```trb
+import { Path, RelativePath, RelativePathError } from trb/std/path
+import trb/std/result
+
+def output_path(root: Path, name: String): Result<Path, RelativePathError>
+	base := try RelativePath.parse("generated/reports")
+	leaf := try base.child(name)
+	return Result<Path, RelativePathError>::Ok(root.join(leaf))
+end
+```
+
+The declaration-root import `import trb/std/path` binds `Path`. Import the peer
+`RelativePath` and `RelativePathError` declarations by exact name when needed.
+
+| Operation | Result |
+| --- | --- |
+| `Path.new(source: String)` | `Path` |
+| `Path#to_s()` | `String` |
+| `Path#join(path: RelativePath)` | `Path` |
+| `RelativePath.parse(source: String)` | `Result<RelativePath, RelativePathError>` |
+| `RelativePath#to_s()` | `String` |
+| `RelativePath#join(path: RelativePath)` | `RelativePath` |
+| `RelativePath#child(name: String)` | `Result<RelativePath, RelativePathError>` |
+| `RelativePath#parent()` | `RelativePath?` |
+
+Both values retain the ordinary public newtype `value()` projection and String
+equality. Equality compares exact text, not filesystem identity or normalized
+filenames. `Path.new` accepts any String, including an empty one; it performs
+no validation, normalization, existence check, environment or home expansion,
+or conversion to an absolute path. `RelativePath.new` is private to its type
+body, so portable source must use its public factory.
+
+### Logical descendant grammar
+
+`RelativePath.parse` accepts a nonempty sequence of nonempty `/`-separated
+components and preserves the input exactly. The fixed rules reject:
+
+- Leading or trailing `/`, repeated `/`, and components equal to `.` or `..`.
+- Backslash, U+0000 through U+001F, and the ASCII characters `< > : " | ? *`.
+  This also excludes absolute, drive-prefixed, UNC, and alternate-data-stream
+  spellings; it does not reinterpret any of them as relative input.
+- A component ending in an ASCII dot or space.
+- Reserved device-name stems, using ASCII-only case-insensitive comparison:
+  `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by
+  one of `0`–`9`, `¹`, `²`, or `³`. The stem is the text before the first dot,
+  with trailing ASCII spaces removed for this check only. Extensions do not
+  escape the rule: `con.txt`, `CON .txt`, and `lpt¹.log` are rejected.
+
+This deliberately conservative logical grammar is informed by
+[Windows filename rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file),
+but does not delegate validation to the current operating system. It does not
+normalize Unicode, change case, trim the returned value, limit path length, or
+guarantee that every accepted name can be created on every filesystem. Case
+and Unicode-normalization collisions remain application concerns. `.config`,
+`..name`, leading spaces, and non-ASCII names such as `日本語/😀.md` are valid.
+
+`join` composes two validated descendants with one `/` and cannot introduce an
+invalid component. `child` accepts exactly one new component and validates it;
+it is not a String overload of `join`. `parent` removes the last component and
+returns `nil` for a one-component path. There is no empty `RelativePath` value
+representing the root.
+
+`RelativePathError` is a payload-free enum, separate from I/O errors:
+
+| Case | Failure |
+| --- | --- |
+| `Empty` | The input is empty. |
+| `EmptyComponent` | A leading, trailing, or repeated `/` occurs. |
+| `DotComponent` | A component is `.` or `..`. |
+| `InvalidCharacter` | A component contains a prohibited character. |
+| `TrailingDotOrSpace` | A component ends with an ASCII dot or space. |
+| `ReservedName` | A component has a reserved device-name stem. |
+| `MultipleComponents` | A `child` argument contains `/`. |
+
+`parse` checks empty input and empty components first, then components in
+source order, using the remaining validation cases in the order above. `child`
+checks for `/` before calling the same parser. `error.to_s()` provides a human
+diagnostic without embedding the input; applications should branch on the enum,
+not the message text.
+
+Generic inbound representation decoding cannot construct `RelativePath`.
+Decode a String or representation DTO and call `RelativePath.parse` explicitly.
+Outgoing codecs may project it to String, as for other closed newtypes.
+
+### Host composition
+
+`Path#join` appends a validated descendant using the **target runtime's** host
+separator, not the compiler machine's. The parent is preserved byte for byte,
+including `..`, repeated separators, and mixed slash styles. On Windows only
+the child's `/` characters become `\`. A separator is inserted unless the
+parent is empty, already ends in an accepted host separator, or is exactly a
+Windows drive letter followed by `:`. Thus POSIX `/` and `//` stay distinct,
+Windows `C:` produces `C:child`, `C:\` produces `C:\child`, and a UNC share
+root receives a separator. An empty parent produces just the host-spelled child.
+Receiver and argument are each evaluated once, in that order; safe navigation
+skips the argument when the receiver is `nil`.
+
+There is no cleaning join, parent resolution, or filesystem access. A parent
+containing `symlink/..` retains its host interpretation, and a descendant can
+still traverse a symlink when later opened: these value types do **not** provide
+root containment or a security boundary.
+
+Logical validation and composition are ordinary TypeRB source. The one
+compiler-owned operation is host joining: portable source and the current
+adapter protocol do not expose a target-host separator query without introducing
+a platform dependency. The intrinsic keeps that host choice separate from the
+pure package and can move to an ordinary adapter when that boundary is available.
+
+Go, Ruby, and Node/Bun TypeScript support host joining. An explicit
+`typescript.runtime: "browser"` build rejects `Path#join`; it still supports
+`Path.new`, `to_s`, and all `RelativePath` operations. The typed-IR REPL uses
+the machine running the evaluator for host joining, regardless of output mode.
+
 ## Filesystem
 
 `trb/std/file` and `trb/std/dir` are separate host-filesystem bridges. `File`
@@ -575,9 +696,11 @@ given to `Dir.children` and appends the entry name without a cleaning join. It
 therefore preserves host resolution for parents containing symbolic links and
 `..`. The appended separator is host-native, existing Windows `/` or `\`
 suffixes are accepted, `C:` remains drive-relative as `C:child`, and UNC share
-roots receive a separator. General parsing, cleaning, volume handling, and
-cross-host path conversion are deferred until TypeRB has a genuine nominal
-`Path` value type.
+roots receive a separator. These I/O calls currently consume Strings;
+`Path#to_s()` supplies their host-native input. The separate
+[path value API](#path-values) can construct a not-yet-existing descendant
+without enumerating a directory. General host-path parsing, cleaning, volume
+inspection, and cross-host conversion are not provided.
 
 ## Process
 

@@ -302,6 +302,34 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   lowered to nominal-owner helpers, including in the REPL; they are not added
   to the representation's native prototype or class.
 
+#### Path values
+
+- `trb/std/path` exports String-backed `Path` and closed `RelativePath`
+  newtypes, with the peer `RelativePathError` enum. `Path.new(String)` is an
+  infallible exact wrapper; it does not validate, normalize, access the
+  filesystem, or change relative text into absolute text. Both newtypes use
+  representation equality, not filesystem identity.
+- `RelativePath.parse(String)` returns `Result<RelativePath, RelativePathError>`
+  and preserves accepted text. Its host-independent slash-component grammar
+  rejects empty input/components, `.`/`..`, control characters U+0000–U+001F,
+  backslash, `< > : " | ? *`, trailing component dot/ASCII space, and the fixed
+  ASCII-case-insensitive reserved stems specified in the
+  [standard-library reference](standard-library.md#logical-descendant-grammar).
+  It does not normalize Unicode or guarantee creation on every filesystem.
+- `RelativePath#join(RelativePath)` composes validated paths infallibly;
+  `child(String)` validates a single component and returns a Result.
+  `parent()` returns `RelativePath?`, with `nil` for a one-component path.
+  Root is not an empty relative value. Both path types expose `to_s()`.
+- `Path#join(RelativePath)` uses the target host's separators, preserves the
+  parent text exactly, and retains Windows drive-relative and POSIX double-root
+  semantics. It performs no filesystem access or lexical cleaning and grants
+  no containment guarantee. The method requires a host runtime; explicit
+  TypeScript browser builds reject it without rejecting the pure value APIs.
+  The REPL uses its evaluator host, independently of code-generation mode.
+- Path methods obey ordinary nominal receiver, argument evaluation, nullable
+  safe-navigation, Result must-use, and closed-newtype representation-boundary
+  rules. There is no static `Path.join` mirror or automatic inbound factory.
+
 #### Fresh empty mutable collections
 
 - An unannotated `mut values := []` or `mut values := {}` starts with a

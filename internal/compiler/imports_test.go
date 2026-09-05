@@ -1985,8 +1985,8 @@ func TestPortableArrayAndHashDiagnosticsAreModeIndependent(t *testing.T) {
 	}
 }
 
-func TestRemovedPathAndFilesystemPackagesCannotBeImported(t *testing.T) {
-	for _, packagePath := range []string{"trb/std/path", "trb/std/filesystem"} {
+func TestRemovedFilesystemPackageCannotBeImported(t *testing.T) {
+	for _, packagePath := range []string{"trb/std/filesystem"} {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
 			_, err := Compile("removed_package.trb", []byte("import "+packagePath+"\n"), mode)
 			want := "unknown TypeRB package " + packagePath

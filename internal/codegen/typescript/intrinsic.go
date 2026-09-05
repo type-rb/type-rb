@@ -113,6 +113,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	}
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
 	switch name {
+	case "trb.std.path.join":
+		return pathJoinExpression(arguments[0], arguments[1], hostPathWindowsExpression())
 	case "trb.std.io.puts":
 		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Array {
 			return "console.log(" + portableArrayString(arguments[0], call.Arguments[0].Value.ExprType()) + ")"

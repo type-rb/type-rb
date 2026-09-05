@@ -280,6 +280,7 @@ type Options struct {
 type Module struct {
 	Path                string
 	Filename            string
+	PackageAliases      map[string]string
 	Program             *ast.Program
 	Exports             map[string]Export
 	CompilerOwned       bool
@@ -346,6 +347,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		}
 		catalog.Modules[clean] = module
 	}
+	canonicalizeNewtypeContracts(catalog)
 	typeOwners := map[string]*Module{}
 	typesByName := map[string]*Export{}
 	modulePaths := make([]string, 0, len(catalog.Modules))
@@ -1023,6 +1025,15 @@ func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding,
 		for _, binding := range symbols {
 			if binding.Export != nil && typeExport(binding.Export.Kind) && binding.DeclarationIdentity() == declaration {
 				return binding, true
+			}
+		}
+	}
+	// A returned nominal value may come through a third module. Its exact
+	// identity permits contract lookup, but never adds a source-visible name.
+	if declaration.Kind == identity.Newtype && r.Catalog != nil {
+		if module := r.Catalog.Modules[declaration.Module]; module != nil {
+			if exported, ok := exportNamed(module.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
+				return catalogNewtypeBinding(module, exported), true
 			}
 		}
 	}

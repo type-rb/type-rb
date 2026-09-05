@@ -69,7 +69,7 @@ func TestFilesystemContractOwnsScopedFileOperations(t *testing.T) {
 		t.Fatal("Dir is not opaque")
 	}
 
-	for _, removed := range []string{"trb/std/filesystem", "trb/std/path", "trb/internal/filesystem"} {
+	for _, removed := range []string{"trb/std/filesystem", "trb/internal/filesystem"} {
 		if _, exists := Lookup(removed); exists {
 			t.Fatalf("removed package %s remains registered", removed)
 		}
@@ -91,6 +91,29 @@ func TestScopedFileContractUsesDeclarationIdentity(t *testing.T) {
 	}
 	if ReceiverMatches(definition.Symbols["read"].Receiver, unrelated, nil) {
 		t.Fatal("an unrelated File declaration received host file methods")
+	}
+}
+
+func TestPathJoinContractUsesExactNominalIdentity(t *testing.T) {
+	definition, method, ok := LookupReceiverMethod(PathType(), "join")
+	if !ok || definition.Path != "trb/std/path" || definition.Root != "Path" || method.Intrinsic != "trb.std.path.join" || method.StaticOwner != "" {
+		t.Fatalf("Path#join contract = %#v, %v", method, ok)
+	}
+	if len(method.Parameters) != 1 || method.Parameters[0].Type.Declaration != RelativePathType().Declaration || method.Return.Declaration != PathType().Declaration {
+		t.Fatalf("Path#join signature = %#v", method)
+	}
+	for _, receiver := range []types.Type{
+		{Kind: types.Named, Name: "Path", Declaration: identity.Declaration{Module: "example/path", Name: "Path", Kind: identity.Newtype}},
+		{Kind: types.Named, Name: "Path"},
+		RelativePathType(),
+		types.FromName("String"),
+	} {
+		if _, method, found := LookupReceiverMethod(receiver, "join"); found && method.Intrinsic == "trb.std.path.join" {
+			t.Errorf("unrelated receiver %s received host composition", receiver)
+		}
+	}
+	if methods := ReceiverMethods(PathType()); len(methods) != 1 || methods[0].Name != "join" {
+		t.Errorf("Path intrinsic completions = %#v", methods)
 	}
 }
 

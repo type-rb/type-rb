@@ -134,6 +134,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return alias + ".NewResultErr[" + successType + ", " + errorType + "](" + value + ")"
 	}
 	switch name {
+	case "trb.std.path.join":
+		g.requireImport("runtime", "")
+		g.requireImport("strings", "")
+		return pathJoinExpression(arguments[0], arguments[1], `runtime.GOOS == "windows"`)
 	case "trb.std.io.puts":
 		g.requireImport("fmt", "")
 		if len(call.Arguments) == 1 {

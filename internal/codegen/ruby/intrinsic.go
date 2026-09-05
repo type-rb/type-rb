@@ -81,6 +81,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Result::Err.new(" + value + ")"
 	}
 	switch name {
+	case "trb.std.path.join":
+		return pathJoinExpression(arguments[0], arguments[1], `!::File::ALT_SEPARATOR.nil?`)
 	case "trb.std.io.puts":
 		if len(call.Arguments) == 1 && call.Arguments[0].Value.ExprType().Kind == types.Array {
 			return "$stdout.puts((" + arguments[0] + ").inspect)"

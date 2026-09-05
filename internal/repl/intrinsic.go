@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/pathvalue"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -77,6 +79,16 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		return nil
 	}
 	switch name {
+	case "trb.std.path.join":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		parent, parentOK := values[0].Data.(string)
+		child, childOK := values[1].Data.(string)
+		if !parentOK || !childOK {
+			return Value{}, errors.New("Path#join requires path values")
+		}
+		return Value{Type: typ, Data: pathvalue.Join(parent, child, runtime.GOOS == "windows")}, nil
 	case "trb.web.request_query":
 		if err := require(1); err != nil {
 			return Value{}, err

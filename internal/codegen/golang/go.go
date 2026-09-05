@@ -3331,6 +3331,11 @@ func (g *generator) goType(t types.Type) string {
 			if t.Declaration.Kind == identity.Class {
 				result = "*" + result
 			}
+		} else if t.Declaration.Kind == identity.Newtype && t.Declaration.Module != "" {
+			result = goIdentifier(t.Declaration.Name, true)
+			if alias := g.declarationAlias(t.Declaration); alias != "" {
+				result = alias + "." + result
+			}
 		} else if alias := g.filesystemDeclarationAlias(t); alias != "" {
 			result = alias + "." + goIdentifier(t.Declaration.Name, true)
 			if t.Declaration.Kind == identity.Class {

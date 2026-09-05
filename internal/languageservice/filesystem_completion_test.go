@@ -28,7 +28,7 @@ func TestFilesystemCompletionUsesDeclarationRootsAndExactPeerImports(t *testing.
 					t.Errorf("%s candidate=%#v, want import path=%q symbol=%q", expected.name, symbol, expected.path, expected.symbol)
 				}
 			}
-			for _, removed := range []string{"FileSystem", "Path"} {
+			for _, removed := range []string{"FileSystem"} {
 				if symbol, ok := filesystemCompletionSymbol(candidates.Symbols, removed); ok {
 					t.Errorf("removed %s root remains in standard completion: %#v", removed, symbol)
 				}
