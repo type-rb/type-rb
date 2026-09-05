@@ -88,7 +88,7 @@ Public operations use these owners:
 2. An operation naturally associated with an actual nominal type, but not with
    an existing instance, is a class member on that type. This includes genuine
    constructors and factories such as `StringBuilder.new()` and
-   `File.open(path)`, as well as `Dir.children(path)`.
+   `File.open(path)`, as well as `Dir.children(path, max_entries: 1000)`.
 3. A domain algorithm with no natural value receiver is a module member.
    Examples include `Math.sqrt(9.0)` and `JSON.decode<Value>(text)`.
 4. An intentionally direct language or DSL operation may remain a top-level

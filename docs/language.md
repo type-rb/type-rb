@@ -188,7 +188,7 @@ have the same semantics:
 - Use a class member for an operation naturally associated with an actual
   nominal type but not an existing instance. This includes constructors and
   factories such as `StringBuilder.new()` and `File.open(path)`, and associated
-  operations such as `Dir.children(path)`.
+  operations such as `Dir.children(path, max_entries: 1000)`.
 - Use a module member for a domain algorithm with no natural value receiver,
   such as `Math.sqrt(9.0)` or `JSON.decode<Value>(text)`.
 - Import an intentionally direct language or DSL operation by exact name, as

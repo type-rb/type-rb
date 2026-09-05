@@ -2,6 +2,7 @@ package golang
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/stdlib"
@@ -47,7 +48,74 @@ func (g *generator) filesystemResultErr(valueType, errorType types.Type, value s
 }
 
 func (g *generator) filesystemError(errorType types.Type, operation, path, message, kind string) string {
-	return g.goType(errorType) + "{Operation: " + strconv.Quote(operation) + ", Path: " + path + ", Message: " + message + ", Kind: " + g.filesystemKind(kind) + "}"
+	target := g.declarationAlias(stdlib.FileSystemTargetType().Declaration) + ".NewFileSystemTargetHost(" + path + ")"
+	return g.goType(stdlib.FileSystemErrorType()) + "{Operation: " + strconv.Quote(operation) + ", Target: " + target + ", Message: " + message + ", Kind: " + g.filesystemKind(kind) + "}"
+}
+
+func (g *generator) filesystemNativeError(operation, path, cause string) string {
+	g.requireImport("os", "")
+	value := g.filesystemError(stdlib.FileSystemErrorType(), operation, path, cause+".Error()", "Other")
+	return "func() " + g.goType(stdlib.FileSystemErrorType()) + " { failure := " + value + "; if os.IsNotExist(" + cause + ") { failure.Kind = " + g.filesystemKind("NotFound") + " } else if os.IsPermission(" + cause + ") { failure.Kind = " + g.filesystemKind("PermissionDenied") + " } else if os.IsExist(" + cause + ") { failure.Kind = " + g.filesystemKind("AlreadyExists") + " }; return failure }()"
+}
+
+func (g *generator) filesystemCreateAll(call *ir.Call, arguments []string) string {
+	g.requireImport("os", "")
+	g.requireImport("strings", "")
+	success, failure := call.ExprType().Args[0], call.ExprType().Args[1]
+	err := func(value string) string { return g.filesystemResultErr(success, failure, value) }
+	return "func(path string) " + g.goType(call.ExprType()) + " { if path == \"\" || strings.IndexByte(path, 0) >= 0 { return " + err(g.filesystemError(failure, "create_all", "path", strconv.Quote("path must be nonempty and contain no NUL"), "InvalidPath")) + " }; if cause := os.MkdirAll(path, 0o777); cause != nil { return " + err(g.filesystemNativeError("create_all", "path", "cause")) + " }; return " + g.filesystemResultOK(success, failure, g.goType(success)+"{}") + " }(" + arguments[0] + ")"
+}
+
+func (g *generator) filesystemChildren(call *ir.Call, arguments []string) string {
+	for _, name := range []string{"os", "io", "strings", "slices", "path/filepath", "unicode/utf8"} {
+		g.requireImport(name, "")
+	}
+	success, failure := call.ExprType().Args[0], call.ExprType().Args[1]
+	entry := g.goType(success.Args[0])
+	err := func(value string) string { return g.filesystemResultErr(success, failure, value) }
+	inputError := func(kind, message string) string {
+		return err(g.filesystemError(failure, "children", "path", strconv.Quote(message), kind))
+	}
+	return strings.NewReplacer(
+		"$result", g.goType(call.ExprType()), "$entry", entry,
+		"$invalidLimit", inputError("InvalidLimit", "max_entries must be non-negative"),
+		"$invalidPath", inputError("InvalidPath", "path must be nonempty and contain no NUL"),
+		"$tooLarge", inputError("TooLarge", "directory exceeds max_entries"),
+		"$invalidName", inputError("UnsupportedName", "directory entry name is not valid UTF-8"),
+		"$failure", err(g.filesystemNativeError("children", "path", "cause")),
+		"$metadataFailure", err(g.filesystemNativeError("children", "childPath", "infoErr")),
+		"$closeFailure", err(g.filesystemNativeError("children", "path", "closeError")),
+		"$other", g.filesystemDirectoryEntryKind("Other"), "$file", g.filesystemDirectoryEntryKind("File"), "$directory", g.filesystemDirectoryEntryKind("Directory"),
+		"$ok", g.filesystemResultOK(success, failure, g.arrayReference("entries")),
+	).Replace(`func(path string, maximum int) (result $result) {
+		if maximum < 0 { return $invalidLimit }
+		if path == "" || strings.IndexByte(path, 0) >= 0 { return $invalidPath }
+		directoryHandle, cause := os.Open(path); if cause != nil { return $failure }
+		completed := false
+		defer func() { if closeError := directoryHandle.Close(); completed && closeError != nil { result = $closeFailure } }()
+		entries := make([]$entry, 0)
+		for {
+			// Request one beyond the remaining allowance, in bounded batches.
+			count := min(128, maximum - len(entries) + 1)
+			source, cause := directoryHandle.Readdirnames(count)
+			if cause != nil && cause != io.EOF { return $failure }
+			if len(source) > maximum - len(entries) { return $tooLarge }
+			for _, name := range source {
+				if !utf8.ValidString(name) { return $invalidName }
+				childPath := path; volume := filepath.VolumeName(path)
+				driveRelativeRoot := volume == path && len(volume) == 2 && volume[1] == ':'
+				if !driveRelativeRoot && (len(childPath) == 0 || !os.IsPathSeparator(childPath[len(childPath)-1])) { childPath += string(os.PathSeparator) }
+				childPath += name
+				info, infoErr := os.Lstat(childPath); if infoErr != nil { return $metadataFailure }
+				kind := $other; if info.Mode().IsRegular() { kind = $file } else if info.IsDir() { kind = $directory }
+				entries = append(entries, $entry{Name: name, Path: childPath, Kind: kind})
+			}
+			if cause == io.EOF { break }
+		}
+		slices.SortStableFunc(entries, func(left, right $entry) int { return strings.Compare(left.Name, right.Name) })
+		completed = true
+		return $ok
+	}(` + arguments[0] + ", " + arguments[1] + ")")
 }
 
 func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
@@ -55,6 +123,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		return
 	}
 	g.requireImport("os", "")
+	g.requireImport("strings", "")
 	g.temporary++
 	id := strconv.Itoa(g.temporary)
 	raw := "__trbFileEffect" + id
@@ -102,15 +171,17 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		modeValue = g.expr(block.Call.Arguments[1].Value)
 	}
 	g.line(mode + " := " + modeValue)
+	invalidPath := g.filesystemError(errorType, "open", path, strconv.Quote("path must be nonempty and contain no NUL"), "InvalidPath")
+	g.line("if " + path + " == \"\" || strings.IndexByte(" + path + ", 0) >= 0 { return " + g.filesystemResultErr(successType, errorType, invalidPath) + " }")
 	g.line(flags + " := os.O_RDONLY")
 	g.line("if " + mode + " == " + g.filesystemOpenMode("Write") + " { " + flags + " = os.O_WRONLY | os.O_CREATE | os.O_TRUNC }")
 	g.line("if " + mode + " == " + g.filesystemOpenMode("CreateNew") + " { " + flags + " = os.O_WRONLY | os.O_CREATE | os.O_EXCL }")
 	g.line(handle + ", " + openError + " := os.OpenFile(" + path + ", " + flags + ", 0o644)")
-	openFailure := g.filesystemError(errorType, "open", path, openError+".Error()", "Other")
+	openFailure := g.filesystemNativeError("open", path, openError)
 	existsFailure := g.filesystemError(errorType, "open", path, openError+".Error()", "AlreadyExists")
 	g.line("if " + openError + " != nil { if os.IsExist(" + openError + ") { return " + g.filesystemResultErr(successType, errorType, existsFailure) + " }; return " + g.filesystemResultErr(successType, errorType, openFailure) + " }")
 	g.line(completed + " := false")
-	closeFailure := g.filesystemError(errorType, "close", path, "closeError.Error()", "Other")
+	closeFailure := g.filesystemNativeError("close", path, "closeError")
 	g.line("defer func() { if closeError := " + handle + ".Close(); " + completed + " && closeError != nil { " + raw + " = " + g.filesystemResultErr(successType, errorType, closeFailure) + " } }()")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
 		binding := g.bindingIdentifier(block.Bindings[0].Name)

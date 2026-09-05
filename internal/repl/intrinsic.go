@@ -151,58 +151,45 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return e.percentDecodeResultErr(typ, kind, input, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: value})
-	case "trb.std.dir.children":
+
+	case "trb.std.dir.create_all":
 		if err := require(1); err != nil {
 			return Value{}, err
 		}
 		path, ok := values[0].Data.(string)
 		if !ok {
-			return Value{}, errors.New("Dir.children expects String")
+			return Value{}, errors.New("Dir.create_all expects Path")
 		}
-		source, err := os.ReadDir(path)
+		if path == "" || strings.IndexByte(path, 0) >= 0 {
+			return e.filesystemErrKind(typ, "create_all", path, errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
+		}
+		if err := os.MkdirAll(path, 0o777); err != nil {
+			return e.filesystemErr(typ, "create_all", path, err)
+		}
+		unit, err := e.unitValue()
 		if err != nil {
-			return e.filesystemErr(typ, "children", path, err)
+			return Value{}, err
 		}
-		sort.SliceStable(source, func(left, right int) bool { return source[left].Name() < source[right].Name() })
-		entryDefinition, ok := e.definitions[symbolKey("trb/std/dir/index", "DirEntry")].(*recordDefinition)
+		return e.filesystemOK(typ, unit)
+	case "trb.std.dir.children":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		path, ok := values[0].Data.(string)
 		if !ok {
-			return Value{}, errors.New("filesystem directory entries are not loaded")
+			return Value{}, errors.New("Dir.children expects Path")
 		}
-		kindDefinition, ok := e.definitions[symbolKey("trb/std/dir/index", "DirEntryKind")].(*enumDefinition)
+		maximum, ok := values[1].Data.(int64)
 		if !ok {
-			return Value{}, errors.New("filesystem directory entry kinds are not loaded")
+			return Value{}, errors.New("Dir.children max_entries must be Integer")
 		}
-		entryType := types.FromName("DirEntry")
-		if len(typ.Args) == 2 && typ.Args[0].Kind == types.Array && len(typ.Args[0].Args) == 1 {
-			entryType = typ.Args[0].Args[0]
+		if maximum < 0 {
+			return e.filesystemErrKind(typ, "children", path, errors.New("max_entries must be non-negative"), "InvalidLimit")
 		}
-		kindType := types.Type{Kind: types.Named, Name: "DirEntryKind", Declaration: kindDefinition.Node.Declaration}
-		items := make([]Value, 0, len(source))
-		for _, sourceEntry := range source {
-			if !utf8.ValidString(sourceEntry.Name()) {
-				return e.filesystemErr(typ, "children", path, errors.New("directory entry name is not valid UTF-8"))
-			}
+		if path == "" || strings.IndexByte(path, 0) >= 0 {
+			return e.filesystemErrKind(typ, "children", path, errors.New("path must be nonempty and contain no NUL"), "InvalidPath")
 		}
-		for _, sourceEntry := range source {
-			childPath := directoryChildPath(path, sourceEntry.Name())
-			info, infoErr := sourceEntry.Info()
-			if infoErr != nil {
-				return e.filesystemErr(typ, "children", childPath, infoErr)
-			}
-			kind := "Other"
-			if info.Mode().IsRegular() {
-				kind = "File"
-			} else if info.IsDir() {
-				kind = "Directory"
-			}
-			items = append(items, Value{Type: entryType, Data: &recordInstance{Definition: entryDefinition, Fields: map[string]Value{
-				"name": {Type: types.FromName("String"), Data: sourceEntry.Name()},
-				"path": {Type: types.FromName("String"), Data: childPath},
-				"kind": {Type: kindType, Data: &enumValue{Definition: kindDefinition, Name: kind, Payload: map[string]Value{}}},
-			}}})
-		}
-		arrayType := types.Type{Kind: types.Array, Name: "Array", Args: []types.Type{entryType}}
-		return e.filesystemOK(typ, Value{Type: arrayType, Data: &arrayValue{Items: items}})
+		return e.filesystemChildren(typ, path, maximum)
 	case "trb.std.file.read", "trb.std.file.read_text":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -227,7 +214,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file exceeds max_bytes"), "TooLarge")
 		}
 		if name == "trb.std.file.read_text" {
-			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: utf8WithReplacement(data)})
+			if !utf8.Valid(data) {
+				return e.filesystemErrKind(typ, operation, file.Name(), errors.New("file is not valid UTF-8"), "InvalidEncoding")
+			}
+			return e.filesystemOK(typ, Value{Type: types.FromName("String"), Data: string(data)})
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Bytes"), Data: bytesValue(data)})
 	case "trb.std.file.write", "trb.std.file.write_text":

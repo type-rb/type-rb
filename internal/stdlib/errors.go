@@ -1,16 +1,29 @@
 package stdlib
 
 func errorsSource() string {
-	return `enum FileSystemErrorKind
+	return `import { Path, RelativePath } from trb/std/path
+
+enum FileSystemErrorKind
 	Other
 	AlreadyExists
+	NotFound
+	PermissionDenied
+	InvalidPath
 	InvalidLimit
 	TooLarge
+	InvalidEncoding
+	UnsupportedName
+end
+
+enum FileSystemTarget
+	Host(path: Path)
+	Relative(path: RelativePath)
+	Root
 end
 
 record FileSystemError
 	operation: String
-	path: String
+	target: FileSystemTarget
 	message: String
 	kind: FileSystemErrorKind = FileSystemErrorKind::Other
 end

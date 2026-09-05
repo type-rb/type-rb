@@ -584,24 +584,39 @@ the machine running the evaluator for host joining, regardless of output mode.
 
 `trb/std/file` and `trb/std/dir` are separate host-filesystem bridges. `File`
 is an actual opaque resource type rather than a module containing a second file
-type. Every operation returns a `Result`:
+type. Explicit TypeScript browser builds reject these host operations; merely
+using their ordinary value declarations does not acquire host access. Every
+operation returns a `Result`:
 
 <!-- trb-doc-test: stdlib-file-read -->
 ```trb
+import trb/std/path
 import trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
-def load_config(path: String): Result<String, FileSystemError>
+def load_config(path: Path): Result<String, FileSystemError>
 	return File.open(path) do |file|
 		try file.read_text(max_bytes: 1048576)
 	end
 end
 ```
 
-Failures carry `operation`, `path`, `message`, and a
+Failures carry `operation`, `target`, `message`, and a
 `FileSystemErrorKind` instead of exposing target exceptions. Import the peer
 error declarations from `trb/std/errors` only when source names them directly.
+`FileSystemTarget` is the immutable sum `Host(Path)`, `Relative(RelativePath)`,
+or `Root`. The currently implemented ambient operations return `Host`, with
+the original, unnormalized input (or the exact child path for a metadata
+failure). Relative/root targets do not themselves acquire a directory or
+grant authority. Rooted directory operations are not implemented yet.
+
+`NotFound`, `PermissionDenied`, and `AlreadyExists` classify the corresponding
+host errors consistently across open, enumeration, and recursive creation.
+Other host errors remain `Other`; an intermediate non-directory is not
+promised a distinct portable classification. Empty paths and paths containing
+NUL return `InvalidPath`, without converting every host invalid-argument error
+into that kind. Human-readable messages are not stable machine-readable data.
 
 `File.open` requires a block and accepts an optional typed `FileMode`. Omitting
 the mode selects `Read`, which opens an existing file for reading. `Write`
@@ -627,8 +642,12 @@ move native work after the block has returned a non-resource value.
 `file.read_text(max_bytes:)` returns `String`. A successful result contains at
 most the given number of bytes. A negative bound returns `InvalidLimit`; input
 exceeding the bound returns `TooLarge` after the operation observes one byte
-beyond it. Text decoding uses the same maximal-subpart U+FFFD replacement rule
-as `Bytes#to_s`. `file.write` accepts `Bytes`, while `file.write_text` accepts
+beyond it. The bound is checked while reading the open handle, not only by a
+prior size check. Text decoding is strict UTF-8: invalid bytes return
+`InvalidEncoding`. A leading UTF-8 BOM is preserved as U+FEFF. Size overflow
+takes precedence over invalid encoding. For replacement display, explicitly
+read Bytes and call `Bytes#to_s`; reading text never silently repairs the input.
+`file.write` accepts `Bytes`, while `file.write_text` accepts
 `String`.
 
 `CreateNew` returns `AlreadyExists` if the path already exists. The existence
@@ -639,50 +658,61 @@ synchronization, or persistence after power loss.
 
 <!-- trb-doc-test: stdlib-exclusive-create-new -->
 ```trb
+import trb/std/path
 import trb/std/file
 import { FileMode } from trb/std/file
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 import { Unit } from trb/std/unit
 
-def create_output(path: String, bytes: Bytes): Result<Unit, FileSystemError>
+def create_output(path: Path, bytes: Bytes): Result<Unit, FileSystemError>
 	return File.open(path, mode: FileMode::CreateNew) do |file|
 		try file.write(bytes)
 	end
 end
 ```
 
-`Dir.children(path)` returns sorted immediate `DirEntry` values. Each entry has
-a `name`, a host-native `path`, and a typed `DirEntryKind`: `File`, `Directory`,
+`Dir.children(path, max_entries:)` requires an explicit named bound and returns
+sorted immediate `DirEntry<Path>` values. Each entry has a `name: String`,
+a host-native `path: Path`, and a typed `DirEntryKind`: `File`, `Directory`,
 or `Other`. Symbolic links and other entries that must not be traversed as
 directories are `Other`. The operation does not recurse. `Dir` is a
 nonconstructible type root in this slice; it owns directory operations but does
 not yet represent an open directory resource.
 
+A negative `max_entries` returns `InvalidLimit`. A directory containing more
+entries than the bound returns `TooLarge`, not a truncated success. Zero
+succeeds only for an empty directory. Enumeration consumes bounded batches and
+checks the limit before retaining a full result; it does not read the entire
+directory into an unbounded Array first. Metadata errors fail the whole
+operation, as do close errors after successful enumeration. These are memory
+and result bounds, not deadlines or a consistent snapshot of concurrent writes.
+
 Directory entry names must have a lossless valid UTF-8 representation. If any
-name does not, `Dir.children` returns `FileSystemErrorKind::Other` for operation
-`children`, with the supplied directory as the error path and
+name does not, `Dir.children` returns `FileSystemErrorKind::UnsupportedName` for operation
+`children`, with `Host(directory)` as the error target and
 `directory entry name is not valid UTF-8` as the message. It never substitutes
 U+FFFD and returns a path that names a different entry. Valid names are sorted
 by their UTF-8 bytes.
 
 <!-- trb-doc-test: stdlib-dir-children -->
 ```trb
+import trb/std/path
 import trb/std/dir
 import { DirEntryKind } from trb/std/dir
 import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
-def regular_file_paths(directory: String): Result<Array<String>, FileSystemError>
-	entries := try Dir.children(directory)
-	mut paths: Array<String> := []
+def regular_file_paths(directory: Path): Result<Array<Path>, FileSystemError>
+	entries := try Dir.children(directory, max_entries: 10000)
+	mut paths: Array<Path> := []
 	entries.each do |entry|
 		if entry.kind == DirEntryKind::File
 			# entry.path can be passed directly to File.open on this host.
 			paths.push(entry.path)
 		end
 	end
-	return Result<Array<String>, FileSystemError>::Ok(paths)
+	return Result<Array<Path>, FileSystemError>::Ok(paths)
 end
 ```
 
@@ -690,17 +720,51 @@ Writes return `Result<Unit, FileSystemError>`. `Unit` is a storable value
 representing successful completion; it is distinct from the internal `Void`
 return category.
 
-Filesystem paths are host-native strings and are passed to the target runtime
-without slash-only normalization. `DirEntry.path` preserves the directory text
+Filesystem inputs are nominal `Path` values. Their host-native text is passed
+to the target runtime without slash-only normalization. `DirEntry.path`
+preserves the directory text
 given to `Dir.children` and appends the entry name without a cleaning join. It
 therefore preserves host resolution for parents containing symbolic links and
 `..`. The appended separator is host-native, existing Windows `/` or `\`
 suffixes are accepted, `C:` remains drive-relative as `C:child`, and UNC share
-roots receive a separator. These I/O calls currently consume Strings;
-`Path#to_s()` supplies their host-native input. The separate
+roots receive a separator. These I/O calls require `Path`, not String or
+`RelativePath`; String DTOs use explicit `Path.new(input)` construction. The separate
 [path value API](#path-values) can construct a not-yet-existing descendant
 without enumerating a directory. General host-path parsing, cleaning, volume
 inspection, and cross-host conversion are not provided.
+
+### Recursive directory creation
+
+`Dir.create_all(path: Path): Result<Unit, FileSystemError>` creates missing
+ancestors and the requested directory. An existing directory, `.`, or an
+existing filesystem root succeeds. A competing creator winning the same
+directory creation is not by itself a failure. A file, symlink to a file, or
+dangling link that cannot resolve as a directory fails. Ambient operations
+follow the host's ordinary symbolic-link resolution; they do not promise
+containment. Failure does not roll back directories already created.
+
+New directories use the ordinary host creation permissions; existing directory
+permissions are not changed. No exact portable permission bits are promised.
+Errors retain operation `create_all` and the original input Path.
+
+<!-- trb-doc-test: stdlib-dir-create-all -->
+```trb
+import trb/std/path
+import trb/std/dir
+import trb/std/result
+import trb/std/unit
+import { FileSystemError } from trb/std/errors
+
+def prepare(directory: Path): Result<Unit, FileSystemError>
+	return Dir.create_all(directory)
+end
+```
+
+These host operations need privileged runtime bridges: ordinary packages cannot
+yet acquire scoped descriptors or enumerate native directory entries through
+the extension protocol. The integration does not grant that authority to
+external providers. It adds neither an opened `Dir` capability, resource
+borrowing, atomic publication, locks, nor a sandbox.
 
 ## Process
 

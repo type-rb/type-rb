@@ -62,7 +62,7 @@ func TestFilesystemContractOwnsScopedFileOperations(t *testing.T) {
 		t.Fatalf("directory contract = %#v", directory)
 	}
 	children := directory.Symbols["children"]
-	if children.StaticOwner != "Dir" || children.Return.String() != "Result<Array<DirEntry>, FileSystemError>" {
+	if children.StaticOwner != "Dir" || children.Return.String() != "Result<Array<DirEntry<Path>>, FileSystemError>" {
 		t.Fatalf("Dir.children contract = %#v", children)
 	}
 	if !OpaqueType(declaredType(dirDeclaration)) {

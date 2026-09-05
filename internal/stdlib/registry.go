@@ -169,7 +169,7 @@ var typeV = types.FromName("V")
 var fileSystemErrorType = declaredType(fileSystemErrorDeclaration)
 var fileType = FileResourceType()
 var fileModeType = declaredType(fileModeDeclaration)
-var dirEntryType = declaredType(dirEntryDeclaration)
+var dirEntryType = DirEntryType()
 var jsonValueType = types.FromName("JSON::Value")
 var jsonErrorType = types.FromName("JSON::Error")
 var processResultType = types.FromName("Process::Output")
@@ -341,6 +341,7 @@ end
 			{Name: "KeyLookupError", Kind: "record"},
 			{Name: "EnumValueError", Kind: "record"},
 			{Name: "FileSystemErrorKind", Kind: "enum"},
+			{Name: "FileSystemTarget", Kind: "enum"},
 			{Name: "FileSystemError", Kind: "record"},
 		},
 		Source:  errorsSource(),
@@ -532,7 +533,7 @@ end
 				TypeParameters:          []string{"T"},
 				trustedScopedFileOrigin: true,
 				Parameters: []Parameter{
-					{Name: "path", Type: stringType},
+					{Name: "path", Type: PathType()},
 					{Name: "mode", Type: fileModeType, Optional: true, Keyword: true},
 				},
 				Return:              filesystemResult(typeT),
@@ -570,8 +571,13 @@ end
 				Name:        "children",
 				Intrinsic:   "trb.std.dir.children",
 				StaticOwner: "Dir",
-				Parameters:  []Parameter{{Name: "path", Type: stringType}},
+				Parameters:  []Parameter{{Name: "path", Type: PathType()}, {Name: "max_entries", Type: integerType, Keyword: true}},
 				Return:      filesystemResult(arrayOf(dirEntryType)),
+			},
+			"create_all": {
+				Name: "create_all", Intrinsic: "trb.std.dir.create_all", StaticOwner: "Dir",
+				Parameters: []Parameter{{Name: "path", Type: PathType()}},
+				Return:     filesystemResult(unitType),
 			},
 		},
 	},

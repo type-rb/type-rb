@@ -7,7 +7,6 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/ir"
-	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -69,11 +68,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		_, successType, errorType := filesystemResultType()
 		return g.filesystemResultName() + ".Ok<" + successType + ", " + errorType + ">(" + value + ")"
 	}
-	filesystemError := func(operation, path, message string) string {
-		_, successType, errorType := filesystemResultType()
-		value := "{ operation: " + strconv.Quote(operation) + ", path: " + path + ", message: " + message + ", kind: " + g.filesystemRuntimeName(stdlib.FileSystemErrorKindType()) + ".Other } satisfies " + errorType
-		return g.filesystemResultName() + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
-	}
+
 	processError := func(operation, command, message string) string {
 		_, successType, errorType := filesystemResultType()
 		value := "{ operation: " + strconv.Quote(operation) + ", command: " + command + ", message: " + message + " } satisfies " + errorType
@@ -131,43 +126,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		invalidUtf8 := percentDecodeError("InvalidUtf8", "input", "decoded URL component is not valid UTF-8")
 		return "((): " + resultType + " => { const input = " + arguments[0] + "; const characters = Array.from(input); const bytes: Array<number> = []; const encoder = new TextEncoder(); for (let index = 0; index < characters.length; index += 1) { const character = characters[index]!; if (character !== \"%\") { bytes.push(...encoder.encode(character)); continue; } if (index + 2 >= characters.length || !/^[0-9A-Fa-f]$/.test(characters[index + 1]!) || !/^[0-9A-Fa-f]$/.test(characters[index + 2]!)) { return " + invalidEscape + "; } bytes.push(Number.parseInt(characters[index + 1]! + characters[index + 2]!, 16)); index += 2; } try { const value = new TextDecoder(\"utf-8\", { fatal: true }).decode(Uint8Array.from(bytes)); return " + filesystemOK("value") + "; } catch { return " + invalidUtf8 + "; } })()"
 	case "trb.std.dir.children":
-		g.temporary++
-		id := strconv.Itoa(g.temporary)
-		path := "__trbDirPath" + id
-		activePath := "__trbDirActivePath" + id
-		host := "__trbDirHost" + id
-		filesystem := "__trbDirSystem" + id
-		pathModule := "__trbDirPathModule" + id
-		source := "__trbDirSource" + id
-		decoder := "__trbDirDecoder" + id
-		names := "__trbDirNames" + id
-		rawName := "__trbDirRawName" + id
-		driveRelativeRoot := "__trbDirDriveRelativeRoot" + id
-		separator := "__trbDirSeparator" + id
-		entries := "__trbDirEntries" + id
-		entryName := "__trbDirEntryName" + id
-		childPath := "__trbDirChildPath" + id
-		info := "__trbDirInfo" + id
-		left := "__trbDirLeft" + id
-		right := "__trbDirRight" + id
-		leftBytes := "__trbDirLeftBytes" + id
-		rightBytes := "__trbDirRightBytes" + id
-		length := "__trbDirCompareLength" + id
-		index := "__trbDirCompareIndex" + id
-		caught := "__trbDirError" + id
-		message := "__trbDirMessage" + id
-		resultType, _, _ := filesystemResultType()
-		compare := "(" + left + ", " + right + ") => { const " + leftBytes + " = new TextEncoder().encode(" + left + ".name); const " + rightBytes + " = new TextEncoder().encode(" + right + ".name); const " + length + " = Math.min(" + leftBytes + ".length, " + rightBytes + ".length); for (let " + index + " = 0; " + index + " < " + length + "; " + index + " += 1) { if (" + leftBytes + "[" + index + "] !== " + rightBytes + "[" + index + "]) { return " + leftBytes + "[" + index + "]! - " + rightBytes + "[" + index + "]!; } } return " + leftBytes + ".length - " + rightBytes + ".length; }"
-		result := call.ExprType()
-		entrySemantic := types.FromName("DirEntry")
-		if len(result.Args) == 2 && result.Args[0].Kind == types.Array && len(result.Args[0].Args) == 1 {
-			entrySemantic = result.Args[0].Args[0]
-		}
-		entryType := g.tsType(entrySemantic)
-		kind := g.filesystemRuntimeName(stdlib.DirEntryKindType())
-		invalidName := filesystemError("children", path, strconv.Quote("directory entry name is not valid UTF-8"))
-		failure := filesystemError("children", activePath, message)
-		return "((): " + resultType + " => { const " + path + " = " + arguments[0] + "; let " + activePath + " = " + path + "; try { const " + host + " = (globalThis as any).process; const " + filesystem + " = " + host + "?.getBuiltinModule?.(\"fs\"); const " + pathModule + " = " + host + "?.getBuiltinModule?.(\"path\"); if (" + filesystem + " === undefined || " + pathModule + " === undefined) throw new Error(\"filesystem is unavailable\"); const " + source + " = " + filesystem + ".readdirSync(" + path + ", { encoding: \"buffer\" }) as Array<Uint8Array>; const " + decoder + " = new TextDecoder(\"utf-8\", { fatal: true }); const " + names + ": Array<string> = []; for (const " + rawName + " of " + source + ") { try { " + names + ".push(" + decoder + ".decode(" + rawName + ")); } catch { return " + invalidName + "; } } const " + driveRelativeRoot + " = " + pathModule + ".sep === \"\\\\\" && /^[A-Za-z]:$/.test(" + path + "); const " + separator + " = " + path + ".endsWith(" + pathModule + ".sep) || (" + pathModule + ".sep === \"\\\\\" && " + path + ".endsWith(\"/\")) || " + driveRelativeRoot + " ? \"\" : " + pathModule + ".sep; const " + entries + ": Array<" + entryType + "> = " + names + ".map((" + entryName + ") => { const " + childPath + " = " + path + " + " + separator + " + " + entryName + "; " + activePath + " = " + childPath + "; const " + info + " = " + filesystem + ".lstatSync(" + childPath + "); " + activePath + " = " + path + "; return ({ name: " + entryName + ", path: " + childPath + ", kind: " + info + ".isFile() ? " + kind + ".File : " + info + ".isDirectory() ? " + kind + ".Directory : " + kind + ".Other } satisfies " + entryType + "); }).sort(" + compare + "); return " + filesystemOK(entries) + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + failure + "; } })()"
+		return g.filesystemChildren(call, arguments)
+	case "trb.std.dir.create_all":
+		return g.filesystemCreateAll(call, arguments)
 	case "trb.std.file.read", "trb.std.file.read_text":
 		g.temporary++
 		id := strconv.Itoa(g.temporary)
@@ -190,13 +151,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		operation := strings.TrimPrefix(name, "trb.std.file.")
 		invalid := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("max_bytes must be non-negative"), "InvalidLimit")
 		tooLarge := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("file exceeds max_bytes"), "TooLarge")
-		failure := g.filesystemErrorValue(errorType, operation, path, message, "Other")
+		failure := g.filesystemNativeError(operation, path, caught)
 		unavailable := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("filesystem is unavailable"), "Other")
 		value := data
+		failureCheck := ""
 		if name == "trb.std.file.read_text" {
-			value = typescriptUTF8WithReplacement(data)
+			invalidEncoding := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("file is not valid UTF-8"), "InvalidEncoding")
+			value = "decoded"
+			failureCheck = "let decoded: string; try { decoded = new TextDecoder(\"utf-8\", { fatal: true, ignoreBOM: true }).decode(" + data + "); } catch { return " + resultError(invalidEncoding) + "; } "
 		}
-		return "((): " + resultType + " => { const " + handle + " = " + arguments[0] + "; const " + limit + " = " + arguments[1] + "; const " + path + " = " + handle + ".path; if (" + limit + " < 0) { return " + resultError(invalid) + "; } const " + filesystem + " = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (" + filesystem + " === undefined) { return " + resultError(unavailable) + "; } try { const " + buffer + " = new Uint8Array(65536); const " + chunks + ": Array<Uint8Array> = []; let " + count + " = 0; while (" + count + " <= " + limit + ") { const " + remaining + " = " + limit + " - " + count + "; const " + request + " = " + remaining + " === 0 ? 1 : Math.min(" + buffer + ".byteLength, " + remaining + "); const " + readCount + " = " + filesystem + ".readSync(" + handle + ".fd, " + buffer + ", 0, " + request + ", null); if (" + readCount + " === 0) break; " + chunks + ".push(" + buffer + ".slice(0, " + readCount + ")); " + count + " += " + readCount + "; } if (" + count + " > " + limit + ") { return " + resultError(tooLarge) + "; } const " + data + " = new Uint8Array(" + count + "); let " + offset + " = 0; for (const " + chunk + " of " + chunks + ") { " + data + ".set(" + chunk + ", " + offset + "); " + offset + " += " + chunk + ".byteLength; } return " + filesystemOK(value) + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + resultError(failure) + "; } })()"
+		return "((): " + resultType + " => { const " + handle + " = " + arguments[0] + "; const " + limit + " = " + arguments[1] + "; const " + path + " = " + handle + ".path; if (" + limit + " < 0) { return " + resultError(invalid) + "; } const " + filesystem + " = (globalThis as any).process?.getBuiltinModule?.(\"fs\"); if (" + filesystem + " === undefined) { return " + resultError(unavailable) + "; } try { const " + buffer + " = new Uint8Array(65536); const " + chunks + ": Array<Uint8Array> = []; let " + count + " = 0; while (" + count + " <= " + limit + ") { const " + remaining + " = " + limit + " - " + count + "; const " + request + " = " + remaining + " === 0 ? 1 : Math.min(" + buffer + ".byteLength, " + remaining + "); const " + readCount + " = " + filesystem + ".readSync(" + handle + ".fd, " + buffer + ", 0, " + request + ", null); if (" + readCount + " === 0) break; " + chunks + ".push(" + buffer + ".slice(0, " + readCount + ")); " + count + " += " + readCount + "; } if (" + count + " > " + limit + ") { return " + resultError(tooLarge) + "; } const " + data + " = new Uint8Array(" + count + "); let " + offset + " = 0; for (const " + chunk + " of " + chunks + ") { " + data + ".set(" + chunk + ", " + offset + "); " + offset + " += " + chunk + ".byteLength; } " + failureCheck + "return " + filesystemOK(value) + "; } catch (" + caught + ") { const " + message + " = " + caught + " instanceof Error ? " + caught + ".message : String(" + caught + "); return " + resultError(failure) + "; } })()"
 	case "trb.std.file.write", "trb.std.file.write_text":
 		g.temporary++
 		id := strconv.Itoa(g.temporary)
@@ -208,7 +172,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		message := "__trbFileWriteMessage" + id
 		resultType, successType, errorType := filesystemResultType()
 		operation := strings.TrimPrefix(name, "trb.std.file.")
-		failure := g.filesystemErrorValue(errorType, operation, path, message, "Other")
+		failure := g.filesystemNativeError(operation, path, caught)
 		unavailable := g.filesystemErrorValue(errorType, operation, path, strconv.Quote("filesystem is unavailable"), "Other")
 		encoding := ""
 		if name == "trb.std.file.write_text" {
