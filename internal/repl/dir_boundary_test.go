@@ -87,15 +87,9 @@ listed(` + strconv.Quote(directory) + `, ` + strconv.Quote(expectedChild) + `)
 }
 
 func TestEvaluateDirChildrenRejectsNonUTF8Name(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows directory APIs do not expose POSIX byte names")
-	}
 	directory := filepath.Join(t.TempDir(), "entries")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
-	}
-	if err := os.WriteFile(directory+string(os.PathSeparator)+string([]byte{0xff}), nil, 0o644); err != nil {
-		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
 	}
 	source := `import trb/std/path
 import trb/std/dir
@@ -113,17 +107,34 @@ def listed(path: String): String
 		else
 			"unexpected"
 		end
-		return error.operation + ":" + kind + ":" + (case error.target
+		correct_target := case error.target
 		when FileSystemTarget::Host(target_path)
 			target_path.to_s() == path
 		else
 			false
-		end).to_s() + ":" + error.message
+		end
+		return error.operation + ":" + kind + ":" + correct_target.to_s() + ":" + error.message
 	end
 end
 
 listed(` + strconv.Quote(directory) + `)
 `
+
+	// Keep source checking covered before the host-specific byte-name fixture.
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run("empty/"+mode, func(t *testing.T) {
+			if got := evaluateDirBoundarySource(t, mode, source); got != `"ok"` {
+				t.Fatalf("empty listing = %s", got)
+			}
+		})
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directory APIs do not expose POSIX byte names")
+	}
+	if err := os.WriteFile(directory+string(os.PathSeparator)+string([]byte{0xff}), nil, 0o644); err != nil {
+		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
+	}
 
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {

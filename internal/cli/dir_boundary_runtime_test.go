@@ -108,17 +108,9 @@ end
 }
 
 func TestRunDirChildrenRejectsNonUTF8NamesAcrossBackends(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows directory APIs do not expose POSIX byte names")
-	}
-
 	directory := filepath.Join(t.TempDir(), "entries")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
-	}
-	invalidName := string([]byte{0xff})
-	if err := os.WriteFile(directory+string(os.PathSeparator)+invalidName, nil, 0o644); err != nil {
-		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
 	}
 
 	source := `import trb/std/path
@@ -137,12 +129,13 @@ def listed(path: String): String
 		else
 			"unexpected"
 		end
-		return error.operation + ":" + kind + ":" + (case error.target
+		correct_target := case error.target
 		when FileSystemTarget::Host(target_path)
 			target_path.to_s() == path
 		else
 			false
-		end).to_s() + ":" + error.message
+		end
+		return error.operation + ":" + kind + ":" + correct_target.to_s() + ":" + error.message
 	end
 end
 
@@ -151,6 +144,24 @@ def main()
 	return
 end
 `
+
+	// Compile and execute the same source even on hosts that cannot create byte names.
+	for _, backend := range dirBoundaryBackends {
+		t.Run("empty/"+backend.name, func(t *testing.T) {
+			requireDirBoundaryRuntime(t, backend)
+			if got := runDirBoundaryProject(t, backend, source); got != "ok\n" {
+				t.Fatalf("empty listing = %q", got)
+			}
+		})
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directory APIs do not expose POSIX byte names")
+	}
+	invalidName := string([]byte{0xff})
+	if err := os.WriteFile(directory+string(os.PathSeparator)+invalidName, nil, 0o644); err != nil {
+		t.Skipf("the host filesystem does not support a non-UTF-8 name: %v", err)
+	}
 
 	for _, backend := range dirBoundaryBackends {
 		t.Run(backend.name, func(t *testing.T) {
