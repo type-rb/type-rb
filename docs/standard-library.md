@@ -505,23 +505,17 @@ body, so portable source must use its public factory.
 components and preserves the input exactly. The fixed rules reject:
 
 - Leading or trailing `/`, repeated `/`, and components equal to `.` or `..`.
-- Backslash, U+0000 through U+001F, and the ASCII characters `< > : " | ? *`.
-  This also excludes absolute, drive-prefixed, UNC, and alternate-data-stream
-  spellings; it does not reinterpret any of them as relative input.
-- A component ending in an ASCII dot or space.
-- Reserved device-name stems, using ASCII-only case-insensitive comparison:
-  `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by
-  one of `0`–`9`, `¹`, `²`, or `³`. The stem is the text before the first dot,
-  with trailing ASCII spaces removed for this check only. Extensions do not
-  escape the rule: `con.txt`, `CON .txt`, and `lpt¹.log` are rejected.
+- NUL, backslash, and colon. This excludes alternate separators, drive prefixes,
+  UNC and alternate-data-stream spellings rather than reinterpreting them.
 
-This deliberately conservative logical grammar is informed by
-[Windows filename rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file),
-but does not delegate validation to the current operating system. It does not
-normalize Unicode, change case, trim the returned value, limit path length, or
-guarantee that every accepted name can be created on every filesystem. Case
-and Unicode-normalization collisions remain application concerns. `.config`,
-`..name`, leading spaces, and non-ASCII names such as `日本語/😀.md` are valid.
+This is a logical descendant grammar, not a universal filename validator.
+Reserved device names, trailing dots/spaces, wildcard-looking characters and
+non-NUL control characters are accepted as literal text. Acceptance does not
+promise that a host can represent the name or that two names identify distinct
+files there. Applications define naming/display policies; the target host
+controls actual filesystem names. No Unicode normalization, case folding,
+trimming or path-length policy is applied. For example, `con.txt`, `report.`
+and `draft?.txt` are valid logical values but are not portable filenames.
 
 `join` composes two validated descendants with one `/` and cannot introduce an
 invalid component. `child` accepts exactly one new component and validates it;
@@ -537,8 +531,6 @@ representing the root.
 | `EmptyComponent` | A leading, trailing, or repeated `/` occurs. |
 | `DotComponent` | A component is `.` or `..`. |
 | `InvalidCharacter` | A component contains a prohibited character. |
-| `TrailingDotOrSpace` | A component ends with an ASCII dot or space. |
-| `ReservedName` | A component has a reserved device-name stem. |
 | `MultipleComponents` | A `child` argument contains `/`. |
 
 `parse` checks empty input and empty components first, then components in
@@ -722,9 +714,8 @@ end
 sorted immediate `DirEntry<Path>` values. Each entry has a `name: String`,
 a host-native `path: Path`, and a typed `DirEntryKind`: `File`, `Directory`,
 or `Other`. Symbolic links and other entries that must not be traversed as
-directories are `Other`. The operation does not recurse. `Dir` is a
-nonconstructible type root in this slice; it owns directory operations but does
-not yet represent an open directory resource.
+directories are `Other`. The operation does not recurse. The class operation
+is ambient; the instance operation below uses an opened directory anchor.
 
 A negative `max_entries` returns `InvalidLimit`. A directory containing more
 entries than the bound returns `TooLarge`, not a truncated success. Zero
@@ -902,20 +893,25 @@ provide a distributed lock. A lock does not make writes atomic or roll back a
 body's completed filesystem operations. The body must satisfy the same checked
 synchronous TypeRB rules as a held File/Dir resource.
 
-The Go native/Go-mode REPL adapter accepts local APFS on macOS and ext-family
-or tmpfs on Linux. Unknown, network, and other filesystem profiles return
-`Unsupported`; there is no weaker locking fallback. Profile identification is
-not a defense against a malicious kernel or filesystem. Lock contention never
-waits, but pathname access and other filesystem operations have no time bound.
+The Go native/Go-mode REPL Linux/macOS adapter uses the host's advisory
+`flock` operation. An OS-reported unsupported operation returns `Unsupported`;
+there is no filesystem-name allowlist or fallback locking protocol. TypeRB
+coordinates processes on a host using the same stable file. Network shares,
+cross-machine exclusion and filesystem-specific enforcement are not a
+portable guarantee. Applications requiring those properties must establish
+an appropriate storage/protocol contract. Lock contention never waits, but
+pathname access and other filesystem operations have no time bound.
 Errors use operation `try_lock`, a Relative target, and sanitized native text;
 cleanup failures use operation `close`.
 
 Generated Go trees include compiler-owned OS-specific support source and a
-fixed `golang.org/x/sys` requirement. The CLI includes them in `run`, executable
-builds, and ordinary target-tree builds; no C compiler is required. Source-only
-`build --stdout` rejects projects requiring these additional files. A conflicting
-explicit dependency version or source occupying the support package is an
-error, not an implicit overwrite. Compiler providers cannot replace this bridge.
+minimum `golang.org/x/sys` requirement. Newer explicit application requirements
+are retained, older ones are raised to the required minimum, and ordinary Go
+module resolution (including replace/exclude directives) applies. The CLI
+includes support source in `run`, executable builds, and target-tree builds;
+no C compiler is required. Source-only `build --stdout` rejects projects
+requiring these additional files. A source occupying the support package is
+an error, not an implicit overwrite. Compiler providers cannot replace this bridge.
 
 ## Process
 

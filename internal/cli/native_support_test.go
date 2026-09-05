@@ -40,20 +40,42 @@ func TestCompilerSupportRejectsUnsafePathsAndCollisions(t *testing.T) {
 	}
 }
 
-func TestCompilerSupportDependencyConflictDoesNotRewriteModule(t *testing.T) {
-	config := project.New(t.TempDir(), "go")
-	config.Go.Module = "example.com/support"
-	filename := filepath.Join(config.Root, "go.mod")
-	original := "module example.com/support\n\ngo 1.27\n\nrequire example.com/native v1.0.0\n"
-	if err := os.WriteFile(filename, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	compiled := map[string]*compiler.Artifact{"main.trb": {NativeDependencies: map[string]string{"example.com/native": "v2.0.0"}}}
-	if err := writeCompiledGoDependencies(config, config.Root, compiled); err == nil || !strings.Contains(err.Error(), "module requires") {
-		t.Fatalf("got %v", err)
-	}
-	data, err := os.ReadFile(filename)
-	if err != nil || string(data) != original {
-		t.Fatalf("changed module on failure: %q, %v", data, err)
+func TestCompilerSupportUsesMinimumDependencyVersions(t *testing.T) {
+	for _, fixture := range []struct{ name, existing, minimum, wanted string }{
+		{"new", "", "v1.2.0", "v1.2.0"},
+		{"older", "v1.1.0", "v1.2.0", "v1.2.0"},
+		{"same", "v1.2.0", "v1.2.0", "v1.2.0"},
+		{"newer", "v1.3.0", "v1.2.0", "v1.3.0"},
+		{"prerelease", "v1.2.0-rc.1", "v1.2.0", "v1.2.0"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			config := project.New(t.TempDir(), "go")
+			config.Go.Module = "example.com/support"
+			filename := filepath.Join(config.Root, "go.mod")
+			original := "module example.com/support\n\ngo 1.27\n"
+			if fixture.existing != "" {
+				original += "\nrequire example.com/native " + fixture.existing + "\n"
+			}
+			directives := "\nreplace example.com/native => ./native\nexclude example.com/native v1.0.0\n"
+			if err := os.WriteFile(filename, []byte(original+directives), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			compiled := map[string]*compiler.Artifact{
+				"main.trb":   {NativeDependencies: map[string]string{"example.com/native": fixture.minimum}},
+				"helper.trb": {NativeDependencies: map[string]string{"example.com/native": "v1.0.1"}},
+			}
+			if err := writeCompiledGoDependencies(config, config.Root, compiled); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, wanted := range []string{"require example.com/native " + fixture.wanted, "replace example.com/native => ./native", "exclude example.com/native v1.0.0"} {
+				if !strings.Contains(string(data), wanted) {
+					t.Fatalf("missing %q in %s", wanted, data)
+				}
+			}
+		})
 	}
 }

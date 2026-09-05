@@ -45,7 +45,7 @@ end
 				}
 			}
 			for _, fixture := range []struct{ source, member string }{
-				{"RelativePath.ne", "new"}, {"RelativePath._r", "_reserved_name"},
+				{"RelativePath.ne", "new"}, {"RelativePath._c", "_component_error"},
 				{"Path.jo", "join"}, {"path.si", "size"},
 			} {
 				if item, ok := findCompletion(service.Complete(fixture.source, len(fixture.source)), fixture.member); ok {

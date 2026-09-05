@@ -153,7 +153,7 @@ helper functions.
 `trb/std/path` provides nominal host `Path` values and closed `RelativePath`
 values with explicit Result-returning parsing, validated child construction,
 logical joining, and nullable parents. Its fixed logical grammar rejects
-traversal components and conservative reserved filenames without normalizing
+traversal components, NUL and alternate path syntax without normalizing
 Unicode or consulting the filesystem. Host joining preserves the parent text
 and chooses separators on the target host, including Windows drive-relative
 paths. Go, Ruby, Node/Bun TypeScript, and the typed-IR REPL share conformance
@@ -173,9 +173,10 @@ regular-file opening on Go native Linux/macOS and the Go-mode REPL. Anchored
 pathname resolution cannot escape the opened directory, and error targets retain
 their relative domain. Other backends reject anchored operations; there is no
 weak containment fallback. Cooperative `Dir#try_lock` provides nonblocking
-exclusive scoped locks on local APFS (macOS) and ext-family/tmpfs (Linux), with
-Busy reentry/contention, leaf-symlink rejection, and Unsupported for other
-filesystem profiles. Go CLI builds include the compiler-owned native adapter;
+exclusive scoped host locks on Linux/macOS, with Busy reentry/contention,
+leaf-symlink rejection and OS-reported Unsupported. Filesystem names are not
+an allowlist; cross-machine/network locking semantics are not guaranteed.
+Go CLI builds include the compiler-owned native adapter;
 the Go-mode REPL uses the same source. Atomic publication remains unimplemented.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,

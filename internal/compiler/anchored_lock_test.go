@@ -38,7 +38,7 @@ func TestAnchoredLockEmitsSharedSupport(t *testing.T) {
 			t.Fatalf("missing lock lowering:\n%s", artifact.Output)
 		}
 	}
-	if count != 6 {
+	if count != 4 {
 		t.Fatalf("got %d native support files", count)
 	}
 }
