@@ -32,7 +32,7 @@ func (c *CLI) buildGoFileRootExecutable(config *project.Config, graph *fileRootS
 	if err != nil {
 		return err
 	}
-	if err := writeStandaloneGoModule(config, buildRoot); err != nil {
+	if err := writeStandaloneGoModule(config, buildRoot, compiled); err != nil {
 		return err
 	}
 	target := generated[graph.Entry]

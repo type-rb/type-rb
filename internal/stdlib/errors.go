@@ -13,6 +13,8 @@ enum FileSystemErrorKind
 	TooLarge
 	InvalidEncoding
 	UnsupportedName
+	Busy
+	Unsupported
 end
 
 enum FileSystemTarget

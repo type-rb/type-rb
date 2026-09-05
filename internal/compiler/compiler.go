@@ -29,15 +29,17 @@ import (
 )
 
 type Artifact struct {
-	Filename        string
-	Mode            string
-	AST             *ast.Program
-	IR              *ir.Program
-	Output          []byte
-	SourceMap       sourcemap.Map
-	CompilerOwned   bool
-	Official        bool
-	ExternalPackage bool
+	Filename           string
+	Mode               string
+	AST                *ast.Program
+	IR                 *ir.Program
+	Output             []byte
+	SupportFiles       []codegen.SupportFile
+	NativeDependencies map[string]string
+	SourceMap          sourcemap.Map
+	CompilerOwned      bool
+	Official           bool
+	ExternalPackage    bool
 	// CompilerGeneratedStart is the byte offset at which virtual package
 	// extension source begins. Interactive consumers use it to distinguish
 	// authored submissions from helper declarations loaded as definitions.
@@ -204,6 +206,7 @@ func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 	}
 	return &Artifact{
 		Filename: unit.Filename, Mode: options.Mode, AST: program, IR: lowered, Output: generated.Output,
+		SupportFiles: generated.SupportFiles, NativeDependencies: generated.NativeDependencies,
 		SourceMap: normalizeGeneratedSourceMap(generated.SourceMap, unit), CompilerGeneratedStart: compilerGeneratedStart(unit),
 		sourceUnit: cloneSourceUnit(unit),
 	}, nil
@@ -229,6 +232,8 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 	}
 	for index, output := range outputs {
 		artifacts[index].Output = output.Output
+		artifacts[index].SupportFiles = output.SupportFiles
+		artifacts[index].NativeDependencies = output.NativeDependencies
 		artifacts[index].SourceMap = normalizeGeneratedSourceMap(output.SourceMap, artifacts[index].sourceUnit)
 	}
 	return artifacts, nil

@@ -34,6 +34,17 @@ func dirOpenFileSymbol() Symbol {
 	return symbol
 }
 
+func dirTryLockSymbol() Symbol {
+	symbol := dirOpenFileSymbol()
+	symbol.Name = "try_lock"
+	symbol.Intrinsic = "trb.std.dir.try_lock"
+	symbol.Parameters = []Parameter{{Name: "path", Type: RelativePathType()}}
+	symbol.RuntimeDependencies = nil
+	symbol.Block.Parameters = nil
+	symbol.Block.ScopedParameters = nil
+	return symbol
+}
+
 func dirSource() string {
 	return `class Dir
 end

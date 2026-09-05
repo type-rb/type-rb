@@ -172,7 +172,11 @@ Dir anchors, with bounded RelativePath listing, recursive creation, and scoped
 regular-file opening on Go native Linux/macOS and the Go-mode REPL. Anchored
 pathname resolution cannot escape the opened directory, and error targets retain
 their relative domain. Other backends reject anchored operations; there is no
-weak containment fallback. Atomic publication and locking remain unimplemented.
+weak containment fallback. Cooperative `Dir#try_lock` provides nonblocking
+exclusive scoped locks on local APFS (macOS) and ext-family/tmpfs (Linux), with
+Busy reentry/contention, leaf-symlink rejection, and Unsupported for other
+filesystem profiles. Go CLI builds include the compiler-owned native adapter;
+the Go-mode REPL uses the same source. Atomic publication remains unimplemented.
 
 Array transformations such as `map`, `select`, `reduce`, predicate searches,
 and key-based sorting accept ordinary statements followed by one final result

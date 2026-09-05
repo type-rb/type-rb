@@ -1231,14 +1231,23 @@ func runEffectProject(t *testing.T, mode string, artifacts []*Artifact, goModule
 	for _, artifact := range artifacts {
 		path := filepath.Join(root, filepath.FromSlash(artifact.IR.ModulePath)+extension)
 		writeCompilerRuntimeFile(t, path, artifact.Output)
+		for _, file := range artifact.SupportFiles {
+			writeCompilerRuntimeFile(t, filepath.Join(root, filepath.FromSlash(file.Path)), file.Output)
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var command *exec.Cmd
 	switch mode {
 	case "go":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte("module "+goModule+"\n\ngo 1.27\n"))
-		command = exec.CommandContext(ctx, "go", "run", ".")
+		manifest := "module " + goModule + "\n\ngo 1.27\n"
+		for _, artifact := range artifacts {
+			for name, version := range artifact.NativeDependencies {
+				manifest += "\nrequire " + name + " " + version + "\n"
+			}
+		}
+		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte(manifest))
+		command = exec.CommandContext(ctx, "go", "run", "-mod=mod", ".")
 		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 	case "ruby":
 		command = exec.CommandContext(ctx, "ruby", "main.rb")

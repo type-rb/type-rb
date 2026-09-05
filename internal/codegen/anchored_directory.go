@@ -7,26 +7,26 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
-func validateAnchoredDirectories(programs []*ir.Program) error {
-	var intrinsic func(ir.Expression) string
-	intrinsic = func(expression ir.Expression) string {
-		switch callee := expression.(type) {
-		case *ir.TypeApply:
-			return intrinsic(callee.Receiver)
-		case *ir.Member:
-			if callee.Reference != nil {
-				return callee.Reference.Intrinsic
-			}
-		case *ir.Identifier:
-			if callee.Reference != nil {
-				return callee.Reference.Intrinsic
-			}
+func anchoredIntrinsic(expression ir.Expression) string {
+	switch callee := expression.(type) {
+	case *ir.TypeApply:
+		return anchoredIntrinsic(callee.Receiver)
+	case *ir.Member:
+		if callee.Reference != nil {
+			return callee.Reference.Intrinsic
 		}
-		return ""
+	case *ir.Identifier:
+		if callee.Reference != nil {
+			return callee.Reference.Intrinsic
+		}
 	}
+	return ""
+}
+
+func validateAnchoredDirectories(programs []*ir.Program) error {
 	anchored := func(name string) bool {
 		switch name {
-		case "trb.std.dir.open", "trb.std.dir.open_file", "trb.std.dir.root_children", "trb.std.dir.root_create_all":
+		case "trb.std.dir.open", "trb.std.dir.open_file", "trb.std.dir.root_children", "trb.std.dir.root_create_all", "trb.std.dir.try_lock":
 			return true
 		}
 		return false
@@ -38,7 +38,7 @@ func validateAnchoredDirectories(programs []*ir.Program) error {
 		plan := effectplan.Analyze([]*ir.Program{program}, effectplan.Options{Intrinsic: anchored})
 		var first *ir.Call
 		for call := range plan.Calls {
-			name := intrinsic(call.Callee)
+			name := anchoredIntrinsic(call.Callee)
 			if anchored(name) && (first == nil || call.SourceSpan().Start.Offset < first.SourceSpan().Start.Offset) {
 				first = call
 			}

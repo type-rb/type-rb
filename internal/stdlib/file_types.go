@@ -43,7 +43,7 @@ func IsScopedResourceType(typ types.Type) bool {
 }
 
 func IsResourceAcquisition(intrinsic string) bool {
-	return intrinsic == "trb.std.file.open" || intrinsic == "trb.std.dir.open" || intrinsic == "trb.std.dir.open_file"
+	return intrinsic == "trb.std.file.open" || intrinsic == "trb.std.dir.open" || intrinsic == "trb.std.dir.open_file" || intrinsic == "trb.std.dir.try_lock"
 }
 
 // IsTrustedResourceContract admits only compiler-owned acquisition origins;
@@ -53,7 +53,7 @@ func IsTrustedResourceContract(definition *Package, symbol *Symbol) bool {
 		return false
 	}
 	return definition == registry["trb/std/file"] && symbol.Intrinsic == "trb.std.file.open" ||
-		definition == registry["trb/std/dir"] && (symbol.Intrinsic == "trb.std.dir.open" || symbol.Intrinsic == "trb.std.dir.open_file")
+		definition == registry["trb/std/dir"] && (symbol.Intrinsic == "trb.std.dir.open" || symbol.Intrinsic == "trb.std.dir.open_file" || symbol.Intrinsic == "trb.std.dir.try_lock")
 }
 
 // FileModeType returns the exact standard FileMode declaration.

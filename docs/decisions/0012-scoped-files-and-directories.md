@@ -224,10 +224,41 @@ Providers cannot register a weaker origin or certify non-retention. The narrow
 bridge can move to an ordinary package only when that protocol can enforce
 equivalent lifetime and authority guarantees.
 
+### Cooperative lock scopes
+
+`Dir#try_lock(RelativePath)` is a parameterless structured Result block, not a
+new public resource type. It opens or creates a dedicated regular file without
+truncation and attempts an exclusive nonblocking OS lock. Contention and
+same-process reentry return Busy. It rejects leaf symlinks and nonregular files;
+parent resolution remains anchored. Scope cleanup follows File acquisition's
+error priority. Process termination also releases the lock, but never removes
+the stable lock file. Failed acquisition may leave a created empty file.
+
+The guarantee is cooperative exclusion for writers using that same file and
+protocol. Replacement/deletion of the lock file, other writers, Git clones,
+distributed leasing, write atomicity and crash durability are not covered.
+There is no age-based takeover or automatic retry. Body operations remain
+source-synchronous and transitively checked; no lock value can escape.
+
+The native adapter uses descriptor-relative `openat` with O_NOFOLLOW for the
+single leaf after resolving the parent through os.Root. Passing O_NOFOLLOW to
+os.Root.OpenFile alone is insufficient: Root intentionally resolves in-root
+symlinks. [Openat](https://man7.org/linux/man-pages/man2/open.2.html) and
+[flock](https://man7.org/linux/man-pages/man2/flock.2.html) supply the required
+leaf and open-file-description semantics. The adapter admits local APFS on
+macOS and ext-family/tmpfs on Linux; other profiles fail Unsupported. This
+allowlist does not prove arbitrary or malicious filesystem behavior.
+
+The same compiler-owned Go source is compiled into the REPL and emitted in
+generated projects, with OS build tags and a fixed x/sys dependency. These are
+explicit support artifacts, not forged portable IR modules or provider-owned
+native declarations. CLI artifact writers include them and reject package
+collisions; source-only stdout cannot represent this multi-file output.
+
 ## Deferred scope
 
 This decision does not add watchers, permissions, arbitrary open-flag
-combinations, locking, seeking, general streaming or incremental text decoding,
+combinations, seeking, general streaming or incremental text decoding,
 temporary-file management, `fsync`, atomic replacement, recursive walking, or
 general path parsing or joining.
 

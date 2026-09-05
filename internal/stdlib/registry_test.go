@@ -106,14 +106,18 @@ func TestAnchoredDirectoryContracts(t *testing.T) {
 			t.Fatal("cloned package acquired authority")
 		}
 	}
-	for name, intrinsic := range map[string]string{"children": "trb.std.dir.root_children", "create_all": "trb.std.dir.root_create_all", "open_file": "trb.std.dir.open_file"} {
+	lock := directory.Symbols["try_lock"]
+	if !IsTrustedResourceContract(directory, &lock) || lock.Block == nil || len(lock.Block.Parameters) != 0 || len(lock.Block.ScopedParameters) != 0 {
+		t.Fatal("lock must be a trusted parameterless scope")
+	}
+	for name, intrinsic := range map[string]string{"children": "trb.std.dir.root_children", "create_all": "trb.std.dir.root_create_all", "open_file": "trb.std.dir.open_file", "try_lock": "trb.std.dir.try_lock"} {
 		definition, symbol, ok := LookupReceiverMethod(DirResourceType(), name)
 		if !ok || definition != directory || symbol.Intrinsic != intrinsic || symbol.StaticOwner != "" {
 			t.Fatalf("%s: %#v", name, symbol)
 		}
 	}
 	methods := ReceiverMethods(DirResourceType())
-	if len(methods) != 3 {
+	if len(methods) != 4 {
 		t.Fatalf("Dir completions: %#v", methods)
 	}
 	for _, method := range methods {
