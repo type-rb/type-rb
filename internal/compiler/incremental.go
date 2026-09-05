@@ -7,6 +7,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
@@ -237,6 +238,9 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		lowered.SourcePath = source.Filename
 		loweringIntegrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
+	}
+	if diagnostics := effectplan.ValidateResources(loweredPrograms); len(diagnostics) > 0 {
+		return nil, true, NewCompileError("", diagnostic.TypeError, diagnostics)
 	}
 	if validateBackend {
 		if err := codegen.ValidateProject(loweredPrograms); err != nil {

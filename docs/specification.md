@@ -631,14 +631,25 @@ switches.
   annotations. It does not reserve that type name for a static-only utility
   namespace. In particular, `trb/std/file` exposes the opaque resource class
   `File`; source cannot construct it with `File.new()`.
-- The exact standard `File` value type is compiler-introduced only as the
-  inferred parameter of the trusted `File.open` block. The `File` declaration
-  remains valid as the class owner of `open`, but authored value-type positions
-  cannot contain that identity, including through nullable, collection,
-  function, or transparent-alias shapes. Functions, fields, compiler-generated
-  declarations, and external declaration providers cannot return or otherwise
-  introduce an exact `File` value. These restrictions are declaration-identity
-  based and do not affect an unrelated type also named `File`.
+- The trusted `File.open` block acquires the exact standard `File` resource and
+  owns its close. A required immutable `File` parameter of an authored method
+  borrows an existing resource for that call; it does not acquire or close it.
+  Immutable local aliases preserve that origin. Borrow annotations use the
+  ordinary parameter/local syntax, without a public lifetime annotation.
+  Returning or storing resources, nullable/container/function/transparent-alias
+  resource types, `Any` erasure, and escaping callback capture are forbidden.
+  Nested acquisition blocks and synchronous inline collection blocks can use
+  outer resources; `concurrent_map` and first-class closures cannot capture them.
+  External declaration providers cannot mint resource values or certify borrows.
+  These rules use declaration identity, not the spelling `File`.
+- While a resource is held, reached operations must be verified synchronous
+  TypeRB source or explicitly admitted compiler-owned intrinsics. The shared
+  typed-IR pass checks imported/generated helper bodies, constructors, defaults,
+  and recursive calls before backend generation, including editor analysis.
+  Unknown calls, native runtime edges, suspension, and unclassified operations
+  fail closed. Borrow methods are checked even when unused. This is a lifetime
+  rule, not a deterministic/pure profile or a termination guarantee. Synchronous
+  filesystem I/O, ordinary control flow and non-resource mutation remain valid.
 - Public operations have one canonical owner. An operation on an existing
   value is an instance method on that value. An operation naturally associated
   with an actual nominal type but not an existing instance is a class member on

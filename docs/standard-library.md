@@ -622,17 +622,41 @@ into that kind. Human-readable messages are not stable machine-readable data.
 the mode selects `Read`, which opens an existing file for reading. `Write`
 opens a file for writing, creating it or truncating it to zero bytes.
 `CreateNew` opens a newly created file for writing. The `File` value is opaque
-and scoped: it may only be used as a direct receiver for its file methods
-inside that block. It cannot be constructed, assigned, passed to another
-function, placed in a collection, returned, or captured by a nested callback.
+and scoped. A checked source helper may borrow it through a required immutable
+`File` parameter. Immutable local aliases, nested acquisition blocks, and
+synchronous inline collection blocks preserve the original resource lifetime.
+It cannot be constructed, reassigned, stored in a field or collection, erased
+to `Any`, returned, or captured by a first-class or concurrent callback.
 The compiler closes the file before the `Result` leaves the structured block.
 Prefix `try` may end the block with an error, but cleanup still finishes before
 that error propagates to the enclosing `Result` boundary. The exact standard
-`File` identity also cannot appear in an authored parameter, return, field,
-collection, function type, or transparent alias. Compiler-generated and
-external declaration contracts cannot supply it as a value; only the trusted
-`File.open` block introduces it. An unrelated declaration with the same name
-is unaffected.
+`File` identity cannot appear in a nullable, return, field, collection, function
+type, or transparent alias. External contracts cannot mint a `File` or promise
+that a native call will not retain it. An unrelated same-named type is unaffected.
+
+<!-- trb-doc-test: stdlib-file-borrow -->
+```trb
+import trb/std/file
+import { FileSystemError } from trb/std/errors
+import { Result } from trb/std/result
+
+def read_header(file: File): Result<String, FileSystemError>
+	handle := file
+	return handle.read_text(max_bytes: 4096)
+end
+```
+
+Only the acquisition block closes the handle; returning from `read_header`
+does not close it. All operations reached while holding a resource must be
+verified synchronous source or admitted compiler intrinsics. This includes
+transitive helpers, constructors and defaults. Unknown/native calls, dynamic
+callback invocation and suspension are rejected in every mode. Compute such
+inputs before acquisition, or perform that work after the scope finishes.
+A helper with a suspending parameter default is treated as a suspending helper,
+including calls that supply that argument: its generated calling convention may
+still suspend. Use a separate synchronous helper for work inside the scope.
+This does not prohibit synchronous I/O or ordinary non-resource mutation, and
+does not claim purity or a bound on execution time.
 
 Acquisition accepts only regular files. The runtime checks the opened handle,
 not a preceding path lookup, before entering the block. Directories, FIFOs,
@@ -785,8 +809,8 @@ end
 These host operations need privileged runtime bridges: ordinary packages cannot
 yet acquire scoped descriptors or enumerate native directory entries through
 the extension protocol. The integration does not grant that authority to
-external providers. It adds neither an opened `Dir` capability, resource
-borrowing, atomic publication, locks, nor a sandbox.
+external providers. Scoped File borrowing is supported; an opened `Dir`
+capability, atomic publication, locks, and a sandbox are not yet implemented.
 
 ## Process
 

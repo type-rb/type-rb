@@ -11,6 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
 	"github.com/type-rb/type-rb/internal/codegen"
+	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
@@ -194,6 +195,9 @@ func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 	checked = checkedPrograms[program.ModulePath]
 	lowered := lower.Program(checked)
 	lowered.SourcePath = unit.Filename
+	if diagnostics := effectplan.ValidateResources([]*ir.Program{lowered}); len(diagnostics) > 0 {
+		return nil, NewCompileError(unit.Filename, diagnostic.TypeError, diagnostics)
+	}
 	generated, err := codegen.Generate(lowered)
 	if err != nil {
 		return nil, err
@@ -452,6 +456,9 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		lowered.SourcePath = source.Filename
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
+	}
+	if diagnostics := effectplan.ValidateResources(loweredPrograms); len(diagnostics) > 0 {
+		return nil, NewCompileError("", diagnostic.TypeError, diagnostics)
 	}
 	if validateBackend {
 		if err := codegen.ValidateProject(loweredPrograms); err != nil {

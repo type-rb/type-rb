@@ -1,5 +1,5 @@
-// Package effectplan performs whole-project call-graph analysis for backend
-// effects that remain intentionally absent from TypeRB source signatures.
+// Package effectplan performs whole-project call-graph analysis shared by
+// backend effect planning and mode-independent scoped-resource validation.
 package effectplan
 
 import (
@@ -37,9 +37,10 @@ type Plan struct {
 	// LambdaModules retains the source module that owns each first-class
 	// function. Backend policy can use that identity without moving target-
 	// specific suspension rules into shared TypeRB semantics.
-	LambdaModules map[*ir.Lambda]string
-	methodKeys    map[methodKey]bool
-	recordKeys    map[recordKey]bool
+	LambdaModules    map[*ir.Lambda]string
+	ResourceFailures map[ir.Statement]string
+	methodKeys       map[methodKey]bool
+	recordKeys       map[recordKey]bool
 }
 
 type methodKey struct {
@@ -169,6 +170,9 @@ type Options struct {
 	WebNext         bool
 	CaptureLambdas  bool
 	PassToFunctions bool
+	// ResourceSafety closes unknown/native call edges instead of assuming that
+	// an unclassified operation has no effect. It is mode-independent.
+	ResourceSafety bool
 }
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
@@ -189,6 +193,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		Iterations:              map[*ir.Iterate]bool{},
 		StructuredBlocks:        map[*ir.StructuredBlock]bool{},
 		LambdaModules:           map[*ir.Lambda]string{},
+		ResourceFailures:        map[ir.Statement]string{},
 		methodKeys:              map[methodKey]bool{},
 		recordKeys:              map[recordKey]bool{},
 	}
@@ -227,6 +232,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 				changed = true
 			}
 			bodyReaches := analyzer.statementsReach(method.method.Body, method, false)
+			bodyReaches = bodyReaches || options.ResourceSafety && (method.method.External || method.owner.kind == identity.Interface)
 			if !plan.Methods[method.method] && (defaultsReach || bodyReaches) {
 				plan.Methods[method.method] = true
 				changed = true
@@ -266,6 +272,9 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		analyzer.statementsReach(method.method.Body, method, true)
 		if plan.Methods[method.method] {
 			plan.methodKeys[methodKey{module: method.module, owner: method.owner.name, name: method.method.Name}] = true
+			if options.ResourceSafety && borrowsResource(method.method) {
+				plan.ResourceFailures[method.method] = method.module
+			}
 		}
 	}
 	for _, class := range analyzer.classes {
@@ -902,6 +911,9 @@ func (a *analyzer) parameterDefaultsReach(context methodContext, record bool) bo
 func (a *analyzer) statementsReach(statements []ir.Statement, context methodContext, record bool) bool {
 	suspends := false
 	for _, statement := range statements {
+		if a.options.ResourceSafety && resourceOpaqueNode(statement) {
+			suspends = true
+		}
 		switch node := statement.(type) {
 		case *ir.Class:
 			identity := a.canonicalDeclarationIdentity(effectDeclarationIdentity(
@@ -975,10 +987,14 @@ func (a *analyzer) statementsReach(statements []ir.Statement, context methodCont
 		case *ir.StructuredBlock:
 			blockSuspends := a.intrinsicReaches(node.Intrinsic)
 			blockSuspends = a.expressionReaches(node.Call, context, record) || blockSuspends
-			blockSuspends = a.statementsReach(node.Body, context, record) || blockSuspends
-			blockSuspends = a.expressionReaches(node.Value, context, record) || blockSuspends
+			bodySuspends := a.statementsReach(node.Body, context, record)
+			bodySuspends = a.expressionReaches(node.Value, context, record) || bodySuspends
+			blockSuspends = bodySuspends || blockSuspends
 			if record && blockSuspends {
 				a.plan.StructuredBlocks[node] = true
+				if a.options.ResourceSafety && bodySuspends && node.Intrinsic == "trb.std.file.open" {
+					a.plan.ResourceFailures[node] = context.module
+				}
 			}
 			suspends = blockSuspends || suspends
 		case *ir.NativeBlock:
@@ -1116,7 +1132,8 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if record && anyReached(a.plan.ParameterDefaults, targets) {
 			a.plan.EnumCallDefaults[node] = true
 		}
-		targetSuspends := anyReached(a.plan.Methods, targets)
+		generatedRaw := node.RawType.Kind != "" && (node.Method == "raw_value" || node.Method == "from_raw")
+		targetSuspends := anyReached(a.plan.Methods, targets) || a.options.ResourceSafety && len(targets) == 0 && !generatedRaw
 		if record && targetSuspends {
 			a.plan.EnumCalls[node] = true
 		}
@@ -1125,6 +1142,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		suspends = a.expressionReaches(node.Receiver, context, record)
 	case *ir.Member:
 		suspends = a.expressionReaches(node.Receiver, context, record)
+		if a.options.ResourceSafety && a.resourceMemberUnsafe(node, context) {
+			suspends = true
+		}
 	case *ir.Index:
 		suspends = a.expressionReaches(node.Receiver, context, record)
 		suspends = a.expressionReaches(node.Index, context, record) || suspends
@@ -1135,6 +1155,7 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 	case *ir.Case:
 		suspends = a.statementsReach([]ir.Statement{node}, context, record)
 	}
+	suspends = suspends || a.options.ResourceSafety && resourceOpaqueNode(expression)
 	if record && suspends {
 		a.plan.Expressions[expression] = true
 	}
@@ -1142,6 +1163,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, context methodContext, record bool) bool {
+	if a.options.ResourceSafety {
+		return a.resourceCallReaches(call, callee, context, record)
+	}
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		if class := a.classDefinitions[identity]; class != nil {
 			return a.plan.ClassConstructors[class.class]
@@ -1224,6 +1248,17 @@ func (a *analyzer) recordConstructReaches(construction *ir.RecordConstruct, cont
 		}
 	}
 	declaration = a.canonicalDeclarationIdentity(declaration)
+	if a.options.ResourceSafety && len(a.recordDefinitions[declaration]) == 0 {
+		provided := map[string]bool{}
+		for _, argument := range construction.Arguments {
+			provided[argument.Name] = true
+		}
+		for _, field := range construction.Fields {
+			if field.HasDefault && !provided[field.Name] {
+				return true
+			}
+		}
+	}
 	omittedDefaultsReach, targetHasEffects := a.recordConstructDefaultsReach(construction, a.recordDefinitions[declaration])
 	if record {
 		if omittedDefaultsReach {
