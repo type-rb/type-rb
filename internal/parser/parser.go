@@ -1640,27 +1640,27 @@ func rubyNativeKeywordCandidate(tok token.Token) bool {
 	return true
 }
 
+func (p *Parser) parseCondition(tokens []token.Token) ast.Expression {
+	// The expression parser owns grouping and must consume the entire condition.
+	// A leading group and a final call do not form one enclosing pair.
+	condition, ok := p.parseExpression(tokens)
+	if !ok {
+		return nativeExpression(tokens, p)
+	}
+	return condition
+}
+
 func (p *Parser) parseIf() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	n := &ast.IfStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	conditionTokens := line[1:]
-	if len(conditionTokens) >= 2 && conditionTokens[0].Lexeme == "(" && conditionTokens[len(conditionTokens)-1].Lexeme == ")" {
-		conditionTokens = conditionTokens[1 : len(conditionTokens)-1]
-	}
-	n.Condition, _ = p.parseExpression(conditionTokens)
-	if n.Condition == nil {
-		n.Condition = nativeExpression(conditionTokens, p)
-	}
+	n.Condition = p.parseCondition(line[1:])
 	p.pos = next
 	n.Then = p.parseStatements(map[string]bool{"elsif": true, "else": true, "end": true})
 	for !p.atEOF() && p.current().Lexeme == "elsif" {
 		s, e, nx, _ := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
-		cond, ok := p.parseExpression(parts[1:])
-		if !ok {
-			cond = nativeExpression(parts[1:], p)
-		}
+		cond := p.parseCondition(parts[1:])
 		p.pos = nx
 		body := p.parseStatements(map[string]bool{"elsif": true, "else": true, "end": true})
 		n.ElseIf = append(n.ElseIf, ast.IfBranch{Condition: cond, Body: body})
@@ -1768,14 +1768,7 @@ func (p *Parser) parseWhile() ast.Statement {
 	start, end, next, comment := p.logicalLine(p.pos)
 	line := p.codeTokens(start, end)
 	n := &ast.WhileStatement{Base: ast.Base{SourceSpan: spanOf(line), TrailingComment: comment}}
-	conditionTokens := line[1:]
-	if len(conditionTokens) >= 2 && conditionTokens[0].Lexeme == "(" && conditionTokens[len(conditionTokens)-1].Lexeme == ")" {
-		conditionTokens = conditionTokens[1 : len(conditionTokens)-1]
-	}
-	n.Condition, _ = p.parseExpression(conditionTokens)
-	if n.Condition == nil {
-		n.Condition = nativeExpression(conditionTokens, p)
-	}
+	n.Condition = p.parseCondition(line[1:])
 	p.pos = next
 	n.Body = p.parseStatements(map[string]bool{"end": true})
 	_, closeSpan := p.consumeTerminator("end")
