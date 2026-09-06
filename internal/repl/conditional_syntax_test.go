@@ -28,12 +28,29 @@ def total(): Integer
 	return result
 end
 
+def grouped_conditions(): Integer
+	mut count := 0
+	if (false) || (true)
+		count += 1
+	end
+	while (count < 2) && (true)
+		count += 1
+	end
+	if false
+		count += 10
+	elsif (false) || (count == 2)
+		count += 1
+	end
+	return count
+end
+
 [
 	true ? 7 : (1 / 0),
 	false ? (1 / 0) : 9,
 	guard(true),
 	guard(false),
 	total(),
+	grouped_conditions(),
 ]
 `),
 	}
@@ -66,7 +83,7 @@ end
 			if err != nil {
 				t.Fatalf("%s conditional syntax evaluation failed: %v", mode, err)
 			}
-			if got, want := Inspect(result.Value), `[7, 9, "early", "late", 5]`; !result.Display || got != want {
+			if got, want := Inspect(result.Value), `[7, 9, "early", "late", 5, 3]`; !result.Display || got != want {
 				t.Fatalf("%s conditional syntax evaluation=%s display=%t, want %s", mode, got, result.Display, want)
 			}
 		})
