@@ -236,7 +236,7 @@ func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 	if len(node.ElseIf) != 0 || node.ThenResult != nil || node.ElseResult != nil {
 		return false, l.unsupported(node.SourceSpan(), "elsif or value-producing if")
 	}
-	condition, err := l.lowerExpression(node.Condition)
+	condition, err := l.lowerCondition(node.Condition)
 	if err != nil {
 		return false, err
 	}
@@ -299,14 +299,15 @@ func (l *v3FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 	}
 
 	l.current, l.env, l.locals = header, headerEnv, append([]string(nil), baseLocals...)
-	condition, err := l.lowerExpression(node.Condition)
+	condition, err := l.lowerCondition(node.Condition)
 	if err != nil {
 		return false, err
 	}
-	header.Terminator = Branch{
+	// A short-circuit condition may end after the original header block.
+	l.current.Terminator = Branch{
 		Op: "branch", Condition: condition.id,
-		WhenTrue: body.ID, TrueArguments: v3EnvironmentArguments(baseLocals, headerEnv),
-		WhenFalse: done.ID, FalseArguments: v3EnvironmentArguments(baseLocals, headerEnv), Origin: loopOrigin,
+		WhenTrue: body.ID, TrueArguments: v3EnvironmentArguments(baseLocals, l.env),
+		WhenFalse: done.ID, FalseArguments: v3EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
 	}
 
 	l.current, l.env, l.locals = body, bodyEnv, append([]string(nil), baseLocals...)
@@ -322,6 +323,57 @@ func (l *v3FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 	}
 	l.current, l.env, l.locals = done, doneEnv, baseLocals
 	return false, nil
+}
+
+// Condition trees have no enclosing expression temporaries to carry across a
+// branch. General logical values remain unsupported until that boundary exists.
+func (l *v3FunctionLowerer) lowerCondition(expression ir.Expression) (v3ValueRef, error) {
+	if node, ok := expression.(*ir.Unary); ok && node.Operator == "!" {
+		value, err := l.lowerCondition(node.Operand)
+		if err != nil {
+			return v3ValueRef{}, err
+		}
+		id := l.newValue()
+		l.emit(BooleanNot{Op: "boolean_not", Result: id, Value: value.id, Origin: l.origin(node.SourceSpan())})
+		return v3ValueRef{id: id, typ: node.ExprType()}, nil
+	}
+	node, logical := expression.(*ir.Binary)
+	if !logical || (node.Operator != "&&" && node.Operator != "||") {
+		return l.lowerExpression(expression)
+	}
+	left, err := l.lowerCondition(node.Left)
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	at := l.origin(node.SourceSpan())
+	names := append([]string(nil), l.locals...)
+	rightBlock, rightEnv := l.newBlockWithLocals(node.SourceSpan(), names, l.env)
+	join, joinEnv := l.newBlockWithLocals(node.SourceSpan(), names, l.env)
+	result := l.newValue()
+	join.Parameters = append(join.Parameters, Parameter{ID: result, Type: "Boolean", Origin: at})
+	rightArguments := v3EnvironmentArguments(names, l.env)
+	shortArguments := append(v3EnvironmentArguments(names, l.env), left.id)
+	branch := Branch{
+		Op: "branch", Condition: left.id, Origin: at,
+		WhenTrue: rightBlock.ID, TrueArguments: rightArguments,
+		WhenFalse: join.ID, FalseArguments: shortArguments,
+	}
+	if node.Operator == "||" {
+		branch.WhenTrue, branch.WhenFalse = branch.WhenFalse, branch.WhenTrue
+		branch.TrueArguments, branch.FalseArguments = branch.FalseArguments, branch.TrueArguments
+	}
+	l.current.Terminator = branch
+	l.current, l.env = rightBlock, rightEnv
+	right, err := l.lowerCondition(node.Right)
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	l.current.Terminator = Jump{
+		Op: "jump", Target: join.ID,
+		Arguments: append(v3EnvironmentArguments(names, l.env), right.id), Origin: at,
+	}
+	l.current, l.env = join, joinEnv
+	return v3ValueRef{id: result, typ: node.ExprType()}, nil
 }
 
 func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRef, error) {
