@@ -1,6 +1,7 @@
 package typescript
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	pathpkg "path"
@@ -1952,6 +1953,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return g.identifierValue(n)
 	case *ir.Literal:
+		if n.Kind == "string" && strings.HasPrefix(n.Raw, `"`) {
+			text, _ := strconv.Unquote(n.Raw)
+			return quoteStringValue(text)
+		}
 		if n.Kind == "nil" {
 			return "null"
 		}
@@ -1965,7 +1970,8 @@ func (g *generator) expr(expression ir.Expression) string {
 				value.WriteString(g.expr(part.Expression))
 				value.WriteByte('}')
 			} else {
-				text := strings.ReplaceAll(part.Text, "`", "\\`")
+				quoted := quoteStringValue(part.Text)
+				text := strings.ReplaceAll(quoted[1:len(quoted)-1], "`", "\\`")
 				value.WriteString(strings.ReplaceAll(text, "${", "\\${"))
 			}
 		}
@@ -2342,7 +2348,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	owner := g.enumCallOwner(call)
 	parts := []string{"((value: " + g.tsType(call.RawType) + "): " + resultType + " => { switch (value) {"}
 	for _, item := range call.RawValues {
-		parts = append(parts, "case "+item.Raw+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
+		parts = append(parts, "case "+quoteRawValue(item.Raw)+": return "+result+".Ok<"+valueType+", "+errorType+">("+owner+"."+item.Member+");")
 	}
 	message := strconv.Quote("unknown raw value for " + call.EnumName)
 	parts = append(parts, "} return "+result+".Err<"+valueType+", "+errorType+">({ value, message: "+message+" }); })("+argument+")")
@@ -3804,7 +3810,7 @@ func (b *tsJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		owner := b.runtimeTypeName(schema)
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
-			branches = append(branches, "case "+item.Raw+": return "+owner+"."+item.Member+";")
+			branches = append(branches, "case "+quoteRawValue(item.Raw)+": return "+owner+"."+item.Member+";")
 		}
 		body = "if (value.kind !== " + strconv.Quote(kind) + ") { " + expected(kind) + "; } switch (value.value) { " + strings.Join(branches, " ") + " } return fail(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + ");"
 	case "array":
@@ -4588,4 +4594,17 @@ func (g *generator) line(text string) {
 	g.b.WriteString(strings.Repeat("  ", g.indent))
 	g.b.WriteString(text)
 	g.b.WriteByte('\n')
+}
+
+func quoteStringValue(text string) string {
+	encoded, _ := json.Marshal(text)
+	return string(encoded)
+}
+
+func quoteRawValue(raw string) string {
+	if strings.HasPrefix(raw, `"`) {
+		text, _ := strconv.Unquote(raw)
+		return quoteStringValue(text)
+	}
+	return raw
 }

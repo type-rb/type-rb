@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -462,7 +463,7 @@ func discoverJobDefaults(job *Job, class *ast.ClassStatement) error {
 			if literal.Kind != ast.StringLiteral {
 				return fmt.Errorf("trb/jobs Job %s.queue expects a String literal", job.Name)
 			}
-			value, err := strconv.Unquote(literal.Raw)
+			value, err := stringliteral.Unquote(literal.Raw)
 			if err != nil || strings.TrimSpace(value) == "" || len(value) > 255 {
 				return fmt.Errorf("trb/jobs Job %s.queue must be a non-empty String of at most 255 bytes", job.Name)
 			}

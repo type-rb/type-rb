@@ -2,10 +2,10 @@ package schema
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -120,7 +120,7 @@ func stringValue(value token.Token) (string, error) {
 	if value.Lexeme[0] == '\'' {
 		return strings.ReplaceAll(value.Lexeme[1:len(value.Lexeme)-1], `\'`, `'`), nil
 	}
-	decoded, err := strconv.Unquote(value.Lexeme)
+	decoded, err := stringliteral.Unquote(value.Lexeme)
 	if err != nil {
 		return "", at(value, "invalid string literal")
 	}

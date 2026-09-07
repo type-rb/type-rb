@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -423,7 +424,7 @@ func (l *functionLowerer) lowerPuts(node *ir.Call) error {
 	if !ok || literal.Kind != "string" {
 		return unsupported(l.program, node.SourceSpan(), "dynamic puts() output")
 	}
-	value, err := strconv.Unquote(literal.Raw)
+	value, err := stringliteral.Unquote(literal.Raw)
 	if err != nil {
 		return fmt.Errorf("%s: decode TypeRB String literal: %w", l.program.SourcePath, err)
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 )
 
 type Kind string
@@ -146,7 +147,7 @@ func FromName(name string) Type {
 // their ordinary scalar representation by non-TypeScript backends.
 func LiteralFromSource(source string) (Type, bool) {
 	if strings.HasPrefix(source, `"`) {
-		value, err := strconv.Unquote(source)
+		value, err := stringliteral.Unquote(source)
 		if err != nil {
 			return Type{}, false
 		}

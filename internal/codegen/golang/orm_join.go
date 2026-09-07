@@ -5,6 +5,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 )
 
 func (g *generator) ormJoin(call *ir.Call, kind string) string {
@@ -107,7 +108,7 @@ func ormJoinAssociation(expression ir.Expression) (string, bool) {
 		if value.Kind != "string" {
 			return "", false
 		}
-		decoded, err := strconv.Unquote(value.Raw)
+		decoded, err := stringliteral.Unquote(value.Raw)
 		if err != nil {
 			return "", false
 		}

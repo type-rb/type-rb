@@ -5,12 +5,12 @@ package parser
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -2241,7 +2241,7 @@ func isEndlessDefinition(line []token.Token) bool {
 }
 
 func unquote(s string) string {
-	if value, err := strconv.Unquote(s); err == nil {
+	if value, err := stringliteral.Unquote(s); err == nil {
 		return value
 	}
 	return strings.Trim(s, "'\"")

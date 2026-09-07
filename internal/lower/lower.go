@@ -14,6 +14,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -983,11 +984,17 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			Lexical: l.checked.LexicalBindings[n], Reference: l.reference(n),
 		}
 	case *ast.Literal:
-		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: n.Raw}
+		raw := n.Raw
+		if n.Kind == ast.StringLiteral && strings.HasPrefix(raw, `"`) {
+			decoded, _ := stringliteral.Unquote(raw) // Validated by the checker.
+			raw = strconv.Quote(decoded)
+		}
+		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: raw}
 	case *ast.InterpolatedString:
 		result := &ir.InterpolatedString{ExprBase: base, Raw: n.Raw}
 		for _, part := range n.Parts {
-			result.Parts = append(result.Parts, ir.StringPart{Text: part.Text, Expression: l.expression(part.Expression)})
+			text, _ := stringliteral.Text(part.Text) // Validated by the checker.
+			result.Parts = append(result.Parts, ir.StringPart{Text: text, Expression: l.expression(part.Expression)})
 		}
 		return result
 	case *ast.SymbolLiteral:

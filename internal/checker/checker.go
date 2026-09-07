@@ -18,6 +18,7 @@ import (
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -4583,7 +4584,7 @@ func checkerRecordJSONName(field *ast.RecordFieldStatement) string {
 		if !ok || literal.Kind != ast.StringLiteral {
 			continue
 		}
-		value, err := strconv.Unquote(literal.Raw)
+		value, err := stringliteral.Unquote(literal.Raw)
 		if err == nil {
 			return strings.Split(value, ",")[0]
 		}
@@ -6395,6 +6396,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.Literal:
 		switch n.Kind {
 		case ast.StringLiteral:
+			if strings.HasPrefix(n.Raw, `"`) {
+				if _, err := stringliteral.Unquote(n.Raw); err != nil {
+					c.error(n.Span(), "invalid String escape or literal")
+				}
+			}
 			typ = types.FromName("String")
 		case ast.IntegerLiteral:
 			if _, ok := types.ParsePortableIntegerLiteral(n.Raw); !ok {
@@ -6413,6 +6419,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 	case *ast.InterpolatedString:
 		for _, part := range n.Parts {
+			if part.Expression == nil {
+				if _, err := stringliteral.Text(part.Text); err != nil {
+					c.error(n.Span(), "invalid String escape or literal")
+				}
+			}
 			if part.Expression != nil {
 				actual := c.checkExpression(part.Expression, sc)
 				actual = c.requireValueExpression(part.Expression, actual, "be interpolated into a String")
@@ -9609,7 +9620,7 @@ func declarationLiteralValue(expression ast.Expression) (string, bool) {
 		if literal.Kind != ast.StringLiteral {
 			return "", false
 		}
-		if value, err := strconv.Unquote(literal.Raw); err == nil {
+		if value, err := stringliteral.Unquote(literal.Raw); err == nil {
 			return value, true
 		}
 		return strings.Trim(literal.Raw, "'\""), true
@@ -9755,12 +9766,12 @@ func (c *Checker) rawEnumLiteral(expression ast.Expression, sc *scope) (RawEnumV
 	case *ast.Literal:
 		switch value.Kind {
 		case ast.StringLiteral:
-			decoded, err := strconv.Unquote(value.Raw)
+			decoded, err := stringliteral.Unquote(value.Raw)
 			if err != nil {
 				c.error(value.Span(), "raw enum String value must be a valid string literal")
 				return RawEnumValue{}, "", false
 			}
-			return RawEnumValue{Raw: value.Raw, Type: typ}, "string:" + decoded, true
+			return RawEnumValue{Raw: strconv.Quote(decoded), Type: typ}, "string:" + decoded, true
 		case ast.IntegerLiteral:
 			parsed, err := strconv.ParseInt(strings.ReplaceAll(value.Raw, "_", ""), 10, 64)
 			if err != nil {

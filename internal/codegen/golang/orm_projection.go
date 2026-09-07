@@ -6,6 +6,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -63,7 +64,7 @@ func ormProjectionColumn(expression ir.Expression) string {
 	case *ir.Symbol:
 		return value.Name
 	case *ir.Literal:
-		if decoded, err := strconv.Unquote(value.Raw); err == nil {
+		if decoded, err := stringliteral.Unquote(value.Raw); err == nil {
 			return decoded
 		}
 		return strings.Trim(value.Raw, "'\"")

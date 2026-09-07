@@ -565,6 +565,7 @@ type Literal struct {
 func (*Literal) irExpression() {}
 
 type StringPart struct {
+	// Text is a decoded value, never target-language source.
 	Text       string
 	Expression Expression
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -770,7 +771,7 @@ func (l *v3FunctionLowerer) lowerLiteral(node *ir.Literal) (v3ValueRef, error) {
 		if l.version < Version4 {
 			return v3ValueRef{}, l.unsupported(node.SourceSpan(), "string literal expression")
 		}
-		value, err := strconv.Unquote(node.Raw)
+		value, err := stringliteral.Unquote(node.Raw)
 		if err != nil {
 			return v3ValueRef{}, fmt.Errorf("%s: decode TypeRB String literal: %w", l.program.SourcePath, err)
 		}
@@ -934,7 +935,7 @@ func (l *v3FunctionLowerer) lowerPuts(node *ir.Call) error {
 	if !ok || literal.Kind != "string" {
 		return l.unsupported(node.SourceSpan(), "dynamic puts() output")
 	}
-	value, err := strconv.Unquote(literal.Raw)
+	value, err := stringliteral.Unquote(literal.Raw)
 	if err != nil {
 		return fmt.Errorf("%s: decode TypeRB String literal: %w", l.program.SourcePath, err)
 	}

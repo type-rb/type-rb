@@ -2,10 +2,10 @@ package web
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -77,7 +77,7 @@ func validatePathParameterCalls(route Route, program *ast.Program, resolved reso
 				})
 				return
 			}
-			name, err := strconv.Unquote(literal.Raw)
+			name, err := stringliteral.Unquote(literal.Raw)
 			if err != nil || declared[name] {
 				return
 			}

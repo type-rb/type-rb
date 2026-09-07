@@ -1,10 +1,10 @@
 package orm
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -83,7 +83,7 @@ func queryString(expression ir.Expression) (string, bool) {
 	if !ok || literal.Kind != "string" {
 		return "", false
 	}
-	if value, err := strconv.Unquote(literal.Raw); err == nil {
+	if value, err := stringliteral.Unquote(literal.Raw); err == nil {
 		return value, true
 	}
 	return strings.Trim(literal.Raw, "'\""), true

@@ -3,11 +3,11 @@ package orm
 import (
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -716,7 +716,7 @@ func irStaticName(expression ir.Expression) (string, bool) {
 		if value.Kind != "string" {
 			return "", false
 		}
-		decoded, err := strconv.Unquote(value.Raw)
+		decoded, err := stringliteral.Unquote(value.Raw)
 		return decoded, err == nil
 	default:
 		return "", false

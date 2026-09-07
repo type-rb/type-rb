@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -251,7 +252,7 @@ func buildDeclarationORMEnumMapping(module string, enum packageextension.Project
 func declarationORMEnumRawValue(value packageextension.ProjectValue) (types.Type, string, int64, bool) {
 	switch value.Kind {
 	case "string":
-		decoded, err := strconv.Unquote(value.Raw)
+		decoded, err := stringliteral.Unquote(value.Raw)
 		return types.FromName("String"), decoded, 0, err == nil
 	case "integer":
 		parsed, err := strconv.ParseInt(strings.ReplaceAll(value.Raw, "_", ""), 10, 64)
@@ -349,7 +350,7 @@ func declarationOptionValue(value packageextension.ProjectValue) (string, bool) 
 	case "symbol":
 		return value.Name, true
 	case "string":
-		decoded, err := strconv.Unquote(value.Raw)
+		decoded, err := stringliteral.Unquote(value.Raw)
 		return decoded, err == nil
 	default:
 		return "", false

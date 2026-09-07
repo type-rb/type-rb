@@ -16,6 +16,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -1286,7 +1287,7 @@ func ormDatabaseValue(value Value) any {
 			switch raw := member.RawValue.(type) {
 			case *ir.Literal:
 				if raw.Kind == "string" {
-					decoded, err := strconv.Unquote(raw.Raw)
+					decoded, err := stringliteral.Unquote(raw.Raw)
 					if err == nil {
 						return decoded
 					}
