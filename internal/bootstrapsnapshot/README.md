@@ -15,3 +15,12 @@ subexpressions in call arguments, remain unsupported. Supporting them requires
 carrying enclosing expression temporaries across blocks, not simply making
 binary instruction emission eager. Version 2 is unchanged. These are snapshot
 coverage limits, not restrictions on ordinary TypeRB language semantics.
+
+Versions 3 and 4 also lower statement `break` and `next` in `while` through
+existing jump edges. Transfers select the nearest loop exit or original
+condition entry and carry the current values of the loop's outer bindings;
+body-local bindings do not escape. Conditional transfers use the same checked
+conditional lowering. A terminating loop body no longer requires an implicit
+backedge, so an early `return` keeps its method target. Function and closure
+lowerers do not inherit enclosing loop targets. Version 2 and unsupported
+iteration-block constructs retain their existing boundaries.
