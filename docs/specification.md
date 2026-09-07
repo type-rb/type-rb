@@ -1180,6 +1180,10 @@ The complete public collection receiver API belongs to the
 ### 3.13 Records
 
 - A record is a closed nominal product with immutable named fields.
+- A `mut` record binding permits rebinding the complete value, not direct or
+  compound assignment to its fields. Collection values held in fields retain
+  the ordinary collection mutation rules; field immutability is not recursive
+  immutability of their contents.
 - Construction is keyword-only. Every required field is supplied exactly once;
   unknown and duplicate field labels are errors.
 - A field may use `name: Type = expression`. Required fields must precede
