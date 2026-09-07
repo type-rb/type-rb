@@ -233,8 +233,8 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 }
 
 func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
-	if len(node.ElseIf) != 0 || node.ThenResult != nil || node.ElseResult != nil {
-		return false, l.unsupported(node.SourceSpan(), "elsif or value-producing if")
+	if node.ThenResult != nil || node.ElseResult != nil {
+		return false, l.unsupported(node.SourceSpan(), "value-producing if")
 	}
 	condition, err := l.lowerCondition(node.Condition)
 	if err != nil {
@@ -260,11 +260,21 @@ func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
 
 	l.current, l.env, l.locals = elseBlock, elseEnv, append([]string(nil), baseLocals...)
 	elseTerminated := false
-	if node.HasElse {
+	if len(node.ElseIf) != 0 {
+		// Lower the remaining chain only on the unmatched edge. Copy the IR
+		// wrapper so repeated encoding retains the original checked program.
+		branch := node.ElseIf[0]
+		remainder := *node
+		remainder.Span = branch.Condition.SourceSpan()
+		remainder.Condition = branch.Condition
+		remainder.Then, remainder.ThenResult, remainder.ThenDiverges = branch.Body, branch.Result, branch.Diverges
+		remainder.ElseIf = node.ElseIf[1:]
+		elseTerminated, err = l.lowerIf(&remainder)
+	} else if node.HasElse {
 		elseTerminated, err = l.lowerStatements(node.Else)
-		if err != nil {
-			return false, err
-		}
+	}
+	if err != nil {
+		return false, err
 	}
 	elseEnd, elseFinal := l.current, cloneV3Env(l.env)
 	if thenTerminated && elseTerminated {
