@@ -17,6 +17,12 @@ type v3ValueRef struct {
 	typ types.Type
 }
 
+type v3LoopTargets struct {
+	header string
+	exit   string
+	locals []string
+}
+
 type v3FunctionLowerer struct {
 	version   int
 	program   *ir.Program
@@ -31,6 +37,7 @@ type v3FunctionLowerer struct {
 	current   *Block
 	env       map[string]v3ValueRef
 	locals    []string
+	loops     []v3LoopTargets
 	nextValue int
 	nextBlock int
 }
@@ -224,12 +231,27 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 		_, terminated, err := l.lowerCase(node, false)
 		return terminated, err
 	case *ir.Break:
-		return false, l.unsupported(node.SourceSpan(), "break")
+		return l.lowerLoopTransfer(node.SourceSpan(), false)
 	case *ir.Next:
-		return false, l.unsupported(node.SourceSpan(), "next")
+		return l.lowerLoopTransfer(node.SourceSpan(), true)
 	default:
 		return false, l.unsupported(statement.SourceSpan(), fmt.Sprintf("statement %T", statement))
 	}
+}
+
+func (l *v3FunctionLowerer) lowerLoopTransfer(span token.Span, next bool) (bool, error) {
+	if len(l.loops) == 0 {
+		return false, l.unsupported(span, "loop transfer outside while")
+	}
+	loop := l.loops[len(l.loops)-1]
+	target := loop.exit
+	if next {
+		target = loop.header
+	}
+	l.current.Terminator = Jump{
+		Op: "jump", Target: target, Arguments: v3EnvironmentArguments(loop.locals, l.env), Origin: l.origin(span),
+	}
+	return true, nil
 }
 
 func (l *v3FunctionLowerer) lowerIf(node *ir.If) (bool, error) {
@@ -321,15 +343,16 @@ func (l *v3FunctionLowerer) lowerWhile(node *ir.While) (bool, error) {
 	}
 
 	l.current, l.env, l.locals = body, bodyEnv, append([]string(nil), baseLocals...)
+	l.loops = append(l.loops, v3LoopTargets{header: header.ID, exit: done.ID, locals: baseLocals})
 	terminated, err := l.lowerStatements(node.Body)
+	l.loops = l.loops[:len(l.loops)-1]
 	if err != nil {
 		return false, err
 	}
-	if terminated {
-		return false, l.unsupported(node.SourceSpan(), "control transfer from a while body")
-	}
-	l.current.Terminator = Jump{
-		Op: "jump", Target: header.ID, Arguments: v3EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
+	if !terminated {
+		l.current.Terminator = Jump{
+			Op: "jump", Target: header.ID, Arguments: v3EnvironmentArguments(baseLocals, l.env), Origin: loopOrigin,
+		}
 	}
 	l.current, l.env, l.locals = done, doneEnv, baseLocals
 	return false, nil
