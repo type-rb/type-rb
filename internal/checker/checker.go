@@ -2301,7 +2301,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					}
 				}
 			}
-			if member, ok := n.Target.(*ast.MemberExpression); ok && c.readonlyClassField(member, sc) {
+			if member, ok := n.Target.(*ast.MemberExpression); ok && c.readonlyAssignmentField(member, sc) {
 				c.error(member.Span(), fmt.Sprintf("field %s is readonly", member.Name))
 			} else {
 				if _, direct := n.Target.(*ast.Identifier); direct {
@@ -5852,10 +5852,15 @@ func (c *Checker) importedAncestorMember(className, memberName string, class boo
 	return resolver.Binding{}, false
 }
 
-func (c *Checker) readonlyClassField(member *ast.MemberExpression, sc *scope) bool {
+func (c *Checker) readonlyAssignmentField(member *ast.MemberExpression, sc *scope) bool {
 	receiverType := c.result.Expressions[member.Receiver]
 	if receiverType.Kind == types.Invalid || receiverType.Name == "" {
 		receiverType = c.checkExpression(member.Receiver, sc)
+	}
+	// Record field stability is already shared by narrowing and member lookup.
+	// A mutable receiver binding does not make that field writable.
+	if c.readonlyDataMember(receiverType, member.Name) {
+		return true
 	}
 	if local, ok := c.localMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && local.field != nil {
 		return local.field.ReadOnly
