@@ -10,6 +10,7 @@ import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -1052,7 +1053,7 @@ func ormEnumRawValue(expression ast.Expression) (types.Type, string, int64, bool
 	case *ast.Literal:
 		switch value.Kind {
 		case ast.StringLiteral:
-			decoded, err := strconv.Unquote(value.Raw)
+			decoded, err := stringliteral.Unquote(value.Raw)
 			return types.FromName("String"), decoded, 0, err == nil
 		case ast.IntegerLiteral:
 			parsed, err := strconv.ParseInt(strings.ReplaceAll(value.Raw, "_", ""), 10, 64)
@@ -1217,7 +1218,7 @@ func associationOptionValue(expression ast.Expression) (string, bool) {
 		if value.Kind != ast.StringLiteral {
 			return "", false
 		}
-		decoded, err := strconv.Unquote(value.Raw)
+		decoded, err := stringliteral.Unquote(value.Raw)
 		return decoded, err == nil
 	default:
 		return "", false

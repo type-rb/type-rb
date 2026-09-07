@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -136,7 +136,7 @@ func discoverCall(filename string, call *ast.CallExpression, parentID, prefix st
 		return
 	}
 	label := literal.Raw
-	if unquoted, err := strconv.Unquote(literal.Raw); err == nil {
+	if unquoted, err := stringliteral.Unquote(literal.Raw); err == nil {
 		label = unquoted
 	}
 	if label == "" {

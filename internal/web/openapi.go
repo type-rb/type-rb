@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -662,7 +663,7 @@ func rawEnumValues(enum packageextension.ProjectEnum) []any {
 		seen[key] = true
 		switch value.Kind {
 		case "string":
-			parsed, err := strconv.Unquote(value.Raw)
+			parsed, err := stringliteral.Unquote(value.Raw)
 			if err != nil {
 				return nil
 			}
@@ -689,7 +690,7 @@ func recordJSONName(field packageextension.ProjectRecordField) (string, bool) {
 		if value.Kind != "string" {
 			continue
 		}
-		parsed, err := strconv.Unquote(value.Raw)
+		parsed, err := stringliteral.Unquote(value.Raw)
 		if err != nil {
 			return "", false
 		}

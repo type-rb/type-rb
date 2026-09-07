@@ -19,6 +19,7 @@ import (
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -876,11 +877,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		var output strings.Builder
 		for _, part := range node.Parts {
 			if part.Expression == nil {
-				text, err := strconv.Unquote("\"" + part.Text + "\"")
-				if err != nil {
-					text = part.Text
-				}
-				output.WriteString(text)
+				output.WriteString(part.Text)
 				continue
 			}
 			value, err := e.expression(part.Expression, module, sc)
@@ -2993,7 +2990,7 @@ func jsonCodecRaw(schema *ir.CodecSchema, value Value, path string) (any, *jsonC
 		switch raw := member.RawValue.(type) {
 		case *ir.Literal:
 			if raw.Kind == "string" {
-				decoded, err := strconv.Unquote(raw.Raw)
+				decoded, err := stringliteral.Unquote(raw.Raw)
 				if err != nil {
 					return nil, &jsonConversionError{path: path, message: err.Error()}
 				}
@@ -3340,7 +3337,7 @@ func literal(node *ir.Literal) (Value, error) {
 	value := Value{Type: node.ExprType()}
 	switch node.Kind {
 	case "string":
-		decoded, err := strconv.Unquote(node.Raw)
+		decoded, err := stringliteral.Unquote(node.Raw)
 		if err != nil {
 			return Value{}, err
 		}

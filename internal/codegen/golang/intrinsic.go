@@ -7,6 +7,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -1155,7 +1156,7 @@ func (g *generator) goWebParameterParser(schema *ir.CodecSchema) string {
 		for _, item := range schema.RawValues {
 			comparison := strconv.Quote(item.Raw)
 			if schema.RawType.Kind == types.String {
-				raw, err := strconv.Unquote(item.Raw)
+				raw, err := stringliteral.Unquote(item.Raw)
 				if err == nil {
 					comparison = strconv.Quote(raw)
 				}

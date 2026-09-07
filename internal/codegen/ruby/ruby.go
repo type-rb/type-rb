@@ -1,6 +1,7 @@
 package ruby
 
 import (
+	"encoding/json"
 	pathpkg "path"
 	"sort"
 	"strconv"
@@ -795,6 +796,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return g.rubyClassName(n.Name, n.Reference)
 	case *ir.Literal:
+		if n.Kind == "string" && strings.HasPrefix(n.Raw, `"`) {
+			text, _ := strconv.Unquote(n.Raw)
+			return quoteStringValue(text)
+		}
 		return n.Raw
 	case *ir.InterpolatedString:
 		var value strings.Builder
@@ -805,7 +810,8 @@ func (g *generator) expr(expression ir.Expression) string {
 				value.WriteString(g.expr(part.Expression))
 				value.WriteByte('}')
 			} else {
-				value.WriteString(part.Text)
+				quoted := quoteStringValue(part.Text)
+				value.WriteString(quoted[1 : len(quoted)-1])
 			}
 		}
 		value.WriteByte('"')
@@ -976,7 +982,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			branches := make([]string, 0, len(n.RawValues))
 			for _, item := range n.RawValues {
-				branches = append(branches, "when "+item.Raw+" then Result::Ok.new("+owner+"::"+item.Member+")")
+				branches = append(branches, "when "+quoteRawValue(item.Raw)+" then Result::Ok.new("+owner+"::"+item.Member+")")
 			}
 			message := strconv.Quote("unknown raw value for " + n.EnumName)
 			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
@@ -1658,7 +1664,7 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 		}
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
-			branches = append(branches, "when "+item.Raw+" then "+schema.Type.Name+"::"+item.Member)
+			branches = append(branches, "when "+quoteRawValue(item.Raw)+" then "+schema.Type.Name+"::"+item.Member)
 		}
 		body = "unless value.is_a?(JSON::Value::" + kind + "); " + expected(kind) + "; end; case value.value; " + strings.Join(branches, "; ") + "; else; fail.call(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "); end"
 	case "array":
@@ -1840,4 +1846,22 @@ func (g *generator) line(text, trailing string) {
 		g.b.WriteString(trailing)
 	}
 	g.b.WriteByte('\n')
+}
+
+// quoteStringValue prevents literal data from starting Ruby interpolation.
+func quoteStringValue(text string) string {
+	encoded, _ := json.Marshal(text)
+	quoted := string(encoded)
+	for _, marker := range []string{"#{", "#@", "#$"} {
+		quoted = strings.ReplaceAll(quoted, marker, `\`+marker)
+	}
+	return quoted
+}
+
+func quoteRawValue(raw string) string {
+	if strings.HasPrefix(raw, `"`) {
+		text, _ := strconv.Unquote(raw)
+		return quoteStringValue(text)
+	}
+	return raw
 }

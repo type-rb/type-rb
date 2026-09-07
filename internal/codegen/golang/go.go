@@ -23,6 +23,7 @@ import (
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -803,7 +804,7 @@ func (g *generator) record(record *ir.Record) {
 				if !ok || literal.Kind != "string" {
 					continue
 				}
-				value, err := strconv.Unquote(literal.Raw)
+				value, err := stringliteral.Unquote(literal.Raw)
 				if err != nil {
 					continue
 				}
@@ -1638,11 +1639,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				arguments = append(arguments, g.expr(part.Expression))
 				continue
 			}
-			text := part.Text
-			if decoded, err := strconv.Unquote("\"" + text + "\""); err == nil {
-				text = decoded
-			}
-			format.WriteString(strings.ReplaceAll(text, "%", "%%"))
+			format.WriteString(strings.ReplaceAll(part.Text, "%", "%%"))
 		}
 		args := ""
 		if len(arguments) > 0 {

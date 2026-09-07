@@ -9,6 +9,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 )
 
 const (
@@ -255,7 +256,7 @@ func stringLiteral(expression ast.Expression) (string, error) {
 	if !ok || literal.Kind != ast.StringLiteral {
 		return "", fmt.Errorf("must be a String literal")
 	}
-	value, err := strconv.Unquote(literal.Raw)
+	value, err := stringliteral.Unquote(literal.Raw)
 	if err != nil {
 		return "", fmt.Errorf("contains an invalid String literal")
 	}

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/type-rb/type-rb/internal/stringliteral"
 )
 
 const DeclarationAdapterProtocolVersion = 2
@@ -301,7 +303,7 @@ func validateDeclarationAdapterType(typ DeclarationAdapterType) error {
 			return fmt.Errorf("type kind int_literal cannot have arguments or be nullable")
 		}
 	case "string_literal":
-		value, err := strconv.Unquote(typ.Name)
+		value, err := stringliteral.Unquote(typ.Name)
 		if err != nil || len(typ.Name) < 2 || typ.Name[0] != '"' || typ.Name[len(typ.Name)-1] != '"' {
 			return fmt.Errorf("type kind string_literal requires a quoted String literal name")
 		}

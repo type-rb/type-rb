@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -612,7 +613,7 @@ func completionSignatureMatches(signature CallSignature, previous [][]token.Toke
 func completionArgumentLiteral(tokens []token.Token) (string, bool) {
 	_, tokens = completionKeywordArgument(tokens)
 	if len(tokens) == 1 && tokens[0].Kind == token.String {
-		value, err := strconv.Unquote(tokens[0].Lexeme)
+		value, err := stringliteral.Unquote(tokens[0].Lexeme)
 		return value, err == nil
 	}
 	if len(tokens) == 2 && tokens[0].Lexeme == ":" && tokens[1].Kind == token.Identifier {

@@ -4,12 +4,12 @@ package cliapp
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 )
 
 const (
@@ -587,7 +587,7 @@ func staticString(value packageextension.ProjectValue) (string, bool) {
 	if value.Kind != "string" {
 		return "", false
 	}
-	parsed, err := strconv.Unquote(value.Raw)
+	parsed, err := stringliteral.Unquote(value.Raw)
 	return parsed, err == nil
 }
 

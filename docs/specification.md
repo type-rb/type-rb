@@ -233,6 +233,14 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   enums, newtypes, and other user-defined values are rejected rather than
   inheriting a target runtime's implicit String conversion. Convert a value
   explicitly, for example with `value.to_s()`, before interpolation.
+- In a double-quoted String, `\#` produces a literal `#` and prevents it from
+  starting interpolation. For example, `"\#{name}"` contains the text
+  `#{name}` without evaluating `name`. Escapes are consumed left to right:
+  `"\\#{name}"` contains one backslash followed by the interpolated String.
+  Escape decoding never starts another interpolation pass. Undefined escapes,
+  including `\{` and `\q`, are compile-time errors in every mode, both in plain
+  Strings and in literal segments surrounding interpolation. REPL evaluation
+  follows the same rule.
 
 #### Aliases and nominal newtypes
 

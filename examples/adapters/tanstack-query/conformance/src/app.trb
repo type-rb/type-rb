@@ -1,13 +1,7 @@
 import { HttpClient, RequestError } from trb/platform/typescript/browser
 import { ReactNode } from trb/platform/typescript/react
 import trb/std/result
-import {
-	QueryClient,
-	QueryClientProvider,
-	UseQueryOptions,
-	queryOptions,
-	useQuery,
-} from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, UseQueryOptions, queryOptions, useQuery } from "@tanstack/react-query"
 
 record Todo
 	id: Integer

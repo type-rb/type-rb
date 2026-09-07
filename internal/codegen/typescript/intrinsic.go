@@ -717,7 +717,7 @@ func (g *generator) tsWebParameterParser(schema *ir.CodecSchema) string {
 		owner := g.tsCodecRuntimeTypeName(schema)
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
-			raw := item.Raw
+			raw := quoteRawValue(item.Raw)
 			if schema.RawType.Kind == types.Int {
 				raw = strconv.Quote(item.Raw)
 			}

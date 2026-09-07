@@ -9,7 +9,6 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
@@ -21,6 +20,7 @@ import (
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -2313,7 +2313,7 @@ func recordJSONName(field *ast.RecordFieldStatement) string {
 		if !ok || literal.Kind != ast.StringLiteral {
 			continue
 		}
-		value, err := strconv.Unquote(literal.Raw)
+		value, err := stringliteral.Unquote(literal.Raw)
 		if err == nil {
 			return strings.Split(value, ",")[0]
 		}
