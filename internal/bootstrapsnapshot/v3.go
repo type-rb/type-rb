@@ -292,7 +292,10 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 		}
 		substitutions := v3TypeSubstitutions(item.record.TypeParameters, typ.Args)
 		fields := []Field{}
+		// Publish the record kind before visiting fields so recursive Array
+		// elements can resolve it. The shared field slice is completed below.
 		definition := TypeDefinition{Kind: "record", ID: id, Fields: &fields}
+		r.definitions[id] = definition
 		for _, statement := range item.record.Body {
 			field, ok := statement.(*ir.RecordField)
 			if !ok {
@@ -308,7 +311,6 @@ func (r *aggregateRegistry) register(program *ir.Program, typ types.Type, item a
 			}
 			fields = append(fields, Field{Name: field.Name, Type: name})
 		}
-		r.definitions[id] = definition
 		return id, nil
 	}
 	if item.enum != nil {

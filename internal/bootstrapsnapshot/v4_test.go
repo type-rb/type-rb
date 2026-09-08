@@ -473,3 +473,87 @@ end
 		t.Fatal("initial bounds check and normalization must precede the RHS")
 	}
 }
+
+func TestBuildV4PreservesRecursiveRecordArrayDefinitions(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		fields map[string]map[string]string
+	}{
+		{"self", `record Node
+	id: Integer
+	children: Array<Node>
+end
+
+def main()
+	mut children: Array<Node> := []
+	node := Node.new(id: 42, children: children)
+	children.push(node)
+	puts("ok")
+end
+`, map[string]map[string]string{"main#Node": {"id": "Integer", "children": "Array<main#Node>"}}},
+		{"mutual", `record Parent
+	id: Integer
+	children: Array<Child>
+end
+
+record Child
+	parents: Array<Parent>
+end
+
+def main()
+	mut parents: Array<Parent> := []
+	child := Child.new(parents: parents)
+	parent := Parent.new(id: 42, children: [child])
+	parents.push(parent)
+	puts("ok")
+end
+`, map[string]map[string]string{
+			"main#Parent": {"id": "Integer", "children": "Array<main#Child>"},
+			"main#Child":  {"parents": "Array<main#Parent>"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			artifacts := analyzeV4Program(t, tc.source)
+			snapshot, err := BuildV4(artifacts, "/project/src")
+			if err != nil {
+				t.Fatal(err)
+			}
+			definitions := map[string]TypeDefinition{}
+			for _, definition := range snapshot.Types {
+				if _, exists := definitions[definition.ID]; exists {
+					t.Fatalf("duplicate type %q", definition.ID)
+				}
+				definitions[definition.ID] = definition
+			}
+			for id, fields := range tc.fields {
+				definition := definitions[id]
+				if definition.Kind != "record" || definition.Fields == nil || len(*definition.Fields) != len(fields) {
+					t.Fatalf("incomplete recursive record %s: %#v", id, definition)
+				}
+				for _, field := range *definition.Fields {
+					if fields[field.Name] != field.Type {
+						t.Fatalf("field identity differs in %s: %#v", id, field)
+					}
+				}
+				array := definitions["Array<"+id+">"]
+				if array.Kind != "array" || array.Element == nil || *array.Element != id {
+					t.Fatalf("missing recursive Array element %s: %#v", id, array)
+				}
+			}
+			encoded, err := json.Marshal(snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repeated, err := BuildV4(artifacts, "/project/src")
+			if err != nil {
+				t.Fatal(err)
+			}
+			repeatedEncoded, err := json.Marshal(repeated)
+			if err != nil || string(encoded) != string(repeatedEncoded) {
+				t.Fatalf("recursive record Array snapshot is not deterministic: %v", err)
+			}
+		})
+	}
+}
