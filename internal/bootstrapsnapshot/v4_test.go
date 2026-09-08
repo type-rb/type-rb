@@ -139,6 +139,81 @@ func TestBuildV4RejectsUnsupportedArrayElements(t *testing.T) {
 	}
 }
 
+func TestBuildV4PreservesBooleanArrayTypesAndCaptures(t *testing.T) {
+	source := `alias Predicate = () -> Boolean
+
+record Flags
+	values: Array<Boolean>
+end
+
+def append(mut values: Array<Boolean>, value: Boolean): Boolean
+	values.push(value)
+	return values[-1]
+end
+
+def main()
+	mut values: Array<Boolean> := []
+	values.push(false)
+	values[-1] = append(values, true)
+	mut groups: Array<Array<Array<Boolean>>> := [[[false]], [values]]
+	groups[0][0] = values
+	flags := Flags.new(values: groups[0][0])
+	predicate: Predicate := fn(): Boolean
+		return flags.values[0]
+	end
+	if predicate()
+		puts("ok")
+	end
+	return
+end
+`
+	artifacts := analyzeV4Program(t, source)
+	snapshot, err := BuildV4(artifacts, "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, element := range map[string]string{
+		"Array<Boolean>":               "Boolean",
+		"Array<Array<Boolean>>":        "Array<Boolean>",
+		"Array<Array<Array<Boolean>>>": "Array<Array<Boolean>>",
+	} {
+		found := false
+		for _, definition := range snapshot.Types {
+			if definition.ID == id {
+				found = definition.Kind == "array" && definition.Element != nil && *definition.Element == element
+			}
+		}
+		if !found {
+			t.Fatalf("missing exact array definition %s with element %s: %#v", id, element, snapshot.Types)
+		}
+	}
+	appendBody := v4FunctionWithSuffix(t, snapshot.Functions, "#append")
+	if appendBody.Parameters[0].Type != "Array<Boolean>" || appendBody.Parameters[1].Type != "Boolean" || appendBody.Result != "Boolean" {
+		t.Fatalf("Boolean array signature changed: %#v", appendBody)
+	}
+	predicate := v4FunctionWithSuffix(t, snapshot.Functions, "$lambda0")
+	if len(predicate.Captures) != 1 || predicate.Captures[0].Type != "main#Flags" || predicate.Result != "Boolean" {
+		t.Fatalf("Boolean array record capture changed: %#v", predicate)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := BuildV4(artifacts, "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeatedEncoded, err := json.Marshal(repeated)
+	if err != nil || string(encoded) != string(repeatedEncoded) {
+		t.Fatalf("Boolean array snapshot is not deterministic: %v", err)
+	}
+	for _, operation := range []string{"array_construct", "array_get", "array_set", "array_push", "closure_construct", "closure_call"} {
+		if !strings.Contains(string(encoded), `"op":"`+operation+`"`) {
+			t.Fatalf("missing %s operation", operation)
+		}
+	}
+}
+
 func TestBuildV4LowersNestedArrays(t *testing.T) {
 	source := `def main()
 	mut groups: Array<Array<Integer>> := [[1]]
