@@ -139,6 +139,23 @@ func TestBuildV4RejectsUnsupportedArrayElements(t *testing.T) {
 	}
 }
 
+func TestBuildV4RejectsTaggedArrayElements(t *testing.T) {
+	source := `enum Choice
+	Item(value: Integer)
+end
+
+def main()
+	values := [Choice::Item(1)]
+	puts(values.size().to_s())
+	return
+end
+`
+	_, err := BuildV4(analyzeV4Program(t, source), "/project/src")
+	if err == nil || !strings.Contains(err.Error(), "bootstrap snapshot v4 does not support Array element type Choice") {
+		t.Fatalf("BuildV4() error=%v", err)
+	}
+}
+
 func TestBuildV4PreservesBooleanArrayTypesAndCaptures(t *testing.T) {
 	source := `alias Predicate = () -> Boolean
 
@@ -302,6 +319,88 @@ func analyzeV4Program(t *testing.T, source string) []*compiler.Artifact {
 		t.Fatal(err)
 	}
 	return artifacts
+}
+
+func TestBuildV4PreservesRecordArrayTypesAndCaptures(t *testing.T) {
+	source := `record Row
+	id: Integer
+	valid: Boolean
+end
+
+record Message
+	text: String
+	rows: Array<Row>
+end
+
+alias Rows = Array<Row>
+alias ReadRow = () -> Row
+
+def append(mut rows: Rows, row: Row): Row
+	rows.push(row)
+	return rows[-1]
+end
+
+def main()
+	mut rows: Rows := []
+	rows.push(Row.new(id: 1, valid: false))
+	rows[-1] = append(rows, Row.new(id: 2, valid: true))
+	mut groups: Array<Array<Array<Row>>> := [[rows]]
+	groups[0][0] = rows
+	mut messages := [Message.new(text: "rows", rows: groups[0][0])]
+	messages.push(Message.new(text: "more", rows: rows))
+	read: ReadRow := fn(): Row
+		return messages[-1].rows[-1]
+	end
+	row := read()
+	if row.valid
+		if row.id == 2
+			puts("ok")
+		end
+	end
+	return
+end
+`
+	artifacts := analyzeV4Program(t, source)
+	snapshot, err := BuildV4(artifacts, "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, element := range map[string]string{
+		"Array<main#Row>":               "main#Row",
+		"Array<Array<main#Row>>":        "Array<main#Row>",
+		"Array<Array<Array<main#Row>>>": "Array<Array<main#Row>>",
+		"Array<main#Message>":           "main#Message",
+	} {
+		found := false
+		for _, definition := range snapshot.Types {
+			if definition.ID == id {
+				found = definition.Kind == "array" && definition.Element != nil && *definition.Element == element
+			}
+		}
+		if !found {
+			t.Fatalf("missing exact array definition %s with element %s: %#v", id, element, snapshot.Types)
+		}
+	}
+	appendBody := v4FunctionWithSuffix(t, snapshot.Functions, "#append")
+	if appendBody.Parameters[0].Type != "Array<main#Row>" || appendBody.Parameters[1].Type != "main#Row" || appendBody.Result != "main#Row" {
+		t.Fatalf("record array signature changed: %#v", appendBody)
+	}
+	read := v4FunctionWithSuffix(t, snapshot.Functions, "$lambda0")
+	if len(read.Captures) != 1 || read.Captures[0].Type != "Array<main#Message>" || read.Result != "main#Row" {
+		t.Fatalf("record array capture changed: %#v", read)
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := BuildV4(artifacts, "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeatedEncoded, err := json.Marshal(repeated)
+	if err != nil || string(encoded) != string(repeatedEncoded) {
+		t.Fatalf("record array snapshot is not deterministic: %v", err)
+	}
 }
 
 func v4FunctionWithSuffix(t *testing.T, functions []FunctionV4, suffix string) FunctionV4 {
