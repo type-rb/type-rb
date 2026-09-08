@@ -7043,6 +7043,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.error(n.Span(), fmt.Sprintf("private member %s cannot be accessed externally", n.Name))
 			}
 		}
+		if c.resourceCallCallee == n && !classAccess && !n.Namespace {
+			if fieldType, _, _, field := c.dataMember(receiverType, n.Name); field {
+				if _, _, callable := types.FunctionSignature(fieldType); !callable && fieldType.Kind != types.Any && fieldType.Kind != types.Invalid {
+					c.error(n.Span(), fmt.Sprintf("field %s of type %s is not callable", n.Name, fieldType))
+				}
+			}
+		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
 			typ = substituteType(c.typeFromRef(record.byName[n.Name].Type), typeSubstitutions(record.typeParameters, receiverType.Args))
 		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
