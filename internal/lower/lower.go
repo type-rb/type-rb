@@ -335,6 +335,12 @@ func contains(values []string, target string) bool {
 func (l *lowerer) statements(nodes []ast.Statement) []ir.Statement {
 	result := make([]ir.Statement, 0, len(nodes))
 	for _, node := range nodes {
+		if assignment, ok := node.(*ast.AssignmentStatement); ok {
+			if index, ok := assignment.Target.(*ast.IndexExpression); ok && l.checked.Expressions[index.Receiver].Kind == types.Array {
+				result = append(result, l.arrayAssignment(assignment, index)...)
+				continue
+			}
+		}
 		if lowered, ok := l.structuredResultStatement(node); ok {
 			result = append(result, lowered...)
 			continue

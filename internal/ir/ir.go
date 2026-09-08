@@ -321,6 +321,8 @@ type Variable struct {
 	Mutable  bool
 	Constant bool
 	Owner    string
+	// Generated preserves the exact compiler-owned binding name.
+	Generated bool
 }
 
 func (*Variable) irStatement() {}
@@ -871,6 +873,10 @@ type Index struct {
 	ExprBase
 	Receiver Expression
 	Index    Expression
+	// PositionOnly validates an Array index and returns its nonnegative
+	// position instead of loading an element. Assignment lowering uses this
+	// before evaluating the RHS; it never captures a backing-storage address.
+	PositionOnly bool
 }
 
 func (*Index) irExpression() {}

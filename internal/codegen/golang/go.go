@@ -432,6 +432,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Variable:
 		if g.functionDepth == 0 {
 			name := g.bindingIdentifier(n.Name)
+			if n.Generated {
+				name = n.Name
+			}
 			if n.Constant {
 				name = goConstantIdentifier(n.Owner, n.Name)
 			}
@@ -443,6 +446,9 @@ func (g *generator) statement(statement ir.Statement) {
 			g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
 		} else {
 			name := g.bindingIdentifier(n.Name)
+			if n.Generated {
+				name = n.Name
+			}
 			g.line(name + " := " + g.exprExpected(n.Value, n.Type))
 			if namedUnusedBinding(n.Name) {
 				g.line("_ = " + name)
@@ -1933,6 +1939,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return name + "[" + strings.Join(arguments, ", ") + "]"
 	case *ir.Index:
+		if n.PositionOnly {
+			g.arrayIndexRuntime = true
+			return g.arrayIndexPositionName() + "(" + g.expr(n.Index) + ", len(" + g.arrayValues(g.expr(n.Receiver)) + "))"
+		}
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
 			keyType := g.goType(hashType.Args[0])

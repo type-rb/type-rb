@@ -7,6 +7,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/token"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 type v4Builder struct {
@@ -149,6 +150,11 @@ func (l *v3FunctionLowerer) lowerIndex(node *ir.Index) (v3ValueRef, error) {
 		Op: "array_get", Result: id, Type: typeID, Array: receiver.id, Index: index.id,
 		Origin: l.origin(node.SourceSpan()),
 	})
+	if node.PositionOnly {
+		// A checked read supplies the existing snapshot's strict bounds
+		// operation. Its element result is unused; no new wire opcode is needed.
+		return l.lowerArrayPosition(receiver, index, typeID, node.SourceSpan())
+	}
 	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }
 
@@ -500,4 +506,36 @@ func cloneV4Locals(source map[string]bool) map[string]bool {
 		result[name] = local
 	}
 	return result
+}
+
+// lowerArrayPosition preserves a checked logical position with existing v4
+// size, Integer arithmetic and branch operations. Normalize only once.
+func (l *v3FunctionLowerer) lowerArrayPosition(array, index v3ValueRef, typeID string, span token.Span) (v3ValueRef, error) {
+	at := l.origin(span)
+	integer := types.FromName("Integer")
+	size := v3ValueRef{id: l.newValue(), typ: integer}
+	l.emit(ArraySize{Op: "array_size", Result: size.id, Type: typeID, Array: array.id, Origin: at})
+	zero, err := l.lowerLiteral(&ir.Literal{ExprBase: ir.NewExprBase(span, integer), Kind: "integer", Raw: "0"})
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	negative, err := l.emitBinary("<", index, zero, span)
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	names := append([]string(nil), l.locals...)
+	adjust, adjustEnv := l.newBlockWithLocals(span, names, l.env)
+	join, joinEnv := l.newBlockWithLocals(span, names, l.env)
+	sizeArg, indexArg, result := l.newValue(), l.newValue(), l.newValue()
+	adjust.Parameters = append(adjust.Parameters, Parameter{ID: sizeArg, Type: "Integer", Origin: at}, Parameter{ID: indexArg, Type: "Integer", Origin: at})
+	join.Parameters = append(join.Parameters, Parameter{ID: result, Type: "Integer", Origin: at})
+	l.current.Terminator = Branch{Op: "branch", Condition: negative.id, WhenTrue: adjust.ID, TrueArguments: append(v3EnvironmentArguments(names, l.env), size.id, index.id), WhenFalse: join.ID, FalseArguments: append(v3EnvironmentArguments(names, l.env), index.id), Origin: at}
+	l.current, l.env = adjust, adjustEnv
+	position, err := l.emitBinary("+", v3ValueRef{id: sizeArg, typ: integer}, v3ValueRef{id: indexArg, typ: integer}, span)
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	l.current.Terminator = Jump{Op: "jump", Target: join.ID, Arguments: append(v3EnvironmentArguments(names, l.env), position.id), Origin: at}
+	l.current, l.env = join, joinEnv
+	return v3ValueRef{id: result, typ: integer}, nil
 }

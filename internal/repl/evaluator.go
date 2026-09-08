@@ -1299,6 +1299,21 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if err != nil {
 			return Value{}, err
 		}
+		if node.PositionOnly {
+			array, ok := receiver.Data.(*arrayValue)
+			if !ok {
+				return Value{}, errors.New("index position requires an Array")
+			}
+			raw, ok := index.Data.(int64)
+			if !ok {
+				return Value{}, errors.New("array index is out of bounds")
+			}
+			position, ok := normalizedPosition(raw, int64(len(array.Items)))
+			if !ok {
+				return Value{}, errors.New("array index is out of bounds")
+			}
+			return Value{Type: node.ExprType(), Data: position}, nil
+		}
 		return indexValue(receiver, index, node.ExprType())
 	case *ir.Transform:
 		return e.transform(node, module, sc)

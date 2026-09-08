@@ -912,6 +912,16 @@ Array, such as `dup`, `slice`, `reverse`, sorting, transformations, `uniq`, and
 `concat`, create a distinct outer Array and remain shallow with respect to
 their elements.
 
+For an element assignment, TypeRB evaluates the Array and index once and fixes
+the nonnegative position before evaluating the right-hand side. Thus, if
+`grow(values)` appends `3` and returns `9`, starting from `[1, 2]`,
+`values[-1] = grow(values)` produces `[1, 9, 3]`. A compound assignment saves
+the old value first, so `values[-1] += grow(values)` produces `[1, 11, 3]`.
+The target must be in bounds both initially and when the write occurs; a
+right-hand-side removal can cause the final write to fail. Earlier side
+effects remain. [Array assignment rules](decisions/0014-stable-array-assignment-positions.md)
+also define short-circuit assignments and nested receivers.
+
 Membership and occurrence counting use portable `==` and are therefore
 available for numeric, Boolean, String, and payloadless enum elements. They do
 not implicitly enable target-native structural equality for nested values.

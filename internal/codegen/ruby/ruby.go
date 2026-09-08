@@ -1008,6 +1008,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.TypeApply:
 		return g.expr(n.Receiver)
 	case *ir.Index:
+		if n.PositionOnly {
+			return "->(values, index) { index += values.length if index < 0; raise IndexError, \"Array index is out of bounds\" if index < 0 || index >= values.length; index }.call(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
+		}
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			return g.expr(n.Receiver) + ".fetch(" + g.expr(n.Index) + ")"
 		}
