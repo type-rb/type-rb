@@ -552,6 +552,18 @@ switches.
   outer Array; its elements remain shallowly shared where their own types have
   reference identity.
 
+Array element assignments evaluate the receiver and index once, left to right,
+then normalize negative indices and check bounds before evaluating the RHS.
+They retain that Array and nonnegative position. Compound assignments read the
+old value before the RHS; Boolean `&&=` / `||=` skip both the RHS and the write
+when short-circuited. Every performed write checks the retained position against the
+Array's current length and uses its current storage. It never renormalizes the
+negative index or automatically extends the Array. Failure leaves earlier side
+effects intact. This rule fixes a position, not the identity of an element
+moved by `shift`, `unshift`, or reordering. See
+[ADR 0014](decisions/0014-stable-array-assignment-positions.md) for nested
+receivers, failure order and examples.
+
 ### 3.3 Access Rules (Private)
 
 - Private class/method names must start with `_`.

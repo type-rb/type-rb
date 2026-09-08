@@ -2190,6 +2190,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return name + "<" + strings.Join(arguments, ", ") + ">"
 	case *ir.Index:
+		if n.PositionOnly {
+			return "((index: number, size: number): number => { if (index < 0) index += size; if (index < 0 || index >= size) throw new RangeError(\"Array index is out of bounds\"); return index; })(" + g.expr(n.Index) + ", " + g.expr(n.Receiver) + ".length)"
+		}
 		if n.Receiver.ExprType().Kind == types.Hash && len(n.Receiver.ExprType().Args) == 2 {
 			hashType := n.Receiver.ExprType()
 			hashIdentity := g.expressionTypeIdentity(hashType, n.Receiver)

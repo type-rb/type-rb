@@ -239,3 +239,63 @@ func v4FunctionWithSuffix(t *testing.T, functions []FunctionV4, suffix string) F
 	t.Fatalf("snapshot is missing function with suffix %q: %#v", suffix, functions)
 	return FunctionV4{}
 }
+
+func TestBuildV4ChecksAndNormalizesAssignmentBeforeRHS(t *testing.T) {
+	source := `def index(): Integer
+	return -1
+end
+
+def grow(mut values: Array<Integer>): Integer
+	values.push(3)
+	return 9
+end
+
+def main()
+	mut values := [1, 2]
+	values[index()] = grow(values)
+	if values[1] == 9
+		puts("ok")
+	end
+	return
+end
+`
+	snapshot, err := BuildV4(analyzeV4Program(t, source), "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := v4FunctionWithSuffix(t, snapshot.Functions, "#main")
+	calls := map[string]int{}
+	var checkedIndex, storedIndex string
+	var rhsBlock string
+	checkedBlock := ""
+	for _, block := range main.Blocks {
+		for _, instruction := range block.Instructions {
+			switch operation := instruction.(type) {
+			case Call:
+				calls[operation.Function]++
+				if operation.Function == "main#grow" {
+					rhsBlock = block.ID
+				}
+			case ArrayGet:
+				if checkedIndex == "" {
+					checkedIndex = operation.Index
+					checkedBlock = block.ID
+				}
+			case ArraySet:
+				storedIndex = operation.Index
+				if rhsBlock != block.ID {
+					t.Fatal("assignment store must follow the RHS result")
+				}
+			}
+		}
+	}
+	if calls["main#index"] != 1 || calls["main#grow"] != 1 {
+		t.Fatalf("evaluation counts: %v", calls)
+	}
+	if checkedIndex == "" || storedIndex == "" || checkedIndex == storedIndex {
+		t.Fatal("assignment must retain a normalized position rather than the requested negative index")
+	}
+	if checkedBlock != main.Entry || rhsBlock == main.Entry {
+		t.Fatal("initial bounds check and normalization must precede the RHS")
+	}
+}
