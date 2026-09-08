@@ -3585,7 +3585,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 			variant := EnumVariant{EnumName: typ.Name, Declaration: binding.DeclarationIdentity(), Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, field := range imported.Fields {
 				fieldType := substituteType(field.Type, substitutions)
-				fieldType = c.canonicalContractType(fieldType, c.activeTypeParameterSet())
+				fieldType = c.canonicalContractType(fieldType, c.activeTypeParameterSet(), binding.Import)
 				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: fieldType, NamedOnly: field.NamedOnly})
 			}
 			if reference, exists := c.resolution.TypeMemberIdentity(binding.DeclarationIdentity(), imported.Name); exists {
@@ -3786,7 +3786,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			}
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
-			c.canonicalizeContractApplication(&application)
+			c.canonicalizeContractApplication(&application, binding.Import)
 		} else if local, found := c.localMember(receiver.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
 			local = c.specializeLocalClassMember(receiver, local)
 			if len(local.method.TypeParameters) > 0 {
@@ -3812,7 +3812,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
 			application.CallResultBridge = binding.Member.CallResultBridge
-			c.canonicalizeContractApplication(&application)
+			c.canonicalizeContractApplication(&application, binding.Import)
 		} else if binding, found := c.resolution.InferredTypeMember(receiver.Name, member.Name); found && binding.Member != nil && len(binding.Member.TypeParameters) > 0 {
 			binding = specializeResolvedClassMember(receiver, binding)
 			application.Kind = "method"
@@ -3824,7 +3824,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			application.Variadic = binding.Member.Variadic
 			application.ReturnType = binding.Member.Type
 			application.CallResultBridge = binding.Member.CallResultBridge
-			c.canonicalizeContractApplication(&application)
+			c.canonicalizeContractApplication(&application, binding.Import)
 		} else if declared, found := c.external[node.Receiver]; found && len(declared.TypeParameters) > 0 {
 			declared = c.specializeDeclarationMember(receiver, declared)
 			application.Kind = "method"
@@ -3884,7 +3884,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 				application.CallResultBridge = binding.Export.CallResultBridge
 				application.Variadic = binding.Export.Variadic
 				application.ReturnType = binding.Export.Type
-				c.canonicalizeContractApplication(&application)
+				c.canonicalizeContractApplication(&application, binding.Import)
 			}
 		} else if binding.Library != nil {
 			application.Kind = "function"
@@ -3894,7 +3894,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 			}
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
-			c.canonicalizeContractApplication(&application)
+			c.canonicalizeContractApplication(&application, binding.Import)
 		}
 	}
 	if application.Kind == "" || len(application.TypeParameters) == 0 {
@@ -3922,7 +3922,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (Generi
 	return application, true
 }
 
-func (c *Checker) canonicalizeContractApplication(application *GenericApplication) {
+func (c *Checker) canonicalizeContractApplication(application *GenericApplication, imported *resolver.Import) {
 	if application == nil {
 		return
 	}
@@ -3931,15 +3931,15 @@ func (c *Checker) canonicalizeContractApplication(application *GenericApplicatio
 		parameters[parameter] = true
 	}
 	for index := range application.Parameters {
-		application.Parameters[index].Type = c.canonicalContractType(application.Parameters[index].Type, parameters)
+		application.Parameters[index].Type = c.canonicalContractType(application.Parameters[index].Type, parameters, imported)
 	}
-	application.ReturnType = c.canonicalContractType(application.ReturnType, parameters)
+	application.ReturnType = c.canonicalContractType(application.ReturnType, parameters, imported)
 }
 
-func (c *Checker) canonicalContractSignature(parameters []callsignature.Parameter) []callsignature.Parameter {
+func (c *Checker) canonicalContractSignature(parameters []callsignature.Parameter, imported *resolver.Import) []callsignature.Parameter {
 	result := append([]callsignature.Parameter(nil), parameters...)
 	for index := range result {
-		result[index].Type = c.canonicalContractType(result[index].Type, c.activeTypeParameterSet())
+		result[index].Type = c.canonicalContractType(result[index].Type, c.activeTypeParameterSet(), imported)
 	}
 	return result
 }
@@ -7448,7 +7448,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						}
 						c.checkCallSignature(n.Span(), exported.Name+".new", parameters, exported.Variadic, n.Arguments, argumentTypes, nil, exported.ParameterResultBridges)
 						if sourceBinding(binding) {
-							c.result.CallSignatures[n] = c.canonicalContractSignature(parameters)
+							c.result.CallSignatures[n] = c.canonicalContractSignature(parameters, binding.Import)
 						}
 					}
 				}
@@ -8397,7 +8397,7 @@ func (c *Checker) checkRecordArguments(call *ast.CallExpression, name string, fi
 	}
 	resolvedFields := append([]resolver.RecordField(nil), fields...)
 	for index := range resolvedFields {
-		resolvedFields[index].Type = c.canonicalContractType(resolvedFields[index].Type, c.activeTypeParameterSet())
+		resolvedFields[index].Type = c.canonicalContractType(resolvedFields[index].Type, c.activeTypeParameterSet(), nil)
 	}
 	c.result.RecordConstructions[call] = RecordConstruction{Fields: resolvedFields, Target: target, Declaration: declaration}
 	byName := map[string]resolver.RecordField{}
@@ -8454,7 +8454,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 		library = &specialized
 		for index := range specialized.Parameters {
 			parameter := &specialized.Parameters[index]
-			parameter.Type = c.canonicalContractType(parameter.Type, c.activeTypeParameterSet())
+			parameter.Type = c.canonicalContractType(parameter.Type, c.activeTypeParameterSet(), binding.Import)
 			parameters = append(parameters, parameter.Type)
 			if !parameter.Optional {
 				required++
@@ -8509,7 +8509,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 			}
 		}
 	} else if binding.Member != nil {
-		signature := binding.Member.Parameters
+		signature := c.canonicalContractSignature(binding.Member.Parameters, binding.Import)
 		parameters = callsignature.Types(signature)
 		variadic = binding.Member.Variadic
 		bridges := []resolver.NativeResultBridge(nil)
@@ -8519,16 +8519,16 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 		parameterIndexes = c.checkCallSignature(span, name, signature, variadic, arguments, actual, nil, bridges)
 		signatureChecked = true
 		if sourceBinding(binding) {
-			c.result.CallSignatures[call] = c.canonicalContractSignature(signature)
+			c.result.CallSignatures[call] = c.canonicalContractSignature(signature, binding.Import)
 		}
 	} else if binding.Export != nil {
-		signature := binding.Export.Parameters
+		signature := c.canonicalContractSignature(binding.Export.Parameters, binding.Import)
 		parameters = callsignature.Types(signature)
 		variadic = binding.Export.Variadic
 		parameterIndexes = c.checkCallSignature(span, name, signature, variadic, arguments, actual, nil, binding.Export.ParameterResultBridges)
 		signatureChecked = true
 		if sourceBinding(binding) {
-			c.result.CallSignatures[call] = c.canonicalContractSignature(signature)
+			c.result.CallSignatures[call] = c.canonicalContractSignature(signature, binding.Import)
 		}
 	}
 	if signatureChecked {
@@ -10070,12 +10070,22 @@ func (c *Checker) authoredTypeIdentity(name, owner string) identity.Declaration 
 	return identity.Declaration{}
 }
 
-func (c *Checker) canonicalContractType(typ types.Type, typeParameters map[string]bool) types.Type {
+func (c *Checker) canonicalContractType(typ types.Type, typeParameters map[string]bool, imported *resolver.Import) types.Type {
+	typ.Args = append([]types.Type(nil), typ.Args...)
 	for index := range typ.Args {
-		typ.Args[index] = c.canonicalContractType(typ.Args[index], typeParameters)
+		typ.Args[index] = c.canonicalContractType(typ.Args[index], typeParameters, imported)
 	}
 	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] || !typ.Declaration.Empty() {
 		return typ
+	}
+	if imported != nil {
+		if exported, ok := imported.Exports[typ.Name]; ok {
+			binding := resolver.Binding{Import: imported, Name: typ.Name, Export: &exported}
+			if declaration := binding.DeclarationIdentity(); declaration.Kind.IsType() {
+				typ.Declaration = declaration
+				return typ
+			}
+		}
 	}
 	if binding, ok := c.resolution.CatalogType(typ.Name); ok {
 		typ.Declaration = binding.DeclarationIdentity()
@@ -10088,7 +10098,7 @@ func (c *Checker) resolvedBindingType(binding resolver.Binding) types.Type {
 	if binding.Export != nil && typ.Kind == types.Named && typ.Name == binding.Export.Name {
 		typ.Declaration = binding.DeclarationIdentity()
 	}
-	return c.canonicalContractType(typ, c.activeTypeParameterSet())
+	return c.canonicalContractType(typ, c.activeTypeParameterSet(), binding.Import)
 }
 
 func (c *Checker) activeTypeParameterSet() map[string]bool {
