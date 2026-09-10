@@ -29,6 +29,56 @@ def extend(mut items: Array<Integer>): Integer
 	return items.size() - 1
 end
 
+def hash_receiver(mut events: Array<String>, entries: Hash<Integer, String>): Hash<Integer, String>
+	events.push("receiver")
+	return entries
+end
+
+def hash_key(mut events: Array<String>, values: Array<Integer>): Integer
+	events.push("key")
+	return values[0]
+end
+
+def extend_hash(mut entries: Hash<Integer, String>): Hash<Integer, String>
+	entries[2] = "two"
+	return {3 => "three"}
+end
+
+def hash_scopes()
+	values := [1, 2]
+	mut entries: Hash<Integer, String> := {1 => "one", 2 => "two"}
+	puts(entries.fetch(values[0]))
+	puts(entries.key?(values[0]))
+	case entries.try_fetch(values[0])
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.message)
+	end
+	case entries.try_fetch(values[1] + 1)
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.key)
+	end
+	puts(entries.delete(values[1]))
+	puts(entries.key?(values[1]))
+	mut events: Array<String> := []
+	puts(hash_receiver(events, entries).fetch(hash_key(events, values)))
+	puts(events.join(","))
+	merged := entries.merge(extend_hash(entries))
+	puts(merged.fetch(2))
+	puts(merged.fetch(3))
+	puts(entries.key?(3))
+end
+
+def hash_merge_scope()
+	values: Hash<String, Integer> := {"answer" => 42}
+	base: Hash<String, Integer> := {"answer" => 0}
+	puts(base.merge(values).fetch("answer"))
+	puts(base.fetch("answer"))
+end
+
 def main()
 	value := "A😀BC"
 	values := [10, 20, 30, 40]
@@ -82,6 +132,8 @@ def main()
 	when Result::Err(error)
 		puts(error.index)
 	end
+	hash_scopes()
+	hash_merge_scope()
 end
 `
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -116,7 +168,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			if want := "😀BC\n😀BC\nC\n3\n3\n40\nx|y|z\n😀B\nreceiver,bounds\n50\n4\n4\n"; stdout.String() != want {
+			if want := "😀BC\n😀BC\nC\n3\n3\n40\nx|y|z\n😀B\nreceiver,bounds\n50\n4\n4\none\ntrue\none\n3\ntwo\nfalse\none\nreceiver,key\ntwo\nthree\nfalse\n42\n0\n"; stdout.String() != want {
 				t.Fatalf("want %q, got %q", want, stdout.String())
 			}
 		})
