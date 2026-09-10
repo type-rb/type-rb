@@ -142,6 +142,10 @@ func (l *v3FunctionLowerer) lowerIndex(node *ir.Index) (v3ValueRef, error) {
 		})
 		return v3ValueRef{id: id, typ: node.ExprType()}, nil
 	}
+	if typeID == "Hash<String, Integer>" {
+		l.emit(HashGet{Op: "hash_get", Result: id, Type: typeID, Hash: receiver.id, Key: index.id, Origin: l.origin(node.SourceSpan())})
+		return v3ValueRef{id: id, typ: node.ExprType()}, nil
+	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "array" {
 		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "index receiver type "+receiver.typ.String())
@@ -174,6 +178,10 @@ func (l *v3FunctionLowerer) lowerArraySet(target *ir.Index, expression ir.Expres
 	typeID, err := l.typeName(receiver.typ, span)
 	if err != nil {
 		return err
+	}
+	if typeID == "Hash<String, Integer>" {
+		l.emit(HashSet{Op: "hash_set", Type: typeID, Hash: receiver.id, Key: index.id, Value: value.id, Origin: l.origin(span)})
+		return nil
 	}
 	definition, ok := l.registry.definition(typeID)
 	if !ok || definition.Kind != "array" {
@@ -286,7 +294,7 @@ func (l *v3FunctionLowerer) lowerV4IntrinsicCall(node *ir.Call) (v3ValueRef, boo
 		return v3ValueRef{}, false, nil
 	}
 	intrinsic := member.Reference.Intrinsic
-	if intrinsic != "trb.std.strings.length" && intrinsic != "trb.std.arrays.length" && intrinsic != "trb.std.arrays.push" {
+	if intrinsic != "trb.std.hashes.fetch" && intrinsic != "trb.std.hashes.contains_key" && intrinsic != "trb.std.strings.length" && intrinsic != "trb.std.arrays.length" && intrinsic != "trb.std.arrays.push" {
 		return v3ValueRef{}, false, nil
 	}
 	receiver, err := l.lowerExpression(member.Receiver)
@@ -299,6 +307,21 @@ func (l *v3FunctionLowerer) lowerV4IntrinsicCall(node *ir.Call) (v3ValueRef, boo
 	}
 	at := l.origin(node.SourceSpan())
 	switch intrinsic {
+	case "trb.std.hashes.fetch", "trb.std.hashes.contains_key":
+		if len(node.Arguments) != 1 || typeID != "Hash<String, Integer>" {
+			return v3ValueRef{}, true, l.unsupported(node.SourceSpan(), "Hash lookup call")
+		}
+		key, keyErr := l.lowerExpression(node.Arguments[0].Value)
+		if keyErr != nil {
+			return v3ValueRef{}, true, keyErr
+		}
+		id := l.newValue()
+		if intrinsic == "trb.std.hashes.fetch" {
+			l.emit(HashGet{Op: "hash_get", Result: id, Type: typeID, Hash: receiver.id, Key: key.id, Origin: at})
+		} else {
+			l.emit(HashContains{Op: "hash_contains", Result: id, Type: typeID, Hash: receiver.id, Key: key.id, Origin: at})
+		}
+		return v3ValueRef{id: id, typ: node.ExprType()}, true, nil
 	case "trb.std.strings.length":
 		if len(node.Arguments) != 0 || typeID != "String" {
 			return v3ValueRef{}, true, l.unsupported(node.SourceSpan(), "String size() call")
@@ -538,4 +561,28 @@ func (l *v3FunctionLowerer) lowerArrayPosition(array, index v3ValueRef, typeID s
 	l.current.Terminator = Jump{Op: "jump", Target: join.ID, Arguments: append(v3EnvironmentArguments(names, l.env), position.id), Origin: at}
 	l.current, l.env = join, joinEnv
 	return v3ValueRef{id: result, typ: integer}, nil
+}
+
+func (l *v3FunctionLowerer) lowerHash(node *ir.Hash) (v3ValueRef, error) {
+	typeID, err := l.typeName(node.ExprType(), node.SourceSpan())
+	if err != nil {
+		return v3ValueRef{}, err
+	}
+	keys := make([]string, 0, len(node.Entries))
+	values := make([]string, 0, len(node.Entries))
+	for _, entry := range node.Entries {
+		key, err := l.lowerExpression(entry.Key)
+		if err != nil {
+			return v3ValueRef{}, err
+		}
+		value, err := l.lowerExpression(entry.Value)
+		if err != nil {
+			return v3ValueRef{}, err
+		}
+		keys = append(keys, key.id)
+		values = append(values, value.id)
+	}
+	id := l.newValue()
+	l.emit(HashConstruct{Op: "hash_construct", Result: id, Type: typeID, Keys: keys, Values: values, Origin: l.origin(node.SourceSpan())})
+	return v3ValueRef{id: id, typ: node.ExprType()}, nil
 }

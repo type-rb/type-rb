@@ -160,6 +160,8 @@ func (r *aggregateRegistry) typeName(program *ir.Program, typ types.Type, span t
 			}
 			r.definitions["String"] = TypeDefinition{Kind: "string", ID: "String"}
 			return "String", nil
+		case types.Hash:
+			return r.registerHash(program, typ, span)
 		case types.Array:
 			return r.registerArray(program, typ, span)
 		case types.Function:
@@ -223,6 +225,27 @@ func (r *aggregateRegistry) registerArray(program *ir.Program, typ types.Type, s
 	}
 	id := "Array<" + element + ">"
 	r.definitions[id] = TypeDefinition{Kind: "array", ID: id, Element: &element}
+	return id, nil
+}
+
+// The initial Hash snapshot subset is deliberately limited to string-indexed integers.
+func (r *aggregateRegistry) registerHash(program *ir.Program, typ types.Type, span token.Span) (string, error) {
+	if typ.Nullable || len(typ.Args) != 2 {
+		return "", r.unsupported(program, span, "Hash type "+typ.String())
+	}
+	key, err := r.typeName(program, typ.Args[0], span)
+	if err != nil {
+		return "", err
+	}
+	value, err := r.typeName(program, typ.Args[1], span)
+	if err != nil {
+		return "", err
+	}
+	if key != "String" || value != "Integer" {
+		return "", r.unsupported(program, span, "Hash key/value type "+typ.String())
+	}
+	id := "Hash<" + key + ", " + value + ">"
+	r.definitions[id] = TypeDefinition{Kind: "hash", ID: id, Key: &key, Element: &value}
 	return id, nil
 }
 

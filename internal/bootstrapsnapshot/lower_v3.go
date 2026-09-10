@@ -434,6 +434,11 @@ func (l *v3FunctionLowerer) lowerExpression(expression ir.Expression) (v3ValueRe
 			return v3ValueRef{}, err
 		}
 		return l.emitBinary(node.Operator, left, right, node.SourceSpan())
+	case *ir.Hash:
+		if l.version >= Version4 {
+			return l.lowerHash(node)
+		}
+		return v3ValueRef{}, l.unsupported(node.SourceSpan(), "Hash literal expression")
 	case *ir.Array:
 		if l.version >= Version4 {
 			return l.lowerArray(node)

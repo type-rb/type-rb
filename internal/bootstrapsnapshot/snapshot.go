@@ -54,6 +54,7 @@ type TypeDefinition struct {
 	Kind       string     `json:"kind"`
 	ID         string     `json:"id"`
 	Element    *string    `json:"element,omitempty"`
+	Key        *string    `json:"key,omitempty"`
 	Parameters *[]string  `json:"parameters,omitempty"`
 	Result     *string    `json:"result,omitempty"`
 	Fields     *[]Field   `json:"fields,omitempty"`
@@ -249,6 +250,43 @@ type WriteString struct {
 	Value   string `json:"value"`
 	Newline bool   `json:"newline"`
 	Origin  Origin `json:"origin"`
+}
+
+type HashConstruct struct {
+	Op     string   `json:"op"`
+	Result string   `json:"result"`
+	Type   string   `json:"type"`
+	Keys   []string `json:"keys"`
+	Values []string `json:"values"`
+	Origin Origin   `json:"origin"`
+}
+
+type HashGet struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Type   string `json:"type"`
+	Hash   string `json:"hash"`
+	Key    string `json:"key"`
+	Origin Origin `json:"origin"`
+}
+
+type HashSet struct {
+	Op     string `json:"op"`
+	Type   string `json:"type"`
+	Hash   string `json:"hash"`
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+	Origin Origin `json:"origin"`
+}
+
+// HashContains distinguishes an absent key from a stored Integer value.
+type HashContains struct {
+	Op     string `json:"op"`
+	Result string `json:"result"`
+	Type   string `json:"type"`
+	Hash   string `json:"hash"`
+	Key    string `json:"key"`
+	Origin Origin `json:"origin"`
 }
 
 type ArrayConstruct struct {
