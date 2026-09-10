@@ -2,6 +2,45 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.6 - 2026-09-10
+
+### REPL performance
+
+- Hash insertion, lookup, membership, and deletion use indexed storage, making
+  large Hash workloads faster and reducing retained memory. Deleted entries
+  release their references, sparse storage compacts, and empty Hashes release
+  their backing storage. Existing typing and immutable rules are unchanged.
+  ([#665](https://github.com/type-rb/type-rb/pull/665))
+
+### Language and execution
+
+- Array element assignments retain the validated position when evaluating the
+  right-hand side grows or otherwise changes the same Array. Compound and
+  short-circuit assignments preserve evaluation order across generated Go,
+  Ruby, TypeScript, and the REPL.
+  ([#659](https://github.com/type-rb/type-rb/pull/659))
+- Double-quoted Strings consistently support escaped interpolation markers
+  across modes. Undefined escapes are rejected by the shared frontend, and
+  literal segments remain literal when mixed with interpolation.
+  ([#651](https://github.com/type-rb/type-rb/pull/651))
+- Parenthesized operands in `if`, `elsif`, and `while` conditions preserve the
+  complete expression. Malformed trailing condition input is diagnosed instead
+  of silently accepting only a prefix.
+  ([#649](https://github.com/type-rb/type-rb/pull/649))
+- Assignments to immutable record fields are rejected even through mutable
+  receiver bindings. Valid record rebinding and mutation of contained
+  collections remain supported.
+  ([#650](https://github.com/type-rb/type-rb/pull/650))
+- Imported function contracts preserve the declaring module's record identity,
+  including through Arrays and generic arguments. Distinct records with the
+  same name no longer pass as each other at calls.
+  ([#662](https://github.com/type-rb/type-rb/pull/662))
+- Calling a non-function data field is rejected during checking, including
+  parenthesized field calls. Function-valued fields and receiver methods remain
+  valid.
+  ([#661](https://github.com/type-rb/type-rb/pull/661))
+
+
 ## 0.4.5 - 2026-09-05
 
 ### Go code generation
