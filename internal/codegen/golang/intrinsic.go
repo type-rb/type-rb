@@ -698,12 +698,12 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.hashes.empty":
 		return "len(" + arguments[0] + ") == 0"
 	case "trb.std.hashes.fetch":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }()"
+		return g.hashBinaryIntrinsic(call, arguments, "key", g.goType(call.ExprType()), "value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value")
 	case "trb.std.hashes.try_fetch":
 		resultType, _, _ := filesystemResultType()
-		return "func() " + resultType + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { return " + keyLookupError("key", "Hash key is missing") + " }; return " + filesystemOK("value") + " }()"
+		return g.hashBinaryIntrinsic(call, arguments, "key", resultType, "value, ok := values[key]; if !ok { return "+keyLookupError("key", "Hash key is missing")+" }; return "+filesystemOK("value"))
 	case "trb.std.hashes.contains_key":
-		return "func() bool { values := " + arguments[0] + "; key := " + arguments[1] + "; _, ok := values[key]; return ok }()"
+		return g.hashBinaryIntrinsic(call, arguments, "key", "bool", "_, ok := values[key]; return ok")
 	case "trb.std.hashes.keys":
 		g.requireImport("maps", "")
 		g.requireImport("slices", "")
@@ -716,10 +716,10 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("maps", "")
 		return "maps.Clone(" + arguments[0] + ")"
 	case "trb.std.hashes.delete":
-		return "func() " + g.goType(call.ExprType()) + " { values := " + arguments[0] + "; key := " + arguments[1] + "; value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; delete(values, key); return value }()"
+		return g.hashBinaryIntrinsic(call, arguments, "key", g.goType(call.ExprType()), "value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; delete(values, key); return value")
 	case "trb.std.hashes.merge":
 		g.requireImport("maps", "")
-		return "func() " + g.goType(call.ExprType()) + " { values := maps.Clone(" + arguments[0] + "); maps.Copy(values, " + arguments[1] + "); return values }()"
+		return g.hashBinaryIntrinsic(call, arguments, "incoming", g.goType(call.ExprType()), "result := maps.Clone(values); maps.Copy(result, incoming); return result")
 	case "trb.std.hashes.update":
 		g.requireImport("maps", "")
 		return "maps.Copy(" + arguments[0] + ", " + arguments[1] + ")"
@@ -1197,4 +1197,14 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 	responseType := "*" + webAlias + ".Response"
 	headers := "__trb_http.NewHeaders(" + g.arrayReference("[]__trb_http.Header{{Name: \"content-type\", Value: \"application/json; charset=utf-8\"}}") + ")"
 	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(map[string]any{\"status\": 500, \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))}) }; return " + webAlias + ".NewResponse(map[string]any{\"status\": " + status + ", \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(encoded.OkValue))}) }()"
+}
+
+// Source arguments are evaluated outside the generated body and its local scope.
+func (g *generator) hashBinaryIntrinsic(call *ir.Call, arguments []string, secondName, resultType, body string) string {
+	receiverType := call.Arguments[0].Value.ExprType()
+	secondType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
+	if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Hash {
+		receiverType = member.Receiver.ExprType()
+	}
+	return "func(values " + g.goType(receiverType) + ", " + secondName + " " + g.goType(secondType) + ") " + resultType + " { " + body + " }(" + strings.Join(arguments, ", ") + ")"
 }
