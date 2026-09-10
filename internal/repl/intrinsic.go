@@ -1170,9 +1170,9 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return Value{}, errors.New("hashes.length/empty expects Hash")
 		}
 		if name == "trb.std.hashes.empty" {
-			return Value{Type: typ, Data: len(hash.Entries) == 0}, nil
+			return Value{Type: typ, Data: hash.size() == 0}, nil
 		}
-		return Value{Type: typ, Data: int64(len(hash.Entries))}, nil
+		return Value{Type: typ, Data: int64(hash.size())}, nil
 	case "trb.std.hashes.fetch":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1181,12 +1181,9 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.fetch expects Hash")
 		}
-		for _, entry := range hash.Entries {
-			if equal(entry.Key, values[1]) {
-				result := entry.Value
-				result.Type = typ
-				return result, nil
-			}
+		if result, ok := hash.get(values[1]); ok {
+			result.Type = typ
+			return result, nil
 		}
 		return Value{}, errors.New("Hash key is missing")
 	case "trb.std.hashes.try_fetch":
@@ -1197,10 +1194,8 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.try_fetch expects Hash")
 		}
-		for _, entry := range hash.Entries {
-			if equal(entry.Key, values[1]) {
-				return e.filesystemOK(typ, entry.Value)
-			}
+		if result, ok := hash.get(values[1]); ok {
+			return e.filesystemOK(typ, result)
 		}
 		return e.keyLookupResultErr(typ, values[1], "Hash key is missing")
 	case "trb.std.hashes.contains_key":
@@ -1211,12 +1206,8 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.contains_key expects Hash")
 		}
-		for _, entry := range hash.Entries {
-			if equal(entry.Key, values[1]) {
-				return Value{Type: typ, Data: true}, nil
-			}
-		}
-		return Value{Type: typ, Data: false}, nil
+		_, exists := hash.get(values[1])
+		return Value{Type: typ, Data: exists}, nil
 	case "trb.std.hashes.keys", "trb.std.hashes.values":
 		if err := require(1); err != nil {
 			return Value{}, err
@@ -1225,8 +1216,8 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.keys/values expects Hash")
 		}
-		items := make([]Value, 0, len(hash.Entries))
-		for _, entry := range hash.Entries {
+		items := make([]Value, 0, hash.size())
+		for entry := range hash.entries() {
 			if name == "trb.std.hashes.keys" {
 				items = append(items, entry.Key)
 			} else {
@@ -1242,8 +1233,7 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.copy expects Hash")
 		}
-		entries := append([]hashEntry(nil), hash.Entries...)
-		return Value{Type: typ, Data: &hashValue{Entries: entries}}, nil
+		return Value{Type: typ, Data: hash.copy()}, nil
 	case "trb.std.hashes.delete":
 		if err := require(2); err != nil {
 			return Value{}, err
@@ -1252,13 +1242,9 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if !ok {
 			return Value{}, errors.New("hashes.delete expects Hash")
 		}
-		for index, entry := range hash.Entries {
-			if equal(entry.Key, values[1]) {
-				result := entry.Value
-				hash.Entries = append(hash.Entries[:index], hash.Entries[index+1:]...)
-				result.Type = typ
-				return result, nil
-			}
+		if result, ok := hash.remove(values[1]); ok {
+			result.Type = typ
+			return result, nil
 		}
 		return Value{}, errors.New("Hash key is missing")
 	case "trb.std.hashes.merge", "trb.std.hashes.update":
@@ -1272,20 +1258,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		target := left
 		if name == "trb.std.hashes.merge" {
-			target = &hashValue{Entries: append([]hashEntry(nil), left.Entries...)}
+			target = left.copy()
 		}
-		for _, incoming := range right.Entries {
-			replaced := false
-			for index, existing := range target.Entries {
-				if equal(existing.Key, incoming.Key) {
-					target.Entries[index].Value = incoming.Value
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				target.Entries = append(target.Entries, incoming)
-			}
+		for incoming := range right.entries() {
+			target.set(incoming.Key, incoming.Value)
 		}
 		if name == "trb.std.hashes.merge" {
 			return Value{Type: typ, Data: target}, nil
