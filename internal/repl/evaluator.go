@@ -79,8 +79,6 @@ type rangeValue struct {
 	End       int64
 	Exclusive bool
 }
-type hashEntry struct{ Key, Value Value }
-type hashValue struct{ Entries []hashEntry }
 
 type recordDefinition struct {
 	Module string
@@ -914,7 +912,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			if err != nil {
 				return Value{}, err
 			}
-			value.Entries = append(value.Entries, hashEntry{Key: key, Value: item})
+			value.set(key, item)
 		}
 		return Value{Type: node.ExprType(), Data: value}, nil
 	case *ir.Identifier:
@@ -1585,7 +1583,7 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 		return e.runtimeIterate(node, source, module, sc)
 	}
 	if hash, ok := source.Data.(*hashValue); ok {
-		entries := append([]hashEntry(nil), hash.Entries...)
+		entries := hash.snapshot()
 		for _, entry := range entries {
 			if err := e.checkContext(); err != nil {
 				return flowResult{}, err
@@ -2916,17 +2914,17 @@ func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, pa
 			return mismatch("Object")
 		}
 		hash := payload.Data.(*hashValue)
-		entries := make([]hashEntry, len(hash.Entries))
-		for index, entry := range hash.Entries {
+		decodedHash := &hashValue{}
+		for entry := range hash.entries() {
 			key := entry.Key.Data.(string)
 			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
 			decoded, err := e.decodeJSONCodecValue(schema.Element, entry.Value, path+"/"+escaped)
 			if err != nil {
 				return Value{}, err
 			}
-			entries[index] = hashEntry{Key: Value{Type: types.FromName("String"), Data: key}, Value: decoded}
+			decodedHash.set(Value{Type: types.FromName("String"), Data: key}, decoded)
 		}
-		return Value{Type: schema.Type, Data: &hashValue{Entries: entries}}, nil
+		return Value{Type: schema.Type, Data: decodedHash}, nil
 	case "record":
 		if variant.Name != "Object" {
 			return mismatch(schema.Type.Name)
@@ -2936,7 +2934,7 @@ func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, pa
 			return Value{}, &jsonConversionError{path: path, message: "record " + schema.Type.Name + " is not loaded"}
 		}
 		byName := map[string]Value{}
-		for _, entry := range payload.Data.(*hashValue).Entries {
+		for entry := range payload.Data.(*hashValue).entries() {
 			byName[entry.Key.Data.(string)] = entry.Value
 		}
 		fields := map[string]Value{}
@@ -3044,7 +3042,7 @@ func jsonCodecRaw(schema *ir.CodecSchema, value Value, path string) (any, *jsonC
 			return nil, &jsonConversionError{path: path, message: "expected Hash"}
 		}
 		result := map[string]any{}
-		for _, entry := range hash.Entries {
+		for entry := range hash.entries() {
 			key := entry.Key.Data.(string)
 			converted, err := jsonCodecRaw(schema.Element, entry.Value, path+"/"+jsonPointerEscapeREPL(key))
 			if err != nil {
@@ -3143,20 +3141,17 @@ func (e *Evaluator) jsonValue(raw any, path string) (Value, *jsonConversionError
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		entries := make([]hashEntry, 0, len(keys))
+		hash := &hashValue{}
 		for _, key := range keys {
 			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
 			converted, err := e.jsonValue(value[key], path+"/"+escaped)
 			if err != nil {
 				return Value{}, err
 			}
-			entries = append(entries, hashEntry{
-				Key:   Value{Type: types.FromName("String"), Data: key},
-				Value: converted,
-			})
+			hash.set(Value{Type: types.FromName("String"), Data: key}, converted)
 		}
 		hashType := types.Type{Kind: types.Hash, Name: "Hash", Args: []types.Type{types.FromName("String"), typ}}
-		return construct("Object", map[string]Value{"value": {Type: hashType, Data: &hashValue{Entries: entries}}}), nil
+		return construct("Object", map[string]Value{"value": {Type: hashType, Data: hash}}), nil
 	default:
 		return Value{}, &jsonConversionError{path: path, message: "unsupported JSON value"}
 	}
@@ -3200,8 +3195,8 @@ func jsonRaw(value Value, path string) (any, *jsonConversionError) {
 		return result, nil
 	case "Object":
 		hash := payload.Data.(*hashValue)
-		result := make(map[string]any, len(hash.Entries))
-		for _, entry := range hash.Entries {
+		result := make(map[string]any, hash.size())
+		for entry := range hash.entries() {
 			key := entry.Key.Data.(string)
 			escaped := strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
 			converted, err := jsonRaw(entry.Value, path+"/"+escaped)
@@ -3394,12 +3389,9 @@ func indexValue(receiver, index Value, typ types.Type) (Value, error) {
 		result.Type = typ
 		return result, nil
 	case *hashValue:
-		for _, entry := range value.Entries {
-			if equal(entry.Key, index) {
-				result := entry.Value
-				result.Type = typ
-				return result, nil
-			}
+		if result, ok := value.get(index); ok {
+			result.Type = typ
+			return result, nil
 		}
 		return Value{}, errors.New("Hash key is missing")
 	case string:
@@ -3431,13 +3423,7 @@ func assignIndex(receiver, index, value Value) error {
 		target.Items[position] = value
 		return nil
 	case *hashValue:
-		for entryIndex, entry := range target.Entries {
-			if equal(entry.Key, index) {
-				target.Entries[entryIndex].Value = value
-				return nil
-			}
-		}
-		target.Entries = append(target.Entries, hashEntry{Key: index, Value: value})
+		target.set(index, value)
 		return nil
 	}
 	return fmt.Errorf("%s is not index-assignable", receiver.Type)
@@ -3622,9 +3608,9 @@ func Inspect(value Value) string {
 		}
 		return strconv.FormatInt(item.Start, 10) + operator + strconv.FormatInt(item.End, 10)
 	case *hashValue:
-		parts := make([]string, len(item.Entries))
-		for index, entry := range item.Entries {
-			parts[index] = Inspect(entry.Key) + ": " + Inspect(entry.Value)
+		parts := make([]string, 0, item.size())
+		for entry := range item.entries() {
+			parts = append(parts, Inspect(entry.Key)+": "+Inspect(entry.Value))
 		}
 		return "{" + strings.Join(parts, ", ") + "}"
 	case *recordInstance:

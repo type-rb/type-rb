@@ -894,7 +894,7 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 		return e.ormResultErr(typ, "Query", "database grouped count query failed")
 	}
 	defer rows.Close()
-	entries := []hashEntry{}
+	hash := &hashValue{}
 	for rows.Next() {
 		var raw any
 		var rawValue any
@@ -909,12 +909,12 @@ func (e *Evaluator) ormGroupedIntrinsic(name string, arguments []evaluatedArgume
 		if err != nil {
 			return e.ormResultErr(typ, "InvalidData", "database grouped aggregate row was invalid")
 		}
-		entries = append(entries, hashEntry{Key: key, Value: value})
+		hash.set(key, value)
 	}
 	if err := rows.Err(); err != nil {
 		return e.ormResultErr(typ, "Query", "database grouped count query failed")
 	}
-	return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: &hashValue{Entries: entries}})
+	return e.ormResultOK(typ, Value{Type: ormResultValueType(typ), Data: hash})
 }
 
 func groupedAggregateExpression(operation, column string) string {
