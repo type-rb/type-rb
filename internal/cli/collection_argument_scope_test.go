@@ -72,6 +72,39 @@ def hash_scopes()
 	puts(entries.key?(3))
 end
 
+def hash_receiver_rebinding()
+	mut entries: Hash<Integer, String> := {1 => "before"}
+	original := entries
+	change := fn(): Integer
+		entries = {2 => "after"}
+		return 1
+	end
+	puts(entries.fetch(change()))
+	entries = original
+	puts(entries.key?(change()))
+	entries = original
+	case entries.try_fetch(change())
+	when Result::Ok(value)
+		puts(value)
+	when Result::Err(error)
+		puts(error.message)
+	end
+	entries = original
+	puts(entries.delete(change()))
+	puts(original.key?(1))
+	puts(entries.fetch(2))
+
+	mut merging: Hash<Integer, String> := {1 => "before"}
+	incoming := fn(): Hash<Integer, String>
+		merging = {1 => "after"}
+		return {2 => "incoming"}
+	end
+	merged := merging.merge(incoming())
+	puts(merged.fetch(1))
+	puts(merging.fetch(1))
+	puts(merged.fetch(2))
+end
+
 def hash_merge_scope()
 	values: Hash<String, Integer> := {"answer" => 42}
 	base: Hash<String, Integer> := {"answer" => 0}
@@ -134,6 +167,7 @@ def main()
 	end
 	hash_scopes()
 	hash_merge_scope()
+	hash_receiver_rebinding()
 end
 `
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -168,7 +202,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			if want := "😀BC\n😀BC\nC\n3\n3\n40\nx|y|z\n😀B\nreceiver,bounds\n50\n4\n4\none\ntrue\none\n3\ntwo\nfalse\none\nreceiver,key\ntwo\nthree\nfalse\n42\n0\n"; stdout.String() != want {
+			if want := "😀BC\n😀BC\nC\n3\n3\n40\nx|y|z\n😀B\nreceiver,bounds\n50\n4\n4\none\ntrue\none\n3\ntwo\nfalse\none\nreceiver,key\ntwo\nthree\nfalse\n42\n0\nbefore\ntrue\nbefore\nbefore\nfalse\nafter\nbefore\nafter\nincoming\n"; stdout.String() != want {
 				t.Fatalf("want %q, got %q", want, stdout.String())
 			}
 		})

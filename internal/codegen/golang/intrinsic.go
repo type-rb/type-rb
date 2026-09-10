@@ -1199,12 +1199,17 @@ func (g *generator) webJSON(call *ir.Call, arguments []string) string {
 	return "func() " + responseType + " { " + builder.source.String() + " encoded := " + encoded + "; if encoded.Kind == " + resultAlias + ".ResultErrTag { return " + webAlias + ".NewResponse(map[string]any{\"status\": 500, \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(\"{\\\"error\\\":\\\"internal_server_error\\\"}\"))}) }; return " + webAlias + ".NewResponse(map[string]any{\"status\": " + status + ", \"headers\": " + headers + ", \"body\": __trb_http.NewBody([]byte(encoded.OkValue))}) }()"
 }
 
-// Source arguments are evaluated outside the generated body and its local scope.
+// Save source arguments in authored order before entering the generated body.
+// Separate statements also preserve a receiver binding replaced by the argument.
 func (g *generator) hashBinaryIntrinsic(call *ir.Call, arguments []string, secondName, resultType, body string) string {
 	receiverType := call.Arguments[0].Value.ExprType()
 	secondType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
 	if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Hash {
 		receiverType = member.Receiver.ExprType()
 	}
-	return "func(values " + g.goType(receiverType) + ", " + secondName + " " + g.goType(secondType) + ") " + resultType + " { " + body + " }(" + strings.Join(arguments, ", ") + ")"
+	g.temporary++
+	id := strconv.Itoa(g.temporary)
+	receiver := "__trbHashReceiver" + id
+	argument := "__trbHashArgument" + id
+	return "func() " + resultType + " { " + receiver + " := " + arguments[0] + "; " + argument + " := " + arguments[1] + "; return func(values " + g.goType(receiverType) + ", " + secondName + " " + g.goType(secondType) + ") " + resultType + " { " + body + " }(" + receiver + ", " + argument + ") }()"
 }
