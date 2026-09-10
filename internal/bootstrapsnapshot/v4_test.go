@@ -557,3 +557,102 @@ end
 		})
 	}
 }
+
+func TestBuildV4HashValues(t *testing.T) {
+	source := `record Index
+ entries: Hash<String, Integer>
+end
+
+def key(mut order: Array<Integer>): String
+ order.push(1)
+ return "same"
+end
+
+def value(mut order: Array<Integer>): Integer
+ order.push(2)
+ return 9
+end
+
+def main()
+ mut order: Array<Integer> := []
+ mut index := Index.new(entries: {"same" => 1, "same" => 2})
+ index.entries[key(order)] = value(order)
+ if index.entries.key?("same")
+  if index.entries["same"] == index.entries.fetch("same")
+   puts("ok")
+  end
+ end
+end
+`
+	snapshot, err := BuildV4(analyzeV4Program(t, source), "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var main FunctionV4
+	for _, function := range snapshot.Functions {
+		if function.Name == "main" {
+			main = function
+		}
+	}
+	found := map[string]int{}
+	calls := []string{}
+	for _, block := range main.Blocks {
+		for _, instruction := range block.Instructions {
+			switch op := instruction.(type) {
+			case HashConstruct:
+				found[op.Op]++
+				if len(op.Keys) != 2 || len(op.Values) != 2 {
+					t.Fatalf("literal entries lost: %#v", op)
+				}
+			case HashGet:
+				found[op.Op]++
+			case HashContains:
+				found[op.Op]++
+			case HashSet:
+				found[op.Op]++
+				if len(calls) != 2 || calls[0] != "main#key" || calls[1] != "main#value" {
+					t.Fatalf("assignment evaluation order: %v", calls)
+				}
+			case Call:
+				calls = append(calls, op.Function)
+			}
+		}
+	}
+	if found["hash_construct"] != 1 || found["hash_set"] != 1 || found["hash_get"] != 2 || found["hash_contains"] != 1 {
+		t.Fatalf("missing Hash operations: %v", found)
+	}
+	for _, definition := range snapshot.Types {
+		if definition.Kind == "hash" {
+			if definition.ID != "Hash<String, Integer>" || definition.Key == nil || *definition.Key != "String" || definition.Element == nil || *definition.Element != "Integer" {
+				t.Fatalf("incorrect Hash type: %#v", definition)
+			}
+			return
+		}
+	}
+	t.Fatal("missing Hash type")
+}
+
+func TestBuildV4HashSubsetRejectsUnsupportedOperations(t *testing.T) {
+	for _, source := range []string{
+		"def main()\n values := {1 => 2}\n if values[1] == 2\n puts(\"ok\")\n end\nend\n",
+		"def main()\n values := {\"key\" => \"value\"}\n puts(values[\"key\"])\nend\n",
+		"def main()\n values := {\"key\" => 2}\n if values.size() == 1\n puts(\"ok\")\n end\nend\n",
+	} {
+		if _, err := BuildV4(analyzeV4Program(t, source), "/project/src"); err == nil {
+			t.Fatalf("unsupported Hash program accepted: %s", source)
+		}
+	}
+	snapshot, err := BuildV4(analyzeV4Program(t, "def main()\n mut values: Hash<String, Integer> := {}\n values[\"key\"] = 2\n if values[\"key\"] == 2\n puts(\"ok\")\n end\nend\n"), "/project/src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, function := range snapshot.Functions {
+		for _, block := range function.Blocks {
+			for _, instruction := range block.Instructions {
+				if op, ok := instruction.(HashConstruct); ok && (op.Keys == nil || op.Values == nil || len(op.Keys) != 0 || len(op.Values) != 0) {
+					t.Fatalf("empty Hash lists must be present: %#v", op)
+				}
+			}
+		}
+	}
+}
