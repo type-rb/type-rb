@@ -408,6 +408,14 @@ func (c *v4CaptureCollector) statement(statement ir.Statement, locals map[string
 	case *ir.While:
 		c.expression(node.Condition, locals)
 		c.statements(node.Body, cloneV4Locals(locals))
+	case *ir.Iterate:
+		c.expression(node.Source, locals)
+		c.expression(node.SliceSize, locals)
+		bodyLocals := cloneV4Locals(locals)
+		for _, binding := range node.Bindings {
+			bodyLocals[binding.Name] = true
+		}
+		c.statements(node.Body, bodyLocals)
 	case *ir.Case:
 		c.caseNode(node, locals)
 	}
