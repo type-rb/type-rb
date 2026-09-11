@@ -1680,11 +1680,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return left + " " + op + " " + right
 	case *ir.Range:
-		exclusive := "0"
-		if n.Exclusive {
-			exclusive = "1"
-		}
-		return "[3]int{" + g.expr(n.Start) + ", " + g.expr(n.End) + ", " + exclusive + "}"
+		return g.rangeExpr(n)
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
