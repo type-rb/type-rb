@@ -1420,6 +1420,11 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
+	if iteration.Source.ExprType().Kind == types.Iterable {
+		g.iterableIterate(iteration)
+		return
+	}
+
 	if iteration.Source.ExprType().Kind == types.Range {
 		g.rangeIterate(iteration)
 		return
@@ -1478,6 +1483,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 
 func (g *generator) iterableExpr(expression ir.Expression) string {
 	value := g.expr(expression)
+	if expression.ExprType().Kind == types.Iterable {
+		return "Array.from(" + value + ")"
+	}
 	if expression.ExprType().Kind != types.Range {
 		return value
 	}
@@ -2010,8 +2018,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
-		case ir.RangeToIterableConversion:
-			return g.iterableExpr(n.Value)
+		case ir.ToIterableConversion:
+			return g.iterableConversion(n)
 		case ir.ResultFunctionToPromiseRejectionConversion:
 			return g.resultFunctionToPromiseRejection(n)
 		case ir.PromiseRejectionToResultConversion:
@@ -3034,6 +3042,9 @@ func (g *generator) tsTypeWithIdentity(typ types.Type, identity *typescriptTypeI
 			element = g.tsTypeWithIdentity(typ.Args[0], argument(0))
 		}
 		result = "Array<" + element + ">"
+		if typ.Kind == types.Iterable {
+			result = "Iterable<" + element + ">"
+		}
 	case types.Hash:
 		key := "string"
 		value := "unknown"
@@ -4178,6 +4189,9 @@ func tsTypeWithMappings(t types.Type, aliases map[string]string, mappings map[st
 			element = tsTypeWithMappings(t.Args[0], aliases, mappings, standardResult)
 		}
 		result = "Array<" + element + ">"
+		if t.Kind == types.Iterable {
+			result = "Iterable<" + element + ">"
+		}
 	case types.Range:
 		result = "[number, number, boolean]"
 	case types.Hash:

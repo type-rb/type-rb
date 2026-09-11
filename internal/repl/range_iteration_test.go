@@ -119,3 +119,42 @@ func TestReplRangeMaterializationCanBeCancelled(t *testing.T) {
 		t.Fatalf("got %v, want cancellation during materialization", err)
 	}
 }
+
+func TestReplIterableBoundariesRetainRepeatableSources(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			e, session := compileRangeSession(t, mode, `def retain<T>(values: Iterable<T>): Iterable<T>
+	return values
+end
+def first(values: Iterable<Integer>): Integer
+	values.each do |value|
+		return value
+	end
+	return -1
+end
+def last_batch(values: Iterable<Integer>): Integer
+	mut result := -1
+	values.each_slice(2).with_index do |part, index|
+		next if index == 0
+		result = part[-1]
+	end
+	return result
+end
+values := retain<Integer>(0..9007199254740991)
+mut items := [1, 2]
+retained := retain<Integer>(items)
+items.push(3)
+items[0] = 4
+items = [99]
+[first(values), first(values), first(retained), last_batch(retained)]
+`)
+			result, err := e.Evaluate(session.Statements, session.ModulePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := Inspect(result.Value); got != "[0, 0, 4, 3]" {
+				t.Fatal(got)
+			}
+		})
+	}
+}

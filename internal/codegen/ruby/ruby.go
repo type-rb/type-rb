@@ -848,7 +848,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
-		case ir.RangeToIterableConversion:
+		case ir.ToIterableConversion:
 			return g.expr(n.Value)
 		case ir.IntegerToFloatConversion:
 			return "(" + g.expr(n.Value) + ").to_f"
