@@ -675,6 +675,11 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
+	if iteration.Source.ExprType().Kind == types.Range {
+		g.rangeIterate(iteration)
+		return
+	}
+
 	itemBinding := binding(0)
 	item := g.bindingIdentifier(itemBinding.Name)
 	if iteration.Operation == "each_slice" {

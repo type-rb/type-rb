@@ -1420,6 +1420,11 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
+	if iteration.Source.ExprType().Kind == types.Range {
+		g.rangeIterate(iteration)
+		return
+	}
+
 	itemBinding := binding(0)
 	if iteration.Operation == "each_slice" {
 		if len(sourceType.Args) == 1 && len(itemBinding.Type.Args) == 1 {
