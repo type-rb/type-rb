@@ -24,3 +24,20 @@ conditional lowering. A terminating loop body no longer requires an implicit
 backedge, so an early `return` keeps its method target. Function and closure
 lowerers do not inherit enclosing loop targets. Version 2 and unsupported
 iteration-block constructs retain their existing boundaries.
+
+Version 4 also lowers direct Array `each` and `each.with_index` statements
+through existing Array operations and control-flow edges. It retains the source
+once, reads its live length and element before each block, and uses an internal
+cursor independent of mutable block parameters. Appending and replacing elements
+remain visible; rebinding the source variable does not retarget the traversal.
+Outer bindings, including those shadowed by block parameters, cross loop edges
+explicitly. `next` advances the cursor, `break` leaves the nearest loop, and
+`return` retains its method or closure target. Closures can capture managed
+iteration elements and values referenced only within an iteration body.
+
+This slice requires one block parameter for `each` and two for `with_index`.
+It uses the existing version-4 Array element types: Integer, Boolean, String,
+function values, nested Arrays, and supported records. Float Arrays, Range and
+Iterable sources, batches, and result-producing iteration remain outside this
+snapshot subset. Versions 2 and 3 keep their earlier coverage. No snapshot
+opcode or format version is added, and ordinary language behavior is unchanged.

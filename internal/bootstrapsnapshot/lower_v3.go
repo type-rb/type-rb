@@ -227,6 +227,8 @@ func (l *v3FunctionLowerer) lowerStatement(statement ir.Statement) (bool, error)
 		return l.lowerIf(node)
 	case *ir.While:
 		return l.lowerWhile(node)
+	case *ir.Iterate:
+		return l.lowerArrayIteration(node)
 	case *ir.Case:
 		_, terminated, err := l.lowerCase(node, false)
 		return terminated, err
