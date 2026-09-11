@@ -543,6 +543,20 @@ switches.
   for an empty Range. Loop transfers retain their ordinary lexical owners.
   REPL Range and `while` iteration have no fixed iteration-count limit and
   remain interruptible through evaluation cancellation.
+- Array `each` and `each.with_index` retain the receiver reference once and
+  advance an index from zero, reading the current length and element before
+  each block invocation. Appended elements are visited, including after storage
+  reallocation; shrinking can end the loop earlier. Replacing elements is
+  visible, and removing or inserting earlier elements can shift which value
+  occupies the next index. Rebinding the receiver variable does not retarget
+  the active iteration. Array-backed `Iterable` and the REPL follow the same
+  rule.
+- `each_slice` groups streamed values using the requested size, fixed once for
+  the call. Each batch is a fresh shallow Array. Changes to the source after a
+  full batch are visible to subsequent consumption. Once the source has ended,
+  a final partial batch is delivered at most once; mutation in that final block
+  does not restart the exhausted iteration. No initial collection-size hint
+  changes the requested batch size.
 - Array `index(value)` returns the zero-based position of the first value that
   is equal under portable `==`, or `nil` when no value matches.
 - String `index(substring)` and `rindex(substring)` search literal substrings

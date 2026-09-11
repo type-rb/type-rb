@@ -1,0 +1,95 @@
+def grow(mut values: Array<Integer>, mut seen: Array<Integer>)
+	values.each.with_index do |value, index|
+		seen.push(value * 10 + index)
+		if index == 0
+			values.push(3)
+			values[1] = 7
+		end
+		next
+	end
+end
+
+def grow_iterable(values: Iterable<Integer>, mut backing: Array<Integer>, mut seen: Array<Integer>)
+	values.each.with_index do |value, index|
+		seen.push(value * 10 + index)
+		if index == 0
+			backing.push(3)
+			backing[1] = 7
+		end
+		next
+	end
+end
+
+def batch_growth(values: Iterable<Integer>, mut backing: Array<Integer>): Integer
+	mut count := 0
+	values.each_slice(2).with_index do |part, index|
+		count += part.size()
+		if index == 0
+			backing.push(3)
+			backing.push(4)
+		end
+	end
+	return count
+end
+
+def main()
+	mut seen: Array<Integer> := []
+	grow([1, 2], seen)
+	mut backing := [1, 2]
+	grow_iterable(backing, backing, seen)
+	seen.each { |value| puts(value) }
+	mut shrink := [1, 2, 3]
+	shrink.each do |value|
+		puts(value)
+		shrink.pop()
+	end
+	mut shifted := [1, 2, 3]
+	shifted.each do |value|
+		puts(value)
+		if value == 1
+			shifted.shift()
+		end
+	end
+	mut original := [1, 2]
+	original.each do |value|
+		puts(value)
+		original = [99]
+	end
+	mut discarded := [1]
+	mut count := 0
+	discarded.each do |_|
+		count += 1
+		if count == 1
+			discarded.push(2)
+		end
+	end
+	puts(count)
+	mut slices := [1, 2]
+	mut saved: Array<Array<Integer>> := []
+	slices.each_slice(2).with_index do |part, index|
+		saved.push(part)
+		if index == 0
+			slices[0] = 8
+			slices.push(3)
+			slices.push(4)
+		end
+	end
+	puts(saved.size())
+	puts(saved[0][0])
+	mut batch_backing := [1, 2]
+	puts(batch_growth(batch_backing, batch_backing))
+	mut partial := [1, 2]
+	mut partial_count := 0
+	partial.each_slice(10) do |part|
+		partial_count += 1
+		partial.push(3)
+		puts(part.size())
+	end
+	puts(partial_count)
+	mut narrow := [1]
+	mut narrow_sizes: Array<Integer> := []
+	narrow.each_slice(2) do |part|
+		narrow_sizes.push(part.size())
+	end
+	puts(narrow_sizes[0])
+end

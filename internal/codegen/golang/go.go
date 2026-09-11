@@ -689,66 +689,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		return
 	}
 
-	itemBinding := binding(0)
-	item := g.bindingIdentifier(itemBinding.Name)
-	if iteration.Operation == "each_slice" {
-		g.temporary++
-		suffix := strconv.Itoa(g.temporary)
-		items := "__trbItems" + suffix
-		size := "__trbSize" + suffix
-		offset := "__trbOffset" + suffix
-		end := "__trbEnd" + suffix
-		g.line("{")
-		g.indent++
-		g.line(items + " := " + g.iterableExpr(iteration.Source))
-		g.line(size + " := " + g.expr(iteration.SliceSize))
-		g.line("if " + size + " <= 0 {")
-		g.indent++
-		g.line("panic(\"each_slice size must be greater than zero\")")
-		g.indent--
-		g.line("}")
-		g.line("for " + offset + " := 0; " + offset + " < len(" + items + "); " + offset + " += " + size + " {")
-		g.indent++
-		if itemBinding.Name != "_" {
-			g.line(end + " := min(" + offset + "+" + size + ", len(" + items + "))")
-			g.line(item + " := " + g.arrayReference(items+"["+offset+":"+end+"]"))
-			g.line("_ = " + item)
-		}
-		if iteration.WithIndex {
-			indexBinding := binding(1)
-			if indexBinding.Name != "_" {
-				index := g.bindingIdentifier(indexBinding.Name)
-				g.line(index + " := " + offset + " / " + size)
-				g.line("_ = " + index)
-			}
-		}
-		g.statements(iteration.Body)
-		g.indent--
-		g.line("}")
-		g.indent--
-		g.line("}")
-		return
-	}
-	indexBinding := binding(1)
-	if iteration.WithIndex && indexBinding.Name != "_" && itemBinding.Name != "_" {
-		g.line("for " + g.bindingIdentifier(indexBinding.Name) + ", " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
-	} else if iteration.WithIndex && indexBinding.Name != "_" {
-		g.line("for " + g.bindingIdentifier(indexBinding.Name) + " := range " + g.iterableExpr(iteration.Source) + " {")
-	} else if itemBinding.Name != "_" {
-		g.line("for _, " + item + " := range " + g.iterableExpr(iteration.Source) + " {")
-	} else {
-		g.line("for range " + g.iterableExpr(iteration.Source) + " {")
-	}
-	g.indent++
-	if itemBinding.Name != "_" {
-		g.line("_ = " + item)
-	}
-	if iteration.WithIndex && indexBinding.Name != "_" {
-		g.line("_ = " + g.bindingIdentifier(indexBinding.Name))
-	}
-	g.statements(iteration.Body)
-	g.indent--
-	g.line("}")
+	g.arrayIterate(iteration)
 }
 
 func (g *generator) iterableExpr(expression ir.Expression) string {
