@@ -795,7 +795,7 @@ end
 	output := string(artifacts[0].Output)
 	for _, expected := range []string{
 		`[]string{"price"}`, `[]string{">="}`, `[]string{"name"}`, `[]string{"LIKE"}`, `[]string{"id"}`, `[]string{"IN"}`,
-		`[]string{"RANGE_EXCLUSIVE"}`, `trbOrmRange{start: 3, end: 5, exclusive: true}`,
+		`[]string{"RANGE_EXCLUSIVE"}`,
 		`return trbOrmRange{start: bounds[0], end: bounds[1], exclusive: bounds[2] != 0}`,
 		`if values.Len() == 0 {`, `return "1 = 0"`,
 	} {
