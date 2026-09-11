@@ -1156,11 +1156,11 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		if err := require(1); err != nil {
 			return Value{}, err
 		}
-		items, err := iterableValues(values[0])
+		items, err := e.materializeIterable(values[0])
 		if err != nil {
 			return Value{}, err
 		}
-		return Value{Type: typ, Data: &arrayValue{Items: append([]Value(nil), items...)}}, nil
+		return Value{Type: typ, Data: &arrayValue{Items: items}}, nil
 	case "trb.std.hashes.length", "trb.std.hashes.empty":
 		if err := require(1); err != nil {
 			return Value{}, err

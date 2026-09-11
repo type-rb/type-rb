@@ -590,10 +590,7 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		return e.evaluate(body, module, branchScope)
 	case *ir.While:
 		last := flowResult{}
-		for iterations := 0; ; iterations++ {
-			if iterations >= 1_000_000 {
-				return flowResult{}, errors.New("while loop exceeded REPL iteration limit")
-			}
+		for {
 			condition, err := e.expression(node.Condition, module, sc)
 			if err != nil {
 				return flowResult{}, err
@@ -1329,7 +1326,7 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	if err != nil {
 		return Value{}, err
 	}
-	items, err := iterableValues(source)
+	items, err := e.materializeIterable(source)
 	if err != nil {
 		return Value{}, err
 	}
@@ -1612,11 +1609,11 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 		}
 		return flowResult{}, nil
 	}
-	items, err := iterableValues(source)
+	next, err := iterableCursor(source)
 	if err != nil {
 		return flowResult{}, err
 	}
-	size := 1
+	size := int64(1)
 	if node.Operation == "each_slice" {
 		value, err := e.expression(node.SliceSize, module, sc)
 		if err != nil {
@@ -1626,29 +1623,37 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 		if !ok || integer <= 0 {
 			return flowResult{}, errors.New("each_slice size must be greater than zero")
 		}
-		size = int(integer)
+		size = integer
 	}
-	iterationIndex := 0
 	itemBinding := node.Bindings[0]
-	for offset := 0; offset < len(items); offset += size {
+	for iterationIndex := int64(0); ; iterationIndex++ {
 		if err := e.checkContext(); err != nil {
 			return flowResult{}, err
 		}
+		item, ok := next()
+		if !ok {
+			return flowResult{}, nil
+		}
 		iterationScope := &scope{parent: sc, values: map[string]Value{}}
 		if node.Operation == "each_slice" {
-			end := offset + size
-			if end > len(items) {
-				end = len(items)
+			slice := []Value{item}
+			for int64(len(slice)) < size {
+				if err := e.checkContext(); err != nil {
+					return flowResult{}, err
+				}
+				item, ok := next()
+				if !ok {
+					break
+				}
+				slice = append(slice, item)
 			}
-			slice := append([]Value(nil), items[offset:end]...)
 			iterationScope.values[itemBinding.Name] = Value{Type: itemBinding.Type, Data: &arrayValue{Items: slice}}
 		} else {
-			item := items[offset]
 			item.Type = itemBinding.Type
 			iterationScope.values[itemBinding.Name] = item
 		}
 		if node.WithIndex {
-			iterationScope.values[node.Bindings[1].Name] = Value{Type: node.Bindings[1].Type, Data: int64(iterationIndex)}
+			iterationScope.values[node.Bindings[1].Name] = Value{Type: types.FromName("Integer"), Data: iterationIndex}
 		}
 		result, err := e.evaluate(node.Body, module, iterationScope)
 		if err != nil || result.Returned {
@@ -1659,12 +1664,9 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 			result.Loop = loopNone
 			return result, nil
 		case loopNext:
-			iterationIndex++
 			continue
 		}
-		iterationIndex++
 	}
-	return flowResult{}, nil
 }
 
 func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string, sc *scope) (flowResult, error) {
@@ -1729,27 +1731,58 @@ func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string
 	return flowResult{}, nil
 }
 
-func iterableValues(value Value) ([]Value, error) {
+// iterableCursor captures the original Array slice or Range bounds once. Range
+// iteration retains constant state and never enumerates values ahead of demand.
+func iterableCursor(value Value) (func() (Value, bool), error) {
 	switch data := value.Data.(type) {
 	case *arrayValue:
-		return data.Items, nil
+		items, index := data.Items, 0
+		return func() (Value, bool) {
+			if index >= len(items) {
+				return Value{}, false
+			}
+			item := items[index]
+			index++
+			return item, true
+		}, nil
 	case *rangeValue:
-		items := []Value{}
-		for current := data.Start; current < data.End; current++ {
-			if len(items) >= 1_000_000 {
-				return nil, errors.New("range exceeded REPL iteration limit")
+		current, end, exclusive := data.Start, data.End, data.Exclusive
+		done := false
+		return func() (Value, bool) {
+			if done || current > end || exclusive && current == end {
+				return Value{}, false
 			}
-			items = append(items, Value{Type: types.FromName("Integer"), Data: current})
-		}
-		if !data.Exclusive && data.Start <= data.End {
-			if len(items) >= 1_000_000 {
-				return nil, errors.New("range exceeded REPL iteration limit")
+			item := Value{Type: types.FromName("Integer"), Data: current}
+			if current == end {
+				done = true
+			} else {
+				current++
 			}
-			items = append(items, Value{Type: types.FromName("Integer"), Data: data.End})
-		}
-		return items, nil
+			return item, true
+		}, nil
 	default:
 		return nil, fmt.Errorf("%s is not iterable", value.Type)
+	}
+}
+
+func (e *Evaluator) materializeIterable(value Value) ([]Value, error) {
+	if array, ok := value.Data.(*arrayValue); ok {
+		return array.Items, nil
+	}
+	next, err := iterableCursor(value)
+	if err != nil {
+		return nil, err
+	}
+	items := []Value{}
+	for {
+		if err := e.checkContext(); err != nil {
+			return nil, err
+		}
+		item, ok := next()
+		if !ok {
+			return items, nil
+		}
+		items = append(items, item)
 	}
 }
 

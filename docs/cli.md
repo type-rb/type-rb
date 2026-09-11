@@ -533,6 +533,11 @@ character, Ctrl-A/E by line, Alt-B/F by word, and Ctrl-P/N moves vertically or
 through history. Ctrl-C cancels current input or evaluation without exiting;
 Ctrl-D exits.
 
+The REPL imposes no fixed iteration-count limit on Range or `while` loops.
+Range `each` reads values incrementally, and `each_slice` materializes only the
+current batch. Explicit `to_a()` still needs memory for the resulting Array;
+its enumeration also observes evaluation cancellation.
+
 Ordinary results retain the `value : Type` form. A result directly associated
 with a mutable REPL binding includes a trailing `[mut]`; arbitrary expressions
 do not inherit the marker:
