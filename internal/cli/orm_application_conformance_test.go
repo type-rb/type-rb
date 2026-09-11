@@ -310,6 +310,22 @@ def exercise(): DbResult<Integer>
 	puts(try TrbConformanceProduct.distinct().count())
 	puts(try TrbConformanceProduct.join(:category).left_join(:category).count())
 	puts(try TrbConformanceProduct.where(id: 1..1000000).count())
+	mut range_start := 1
+	mut range_calls := 0
+	range_finish := fn(): Integer
+		range_start = 1000001
+		range_calls += 1
+		return 1000000
+	end
+	inclusive_count := try TrbConformanceProduct.where(id: range_start..range_finish()).count()
+	puts(inclusive_count == 2 && range_start == 1000001 && range_calls == 1)
+	range_start = 1
+	exclusive_count := try TrbConformanceProduct.where(id: range_start...range_finish()).count()
+	puts(exclusive_count == 2 && range_start == 1000001 && range_calls == 2)
+	range_start = 1
+	retained_bounds := range_start...range_finish()
+	retained_count := try TrbConformanceProduct.where(id: retained_bounds).count()
+	puts(retained_count == 2 && range_start == 1000001 && range_calls == 3)
 	puts(try TrbConformanceProduct.where("name", "LIKE", "%irs%").count())
 	paged_products := try TrbConformanceProduct.order(id: :asc).limit(1).offset(1).all()
 	puts(paged_products.size())
@@ -433,6 +449,9 @@ true
 2
 2
 2
+true
+true
+true
 1
 1
 1

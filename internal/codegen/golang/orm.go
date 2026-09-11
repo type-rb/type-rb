@@ -492,9 +492,6 @@ func (g *generator) ormPredicateArguments(call *ir.Call) string {
 }
 
 func (g *generator) ormRangePredicateValue(value ir.Expression) string {
-	if bounds, ok := value.(*ir.Range); ok {
-		return "trbOrmRange{start: " + g.expr(bounds.Start) + ", end: " + g.expr(bounds.End) + ", exclusive: " + strconv.FormatBool(bounds.Exclusive) + "}"
-	}
 	bounds := g.expr(value)
 	return "func(bounds [3]int) trbOrmRange { return trbOrmRange{start: bounds[0], end: bounds[1], exclusive: bounds[2] != 0} }(" + bounds + ")"
 }
