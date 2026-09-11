@@ -73,7 +73,7 @@ func resourceOpaqueNode(node any) bool {
 		switch value.Kind {
 		case ir.IntegerToFloatConversion, ir.UnionIntegerToFloatConversion,
 			ir.NonNullableToNullableConversion, ir.NullableToNonNullableConversion,
-			ir.RangeToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion:
+			ir.ToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion:
 			return false
 		}
 	}

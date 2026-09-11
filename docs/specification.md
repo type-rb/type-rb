@@ -530,10 +530,14 @@ switches.
   an existing element. Array slices return a new shallow Array.
 - Range values retain their bounds and inclusivity through variables and
   function boundaries. Converting `Range<Integer>` to `Iterable<Integer>`
-  enumerates the represented values without changing slice semantics.
+  retains the bounds without enumerating or copying the sequence. Each iteration
+  starts at the beginning, including after an earlier iteration exits. Array
+  conversion retains the original Array reference: mutations before the next
+  iteration are visible, while rebinding the original variable does not replace
+  the retained source. These conversions do not change slice semantics.
   `range.to_a()` materializes those values as a new `Array<Integer>`; a
   reversed Range materializes an empty Array.
-- Direct Range `each`, `each.with_index`, and `each_slice` evaluate the
+- Range and `Iterable` `each`, `each.with_index`, and `each_slice` evaluate the
   receiver once and consume values incrementally. `each_slice` allocates only
   the current batch; its size is evaluated once before iteration, including
   for an empty Range. Loop transfers retain their ordinary lexical owners.

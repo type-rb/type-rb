@@ -916,8 +916,8 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 	}
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
 		kind := ir.IntegerToFloatConversion
-		if target.Kind == types.Iterable && result.ExprType().Kind == types.Range {
-			kind = ir.RangeToIterableConversion
+		if target.Kind == types.Iterable && (result.ExprType().Kind == types.Array || result.ExprType().Kind == types.Range || result.ExprType().Kind == types.Iterable) {
+			kind = ir.ToIterableConversion
 		} else if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
 			kind = ir.NonNullableToNullableConversion
 		} else if result.ExprType().Kind == types.Union {
@@ -1577,8 +1577,8 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 	conversionType := target
 	kind := ir.ConversionKind("")
 	switch {
-	case target.Kind == types.Iterable && source.Kind == types.Range:
-		kind = ir.RangeToIterableConversion
+	case target.Kind == types.Iterable && (source.Kind == types.Array || source.Kind == types.Range || source.Kind == types.Iterable):
+		kind = ir.ToIterableConversion
 	case target.Nullable && !source.Nullable && source.Kind != types.Nil:
 		kind = ir.NonNullableToNullableConversion
 	case target.Kind == types.Union && source.Kind == types.Union &&

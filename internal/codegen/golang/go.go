@@ -62,6 +62,7 @@ type generator struct {
 	executionActive   bool
 	oidcRuntime       bool
 	arrayRuntime      bool
+	iterableRuntime   bool
 	arrayIndexRuntime bool
 	recordSources     bool
 	sourceMarker      int
@@ -186,6 +187,9 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	g.integrations(program.Extensions)
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.iterableRuntime {
+		g.iterableRuntimeSupport()
 	}
 	if g.arrayRuntime {
 		g.arrayRuntimeSupport()
@@ -675,6 +679,11 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.line("}")
 		return
 	}
+	if iteration.Source.ExprType().Kind == types.Iterable {
+		g.iterableIterate(iteration)
+		return
+	}
+
 	if iteration.Source.ExprType().Kind == types.Range {
 		g.rangeIterate(iteration)
 		return
@@ -744,8 +753,12 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 
 func (g *generator) iterableExpr(expression ir.Expression) string {
 	value := g.expr(expression)
-	if expression.ExprType().Kind == types.Array || expression.ExprType().Kind == types.Iterable {
+	if expression.ExprType().Kind == types.Array {
 		return g.arrayValues(value)
+	}
+	if expression.ExprType().Kind == types.Iterable {
+		element := g.goType(expression.ExprType().Args[0])
+		return "func(source " + g.goType(expression.ExprType()) + ") []" + element + " { values := []" + element + "{}; for value := range source { values = append(values, value) }; return values }(" + value + ")"
 	}
 	if expression.ExprType().Kind != types.Range {
 		return value
@@ -1686,8 +1699,8 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
-		case ir.RangeToIterableConversion:
-			return g.arrayReference(g.iterableExpr(n.Value))
+		case ir.ToIterableConversion:
+			return g.iterableConversion(n)
 		case ir.IntegerToFloatConversion:
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
@@ -2089,6 +2102,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 func (g *generator) absorbRuntimeRequirements(child *generator) {
 	g.oidcRuntime = g.oidcRuntime || child.oidcRuntime
 	g.arrayRuntime = g.arrayRuntime || child.arrayRuntime
+	g.iterableRuntime = g.iterableRuntime || child.iterableRuntime
 	g.arrayIndexRuntime = g.arrayIndexRuntime || child.arrayIndexRuntime
 	g.checkedInteger = g.checkedInteger || child.checkedInteger
 	g.utf8Replacement = g.utf8Replacement || child.utf8Replacement
@@ -3305,7 +3319,13 @@ func (g *generator) goType(t types.Type) string {
 	case types.StringBuilder:
 		g.requireImport("strings", "")
 		result = "*strings.Builder"
-	case types.Array, types.Iterable:
+	case types.Iterable:
+		element := "any"
+		if len(t.Args) == 1 {
+			element = g.goType(t.Args[0])
+		}
+		result = "func(func(" + element + ") bool)"
+	case types.Array:
 		g.arrayRuntime = true
 		result = "*" + g.goArraySliceType(t)
 	case types.Range:

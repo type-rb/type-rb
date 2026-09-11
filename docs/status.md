@@ -46,9 +46,9 @@ Direct Range iteration streams in Go and TypeScript output and in the typed-IR
 REPL, matching the Ruby Range path without allocating the complete sequence.
 The REPL's former fixed Range/while iteration caps are removed; evaluation
 cancellation remains active, including while building an explicit Range Array.
-Go/TypeScript conversion from Range to an `Iterable` parameter still materializes
-its representation; replacing that separate representation boundary remains
-follow-up work.
+Range and Array conversions to `Iterable` retain a repeatable source instead of
+materializing a copy. Function, generic, and nullable boundaries preserve this
+behavior; each iteration starts at the beginning of the retained collection.
 
 `trb lint` runs project checking before a small configurable built-in ruleset.
 The recommended rules safely rewrite simple one-transfer guard blocks and
