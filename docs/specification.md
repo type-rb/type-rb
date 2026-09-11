@@ -528,6 +528,8 @@ switches.
   nonnegative, ordered, and within the collection. The exclusive
   `size...size` range is a valid empty slice; an inclusive finish always names
   an existing element. Array slices return a new shallow Array.
+- A Range literal evaluates its start and then its end exactly once, retaining
+  each endpoint value before evaluating the next expression.
 - Range values retain their bounds and inclusivity through variables and
   function boundaries. Converting `Range<Integer>` to `Iterable<Integer>`
   retains the bounds without enumerating or copying the sequence. Each iteration

@@ -12,7 +12,9 @@ import (
 )
 
 func TestRunRangeIterationStreamsAcrossBackends(t *testing.T) {
-	const source = `def bounds(mut events: Array<Integer>): Range<Integer>
+	const source = `import { Result } from trb/std/result
+
+def bounds(mut events: Array<Integer>): Range<Integer>
 	events.push(1)
 	return 1..5
 end
@@ -27,6 +29,28 @@ def first(span: Range<Integer>): Integer
 		return value + index
 	end
 	return -1
+end
+
+def endpoint(mut events: Array<Integer>, value: Integer, fail: Boolean): Result<Integer, Integer>
+	events.push(value)
+	if fail
+		return Result<Integer, Integer>::Err(value)
+	end
+	return Result<Integer, Integer>::Ok(value)
+end
+
+def attempted_range(mut events: Array<Integer>, fail_start: Boolean, fail_end: Boolean): Result<Range<Integer>, Integer>
+	span := (try endpoint(events, 1, fail_start))..(try endpoint(events, 3, fail_end))
+	return Result<Range<Integer>, Integer>::Ok(span)
+end
+
+def print_attempt(result: Result<Range<Integer>, Integer>)
+	case result
+	when Result::Ok(span)
+		puts(first(span))
+	when Result::Err(error)
+		puts(0 - error)
+	end
 end
 
 def main()
@@ -81,9 +105,33 @@ def main()
 	mut count := 0
 	(0..1_000_000).each { |_| count += 1 }
 	puts(count)
+	mut start := 0
+	mut calls := 0
+	finish := fn(): Integer
+		calls += 1
+		start = 9
+		return 2
+	end
+	(start..finish()).each { |value| puts(value) }
+	puts(start)
+	start = 1
+	(start...finish()).each { |value| puts(value) }
+	puts(start)
+	start = 3
+	(start..finish()).each { |_| puts("bad") }
+	puts(calls)
+	mut endpoint_events: Array<Integer> := []
+	print_attempt(attempted_range(endpoint_events, false, false))
+	print_attempt(attempted_range(endpoint_events, true, false))
+	print_attempt(attempted_range(endpoint_events, false, true))
+	fallback := attempted_range(endpoint_events, true, false) catch |error|
+		error..error
+	end
+	puts(first(fallback))
+	puts(endpoint_events.size())
 end
 `
-	want := "-20\n2\n13\n24\n14\n25\n1\n12\n0\n3\n9007199254740990\n9007199254740990\n9007199254740991\n9007199254740990\n2\n-9007199254740991\n-9007199254740990\n0\n1000001\n"
+	want := "-20\n2\n13\n24\n14\n25\n1\n12\n0\n3\n9007199254740990\n9007199254740990\n9007199254740991\n9007199254740990\n2\n-9007199254740991\n-9007199254740990\n0\n1000001\n0\n1\n2\n9\n1\n9\n3\n1\n-1\n-3\n1\n6\n"
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			if mode == "ruby" || mode == "typescript" {

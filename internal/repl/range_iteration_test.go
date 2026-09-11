@@ -72,6 +72,37 @@ end
 	}
 }
 
+func TestReplRangeEndpointsRetainEvaluatedStart(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			e, session := compileRangeSession(t, mode, `mut start := 0
+mut calls := 0
+finish := fn(): Integer
+	calls += 1
+	start = 9
+	return 2
+end
+mut values: Array<Integer> := []
+(start..finish()).each { |value| values.push(value) }
+start = 1
+(start...finish()).each { |value| values.push(value) }
+start = 3
+values.push((start..finish()).to_a().size())
+values.push(start)
+values.push(calls)
+values
+`)
+			result, err := e.Evaluate(session.Statements, session.ModulePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := Inspect(result.Value); got != "[0, 1, 2, 1, 0, 9, 3]" {
+				t.Fatal(got)
+			}
+		})
+	}
+}
+
 func TestReplMillionEntryHashAndRangeMaterialization(t *testing.T) {
 	e, session := compileRangeSession(t, "go", `mut h := {}
 (0..1_000_000).each { |i| h[i] = i * i }
