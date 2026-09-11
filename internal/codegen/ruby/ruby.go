@@ -435,7 +435,9 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		header := source + "." + n.Operation
 		if n.Operation == "each_slice" {
-			header += "(" + g.expr(n.SliceSize) + ")"
+			// Suppress Enumerable's initial size hint so the requested batch size
+			// remains stable when a retained Array changes during iteration.
+			header = source + ".to_enum(:each).each_slice(" + g.expr(n.SliceSize) + ")"
 		}
 		if n.WithIndex {
 			header += ".with_index"

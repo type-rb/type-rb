@@ -1432,34 +1432,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 
 	itemBinding := binding(0)
 	if iteration.Operation == "each_slice" {
-		if len(sourceType.Args) == 1 && len(itemBinding.Type.Args) == 1 {
-			itemIdentity := projectTypeScriptTypeIdentity(itemBinding.Type.Args[0], sourceType.Args[0], identityArgument(sourceIdentity, 0))
-			g.exactTypes[itemBinding.Name] = identityWithArgument(itemBinding.Type, 0, itemIdentity)
-		}
-		g.temporary++
-		suffix := strconv.Itoa(g.temporary)
-		items := "__trbItems" + suffix
-		size := "__trbSize" + suffix
-		offset := "__trbOffset" + suffix
-		g.line("{")
-		g.indent++
-		g.line("const " + items + " = " + g.iterableExpr(iteration.Source) + ";")
-		g.line("const " + size + " = " + g.expr(iteration.SliceSize) + ";")
-		g.line("if (" + size + " <= 0) throw new Error(\"each_slice size must be greater than zero\");")
-		g.line("for (let " + offset + " = 0; " + offset + " < " + items + ".length; " + offset + " += " + size + ") {")
-		g.indent++
-		g.line("let " + itemBinding.Name + " = " + items + ".slice(" + offset + ", " + offset + " + " + size + ");")
-		g.line("void " + itemBinding.Name + ";")
-		if iteration.WithIndex {
-			indexBinding := binding(1)
-			g.line("let " + indexBinding.Name + " = Math.floor(" + offset + " / " + size + ");")
-			g.line("void " + indexBinding.Name + ";")
-		}
-		g.statements(iteration.Body)
-		g.indent--
-		g.line("}")
-		g.indent--
-		g.line("}")
+		g.iterableIterate(iteration)
 		return
 	}
 	indexBinding := binding(1)

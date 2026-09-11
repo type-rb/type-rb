@@ -31,7 +31,7 @@ func (g *generator) iterableConversion(conversion *ir.Conversion) string {
 	case types.Range:
 		body = "start, end, exclusive := __trbSource[0], __trbSource[1], __trbSource[2] == 1; for " + element + " := start; " + element + " < end; " + element + "++ { " + visit + " }; if !exclusive && start <= end { " + element + " := end; " + visit + " }"
 	case types.Array:
-		body = "for _, " + element + " := range *__trbSource { " + visit + " }"
+		body = "for index := 0; index < len(*__trbSource); index++ { " + element + " := (*__trbSource)[index]; " + visit + " }"
 	case types.Iterable:
 		sequence := "__trbSource"
 		if source.Nullable {

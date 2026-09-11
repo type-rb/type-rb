@@ -1731,17 +1731,18 @@ func (e *Evaluator) runtimeIterate(node *ir.Iterate, source Value, module string
 	return flowResult{}, nil
 }
 
-// iterableCursor captures the original Array slice or Range bounds once. Range
+// iterableCursor retains the original Array reference or Range bounds once. Range
 // iteration retains constant state and never enumerates values ahead of demand.
 func iterableCursor(value Value) (func() (Value, bool), error) {
 	switch data := value.Data.(type) {
 	case *arrayValue:
-		items, index := data.Items, 0
+		index, done := 0, false
 		return func() (Value, bool) {
-			if index >= len(items) {
+			if done || index >= len(data.Items) {
+				done = true
 				return Value{}, false
 			}
-			item := items[index]
+			item := data.Items[index]
 			index++
 			return item, true
 		}, nil
