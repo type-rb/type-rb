@@ -432,7 +432,7 @@ func Assignable(target, value Type) bool {
 			return false
 		}
 	}
-	if target.Kind == Named && (len(target.Args) > 0 || len(value.Args) > 0) {
+	if (target.Kind == Named || target.Kind == Range) && (len(target.Args) > 0 || len(value.Args) > 0) {
 		if len(target.Args) != len(value.Args) {
 			return false
 		}
