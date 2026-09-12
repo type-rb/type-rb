@@ -1,12 +1,13 @@
 ---
 name: develop-typerb
-description: Evolve the TypeRB language and toolchain. Use when changing TypeRB syntax or semantics, AST/typed IR, checker rules, formatter behavior, standard or platform packages, Ruby/Go/TypeScript backends, or REPL behavior.
+description: Implement or review changes to TypeRB language behavior, compiler, backends, or packages.
 ---
 
 # Develop TypeRB
 
-Read `docs/specification.md` and the relevant implementation before changing
-behavior.
+Read the relevant sections of `docs/specification.md` and the affected
+implementation when changing behavior. Use this skill for compiler work, not
+for an unrelated application or documentation edit.
 
 ## Replace alpha behavior directly
 
@@ -42,40 +43,36 @@ Preserve these invariants:
   reintroduce a second checked-effect channel or map native exceptions and
   Promise rejections implicitly outside an explicit Result bridge.
 
-Choose the narrowest package boundary that can implement a feature:
-
-1. Use an ordinary TypeRB package by default.
-2. Use an explicit platform package for backend- or ecosystem-specific
-   behavior.
-3. Add an API to `trb/std/*` only when it is foundational, portable, broadly
-   applicable, and stable enough to version with the compiler.
-4. Treat bundling as a distribution decision. It never grants compiler
-   privileges or makes a dependency implicit.
-5. Use compiler integration only when TypeRB source, native dependencies, and
-   the current extension protocol cannot express the required behavior. Do not
-   choose it merely because a package is official or convenient to ship.
-6. When compiler integration is unavoidable, document the missing extension
-   capability and preserve a path toward an ordinary package.
+For new APIs or compiler integration, choose the narrowest sufficient
+[package boundary](references/package-boundaries.md).
 
 Test intended behavior rather than incidental representation:
 
 - Prefer compiler and CLI integration tests for portable semantics and diagnostics across modes.
 - Add focused package unit tests when a boundary needs faster or more precise feedback.
-- Before a behavior-preserving refactor, add characterization coverage for the
-  behavior that remains part of the target contract. For an intentional alpha
-  redesign, replace old expectations with coverage of the selected contract.
+- For a behavior-preserving refactor, retain existing coverage and add
+  characterization tests where an affected contract has an uncovered risk.
+  For an intentional alpha redesign, replace old expectations with coverage of
+  the selected contract.
   Avoid full AST, IR, or generated-file snapshots unless that exact
   representation is the contract.
 
-For each coherent change:
+## Validate the affected contract
 
-1. Add positive and diagnostic tests, covering Ruby, Go, and TypeScript when the feature is portable.
-2. Exercise the typed-IR REPL when runtime expression semantics change.
-3. Exercise Result success, propagation, recovery, and must-use diagnostics
-   across every affected structured block and native boundary.
-4. Run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
-   `./trb fmt --check .`. Use the source-checkout launcher so an older released
-   `trb` on `PATH` cannot validate current syntax with a stale formatter.
-5. Update `docs/specification.md`, `docs/status.md`, or `docs/roadmap.md` only
-   where behavior or status changed.
-6. Commit the completed work unit. Use Go 1.27 and current target language features; legacy target versions are out of scope.
+Add positive and diagnostic coverage for changed behavior; use Ruby, Go, and
+TypeScript where the feature is portable. Exercise the typed-IR REPL when runtime
+expression semantics change. Cover Result success, propagation, recovery, and
+must-use diagnostics where a changed block or native boundary affects them.
+
+Use focused tests during implementation. Before completing compiler/runtime
+changes, run `GOCACHE=/tmp/type-rb-go-cache go test ./...` and
+`./trb fmt --check .`, and satisfy required CI. Use the checkout launcher so an
+older installed formatter cannot validate current syntax. Documentation-only
+work needs the checks relevant to its changed text plus required CI, not a new
+set of compiler tests. Reuse passing results for the unchanged candidate rather
+than repeating them without a new concern.
+
+Update specification, status, or roadmap only where behavior or status changed.
+Use the toolchain declared in `go.mod` and the supported target versions; legacy
+target compatibility is outside the project scope. Complete the requested work
+unit without treating it as permission for a new feature, merge, or release.
