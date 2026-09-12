@@ -1,18 +1,18 @@
 ---
 name: use-typerb
-description: Build, modify, debug, explain, or teach TypeRB applications. Use for .trb source, trbconfig.jsonc projects, TypeRB package APIs, compiler diagnostics encountered by application authors, and interactive TypeRB learning. Do not use for changing the TypeRB compiler or language semantics; use develop-typerb for those tasks.
+description: Build, debug, explain, or teach TypeRB applications. Compiler changes use develop-typerb.
 ---
 
 # Use TypeRB
 
-Work from the nearest `trbconfig.jsonc`, or use a scratch Go-mode REPL when no
-project exists. Inspect existing source and configuration before proposing a
-new layout.
+For application edits, work from the nearest `trbconfig.jsonc` and existing
+source. Use a scratch Go-mode REPL when an executable example is useful and no
+project exists; explanation-only requests do not require creating a project.
 
 ## Find the authoritative API
 
-Use documentation as an index rather than guessing from Go, Ruby, or
-TypeScript:
+Consult the documentation for the question at hand; these are entry points,
+not a reading list required before every task:
 
 - Read `docs/language.md` for implemented syntax and
   `docs/specification.md` for exact semantics.
@@ -46,34 +46,22 @@ Keep these application invariants:
 
 ## Use the compiler feedback loop
 
-After each coherent edit:
+For source changes, format the affected files and run
+`trb check --diagnostic-format json`. Use diagnostic codes, spans, related
+locations, and fixes rather than parsing message text alone. Run the narrowest application
+test or command that exercises the change; build or run the executable when
+that boundary is affected.
 
-1. Run `trb fmt` on the affected source.
-2. Run `trb check --diagnostic-format json` and use diagnostic codes, spans,
-   related locations, and fixes rather than parsing message text alone.
-3. Run `trb lint --diagnostic-format json` and apply only fixes declared safe
-   by the rule. Use `--deny-warnings` when the project treats warnings as CI
-   failures.
-4. Run the narrowest relevant application command, then `trb run` or
-   `trb build` when the project has an executable boundary.
+Use `trb lint --diagnostic-format json` for requested lint work or the project's
+checks, applying only fixes declared safe. Use `--deny-warnings` when required
+by project policy. Retain required CI and expand validation for failures or
+unresolved concerns; an unchanged successful check need not be repeated.
 
 Inside a TypeRB compiler checkout, use `./trb` so the source compiler validates
 the current language. In an application repository, use the installed `trb`.
 Never weaken types or add native escape syntax merely to silence a diagnostic.
 
-## Teach interactively
+## Teaching requests
 
-When the user asks to learn TypeRB:
-
-1. Establish the intended path: language basics, API/backend, database, Jobs,
-   or browser UI.
-2. Start with [A Tour of TypeRB](https://type-rb.github.io/tour/) or one small
-   local `.trb` exercise that runs immediately.
-3. Introduce one new concept at a time and let the learner write or modify the
-   code before showing a complete answer unless they request it.
-4. Validate the learner's actual code with `trb fmt` and `trb check`; explain
-   the TypeRB rule behind each diagnostic.
-5. End each step with one observable result and one suggested next exercise.
-
-Prefer executable feedback over a long lecture. Link the relevant reference
-section when the learner wants the full rule.
+For an interactive lesson, use [teaching guidance](references/teaching.md).
+For a focused question, answer it directly and link the relevant rule.

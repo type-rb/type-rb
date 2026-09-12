@@ -1,83 +1,47 @@
 ---
 name: publish-typerb
-description: Publish TypeRB changes through GitHub. Use when creating a branch, choosing commit messages, pushing work, opening or updating a pull request, assigning its author and change-type label, or preparing a TypeRB change for review and merge.
+description: Prepare or update TypeRB GitHub pull requests and their required release metadata.
 ---
 
 # Publish TypeRB
 
-Never push changes directly to `main`. Publish every change through a pull request.
+Publish through a pull request; never push changes directly to the default
+branch. Complete the requested edits and checks before requesting review.
+A PR-only request ends with an open PR and retained branch/worktree. Merge only
+with user authorization; a review boundary overrides older standing approval.
 
-Use local `git` for branches, commits, and pushes. Prefer the authenticated GitHub Connector for pull requests, metadata, and labels. Use `gh` only when the Connector lacks the required capability, such as GitHub Actions log inspection; do not block on `gh` authentication when the Connector can complete the task.
+Use local Git for branches, commits, and pushes. Prefer an available authenticated
+GitHub connector for PR metadata; use `gh` when it provides the needed capability.
+Do not let a missing optional client block an equivalent authenticated workflow.
 
-## Classify the change
+## Branch, commit, and metadata
 
-Choose one primary type. Use it as both the branch prefix and PR label:
+Choose a primary change type: `feat`, `fix`, `refactor`, `perf`, `test`, `doc`,
+`build`, `ci`, or `chore`. Apply exactly one corresponding PR label; other status
+or area labels may coexist. Create a missing change-type label when needed.
 
-- `feat`: user-facing capability
-- `fix`: defect correction
-- `refactor`: behavior-preserving restructuring
-- `perf`: performance improvement
-- `test`: test-only change
-- `doc`: documentation-only change
-- `build`: build or packaging change
-- `ci`: continuous-integration change
-- `chore`: maintenance not covered above
+Follow an explicit user or repository branch convention; otherwise use
+`<type>/<short-kebab-description>`. An explicitly different prefix does not change
+the semantic PR label. Avoid agent/username prefixes. Commit coherent units with
+a concise imperative subject and only the rationale a reviewer needs. Keep
+unrelated user edits out of commits.
 
-Use `<type>/<short-kebab-description>`, for example `feat/homebrew-install` or `fix/repl-history`. Do not use `codex/`, `agent/`, or a username prefix.
+## Prepare review
 
-## Commit the work
+- Complete relevant checks, push the branch, and target the repository's default
+  branch. Keep a PR draft while required implementation or verification remains.
+- Describe the final problem, resulting behavior, validation, and material limits.
+  Include the exact [release-note metadata](references/release-note.md).
+- Assign the PR author, using the login returned by current PR metadata, and
+  apply its change-type label. Do not guess the author.
+- Mark it ready once reviewable and required checks pass. Check results for the
+  actual candidate; do not repeat unchanged passing checks without a reason.
+- Report the open PR when that is the requested endpoint. This workflow does
+  not itself authorize merging, publishing a release, or starting another task.
 
-- Commit coherent, independently understandable work units.
-- Use a concise imperative subject.
-- Add a body only when rationale, constraints, rejected alternatives, or intentional limitations are not evident from the diff.
-- Explain why; do not mechanically list changed files.
-- Keep unrelated user changes out of the commit.
+## After an authorized merge
 
-## Open the pull request
-
-1. Verify the relevant checks before pushing.
-2. Push the working branch to `origin`; never push the change to `main`.
-3. Open a pull request targeting `main`. Keep it draft while required work remains.
-4. Summarize what changed, why, user or developer impact, checks, and intentional follow-ups.
-5. Add the release-note block described below.
-6. Apply the label that exactly matches the branch prefix. Apply exactly one change-type label; unrelated status or area labels may coexist.
-7. Assign the pull request author to the pull request. Read the author login from the created pull request response or current pull request metadata; do not guess it.
-8. Mark the pull request ready only when it is reviewable and required checks pass.
-
-### Record release impact
-
-Include this exact section in every pull request body:
-
-```text
-## Release note
-
-Area: <short user-facing subsystem>
-Kind: <Added|Changed|Fixed|Performance|Security|Deprecated|Removed|None>
-Breaking: <Yes|No>
-
-<one concise user-facing paragraph, or a short reason when Kind is None>
-```
-
-- Describe observable behavior, not files or implementation mechanics.
-- Use `Kind: None` for internal maintenance, documentation-only changes, release
-  preparation, and other changes users do not need in a changelog.
-- Keep the area stable and recognizable, such as `Language`, `Compiler`,
-  `CLI`, `REPL`, `Standard library`, `Web`, `ORM`, `Jobs`, `Packages`, or
-  `Tooling`. Add a new area when none of these fits naturally.
-- Set `Breaking: Yes` only when users must change existing code or operation.
-- During alpha, `Breaking` is descriptive release metadata only. Never alter
-  the chosen design, add compatibility behavior, or require migration guidance
-  because a change is breaking. Describe the resulting observable behavior;
-  provide transition instructions only when the maintainer explicitly asks for
-  them.
-
-If a needed change-type label does not exist, create it before assigning it. Keep label names identical to the prefixes above.
-
-## After merge
-
-1. Confirm the pull request merged, then switch to `main`.
-2. Fetch `origin` with pruning and fast-forward local `main` to `origin/main`.
-3. Delete the merged local head branch with `git branch -d <branch>`.
-4. Verify that local `main` is clean and synchronized.
-
-Delete only the pull request's confirmed merged branch. Never use `-D` or bulk-delete local branches as a routine post-merge step.
+Confirm the PR merged, fetch with pruning, and synchronize a clean default
+branch. Delete only confirmed merged task branches with `git branch -d`; preserve
+unrelated changes and follow the active workspace workflow for worktree cleanup.
+Never force-delete or bulk-delete branches. Keep open review branches available.
