@@ -102,6 +102,28 @@ func TestAssignableNamedGenericIsInvariant(t *testing.T) {
 	}
 }
 
+func TestAssignableRangePreservesElementType(t *testing.T) {
+	integers := Type{Kind: Range, Name: "Range", Args: []Type{FromName("Integer")}}
+	readonly := integers
+	readonly.Readonly = true
+	if !Assignable(integers, readonly) {
+		t.Fatal("readonly bindings must preserve the Range element type")
+	}
+	for _, other := range []Type{
+		{Kind: Range, Name: "Range", Args: []Type{FromName("String")}},
+		{Kind: Range, Name: "Range", Args: []Type{FromName("Float")}},
+		{Kind: Range, Name: "Range"},
+	} {
+		if Assignable(integers, other) || Assignable(other, integers) {
+			t.Fatalf("Range<Integer> must not be interchangeable with %s", other)
+		}
+	}
+	iterable := Type{Kind: Iterable, Name: "Iterable", Args: []Type{FromName("Integer")}}
+	if !Assignable(iterable, integers) {
+		t.Fatal("Range to matching Iterable conversion must remain assignable")
+	}
+}
+
 func TestFunctionTypesAreInvariant(t *testing.T) {
 	integer := FromName("Integer")
 	float := FromName("Float")
