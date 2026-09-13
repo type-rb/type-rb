@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/compiler"
@@ -85,6 +86,75 @@ end
 			}
 			if got, want := Inspect(result.Value), `[7, 9, "early", "late", 5, 3]`; !result.Display || got != want {
 				t.Fatalf("%s conditional syntax evaluation=%s display=%t, want %s", mode, got, result.Display, want)
+			}
+		})
+	}
+}
+
+func TestRunReadsAndEvaluatesConditionalTransfersAcrossModes(t *testing.T) {
+	const input = `def total(): Integer
+mut count := 0
+mut result := 0
+while count < 5
+count += 1
+next if count == 1
+break if count == 4
+result += count
+end
+return result if true
+return 99
+end
+def stop()
+return if true
+puts(99)
+end
+total()
+stop()
+:quit
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run(Options{
+				Mode: mode, Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr,
+				Compile: conditionalSessionCompiler(mode),
+			})
+			if err != nil || stderr.Len() != 0 || stdout.String() != "5 : Integer\n" {
+				t.Fatalf("Run conditional transfers: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func conditionalSessionCompiler(mode string) CompileFunc {
+	return func(text string) (*Compilation, error) {
+		const module = "__trb_repl__"
+		artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
+			Filename: "/project/.trb-repl.trb", ModulePath: module, Package: "main", Source: []byte(text),
+		}}, compiler.Options{Mode: mode, InteractiveModule: module, GoModule: "example.com/repl", RubyLoader: "require_relative"})
+		if err != nil {
+			return nil, err
+		}
+		programs := make([]*ir.Program, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			programs = append(programs, artifact.IR)
+		}
+		return &Compilation{Session: artifacts[0], Artifacts: artifacts, Programs: programs}, nil
+	}
+}
+
+func TestRunReportsInvalidConditionalTransfersAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run(Options{
+				Mode: mode, Stdin: strings.NewReader("def broken(): Integer\nreturn 1 if\nend\n7\n:quit\n"),
+				Stdout: &stdout, Stderr: &stderr, Compile: conditionalSessionCompiler(mode),
+			})
+			if err != nil || stdout.String() != "7 : Integer\n" ||
+				!strings.Contains(stderr.String(), "conditional return requires a valid condition after if") ||
+				strings.Contains(stderr.String(), "incomplete input") {
+				t.Fatalf("Run invalid transfer: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
 			}
 		})
 	}
