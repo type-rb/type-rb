@@ -637,17 +637,27 @@ func expandGenericClosers(tokens []token.Token) []token.Token {
 
 func splitTopLevel(tokens []token.Token, separator string) [][]token.Token {
 	var out [][]token.Token
-	start, depth := 0, 0
+	start := 0
+	var nesting []string
 	for i, tok := range tokens {
 		switch tok.Lexeme {
 		case "(", "[", "{", "<":
-			depth++
+			nesting = append(nesting, tok.Lexeme)
 		case ")", "]", "}", ">":
-			if depth > 0 {
-				depth--
+			if len(nesting) > 0 {
+				nesting = nesting[:len(nesting)-1]
+			}
+		case ">>":
+			// Close nested type arguments without rewriting shift expressions.
+			// A shift inside parentheses must not consume their delimiter.
+			for range 2 {
+				if len(nesting) == 0 || nesting[len(nesting)-1] != "<" {
+					break
+				}
+				nesting = nesting[:len(nesting)-1]
 			}
 		}
-		if tok.Lexeme == separator && depth == 0 {
+		if tok.Lexeme == separator && len(nesting) == 0 {
 			out = append(out, tokens[start:i])
 			start = i + 1
 		}
