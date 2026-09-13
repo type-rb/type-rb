@@ -2,6 +2,54 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.7 - 2026-09-14
+
+### Language and checking
+
+- Nested generic parameter types no longer consume the following parameter.
+  Functions with parameters such as `rows: Array<Array<Integer>>, index: Integer`
+  compile and validate their arguments correctly across modes.
+  ([#686](https://github.com/type-rb/type-rb/pull/686))
+- Incompatible Range element types are rejected during type checking at
+  assignments, calls, and returns, before they can reach generated code.
+  ([#683](https://github.com/type-rb/type-rb/pull/683))
+- Go evaluates Range endpoints from left to right exactly once, retaining the
+  start before the end expression can change its source binding. ORM range
+  predicates follow the same rule for inline and retained Range values.
+  ([#680](https://github.com/type-rb/type-rb/pull/680),
+  [#681](https://github.com/type-rb/type-rb/pull/681))
+
+### Collections and iteration
+
+- Range iteration streams values without first allocating the whole sequence,
+  including when passed through an `Iterable<Integer>` boundary. Iterables can
+  be traversed repeatedly, early exits avoid unused work, and `each_slice`
+  allocates only the current batch. Explicit `to_a()` still materializes an Array.
+  ([#671](https://github.com/type-rb/type-rb/pull/671),
+  [#676](https://github.com/type-rb/type-rb/pull/676))
+- Array iteration observes appends, replacements, and shrinking consistently
+  across generated backends and the REPL, including after storage reallocation.
+  Rebinding a variable does not replace the active receiver. Each slice is a
+  fresh shallow Array with the requested batch size, and a final partial batch
+  does not restart an exhausted iteration.
+  ([#677](https://github.com/type-rb/type-rb/pull/677))
+- Hash lookup, key presence, deletion, and merge preserve caller variable scope
+  and receiver evaluation order in generated Go. Merge in Go and TypeScript
+  evaluates its argument before copying the receiver, preserving mutations made
+  while preparing that argument.
+  ([#669](https://github.com/type-rb/type-rb/pull/669),
+  [#670](https://github.com/type-rb/type-rb/pull/670))
+
+### REPL
+
+- Range and `while` loops no longer have a fixed iteration-count limit.
+  Active iteration and explicit Array materialization remain cancellable.
+  ([#671](https://github.com/type-rb/type-rb/pull/671))
+- Completed methods and loops containing conditional `return`, `break`, or
+  `next` execute without requesting an extra `end`. Invalid conditional
+  transfers produce their normal diagnostic instead of appearing incomplete.
+  ([#687](https://github.com/type-rb/type-rb/pull/687))
+
 ## 0.4.6 - 2026-09-10
 
 ### REPL performance
