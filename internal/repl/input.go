@@ -16,9 +16,10 @@ func Complete(source string) bool {
 	}
 	blocks := 0
 	delimiters := []string{}
+	transferConditions := make(map[int]bool)
 	lineStart := true
 	lineOpenedBlock := false
-	for _, item := range tokens {
+	for index, item := range tokens {
 		switch item.Kind {
 		case token.Comment:
 			continue
@@ -28,6 +29,9 @@ func Complete(source string) bool {
 			continue
 		case token.EOF:
 			continue
+		}
+		if at := conditionalTransferIf(tokens, index); at >= 0 {
+			transferConditions[at] = true
 		}
 		if item.Lexeme == ";" && len(delimiters) == 0 {
 			lineStart = true
@@ -45,7 +49,7 @@ func Complete(source string) bool {
 				}
 			}
 		}
-		if item.Kind == token.Identifier && (item.Lexeme == "if" || item.Lexeme == "case") {
+		if item.Kind == token.Identifier && (item.Lexeme == "case" || item.Lexeme == "if" && !transferConditions[index]) {
 			blocks++
 			lineOpenedBlock = true
 		}
@@ -68,6 +72,44 @@ func Complete(source string) bool {
 		}
 	}
 	return blocks == 0 && len(delimiters) == 0 && !strings.HasSuffix(strings.TrimSpace(source), "\\")
+}
+
+// A transfer's trailing condition does not open an end-delimited block. Only
+// the first ungrouped if on that logical statement is the modifier; grouped
+// value-producing if expressions still contribute their own block depth.
+func conditionalTransferIf(tokens []token.Token, start int) int {
+	item := tokens[start]
+	if item.Kind != token.Identifier || item.Lexeme != "return" && item.Lexeme != "break" && item.Lexeme != "next" {
+		return -1
+	}
+	if start > 0 && (tokens[start-1].Lexeme == "." || tokens[start-1].Lexeme == "::") {
+		return -1
+	}
+	depth := 0
+	for at := start + 1; at < len(tokens); at++ {
+		next := tokens[at]
+		if next.Kind == token.EOF || depth == 0 && (next.Kind == token.Newline || next.Kind == token.Comment || next.Lexeme == ";") {
+			break
+		}
+		if depth == 0 && next.Kind == token.Identifier && next.Lexeme == "if" {
+			return at
+		}
+		// break and next have no value form. Do not mistake a contextual
+		// name in an initializer or call for a conditional transfer.
+		if item.Lexeme != "return" {
+			break
+		}
+		switch next.Lexeme {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			if depth == 0 {
+				return -1
+			}
+			depth--
+		}
+	}
+	return -1
 }
 
 func matching(open, close string) bool {

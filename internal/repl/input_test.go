@@ -385,3 +385,33 @@ func TestCompleteTracksResultCatch(t *testing.T) {
 		}
 	}
 }
+
+func TestCompleteConditionalTransfers(t *testing.T) {
+	for _, source := range []string{
+		"def probe()\nreturn if true\nend",
+		"def probe(): Integer\nreturn 7 if true\nreturn 0\nend",
+		"while true\nnext if false\nbreak if true\nend",
+		"while true; next if false; break if true; end",
+		"[1, 2].each { |item| next if item == 1 }",
+		"[1, 2].each { |item| puts(item); break if item == 2 }",
+		"def probe()\n[1].each { |item| return if item == 1 }\nend",
+		"def probe(): Integer\nreturn (if true\n7\nelse\n0\nend) if true\nreturn 0\nend",
+	} {
+		if !Complete(source) {
+			t.Errorf("closed conditional transfer is incomplete: %q", source)
+		}
+	}
+	for _, source := range []string{
+		"def probe()\nreturn if true",
+		"while true\nbreak if true",
+		"[1, 2].each { |item| next if item == 1",
+		"def probe(): Integer\nreturn (if true\n7",
+		"def probe(): Integer\nreturn (if true\n7\nend) if true",
+		"value := if true\n7",
+		"next := if true\n7",
+	} {
+		if Complete(source) {
+			t.Errorf("open block or delimiter is complete: %q", source)
+		}
+	}
+}
