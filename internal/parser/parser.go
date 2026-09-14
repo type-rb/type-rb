@@ -1671,8 +1671,7 @@ func (p *Parser) parseIf() ast.Statement {
 		p.pos = nx
 		n.Else = p.parseStatements(map[string]bool{"end": true})
 	}
-	_, closeSpan := p.consumeTerminator("end")
-	n.SourceSpan.End = closeSpan.End
+	n.SourceSpan.End = p.consumeControlTerminator().End
 	return n
 }
 
@@ -1759,9 +1758,19 @@ func (p *Parser) parseCase() ast.Statement {
 	if len(node.Branches) == 0 {
 		p.errorAt(node.Span(), "case requires at least one when branch")
 	}
-	_, closeSpan := p.consumeTerminator("end")
-	node.SourceSpan.End = closeSpan.End
+	node.SourceSpan.End = p.consumeControlTerminator().End
 	return node
+}
+
+func (p *Parser) consumeControlTerminator() token.Span {
+	closing := p.current()
+	_, span := p.consumeTerminator("end")
+	if closing.Lexeme == "end" {
+		// An enclosing expression owns any arguments or delimiters after end.
+		// Keep them outside the embedded control node's replacement span.
+		return closing.Span
+	}
+	return span
 }
 
 func (p *Parser) parseWhile() ast.Statement {
