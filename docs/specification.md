@@ -422,6 +422,11 @@ end
   assigning `nil` gives the path type `Nil`. A conditional, loop, or callback
   does not export that assignment fact to a parent path that may not execute it.
   Compound assignment does not establish a new nullable flow fact.
+- After a conditional region, bindings that a branch may replace lose their
+  earlier narrowing, including stable field facts derived from a replaced
+  receiver. Each branch is checked with its own entry facts before that join.
+  Unchanged bindings and distinct shadowing declarations retain their facts;
+  returning-guard promotion still applies to the continuing path.
 - Before a repeated body is checked, facts for bindings it may replace are
   discarded, including facts about stable fields of a replaced receiver. A
   `while` condition or a fresh guard in the body may establish a new fact for

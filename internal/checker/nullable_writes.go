@@ -17,6 +17,19 @@ func invalidateRepeatedNullableFacts(sc *scope, body []ast.Statement, parameters
 	writes := map[string]bool{}
 	collectNullableWrites(condition, hidden, writes)
 	collectNullableStatementWrites(body, hidden, writes)
+	invalidateNullableWrites(sc, writes)
+}
+
+// A conditional write cannot keep the parent's earlier value or field facts.
+// Check each branch with its entry facts first, then forget replaced bindings
+// at the join without exporting a branch-specific assigned type.
+func invalidateConditionalNullableFacts(sc *scope, expression ast.Expression) {
+	writes := map[string]bool{}
+	collectNullableWrites(expression, map[string]bool{}, writes)
+	invalidateNullableWrites(sc, writes)
+}
+
+func invalidateNullableWrites(sc *scope, writes map[string]bool) {
 	for name := range writes {
 		value, ok := sc.lookup(name)
 		if !ok {
