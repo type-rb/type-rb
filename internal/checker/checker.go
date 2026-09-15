@@ -4941,6 +4941,10 @@ func (c *Checker) classImplements(classType, interfaceType types.Type, seen map[
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
+	if expression != nil && target.Nullable && actual.Nullable && scalarType(target).Kind == types.Float && scalarType(actual).Kind == types.Int {
+		c.result.Conversions[expression] = target
+		return
+	}
 	if expression != nil && target.Kind == types.Iterable && (actual.Kind == types.Array || actual.Kind == types.Range || actual.Kind == types.Iterable && !types.Equivalent(target, actual)) {
 		c.result.Conversions[expression] = target
 		return

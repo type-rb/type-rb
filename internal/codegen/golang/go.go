@@ -1643,6 +1643,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.ToIterableConversion:
 			return g.iterableConversion(n)
 		case ir.IntegerToFloatConversion:
+			if n.Value.ExprType().Nullable && n.ExprType().Nullable {
+				return "func(value *int) *float64 { if value == nil { return nil }; converted := float64(*value); return &converted }(" + g.expr(n.Value) + ")"
+			}
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
 			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"

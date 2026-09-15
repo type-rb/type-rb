@@ -1,0 +1,41 @@
+record Reading
+	value: Float?
+end
+
+def source(value: Integer?): Integer?
+	puts("source")
+	return value
+end
+
+def widen(value: Integer?): Float?
+	return source(value)
+end
+
+def with_default(value: Integer?, converted: Float? = value): Float?
+	return converted
+end
+
+def label(value: Float?): String
+	if value == nil
+		return "nil"
+	end
+	return (value / 2.0).to_s()
+end
+
+def main()
+	inputs: Array<Integer?> := [nil, 0, 7]
+	inputs.each do |input|
+		initial: Float? := source(input)
+		puts(label(initial))
+		mut assigned: Float? := nil
+		assigned = source(input)
+		puts(label(assigned))
+		puts(label(widen(input)))
+		puts(label(source(input)))
+		reading := Reading.new(value: source(input))
+		puts(label(reading.value))
+		array: Array<Float?> := [source(input)]
+		puts(label(array[0]))
+		puts(label(with_default(input)))
+	end
+end

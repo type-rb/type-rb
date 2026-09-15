@@ -1998,6 +1998,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.PromiseRejectionToResultConversion:
 			return g.promiseRejectionToResult(n)
 		case ir.IntegerToFloatConversion:
+			if n.Value.ExprType().Nullable && n.ExprType().Nullable {
+				return g.expr(n.Value)
+			}
 			return "Number(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
 			return "((value: " + g.tsType(n.Value.ExprType()) + "): " + g.tsType(n.ExprType()) + " => typeof value === \"number\" ? Number(value) : value)(" + g.expr(n.Value) + ")"
