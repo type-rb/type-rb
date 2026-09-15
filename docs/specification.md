@@ -55,6 +55,9 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   use `values.each do |value| ... end` syntax.
 - Functions and methods with an explicit return type must return a value on
   every reachable path. Final expressions are not implicit returns.
+- An ordinary expression statement evaluates its expression once and discards
+  its value. The standard `Result` required-use rule still rejects discarded
+  Result values.
 - Complete `if` flow and exhaustive enum or union `case` flow can satisfy the
   return rule. A return inside a loop alone does not prove that the function
   returns because initial loop analysis is conservative.

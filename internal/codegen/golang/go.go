@@ -506,10 +506,14 @@ func (g *generator) statement(statement ir.Statement) {
 		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
 			break
 		}
-		if identifier, ok := n.Expression.(*ir.Identifier); ok && identifier.Generated {
-			g.line("_ = " + g.expr(identifier))
-		} else {
+		if literal, ok := n.Expression.(*ir.Literal); ok && literal.Kind == "nil" {
+			// A bare nil has no effects and cannot be assigned without a Go type.
+			break
+		}
+		if kind := n.Expression.ExprType().Kind; kind == types.Void || kind == types.Never {
 			g.line(g.expr(n.Expression))
+		} else {
+			g.line("_ = " + g.expr(n.Expression))
 		}
 	case *ir.If:
 		g.line("if " + g.expr(n.Condition) + " {")
