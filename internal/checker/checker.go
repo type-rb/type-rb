@@ -2906,6 +2906,7 @@ func (c *Checker) checkIf(node *ast.IfStatement, sc *scope, expression bool) typ
 	} else if expression {
 		c.error(node.Span(), "if expression requires an else branch")
 	}
+	invalidateConditionalNullableFacts(sc, node)
 	if !node.HasElse && allMatchedBranchesDiverge {
 		c.promoteNullableNarrowings(sc, remainingScope)
 	}
@@ -3053,6 +3054,7 @@ func (c *Checker) promoteNullableNarrowings(target, narrowed *scope) {
 }
 
 func (c *Checker) checkCase(node *ast.CaseStatement, sc *scope, expression bool) types.Type {
+	defer invalidateConditionalNullableFacts(sc, node)
 	selectorType := c.checkExpression(node.Value, sc)
 	selectorType = c.requireValueExpression(node.Value, selectorType, "be used as a case selector")
 	borrowedSelector := c.concurrentBorrowedExpression(node.Value, sc)

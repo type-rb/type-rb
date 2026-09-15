@@ -53,6 +53,11 @@ may execute more than once, or may execute later. The assigned flow type is
 available to the remaining statements inside that path only. Existing
 returning-guard promotion remains limited to facts proved by the guard.
 
+A conditional join also discards earlier facts for bindings that its branches
+may replace, including field facts derived from a replaced receiver. Checking a
+branch retains its entry facts until a write occurs. The join does not infer a
+shared assigned type even when several branches assign the same base type.
+
 Assignment invalidates nullable field facts derived from the assigned receiver.
 Compound assignment keeps its existing operator and declared-target checks and
 does not establish a new nullable flow fact.
