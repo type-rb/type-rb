@@ -6359,7 +6359,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.markEmptyCollectionCapture(value.pending, n.Span())
 				}
 			}
-			if value.declared.Nullable && !value.typ.Nullable {
+			if value.declared.Nullable && !value.typ.Nullable && value.typ.Kind != types.Nil {
 				c.result.NullableUnwraps[n] = value.declared
 			}
 			if !value.constant {
