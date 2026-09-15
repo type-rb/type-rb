@@ -127,11 +127,11 @@ stop()
 }
 
 func conditionalSessionCompiler(mode string) CompileFunc {
-	return func(text string) (*Compilation, error) {
+	return func(text string, flowResets []int) (*Compilation, error) {
 		const module = "__trb_repl__"
 		artifacts, err := compiler.CompileProject([]compiler.SourceUnit{{
 			Filename: "/project/.trb-repl.trb", ModulePath: module, Package: "main", Source: []byte(text),
-		}}, compiler.Options{Mode: mode, InteractiveModule: module, GoModule: "example.com/repl", RubyLoader: "require_relative"})
+		}}, compiler.Options{Mode: mode, InteractiveModule: module, InteractiveFlowResets: flowResets, GoModule: "example.com/repl", RubyLoader: "require_relative"})
 		if err != nil {
 			return nil, err
 		}

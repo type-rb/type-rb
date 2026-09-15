@@ -506,6 +506,8 @@ type Checker struct {
 	usedImports                 map[*ast.ImportStatement]map[string]bool
 	allowUnusedImports          bool
 	interactiveTopLevel         bool
+	interactiveFlowResets       []int
+	interactiveFlowResetIndex   int
 	compilerGeneratedStart      int
 	aliasCycles                 map[string]bool
 	resultBoundaries            []resultBoundary
@@ -573,6 +575,7 @@ type resultBoundary struct {
 type Options struct {
 	AllowUnusedImports     bool
 	InteractiveTopLevel    bool
+	InteractiveFlowResets  []int
 	RunnableMain           *ast.MethodStatement
 	CompilerGeneratedStart int
 }
@@ -907,6 +910,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		usedImports:                importUses,
 		allowUnusedImports:         options.AllowUnusedImports,
 		interactiveTopLevel:        options.InteractiveTopLevel,
+		interactiveFlowResets:      options.InteractiveFlowResets,
 		compilerGeneratedStart:     options.CompilerGeneratedStart,
 		runnableMain:               options.RunnableMain,
 		aliasCycles:                map[string]bool{},
@@ -1815,6 +1819,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 	popTypeOwner := c.pushActiveTypeOwner(scopeConstantOwner(sc))
 	defer popTypeOwner()
 	for _, statement := range statements {
+		c.invalidateInteractiveFlow(sc, statement.Span().Start.Offset)
 		var inferenceRegion *emptyCollectionInferenceRegion
 		if c.inferenceOnly && c.pendingEmptyCollections > 0 {
 			inferenceRegion = &emptyCollectionInferenceRegion{

@@ -28,7 +28,7 @@ type Compilation struct {
 	HiddenPreludeLines int
 }
 
-type CompileFunc func(source string) (*Compilation, error)
+type CompileFunc func(source string, flowResets []int) (*Compilation, error)
 
 type Options struct {
 	Mode        string
@@ -53,7 +53,7 @@ func Run(options Options) error {
 	compilation := options.Initial
 	if compilation == nil {
 		var err error
-		compilation, err = options.Compile("")
+		compilation, err = options.Compile("", nil)
 		if err != nil {
 			return err
 		}
@@ -83,6 +83,7 @@ func Run(options Options) error {
 
 	source := ""
 	statementCount := 0
+	var flowResets []int
 	for {
 		snippet, readErr := reader.Read()
 		if errors.Is(readErr, io.EOF) {
@@ -104,7 +105,7 @@ func Run(options Options) error {
 		}
 
 		if strings.HasPrefix(trimmed, ":") {
-			quit, replacement, nextCompilation := handleCommand(trimmed, source, options)
+			quit, replacement, nextCompilation := handleCommand(trimmed, source, options, flowResets)
 			if quit {
 				return nil
 			}
@@ -136,7 +137,7 @@ func Run(options Options) error {
 		}
 
 		candidate := appendSource(source, snippet)
-		next, compileErr := options.Compile(candidate)
+		next, compileErr := options.Compile(candidate, flowResets)
 		if compileErr != nil {
 			printCompileError(options.Stderr, compileErr, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			continue
@@ -155,6 +156,11 @@ func Run(options Options) error {
 		authored := authoredStatements(next.Session)
 		result, runtimeErr := evaluateInterruptibly(evaluator, authored[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {
+			// Earlier writes and external effects remain; checking must not keep
+			// facts that described the state before this attempted submission.
+			if len(flowResets) == 0 || flowResets[len(flowResets)-1] != len(source) {
+				flowResets = append(flowResets, len(source))
+			}
 			if errors.Is(runtimeErr, context.Canceled) {
 				printEvaluationInterrupted(options.Stdout, options.Interactive)
 				continue
@@ -203,7 +209,7 @@ func printEvaluationInterrupted(output io.Writer, colored bool) {
 	fmt.Fprintln(output, colorize(colored, colorMuted, "interrupted"))
 }
 
-func handleCommand(command, source string, options Options) (bool, string, *Compilation) {
+func handleCommand(command, source string, options Options, flowResets []int) (bool, string, *Compilation) {
 	name, argument, _ := strings.Cut(command, " ")
 	switch name {
 	case ":quit", ":exit", ":q":
@@ -225,7 +231,7 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 			break
 		}
 		candidate := appendSource(source, argument)
-		compilation, err := options.Compile(candidate)
+		compilation, err := options.Compile(candidate, flowResets)
 		if err != nil {
 			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break
@@ -255,14 +261,14 @@ func handleCommand(command, source string, options Options) (bool, string, *Comp
 			break
 		}
 		candidate := appendSource(source, string(data))
-		compilation, err := options.Compile(candidate)
+		compilation, err := options.Compile(candidate, flowResets)
 		if err != nil {
 			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break
 		}
 		return false, candidate, compilation
 	case ":reload":
-		compilation, err := options.Compile(source)
+		compilation, err := options.Compile(source, flowResets)
 		if err != nil {
 			printCompileError(options.Stderr, err, options.Interactive, options.ProjectRoot, sessionFilename(options.Initial))
 			break

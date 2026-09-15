@@ -538,6 +538,13 @@ Range `each` reads values incrementally, and `each_slice` materializes only the
 current batch. Explicit `to_a()` still needs memory for the resulting Array;
 its enumeration also observes evaluation cancellation.
 
+If evaluation fails or is interrupted, writes and external effects that already
+completed remain observable. The session discards earlier flow narrowing at that
+input boundary, so a nullable value may need a new guard before member access.
+A statically rejected input does not change runtime state or invalidate earlier
+facts. `:reload` and `:load` replay accepted inputs with their recorded checking
+boundaries; they do not replay the failed input or its partial effects.
+
 Ordinary results retain the `value : Type` form. A result directly associated
 with a mutable REPL binding includes a trailing `[mut]`; arbitrary expressions
 do not inherit the marker:
