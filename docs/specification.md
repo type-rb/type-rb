@@ -618,6 +618,8 @@ receivers, failure order and examples.
 - A non-nullable `Integer` is assignable to a non-nullable `Float`. The checker
   records this widening explicitly and typed IR lowers it in initializers,
   assignments, arguments, record and enum payloads, defaults, and returns.
+  The same widening applies from `Integer?` to `Float?`: `nil` stays `nil`,
+  a present Integer becomes a present Float, and the source is evaluated once.
   `Float` does not narrow implicitly to `Integer`.
 - Function and method parameters are immutable bindings unless their
   declaration uses `mut`. The marker controls the implementation binding only;

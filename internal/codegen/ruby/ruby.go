@@ -853,6 +853,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.ToIterableConversion:
 			return g.expr(n.Value)
 		case ir.IntegerToFloatConversion:
+			if n.Value.ExprType().Nullable && n.ExprType().Nullable {
+				return "(" + g.expr(n.Value) + ")&.to_f"
+			}
 			return "(" + g.expr(n.Value) + ").to_f"
 		case ir.UnionIntegerToFloatConversion:
 			return "(->(value) { value.is_a?(Integer) ? value.to_f : value }).call(" + g.expr(n.Value) + ")"
