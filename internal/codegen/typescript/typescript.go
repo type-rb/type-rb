@@ -1174,7 +1174,7 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 		if typeOnly && kind != identity.Newtype {
 			continue
 		}
-		if !standardIdentity && kind != identity.Newtype {
+		if !standardIdentity && kind != identity.Newtype && kind != identity.Enum {
 			continue
 		}
 		if !kind.IsType() || strings.Contains(symbol, "::") {
