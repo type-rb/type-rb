@@ -3,6 +3,7 @@ package compiler
 import (
 	"bytes"
 	"reflect"
+	"slices"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/checker"
@@ -152,6 +153,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:     options.AllowUnusedImports,
 			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			InteractiveFlowResets:  options.InteractiveFlowResets,
 			RunnableMain:           topLevelMethod(program, MainFunction),
 			CompilerGeneratedStart: compilerGeneratedStart(source),
 		})
@@ -434,6 +436,7 @@ func equalSourceUnitMetadata(left, right SourceUnit) bool {
 }
 
 func cloneOptions(options Options) Options {
+	options.InteractiveFlowResets = append([]int(nil), options.InteractiveFlowResets...)
 	options.PackageOptions = cloneBytesMap(options.PackageOptions)
 	options.PackageAliases = cloneStringMap(options.PackageAliases)
 	options.DeclarationProviders = append([]declarationproviderhost.Source(nil), options.DeclarationProviders...)
@@ -445,6 +448,7 @@ func equalOptions(left, right Options) bool {
 		left.GoModule == right.GoModule && left.RubyLoader == right.RubyLoader && left.TypeScriptRuntime == right.TypeScriptRuntime &&
 		left.SourceRoot == right.SourceRoot && left.ProjectRoot == right.ProjectRoot && left.JobsConfiguration == right.JobsConfiguration &&
 		left.AllowUnusedImports == right.AllowUnusedImports && left.InteractiveModule == right.InteractiveModule &&
+		slices.Equal(left.InteractiveFlowResets, right.InteractiveFlowResets) &&
 		(left.NativePackages == right.NativePackages || reflect.DeepEqual(left.NativePackages, right.NativePackages)) &&
 		reflect.DeepEqual(left.DeclarationProviders, right.DeclarationProviders) &&
 		equalBytesMap(left.PackageOptions, right.PackageOptions) &&

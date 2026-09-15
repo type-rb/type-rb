@@ -93,21 +93,23 @@ func NewCompileError(filename string, fallback diagnostic.Code, items []diagnost
 }
 
 type Options struct {
-	Mode                 string
-	Package              string
-	ModulePath           string
-	GoModule             string
-	RubyLoader           string
-	TypeScriptRuntime    string
-	SourceRoot           string
-	ProjectRoot          string
-	PackageOptions       map[string][]byte
-	PackageAliases       map[string]string
-	JobsConfiguration    string
-	AllowUnusedImports   bool
-	InteractiveModule    string
-	NativePackages       *nativepackage.Catalog
-	DeclarationProviders []declarationproviderhost.Source
+	Mode               string
+	Package            string
+	ModulePath         string
+	GoModule           string
+	RubyLoader         string
+	TypeScriptRuntime  string
+	SourceRoot         string
+	ProjectRoot        string
+	PackageOptions     map[string][]byte
+	PackageAliases     map[string]string
+	JobsConfiguration  string
+	AllowUnusedImports bool
+	InteractiveModule  string
+	// Authored source boundaries invalidated by partial interactive execution.
+	InteractiveFlowResets []int
+	NativePackages        *nativepackage.Catalog
+	DeclarationProviders  []declarationproviderhost.Source
 }
 
 const MainFunction = "main"
@@ -175,6 +177,7 @@ func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 	checked, checkDiagnostics := checker.CheckWithOptions(program, resolved, checker.Options{
 		AllowUnusedImports:     options.AllowUnusedImports,
 		InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == options.ModulePath,
+		InteractiveFlowResets:  options.InteractiveFlowResets,
 		RunnableMain:           topLevelMethod(program, MainFunction),
 		CompilerGeneratedStart: compilerGeneratedStart(unit),
 	})
@@ -393,6 +396,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:     options.AllowUnusedImports,
 			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
+			InteractiveFlowResets:  options.InteractiveFlowResets,
 			RunnableMain:           topLevelMethod(program, MainFunction),
 			CompilerGeneratedStart: compilerGeneratedStart(source),
 		})

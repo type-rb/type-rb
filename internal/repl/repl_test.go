@@ -26,7 +26,7 @@ func TestRunReusesProvidedInitialCompilation(t *testing.T) {
 		Stdout:  &stdout,
 		Stderr:  &stderr,
 		Initial: initial,
-		Compile: func(string) (*Compilation, error) {
+		Compile: func(string, []int) (*Compilation, error) {
 			compileCalls++
 			return initial, nil
 		},

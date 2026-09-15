@@ -1447,7 +1447,7 @@ func (c *CLI) runRepl(args []string) error {
 		sessionPackage = config.Go.RootPackage
 	}
 	analyzer := compiler.NewAnalyzer()
-	compileSource := func(source string) (*repl.Compilation, error) {
+	compileSource := func(source string, flowResets []int) (*repl.Compilation, error) {
 		units, options, err := projectCompilation(config, files)
 		if err != nil {
 			return nil, err
@@ -1461,6 +1461,7 @@ func (c *CLI) runRepl(args []string) error {
 		})
 		options.AllowUnusedImports = true
 		options.InteractiveModule = sessionModule
+		options.InteractiveFlowResets = flowResets
 		artifacts, err := analyzer.AnalyzeProject(units, options)
 		if err != nil {
 			return nil, err
@@ -1477,7 +1478,7 @@ func (c *CLI) runRepl(args []string) error {
 		}
 		return compilation, nil
 	}
-	initial, err := compileSource("")
+	initial, err := compileSource("", nil)
 	if err != nil {
 		return err
 	}
@@ -1486,10 +1487,14 @@ func (c *CLI) runRepl(args []string) error {
 	if err != nil {
 		return err
 	}
-	compile := func(source string) (*repl.Compilation, error) {
+	compile := func(source string, flowResets []int) (*repl.Compilation, error) {
 		hiddenPrelude := replPrelude(availableImports, source)
 		hiddenPreludeLines := strings.Count(hiddenPrelude, "\n")
-		compilation, err := compileSource(hiddenPrelude + source)
+		adjusted := make([]int, len(flowResets))
+		for i, offset := range flowResets {
+			adjusted[i] = offset + len(hiddenPrelude)
+		}
+		compilation, err := compileSource(hiddenPrelude+source, adjusted)
 		if err != nil {
 			return nil, hideReplPreludeDiagnostics(err, sessionFilename, hiddenPreludeLines, len(hiddenPrelude))
 		}
