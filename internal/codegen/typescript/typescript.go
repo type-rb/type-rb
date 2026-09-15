@@ -1000,7 +1000,8 @@ func (g *generator) statement(statement ir.Statement) {
 		if call, ok := n.Expression.(*ir.Call); ok && call.Block != nil && g.testCallBlock(call) {
 			return
 		}
-		g.line(g.expr(n.Expression) + ";")
+		// Object and function literals must remain expressions at statement scope.
+		g.line("(" + g.expr(n.Expression) + ");")
 	case *ir.If:
 		g.line("if (" + g.expr(n.Condition) + ") {")
 		g.indent++
