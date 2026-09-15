@@ -58,6 +58,7 @@ type generator struct {
 	ormCommonRuntime  bool
 	ormPackageModels  []ormintegration.Model
 	projectNames      *goProjectNames
+	enumLayout        goEnumLayout
 	execution         *effectplan.Plan
 	executionActive   bool
 	oidcRuntime       bool
@@ -95,26 +96,27 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	projectNames := analyzeGoProjectNames(programs)
+	enumLayout := analyzeGoEnumLayout(programs)
 	ormRuntime := analyzeGoORMRuntime(programs)
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames, ormRuntime, execution)
+		result[index] = generate(program, projectNames, ormRuntime, execution, enumLayout)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan) sourcemap.Generated {
-	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, nil)
+func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout) sourcemap.Generated {
+	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, enumLayout, nil)
 	bindingNames := analyzeGoBindingNames(bindings, imports)
 	if len(bindingNames) == 0 {
 		return generated
 	}
-	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, bindingNames)
+	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, enumLayout, bindingNames)
 	return generated
 }
 
-func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
+func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
 	ormPackageKey := goORMPackageKey(program)
 	g := &generator{
 		topMethods:       map[string]bool{},
@@ -136,6 +138,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		ormCommonRuntime: ormRuntime.owners[ormPackageKey] == program.ModulePath,
 		ormPackageModels: ormRuntime.models[ormPackageKey],
 		projectNames:     projectNames,
+		enumLayout:       enumLayout,
 		execution:        execution,
 		recordSources:    true,
 		sourceLocations:  map[int]sourcemap.Location{},
@@ -320,6 +323,9 @@ func (g *generator) importStatement(imported *ir.Import) {
 		}
 		g.typeAliases[local] = goImportAlias(alias)
 		g.typeKinds[local] = imported.SymbolKinds[symbol]
+		if identity.Kind(imported.SymbolKinds[symbol]).IsType() {
+			g.typeNames[local] = symbol
+		}
 	}
 	for canonical, local := range imported.NestedTypeSymbols {
 		g.typeAliases[canonical] = goImportAlias(alias)
@@ -555,7 +561,11 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
 				name := g.caseBindingIdentifier(binding)
-				g.line(name + " := " + value + "." + field)
+				payload := value + "." + field
+				if g.enumLayout.indirect(n.Value.ExprType().Declaration, branch.Member, binding.Field) {
+					payload = "*" + payload
+				}
+				g.line(name + " := " + payload)
 				if namedUnusedBinding(binding.Name) {
 					g.line("_ = " + name)
 				}
@@ -1034,7 +1044,11 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		}
 		for _, field := range member.Fields {
 			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
-			g.line(fieldName + " " + g.goType(field.Type))
+			fieldType := g.goType(field.Type)
+			if g.enumLayout.indirect(enum.Declaration, member.Name, field.Name) {
+				fieldType = "*" + fieldType
+			}
+			g.line(fieldName + " " + fieldType)
 		}
 	}
 	g.indent--
@@ -1060,7 +1074,11 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		fields := []string{"Kind: " + constant + "Tag"}
 		for _, field := range member.Fields {
 			fieldName := goIdentifier(member.Name, true) + goIdentifier(field.Name, true)
-			fields = append(fields, fieldName+": "+g.bindingIdentifier(field.Name))
+			value := g.bindingIdentifier(field.Name)
+			if g.enumLayout.indirect(enum.Declaration, member.Name, field.Name) {
+				value = "&" + value
+			}
+			fields = append(fields, fieldName+": "+value)
 		}
 		g.line("return " + name + genericArguments + "{" + strings.Join(fields, ", ") + "}")
 		g.indent--
@@ -2076,6 +2094,7 @@ func (g *generator) ifExpression(node *ir.If) string {
 		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
+		enumLayout:      g.enumLayout,
 		execution:       g.execution,
 		executionActive: g.executionActive,
 	}
@@ -2146,6 +2165,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		jobsSQL:         g.jobsSQL,
 		orm:             g.orm,
 		projectNames:    g.projectNames,
+		enumLayout:      g.enumLayout,
 		execution:       g.execution,
 		executionActive: g.executionActive,
 	}
@@ -2214,7 +2234,11 @@ func (g *generator) caseExpression(node *ir.Case) string {
 				}
 				field := goIdentifier(branch.Member, true) + goIdentifier(binding.Field, true)
 				name := child.caseBindingIdentifier(binding)
-				child.line(name + " := " + value + "." + field)
+				payload := value + "." + field
+				if child.enumLayout.indirect(node.Value.ExprType().Declaration, branch.Member, binding.Field) {
+					payload = "*" + payload
+				}
+				child.line(name + " := " + payload)
 				if namedUnusedBinding(binding.Name) {
 					child.line("_ = " + name)
 				}
