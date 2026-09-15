@@ -422,6 +422,12 @@ end
   assigning `nil` gives the path type `Nil`. A conditional, loop, or callback
   does not export that assignment fact to a parent path that may not execute it.
   Compound assignment does not establish a new nullable flow fact.
+- Before a repeated body is checked, facts for bindings it may replace are
+  discarded, including facts about stable fields of a replaced receiver. A
+  `while` condition or a fresh guard in the body may establish a new fact for
+  each iteration. The old fact is also unavailable after the loop. Bindings
+  that the body does not replace retain their facts; block parameters and local
+  declarations do not invalidate unrelated outer bindings of the same name.
 - A direct nullable data field may also narrow when its receiver is a stable
   lexical binding and the field cannot change: record fields are always
   stable, and class fields must be declared `readonly`. Reassigning the

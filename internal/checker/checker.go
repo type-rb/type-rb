@@ -2396,6 +2396,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 		case *ast.CaseStatement:
 			c.checkCase(n, sc, false)
 		case *ast.WhileStatement:
+			invalidateRepeatedNullableFacts(sc, n.Body, nil, n.Condition)
 			c.checkBooleanCondition(n.Condition, sc, "while")
 			bodyScope, _ := c.nullableConditionScopes(n.Condition, sc)
 			c.loopDepth++
@@ -6752,6 +6753,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if transform {
 				c.valueTransformDepth++
 			}
+			invalidateRepeatedNullableFacts(sc, n.Block.Body, n.Block.Parameters, nil)
 			if n.Operation == "concurrent_map" {
 				c.concurrentBlockScopes = append(c.concurrentBlockScopes, blockScope)
 				c.concurrentMapDepth++
