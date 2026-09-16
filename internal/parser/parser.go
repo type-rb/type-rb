@@ -551,18 +551,18 @@ func (p *Parser) consumeBlockTerminator() (token.Span, *catchHeader) {
 	return span, nil
 }
 
-func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+func (p *Parser) controlFlowExpressionTokens(line []token.Token, next int, base ast.Base, first int) ([]token.Token, map[int]ast.Expression, ast.Base, bool) {
 	controlAt := -1
 	construct := ""
 	for index, item := range line {
-		if index > 0 && (item.Lexeme == "case" || item.Lexeme == "if") {
+		if index >= first && (item.Lexeme == "case" || item.Lexeme == "if") {
 			controlAt = index
 			construct = item.Lexeme
 			break
 		}
 	}
 	if controlAt < 0 {
-		return nil
+		return nil, nil, base, false
 	}
 
 	controlPosition := -1
@@ -573,7 +573,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 		}
 	}
 	if controlPosition < 0 {
-		return nil
+		return nil, nil, base, false
 	}
 
 	p.pos = controlPosition
@@ -584,7 +584,7 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 		controlNode, _ = p.parseIf().(*ast.IfStatement)
 	}
 	if controlNode == nil {
-		return nil
+		return nil, nil, base, false
 	}
 	parsedNext := p.pos
 
@@ -600,6 +600,20 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 		base.SourceSpan.End = wrapped[len(wrapped)-1].Span.End
 	}
 	embedded := map[int]ast.Expression{line[controlAt].Span.Start.Offset: controlNode}
+
+	if next > parsedNext {
+		p.pos = next
+	} else {
+		p.pos = parsedNext
+	}
+	return wrapped, embedded, base, true
+}
+
+func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
+	wrapped, embedded, base, ok := p.controlFlowExpressionTokens(line, next, base, 1)
+	if !ok {
+		return nil
+	}
 
 	var statement ast.Statement
 	if len(wrapped) > 0 && wrapped[0].Lexeme == "return" {
@@ -620,13 +634,14 @@ func (p *Parser) tryControlFlowExpressionStatement(line []token.Token, next int,
 		}
 	}
 	if statement == nil {
-		p.errorAt(base.SourceSpan, construct+" expression is not valid in this expression context")
-		statement = &ast.ExpressionStatement{Base: base, Expression: controlNode}
-	}
-	if next > parsedNext {
-		p.pos = next
-	} else {
-		p.pos = parsedNext
+		for _, control := range embedded {
+			construct := "if"
+			if _, ok := control.(*ast.CaseStatement); ok {
+				construct = "case"
+			}
+			p.errorAt(base.SourceSpan, construct+" expression is not valid in this expression context")
+			statement = &ast.ExpressionStatement{Base: base, Expression: control}
+		}
 	}
 	return statement
 }
@@ -937,13 +952,15 @@ func (p *Parser) parseRecord() ast.Statement {
 		}
 		s, e, nx, trailing := p.logicalLine(p.pos)
 		parts := p.codeTokens(s, e)
-		field := p.parseRecordField(parts, trailing)
+		field := p.parseRecordField(parts, trailing, nx)
 		if field == nil {
 			p.errorAt(spanOf(parts), "record body may only contain typed fields")
 		} else {
 			record.Body = append(record.Body, field)
 		}
-		p.pos = nx
+		if p.pos < nx {
+			p.pos = nx
+		}
 	}
 	_, closeSpan := p.consumeTerminator("end")
 	record.SourceSpan.End = closeSpan.End
@@ -1156,7 +1173,7 @@ func (p *Parser) parseEnumMember(parts []token.Token, trailing string) *ast.Enum
 	return member
 }
 
-func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.RecordFieldStatement {
+func (p *Parser) parseRecordField(line []token.Token, comment string, next int) *ast.RecordFieldStatement {
 	if len(line) < 3 || line[0].Kind != token.Identifier || strings.HasPrefix(line[0].Lexeme, "@") || line[1].Lexeme != ":" {
 		return nil
 	}
@@ -1184,7 +1201,13 @@ func (p *Parser) parseRecordField(line []token.Token, comment string) *ast.Recor
 		if equal+1 >= attributeAt {
 			return nil
 		}
-		field.Default, _ = p.parseExpression(line[equal+1 : attributeAt])
+		value := line[equal+1 : attributeAt]
+		if wrapped, embedded, parsed, ok := p.controlFlowExpressionTokens(value, next, field.Base, 0); ok {
+			field.Default, _ = p.parseExpressionWithEmbedded(wrapped, embedded)
+			field.SourceSpan.End = parsed.SourceSpan.End
+		} else {
+			field.Default, _ = p.parseExpression(value)
+		}
 		if field.Default == nil {
 			return nil
 		}
