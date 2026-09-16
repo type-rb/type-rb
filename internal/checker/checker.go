@@ -6923,7 +6923,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
-		if c.enumPattern > 0 && receiverType.Name == c.enumPatternType.Name && len(receiverType.Args) == 0 {
+		// Pattern arguments come from the selector only for the same declaration.
+		// An imported alias has a different spelling but retains nominal identity.
+		patternBase := c.enumPatternType
+		patternBase.Args = nil
+		if c.enumPattern > 0 && types.Equivalent(receiverType, patternBase) && len(receiverType.Args) == 0 {
 			receiverType = c.enumPatternType
 			c.result.Expressions[n.Receiver] = receiverType
 		} else if c.enumPattern > 0 && len(receiverType.Args) == 0 {
