@@ -1566,7 +1566,7 @@ func TestReplExecutesPortableORMReads(t *testing.T) {
 		`"SELECT \"id\", \"category_id\", \"name\", \"price\", \"active\" FROM \"products\" WHERE EXISTS (SELECT 1 FROM \"categories\" WHERE \"categories\".\"id\" = \"products\".\"category_id\" AND (\"name\" = ?))" : String`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
-		`DbResult::Ok(value: 1) : DbResult<Integer>`,
+		// Defining grouped_product_count does not repeat the preceding query.
 		`DbResult::Ok(value: 16) : DbResult<Integer>`,
 		`Featured`,
 		`DbResult::Ok(value: 1) : DbResult<Integer>`,
