@@ -1194,6 +1194,15 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				target = application.Receiver
 				typeArguments = append(typeArguments, application.Arguments...)
 			}
+			if construction.ResolvedType.Kind == types.Named {
+				resolved := construction.ResolvedType
+				name := resolved.Name
+				if resolved.Declaration.Name != "" {
+					name = resolved.Declaration.Name
+				}
+				target = &ir.Identifier{ExprBase: ir.NewExprBase(construction.Target.Span(), resolved), Name: name, Declaration: construction.Declaration, Reference: referenceFromBinding(construction.TargetBinding)}
+				typeArguments = append([]types.Type(nil), resolved.Args...)
+			}
 			result := &ir.RecordConstruct{
 				ExprBase: base, Declaration: construction.Declaration, Target: target,
 				TypeArguments: typeArguments,
