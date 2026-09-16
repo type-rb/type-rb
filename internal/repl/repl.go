@@ -184,15 +184,17 @@ func Run(options Options) error {
 }
 
 func authoredStatements(artifact *compiler.Artifact) []ir.Statement {
-	if artifact == nil || artifact.IR == nil || artifact.CompilerGeneratedStart <= 0 {
-		if artifact == nil || artifact.IR == nil {
-			return nil
-		}
-		return artifact.IR.Statements
+	if artifact == nil || artifact.IR == nil {
+		return nil
 	}
 	result := make([]ir.Statement, 0, len(artifact.IR.Statements))
 	for _, statement := range artifact.IR.Statements {
-		if statement.SourceSpan().Start.Offset < artifact.CompilerGeneratedStart {
+		// Lowering can add or merge type imports between submissions. They
+		// have no authored input position and must not advance the cursor.
+		if imported, ok := statement.(*ir.Import); ok && imported.Implicit {
+			continue
+		}
+		if artifact.CompilerGeneratedStart <= 0 || statement.SourceSpan().Start.Offset < artifact.CompilerGeneratedStart {
 			result = append(result, statement)
 		}
 	}
