@@ -80,9 +80,11 @@ type CodecApplication struct {
 }
 
 type RecordConstruction struct {
-	Fields      []resolver.RecordField
-	Target      ast.Expression
-	Declaration identity.Declaration
+	ResolvedType  types.Type
+	TargetBinding *resolver.Binding
+	Fields        []resolver.RecordField
+	Target        ast.Expression
+	Declaration   identity.Declaration
 }
 
 type CallSpecializationRequest struct {
@@ -6954,6 +6956,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if n.Name == "new" && authoredOwnerAccess(n.Receiver, sc) {
+			if construction, ok := c.aliasRecordConstruction(receiverType); ok {
+				typ = construction.ResolvedType
+				break
+			}
+		}
 		if n.Namespace {
 			if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists && binding.Export != nil && binding.Member == nil && binding.Export.Kind != resolver.ModuleExport {
 				typ = c.resolvedBindingType(binding)
@@ -7417,81 +7425,90 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ = invalidType()
 				break
 			}
-			switch receiver := member.Receiver.(type) {
-			case *ast.Identifier:
-				identifier := receiver
-				typ = types.FromName(identifier.Name)
-				if binding, imported := c.result.References[identifier]; imported && binding.Export != nil {
-					if binding.Export.Kind == resolver.RecordExport {
-						c.checkImportedRecordArguments(n, binding)
-					} else {
-						c.checkImportedArguments(n, binding, argumentTypes, sc)
-					}
-				} else if record := c.records[identifier.Name]; record != nil {
-					c.checkLocalRecordArguments(n, record, c.authoredTypeIdentities[identifier.Name])
-				} else if info := c.classes[identifier.Name]; info != nil {
-					c.checkArguments(n, info.methods["initialize"], argumentTypes)
-				}
-			case *ast.GenericExpression:
-				application := c.result.GenericApplications[receiver]
-				typ = application.ReturnType
-				substitutions := typeSubstitutions(application.TypeParameters, application.TypeArguments)
-				if record := c.records[application.Name]; record != nil {
-					fields := make([]resolver.RecordField, len(record.fields))
-					for index, field := range record.fields {
-						fields[index] = resolver.RecordField{Name: field.Name, Type: substituteType(c.typeFromRef(field.Type), substitutions), HasDefault: field.Default != nil}
-					}
-					c.checkRecordArguments(n, record.name, fields, application.Declaration)
-				} else if info := c.classes[application.Name]; info != nil {
-					if initialize := info.methods["initialize"]; initialize != nil {
-						signature := c.signatureFromMethod(initialize)
-						for index := range signature.parameters {
-							signature.parameters[index].Type = substituteType(signature.parameters[index].Type, substitutions)
-						}
-						names := make([]string, len(initialize.Parameters))
-						for index, parameter := range initialize.Parameters {
-							names[index] = parameter.Name
-						}
-						c.checkCallSignature(n.Span(), application.Name+".new", signature.parameters, signature.variadic, n.Arguments, argumentTypes, names, nil)
-						c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), signature.parameters...)
-					}
-				} else if binding, imported := c.result.References[receiver.Receiver]; imported && binding.Export != nil {
-					exported := *binding.Export
-					if exported.Kind == resolver.RecordExport {
-						fields := append([]resolver.RecordField(nil), exported.Fields...)
-						for index := range fields {
-							fields[index].Type = substituteType(fields[index].Type, substitutions)
-							fields[index].ResultBridge = substituteNativeResultBridge(fields[index].ResultBridge, substitutions)
-						}
-						c.checkRecordArguments(n, exported.Name, fields, binding.DeclarationIdentity())
-					} else {
-						parameters := append([]callsignature.Parameter(nil), exported.Parameters...)
-						for index := range parameters {
-							parameters[index].Type = substituteType(parameters[index].Type, substitutions)
-						}
-						c.checkCallSignature(n.Span(), exported.Name+".new", parameters, exported.Variadic, n.Arguments, argumentTypes, nil, exported.ParameterResultBridges)
-						if sourceBinding(binding) {
-							c.result.CallSignatures[n] = c.canonicalContractSignature(parameters, binding.Import)
-						}
-					}
-				}
-			case *ast.MemberExpression:
-				if receiver.Namespace {
-					if binding, imported := c.result.References[receiver]; imported && binding.Export != nil {
-						typ = c.resolvedBindingType(binding)
+			if construction, alias := c.aliasRecordConstruction(constructorType); alias && authoredOwnerAccess(member.Receiver, sc) {
+				typ = construction.ResolvedType
+				c.checkRecordArguments(n, typ.Name, construction.Fields, construction.Declaration)
+				checked := c.result.RecordConstructions[n]
+				checked.ResolvedType = typ
+				checked.TargetBinding = construction.TargetBinding
+				c.result.RecordConstructions[n] = checked
+			} else {
+				switch receiver := member.Receiver.(type) {
+				case *ast.Identifier:
+					identifier := receiver
+					typ = types.FromName(identifier.Name)
+					if binding, imported := c.result.References[identifier]; imported && binding.Export != nil {
 						if binding.Export.Kind == resolver.RecordExport {
 							c.checkImportedRecordArguments(n, binding)
 						} else {
 							c.checkImportedArguments(n, binding, argumentTypes, sc)
 						}
-					} else {
-						name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
-						if record := c.records[name]; local && record != nil {
-							typ = types.FromName(name)
-							c.checkLocalRecordArguments(n, record, c.result.ExpressionDeclarations[receiver])
-						} else if info := c.classes[name]; local && info != nil {
-							typ = types.FromName(name)
-							c.checkArguments(n, info.methods["initialize"], argumentTypes)
+					} else if record := c.records[identifier.Name]; record != nil {
+						c.checkLocalRecordArguments(n, record, c.authoredTypeIdentities[identifier.Name])
+					} else if info := c.classes[identifier.Name]; info != nil {
+						c.checkArguments(n, info.methods["initialize"], argumentTypes)
+					}
+				case *ast.GenericExpression:
+					application := c.result.GenericApplications[receiver]
+					typ = application.ReturnType
+					substitutions := typeSubstitutions(application.TypeParameters, application.TypeArguments)
+					if record := c.records[application.Name]; record != nil {
+						fields := make([]resolver.RecordField, len(record.fields))
+						for index, field := range record.fields {
+							fields[index] = resolver.RecordField{Name: field.Name, Type: substituteType(c.typeFromRef(field.Type), substitutions), HasDefault: field.Default != nil}
+						}
+						c.checkRecordArguments(n, record.name, fields, application.Declaration)
+					} else if info := c.classes[application.Name]; info != nil {
+						if initialize := info.methods["initialize"]; initialize != nil {
+							signature := c.signatureFromMethod(initialize)
+							for index := range signature.parameters {
+								signature.parameters[index].Type = substituteType(signature.parameters[index].Type, substitutions)
+							}
+							names := make([]string, len(initialize.Parameters))
+							for index, parameter := range initialize.Parameters {
+								names[index] = parameter.Name
+							}
+							c.checkCallSignature(n.Span(), application.Name+".new", signature.parameters, signature.variadic, n.Arguments, argumentTypes, names, nil)
+							c.result.CallSignatures[n] = append([]callsignature.Parameter(nil), signature.parameters...)
+						}
+					} else if binding, imported := c.result.References[receiver.Receiver]; imported && binding.Export != nil {
+						exported := *binding.Export
+						if exported.Kind == resolver.RecordExport {
+							fields := append([]resolver.RecordField(nil), exported.Fields...)
+							for index := range fields {
+								fields[index].Type = substituteType(fields[index].Type, substitutions)
+								fields[index].ResultBridge = substituteNativeResultBridge(fields[index].ResultBridge, substitutions)
+							}
+							c.checkRecordArguments(n, exported.Name, fields, binding.DeclarationIdentity())
+						} else {
+							parameters := append([]callsignature.Parameter(nil), exported.Parameters...)
+							for index := range parameters {
+								parameters[index].Type = substituteType(parameters[index].Type, substitutions)
+							}
+							c.checkCallSignature(n.Span(), exported.Name+".new", parameters, exported.Variadic, n.Arguments, argumentTypes, nil, exported.ParameterResultBridges)
+							if sourceBinding(binding) {
+								c.result.CallSignatures[n] = c.canonicalContractSignature(parameters, binding.Import)
+							}
+						}
+					}
+				case *ast.MemberExpression:
+					if receiver.Namespace {
+						if binding, imported := c.result.References[receiver]; imported && binding.Export != nil {
+							typ = c.resolvedBindingType(binding)
+							if binding.Export.Kind == resolver.RecordExport {
+								c.checkImportedRecordArguments(n, binding)
+							} else {
+								c.checkImportedArguments(n, binding, argumentTypes, sc)
+							}
+						} else {
+							name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
+							if record := c.records[name]; local && record != nil {
+								typ = types.FromName(name)
+								c.checkLocalRecordArguments(n, record, c.result.ExpressionDeclarations[receiver])
+							} else if info := c.classes[name]; local && info != nil {
+								typ = types.FromName(name)
+								c.checkArguments(n, info.methods["initialize"], argumentTypes)
+							}
 						}
 					}
 				}

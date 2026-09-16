@@ -730,6 +730,14 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 				target := &types
 				switch n.SymbolKinds[symbol] {
+				case "record":
+					if n.RecordDefaults[symbol] {
+						values = append(values, tsRecordConstructorName(symbol))
+						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
+							values = append(values, tsRecordSyncConstructorName(symbol))
+						}
+					}
+
 				case "enum", "enum_alias":
 					// Generated codecs construct enum values at runtime. Keep
 					// transitive enum dependencies as value imports even when the
