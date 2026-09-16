@@ -3768,7 +3768,13 @@ func (c *Checker) checkEnumConstructor(call *ast.CallExpression, variant EnumVar
 	return indexes
 }
 
-func (c *Checker) resolveGenericApplication(node *ast.GenericExpression) (GenericApplication, bool) {
+func (c *Checker) resolveGenericApplication(node *ast.GenericExpression, sc *scope) (GenericApplication, bool) {
+	if receiver, ok := node.Receiver.(*ast.Identifier); ok {
+		if _, shadowed := sc.lookup(receiver.Name); shadowed {
+			c.error(node.Span(), fmt.Sprintf("local value %s does not accept type arguments", receiver.Name))
+			return GenericApplication{}, false
+		}
+	}
 	name := ""
 	switch receiver := node.Receiver.(type) {
 	case *ast.Identifier:
@@ -6856,7 +6862,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.declarationOwnerReceiver = n.Receiver
 		receiverType := c.checkExpression(n.Receiver, sc)
 		c.declarationOwnerReceiver = previousDeclarationOwnerReceiver
-		application, ok := c.resolveGenericApplication(n)
+		application, ok := c.resolveGenericApplication(n, sc)
 		if !ok {
 			typ = receiverType
 			break
