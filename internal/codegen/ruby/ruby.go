@@ -1006,6 +1006,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		owner := n.EnumName
+		if n.Reference != nil && n.Reference.Declaration.Kind.IsType() {
+			owner = n.Reference.Declaration.Name
+		}
 		if n.Reference == nil && n.Owner != "" {
 			owner = n.Owner
 		}
