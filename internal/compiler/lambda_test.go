@@ -110,3 +110,60 @@ end
 		}
 	}
 }
+
+func TestGenericCallableFactoriesUseDeclarationArgumentsAcrossModes(t *testing.T) {
+	declarations := `def keep<T>(value: T, *, label: String = "saved"): () -> T
+ puts(label)
+ return fn(): T
+  return value
+ end
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			source := declarations + `def sample(): String
+number := keep<Integer>(7)
+text := keep<String>("held", label: "explicit")
+puts(number())
+return text()
+end
+`
+			if _, err := Compile("factory.trb", []byte(source), mode); err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct{ body, want string }{
+				{`value := keep<Integer>()`, "keep() is missing required argument 1"},
+				{`value := keep<Integer>("bad")`, "expected Integer"},
+				{`value := keep<Integer>(7, label: 1)`, "expected String"},
+				{`value := keep<Integer>(7); value(1)`, "fn() expects"},
+			} {
+				_, err := Compile("invalid_factory.trb", []byte(declarations+"def sample()\n"+tc.body+"\nend\n"), mode)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("%s: want %q, got %v", tc.body, tc.want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestImportedGenericCallableFactoriesAcrossModes(t *testing.T) {
+	factory := SourceUnit{Filename: "factory.trb", ModulePath: "factory", Source: []byte(`def keep<T>(value: T): () -> T
+return fn(): T
+return value
+end
+end
+`)}
+	consumer := SourceUnit{Filename: "main.trb", ModulePath: "main", Source: []byte(`import { keep as retained } from factory
+def sample(): Integer
+callback := retained<Integer>(7)
+return callback()
+end
+`)}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			if _, err := CompileProject([]SourceUnit{factory, consumer}, Options{Mode: mode, SourceRoot: "/project", ProjectRoot: "/project"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

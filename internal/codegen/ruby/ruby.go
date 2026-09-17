@@ -964,7 +964,11 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		parts = g.executionArguments(n, parts)
 		callee := g.expr(n.Callee)
-		if n.Callee.ExprType().Kind == types.Function {
+		// A generic declaration carries its return type, which may be callable.
+		// Apply its own arguments before invoking any returned function value.
+		application, applied := n.Callee.(*ir.TypeApply)
+		directGeneric := applied && (application.Kind == "function" || application.Kind == "method")
+		if !directGeneric && n.Callee.ExprType().Kind == types.Function {
 			return callee + ".call(" + strings.Join(parts, ", ") + ")"
 		}
 		return callee + "(" + strings.Join(parts, ", ") + ")"

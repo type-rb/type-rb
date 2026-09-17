@@ -7279,19 +7279,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				break
 			}
 		}
-		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
-			for _, argument := range n.Arguments {
-				if argument.Name != "" || argument.Splat != "" {
-					c.error(argument.Value.Span(), "fn values accept positional arguments only")
-				}
-			}
-			c.checkTypedArguments(n.Span(), "fn", parameters, len(parameters), false, n.Arguments, argumentTypes)
-			if n.Block != nil {
-				c.error(n.Block.Span(), "fn values do not accept call blocks")
-			}
-			typ = returned
-			break
-		}
+		// A generic application exposes the declaration result type, not the
+		// callable signature of the declaration itself. Bind its arguments first.
 		if generic, ok := n.Callee.(*ast.GenericExpression); ok {
 			application := c.result.GenericApplications[generic]
 			if application.Kind != "function" && application.Kind != "method" {
@@ -7333,6 +7322,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				}
 				libraryBlockChecked = true
 			}
+			break
+		}
+		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
+			for _, argument := range n.Arguments {
+				if argument.Name != "" || argument.Splat != "" {
+					c.error(argument.Value.Span(), "fn values accept positional arguments only")
+				}
+			}
+			c.checkTypedArguments(n.Span(), "fn", parameters, len(parameters), false, n.Arguments, argumentTypes)
+			if n.Block != nil {
+				c.error(n.Block.Span(), "fn values do not accept call blocks")
+			}
+			typ = returned
 			break
 		}
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
