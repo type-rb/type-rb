@@ -9,12 +9,10 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
-// Bind nominal signatures in their defining module before callers see them.
-// Include the scoped File/Dir contracts: an imported borrow parameter must retain
-// its exact resource identity. A source import alias is not a global type name;
-// another module's same-named newtype must not change a returned value's
-// methods or construction.
-func canonicalizeNewtypeContracts(catalog *Catalog) {
+// Bind type signatures in their defining module before callers see them.
+// Import spellings and same-named declarations in other modules must not change
+// transparent alias expansion, nominal identity, or scoped resource contracts.
+func canonicalizeTypeContracts(catalog *Catalog) {
 	for _, module := range catalog.Modules {
 		scope := map[string]Binding{}
 		for _, statement := range module.Program.Statements {
@@ -41,7 +39,7 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 				}
 				for _, name := range names {
 					exported, found := exportNamed(dependency.Exports, name)
-					if !found || exported.Kind != NewtypeExport && !catalogScopedResourceExport(dependency, exported) {
+					if !found || !catalogAliasContractExport(dependency, exported) {
 						continue
 					}
 					local := name
@@ -50,31 +48,34 @@ func canonicalizeNewtypeContracts(catalog *Catalog) {
 					} else if len(node.Symbols) == 0 && node.Alias != "" {
 						local = node.Alias
 					}
-					scope[local] = catalogNewtypeBinding(dependency, exported)
+					scope[local] = catalogTypeBinding(dependency, exported)
 				}
 				break
 			}
 		}
 		for name, exported := range flattenExports(module.Exports) {
-			if exported.Kind == NewtypeExport {
-				scope[name] = catalogNewtypeBinding(module, exported)
+			if exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport {
+				scope[name] = catalogTypeBinding(module, exported)
 			}
 		}
 		for name, exported := range module.Exports {
-			module.Exports[name] = canonicalNewtypeExport(exported, scope, nil)
+			module.Exports[name] = canonicalTypeExport(exported, scope, nil)
 		}
 	}
 }
 
-func catalogScopedResourceExport(module *Module, exported Export) bool {
+func catalogAliasContractExport(module *Module, exported Export) bool {
+	if exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport {
+		return true
+	}
 	if !module.CompilerOwned {
 		return false
 	}
-	binding := catalogNewtypeBinding(module, exported)
+	binding := catalogTypeBinding(module, exported)
 	return binding.DeclarationIdentity() == stdlib.FileResourceType().Declaration || binding.DeclarationIdentity() == stdlib.DirResourceType().Declaration
 }
 
-func catalogNewtypeBinding(module *Module, exported Export) Binding {
+func catalogTypeBinding(module *Module, exported Export) Binding {
 	kind := ProjectImport
 	if module.CompilerOwned {
 		kind = StandardImport
@@ -84,9 +85,9 @@ func catalogNewtypeBinding(module *Module, exported Export) Binding {
 	return Binding{Import: &Import{Kind: kind, Path: module.Path, ModulePath: module.Path, Filename: module.Filename, Exports: module.Exports}, Name: exported.Name, Export: &exported}
 }
 
-func canonicalNewtypeExport(exported Export, scope map[string]Binding, outerParameters []string) Export {
+func canonicalTypeExport(exported Export, scope map[string]Binding, outerParameters []string) Export {
 	parameters := append(append([]string(nil), outerParameters...), exported.TypeParameters...)
-	qualify := func(typ types.Type) types.Type { return canonicalNewtypeType(typ, scope, parameters) }
+	qualify := func(typ types.Type) types.Type { return canonicalContractType(typ, scope, parameters) }
 	exported.Type = qualify(exported.Type)
 	exported.NewtypeTarget = qualify(exported.NewtypeTarget)
 	exported.AliasTarget = qualify(exported.AliasTarget)
@@ -114,24 +115,24 @@ func canonicalNewtypeExport(exported Export, scope map[string]Binding, outerPara
 	exported.Members = cloneMembers(exported.Members)
 	for name, member := range exported.Members {
 		memberParameters := append(append([]string(nil), parameters...), member.TypeParameters...)
-		member.Type = canonicalNewtypeType(member.Type, scope, memberParameters)
+		member.Type = canonicalContractType(member.Type, scope, memberParameters)
 		member.Parameters = append([]callsignature.Parameter(nil), member.Parameters...)
 		for index := range member.Parameters {
-			member.Parameters[index].Type = canonicalNewtypeType(member.Parameters[index].Type, scope, memberParameters)
+			member.Parameters[index].Type = canonicalContractType(member.Parameters[index].Type, scope, memberParameters)
 		}
 		exported.Members[name] = member
 	}
 	exported.Nested = cloneExports(exported.Nested)
 	for name, nested := range exported.Nested {
-		exported.Nested[name] = canonicalNewtypeExport(nested, scope, parameters)
+		exported.Nested[name] = canonicalTypeExport(nested, scope, parameters)
 	}
 	return exported
 }
 
-func canonicalNewtypeType(typ types.Type, scope map[string]Binding, parameters []string) types.Type {
+func canonicalContractType(typ types.Type, scope map[string]Binding, parameters []string) types.Type {
 	typ.Args = append([]types.Type(nil), typ.Args...)
 	for index := range typ.Args {
-		typ.Args[index] = canonicalNewtypeType(typ.Args[index], scope, parameters)
+		typ.Args[index] = canonicalContractType(typ.Args[index], scope, parameters)
 	}
 	if typ.Kind != types.Named || !typ.Declaration.Empty() {
 		return typ

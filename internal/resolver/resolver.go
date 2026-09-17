@@ -347,7 +347,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		}
 		catalog.Modules[clean] = module
 	}
-	canonicalizeNewtypeContracts(catalog)
+	canonicalizeTypeContracts(catalog)
 	typeOwners := map[string]*Module{}
 	typesByName := map[string]*Export{}
 	modulePaths := make([]string, 0, len(catalog.Modules))
@@ -1028,12 +1028,24 @@ func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding,
 			}
 		}
 	}
-	// A returned nominal value may come through a third module. Its exact
+	// Inferred aliases can belong to a native package contract without being
+	// selected by name. Match the exact import, never another alias's spelling.
+	if declaration.Kind == identity.TypeAlias {
+		for _, imported := range r.Imports {
+			if imported == nil || imported.RuntimePath() != declaration.Module {
+				continue
+			}
+			if exported, ok := exportNamed(imported.Exports, declaration.Name); ok && exported.Kind == TypeAliasExport {
+				return Binding{Import: imported, Name: exported.Name, Export: &exported}, true
+			}
+		}
+	}
+	// A returned alias or nominal value may come through a third module. Its exact
 	// identity permits contract lookup, but never adds a source-visible name.
-	if declaration.Kind == identity.Newtype && r.Catalog != nil {
+	if (declaration.Kind == identity.Newtype || declaration.Kind == identity.TypeAlias) && r.Catalog != nil {
 		if module := r.Catalog.Modules[declaration.Module]; module != nil {
 			if exported, ok := exportNamed(module.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
-				return catalogNewtypeBinding(module, exported), true
+				return catalogTypeBinding(module, exported), true
 			}
 		}
 	}

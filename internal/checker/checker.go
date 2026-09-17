@@ -3540,7 +3540,7 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 	if typ.Nullable {
 		return nil, false
 	}
-	if parameters, target, alias := c.aliasDefinition(typ.Name); alias {
+	if parameters, target, alias := c.aliasDefinition(typ); alias {
 		expanded := substituteType(target, typeSubstitutions(parameters, typ.Args))
 		expanded = c.expandAlias(expanded, map[string]bool{})
 		variants, ok := c.enumVariants(expanded)
@@ -5381,7 +5381,7 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 	if name == "" {
 		return
 	}
-	_, _, transparentAlias := c.aliasDefinition(name)
+	_, _, transparentAlias := c.aliasDefinition(types.FromName(name))
 	superclassType := c.expandAlias(types.FromName(name), map[string]bool{})
 	superclassType = c.canonicalType(superclassType, c.activeTypeParameterSet())
 	// An imported transparent alias is expanded in its declaring module's
@@ -6939,7 +6939,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			receiverType = c.enumPatternType
 			c.result.Expressions[n.Receiver] = receiverType
 		} else if c.enumPattern > 0 && len(receiverType.Args) == 0 {
-			if parameters, target, alias := c.aliasDefinition(receiverType.Name); alias {
+			if parameters, target, alias := c.aliasDefinition(receiverType); alias {
 				parameterSet := map[string]bool{}
 				for _, parameter := range parameters {
 					parameterSet[parameter] = true
@@ -7080,6 +7080,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					c.error(n.Span(), fmt.Sprintf("field %s of type %s is not callable", n.Name, fieldType))
 				}
 			}
+		}
+		if !classAccess && !n.Namespace {
+			receiverType = dataReceiverType
 		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
 			typ = substituteType(c.typeFromRef(record.byName[n.Name].Type), typeSubstitutions(record.typeParameters, receiverType.Args))
@@ -10043,7 +10046,7 @@ func (c *Checker) typeFromRef(ref ast.TypeRef) types.Type {
 
 func (c *Checker) typeFromRefWithParameters(ref ast.TypeRef, typeParameters map[string]bool) types.Type {
 	authored := c.canonicalType(fromTypeRef(ref), typeParameters)
-	result := c.expandAlias(fromTypeRef(ref), map[string]bool{})
+	result := c.expandAlias(authored, map[string]bool{})
 	result = c.canonicalType(result, typeParameters)
 	if !ref.Empty() {
 		c.result.ResolvedTypes[ref.Span()] = authored
@@ -10052,6 +10055,7 @@ func (c *Checker) typeFromRefWithParameters(ref ast.TypeRef, typeParameters map[
 }
 
 func (c *Checker) canonicalType(typ types.Type, typeParameters map[string]bool) types.Type {
+	typ.Args = append([]types.Type(nil), typ.Args...)
 	for index := range typ.Args {
 		typ.Args[index] = c.canonicalType(typ.Args[index], typeParameters)
 	}
@@ -10166,25 +10170,6 @@ func (c *Checker) pushActiveTypeOwner(owner string) func() {
 	previous := c.activeTypeOwner
 	c.activeTypeOwner = owner
 	return func() { c.activeTypeOwner = previous }
-}
-
-func (c *Checker) aliasDefinition(name string) ([]string, types.Type, bool) {
-	if alias := c.aliases[name]; alias != nil {
-		return alias.typeParameters, alias.target, true
-	}
-	if binding, imported := c.resolution.ImportedType(name); imported && binding.Export.Kind == resolver.TypeAliasExport {
-		return binding.Export.TypeParameters, binding.Export.AliasTarget, true
-	}
-	if binding, inferred := c.resolution.InferredType(name); inferred && binding.Export.Kind == resolver.TypeAliasExport {
-		return binding.Export.TypeParameters, binding.Export.AliasTarget, true
-	}
-	if exported, exists := c.resolution.CompilerOwnedType(name); exists && exported.Kind == resolver.TypeAliasExport {
-		return exported.TypeParameters, exported.AliasTarget, true
-	}
-	if exported, exists := c.resolution.ContractTypeAlias(name); exists {
-		return exported.TypeParameters, exported.AliasTarget, true
-	}
-	return nil, types.Type{}, false
 }
 
 func (c *Checker) aliasTargetIsExternal(target types.Type, seen map[string]bool) bool {
@@ -10373,11 +10358,15 @@ func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Ty
 		arguments[index] = c.expandAlias(argument, visiting)
 	}
 	typ.Args = arguments
-	parameters, target, alias := c.aliasDefinition(typ.Name)
+	parameters, target, alias := c.aliasDefinition(typ)
 	if !alias {
 		return typ
 	}
-	if visiting[typ.Name] {
+	key := typ.Name
+	if !typ.Declaration.Empty() {
+		key = typ.Declaration.Key()
+	}
+	if visiting[key] {
 		if !c.aliasCycles[typ.Name] {
 			span := token.Span{}
 			if local := c.aliases[typ.Name]; local != nil {
@@ -10391,12 +10380,12 @@ func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Ty
 	if len(parameters) != len(typ.Args) {
 		return typ
 	}
-	visiting[typ.Name] = true
+	visiting[key] = true
 	expanded := substituteType(target, typeSubstitutions(parameters, typ.Args))
 	expanded.Nullable = expanded.Nullable || typ.Nullable
 	expanded.Readonly = expanded.Readonly || typ.Readonly
 	expanded = c.expandAlias(expanded, visiting)
-	delete(visiting, typ.Name)
+	delete(visiting, key)
 	return expanded
 }
 
