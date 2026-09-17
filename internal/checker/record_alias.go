@@ -8,7 +8,7 @@ import (
 // Alias construction keeps the underlying record identity and substitutions.
 // Backends and the evaluator consume the same field and default contract.
 func (c *Checker) aliasRecordConstruction(typ types.Type) (RecordConstruction, bool) {
-	if _, _, alias := c.aliasDefinition(typ.Name); !alias {
+	if _, _, alias := c.aliasDefinition(typ); !alias {
 		return RecordConstruction{}, false
 	}
 	target := c.canonicalType(c.expandAlias(typ, map[string]bool{}), c.activeTypeParameterSet())
