@@ -59,6 +59,7 @@ type generator struct {
 	ormPackageModels  []ormintegration.Model
 	projectNames      *goProjectNames
 	enumLayout        goEnumLayout
+	identityAliases   goIdentityAliases
 	execution         *effectplan.Plan
 	executionActive   bool
 	oidcRuntime       bool
@@ -97,26 +98,27 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	projectNames := analyzeGoProjectNames(programs)
 	enumLayout := analyzeGoEnumLayout(programs)
+	identityAliases := analyzeGoIdentityAliases(programs)
 	ormRuntime := analyzeGoORMRuntime(programs)
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames, ormRuntime, execution, enumLayout)
+		result[index] = generate(program, projectNames, ormRuntime, execution, enumLayout, identityAliases)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout) sourcemap.Generated {
-	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, enumLayout, nil)
+func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases) sourcemap.Generated {
+	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, nil)
 	bindingNames := analyzeGoBindingNames(bindings, imports)
 	if len(bindingNames) == 0 {
 		return generated
 	}
-	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, enumLayout, bindingNames)
+	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, bindingNames)
 	return generated
 }
 
-func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
+func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
 	ormPackageKey := goORMPackageKey(program)
 	g := &generator{
 		topMethods:       map[string]bool{},
@@ -139,6 +141,7 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		ormPackageModels: ormRuntime.models[ormPackageKey],
 		projectNames:     projectNames,
 		enumLayout:       enumLayout,
+		identityAliases:  identityAliases,
 		execution:        execution,
 		recordSources:    true,
 		sourceLocations:  map[int]sourcemap.Location{},
@@ -966,6 +969,9 @@ func enumMethodName(enumName, methodName string) string {
 }
 
 func (g *generator) typeAlias(alias *ir.TypeAlias) {
+	if _, erased := g.identityAliases[alias.Declaration]; erased {
+		return
+	}
 	name := goDeclaredTypeName(alias.Declaration.Name, alias.Name)
 	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.typeAliasTarget(alias) + goTrailingComment(alias.TrailingComment))
 	if len(alias.Variants) == 0 {
@@ -3259,6 +3265,7 @@ func (g *generator) goImportedName(name string, reference *ir.Reference) string 
 }
 
 func (g *generator) goType(t types.Type) string {
+	t = g.identityAliases.expand(t)
 	var result string
 	switch t.Kind {
 	case types.Void:

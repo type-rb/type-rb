@@ -406,7 +406,7 @@ end
 	}
 }
 
-func TestGenericIdentityAliasSharesEffectABIInRubyAndTypeScript(t *testing.T) {
+func TestGenericIdentityAliasSharesEffectABIAcrossModes(t *testing.T) {
 	main := SourceUnit{
 		Filename: "main.trb", ModulePath: "main", Package: "main",
 		Source: []byte(`interface Worker
@@ -433,7 +433,7 @@ def main()
 end
 `),
 	}
-	for _, mode := range []string{"ruby", "typescript"} {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireEffectRuntime(t, mode)
 			artifacts, err := CompileProject([]SourceUnit{main}, Options{
@@ -539,7 +539,7 @@ end
 	}
 }
 
-func TestNestedImportedIdentityAliasSharesEffectABIInRubyAndTypeScript(t *testing.T) {
+func TestNestedImportedIdentityAliasSharesEffectABIAcrossModes(t *testing.T) {
 	contract := SourceUnit{
 		Filename: "contracts/worker.trb", ModulePath: "contracts/worker", Package: "contracts",
 		Source: []byte(`interface Worker
@@ -571,11 +571,11 @@ def main()
 end
 `),
 	}
-	for _, mode := range []string{"ruby", "typescript"} {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireEffectRuntime(t, mode)
 			artifacts, err := CompileProject([]SourceUnit{contract, main}, Options{
-				Mode: mode, RubyLoader: "require_relative", TypeScriptRuntime: "bun",
+				Mode: mode, GoModule: "example.com/nested-imported-identity-effect", RubyLoader: "require_relative", TypeScriptRuntime: "bun",
 				SourceRoot: "/project", ProjectRoot: "/project",
 			})
 			if err != nil {
