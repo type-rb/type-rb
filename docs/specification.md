@@ -1469,7 +1469,8 @@ inferred from Go, Ruby, or TypeScript:
   `response.json<T>()`.
 - `alias Alias<T> = Target<T, ...>` creates a transparent alias rather than a
   nominal type. Assignment and member checking use the expanded target, while
-  diagnostics, completion, imports, and generated signatures retain the alias.
+  diagnostics, completion, and imports retain the alias. Generated signatures
+  may expand it when the target language cannot represent the alias directly.
   An alias of an enum also qualifies its variants, such as
   `DbResult<Integer>::Ok(1)` and `when DbResult::Err(error)`.
 - Calls, construction, and generic method selection use explicit type
