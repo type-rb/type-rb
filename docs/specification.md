@@ -434,6 +434,14 @@ end
   receiver. Each branch is checked with its own entry facts before that join.
   Unchanged bindings and distinct shadowing declarations retain their facts;
   returning-guard promotion still applies to the continuing path.
+- Once a closure can replace a mutable lexical binding, calls discard earlier
+  narrowing for that binding and stable fields reached through it. The checker
+  conservatively allows for aliased, stored and forwarded callbacks; it does not
+  infer per-callee replacement effects. The same rule applies at conditional,
+  short-circuit and catch joins and across loop backedges. A fresh guard or
+  assignment after the call can establish a new fact. Closure construction alone
+  does not replace the binding, and immutable bindings, unrelated mutable bindings
+  and captures used only for reading retain their facts.
 - Before a repeated body is checked, facts for bindings it may replace are
   discarded, including facts about stable fields of a replaced receiver. A
   `while` condition or a fresh guard in the body may establish a new fact for
