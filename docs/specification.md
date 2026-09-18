@@ -148,7 +148,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   exhaustive `case` use the same Result rules as named functions.
 - A function value owns `return` statements in its body. It may capture outer
   lexical bindings, while ordinary immutability and `mut` assignment rules
-  continue to apply to captured values.
+  continue to apply to captured values. A nullable mutable binding, or a
+  readonly field reached through a replaceable binding, must be narrowed inside
+  the function body before use as non-null. A proof at function creation does
+  not survive later replacement of the captured binding. Immutable binding
+  proofs and immutable readonly paths remain available.
 - Function values take required positional parameters in the initial syntax;
   defaults, named-only parameters, rest parameters, call blocks, and generic
   lambda parameters are not accepted. Their parameter bindings are immutable

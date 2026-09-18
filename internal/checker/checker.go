@@ -328,6 +328,7 @@ type scope struct {
 	parent           *scope
 	values           map[string]symbol
 	nullableMembers  map[nullableMemberKey]nullableMemberFact
+	captureBoundary  bool
 	constantsAllowed bool
 	constantOwner    string
 	enumsAllowed     bool
@@ -350,13 +351,20 @@ func (s *scope) lookup(name string) (symbol, bool) {
 }
 
 func (s *scope) lookupOwner(name string) (symbol, *scope, bool) {
+	captured := false
 	for current := s; current != nil; current = current.parent {
 		if value, ok := current.values[name]; ok {
 			if value.pending != nil && value.pending.resolved.Kind != "" {
 				value.typ = value.pending.resolved
 			}
+			if captured && value.mutable && value.declared.Nullable {
+				// The closure can run after the parent replaces this binding.
+				// A guard inside the closure creates its own nearer flow entry.
+				value.typ = value.declared
+			}
 			return value, current, true
 		}
+		captured = captured || current.captureBoundary
 	}
 	return symbol{}, nil, false
 }
@@ -387,10 +395,17 @@ func (s *scope) setAssignmentType(name string, declared, flow types.Type) {
 }
 
 func (s *scope) nullableMember(key nullableMemberKey) (nullableMemberFact, bool) {
+	captured := false
 	for current := s; current != nil; current = current.parent {
 		if fact, ok := current.nullableMembers[key]; ok {
+			if captured {
+				if root, ok := s.lookup(key.rootName); ok && root.mutable {
+					return nullableMemberFact{}, false
+				}
+			}
 			return fact, fact.valid
 		}
+		captured = captured || current.captureBoundary
 	}
 	return nullableMemberFact{}, false
 }
@@ -6287,7 +6302,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.CaseStatement:
 		typ = c.checkCase(n, sc, true)
 	case *ast.LambdaExpression:
-		lambdaScope := &scope{parent: sc, values: map[string]symbol{}}
+		lambdaScope := &scope{parent: sc, values: map[string]symbol{}, captureBoundary: true}
 		parameterTypes := make([]types.Type, 0, len(n.Parameters))
 		for _, parameter := range n.Parameters {
 			if parameter.Type.Empty() {
