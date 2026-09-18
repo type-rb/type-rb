@@ -60,6 +60,21 @@ result := value + 1
 puts(result)
 end
 end`,
+		"writer from previous iteration after fresh guard": `def main()
+mut value: Integer? := 1
+noop := fn(): Boolean; return true; end
+mut callbacks := [noop]
+mut step := 0
+while step < 2
+if value != nil
+callbacks[0]()
+result := value + 1
+callbacks[0] = fn(): Boolean; value = nil; return true; end
+puts(result)
+end
+step += 1
+end
+end`,
 		"readonly field of replaced root": `record Box
 value: Integer?
 end

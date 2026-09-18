@@ -17,6 +17,9 @@ func invalidateRepeatedNullableFacts(sc *scope, body []ast.Statement, parameters
 	inventory := newNullableWriteInventory()
 	inventory.expression(condition, hidden)
 	inventory.statements(body, hidden)
+	// A callback created later in the body may already exist on the next
+	// iteration. Calls after a fresh inner guard must see that possible writer.
+	markNullableCaptures(sc, inventory.captures)
 	invalidateNullableWrites(sc, inventory.effects(sc))
 }
 
