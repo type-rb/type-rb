@@ -14,19 +14,19 @@ func invalidateRepeatedNullableFacts(sc *scope, body []ast.Statement, parameters
 	for _, name := range parameters {
 		hidden[name] = true
 	}
-	writes := map[string]bool{}
-	collectNullableWrites(condition, hidden, writes)
-	collectNullableStatementWrites(body, hidden, writes)
-	invalidateNullableWrites(sc, writes)
+	inventory := newNullableWriteInventory()
+	inventory.expression(condition, hidden)
+	inventory.statements(body, hidden)
+	invalidateNullableWrites(sc, inventory.effects(sc))
 }
 
 // A conditional write cannot keep the parent's earlier value or field facts.
 // Check each branch with its entry facts first, then forget replaced bindings
 // at the join without exporting a branch-specific assigned type.
 func invalidateConditionalNullableFacts(sc *scope, expression ast.Expression) {
-	writes := map[string]bool{}
-	collectNullableWrites(expression, map[string]bool{}, writes)
-	invalidateNullableWrites(sc, writes)
+	inventory := newNullableWriteInventory()
+	inventory.expression(expression, map[string]bool{})
+	invalidateNullableWrites(sc, inventory.effects(sc))
 }
 
 func invalidateNullableWrites(sc *scope, writes map[string]bool) {
@@ -44,36 +44,37 @@ func invalidateNullableWrites(sc *scope, writes map[string]bool) {
 
 // This is a lexical write inventory, not expression checking. Walk evaluated
 // subexpressions, including expression-valued branches, without entering a
-// function declaration. Block/pattern/local bindings hide outer names.
-func collectNullableStatementWrites(body []ast.Statement, inherited map[string]bool, writes map[string]bool) {
+// function declaration for immediate effects. Deferred lambda writes are tracked
+// separately. Block/pattern/local bindings hide outer names.
+func (w *nullableWriteInventory) statements(body []ast.Statement, inherited map[string]bool) {
 	hidden := maps.Clone(inherited)
 	for _, statement := range body {
 		switch node := statement.(type) {
 		case *ast.VariableStatement:
-			collectNullableWrites(node.Value, hidden, writes)
+			w.expression(node.Value, hidden)
 			hidden[node.Name] = true
 		case *ast.AssignmentStatement:
-			collectNullableWrites(node.Target, hidden, writes)
-			collectNullableWrites(node.Value, hidden, writes)
+			w.expression(node.Target, hidden)
+			w.expression(node.Value, hidden)
 			if target, ok := node.Target.(*ast.Identifier); ok && !hidden[target.Name] {
-				writes[target.Name] = true
+				w.writes[target.Name] = true
 			}
 		case *ast.ReturnStatement:
-			collectNullableWrites(node.Value, hidden, writes)
+			w.expression(node.Value, hidden)
 		case *ast.ExpressionStatement:
-			collectNullableWrites(node.Expression, hidden, writes)
+			w.expression(node.Expression, hidden)
 		case *ast.WhileStatement:
-			collectNullableWrites(node.Condition, hidden, writes)
-			collectNullableStatementWrites(node.Body, hidden, writes)
+			w.expression(node.Condition, hidden)
+			w.statements(node.Body, hidden)
 		case *ast.NativeBlock:
-			collectNullableStatementWrites(node.Body, hidden, writes)
+			w.statements(node.Body, hidden)
 		case ast.Expression:
-			collectNullableWrites(node, hidden, writes)
+			w.expression(node, hidden)
 		}
 	}
 }
 
-func collectNullableBlockWrites(block *ast.BlockExpression, inherited map[string]bool, writes map[string]bool) {
+func (w *nullableWriteInventory) block(block *ast.BlockExpression, inherited map[string]bool) {
 	if block == nil {
 		return
 	}
@@ -81,95 +82,105 @@ func collectNullableBlockWrites(block *ast.BlockExpression, inherited map[string
 	for _, name := range block.Parameters {
 		hidden[name] = true
 	}
-	collectNullableStatementWrites(block.Body, hidden, writes)
+	w.statements(block.Body, hidden)
 }
 
-func collectNullableWrites(expression ast.Expression, hidden map[string]bool, writes map[string]bool) {
+func (w *nullableWriteInventory) expression(expression ast.Expression, hidden map[string]bool) {
 	switch node := expression.(type) {
-	case *ast.IfStatement:
-		collectNullableWrites(node.Condition, hidden, writes)
-		collectNullableStatementWrites(node.Then, hidden, writes)
-		for _, branch := range node.ElseIf {
-			collectNullableWrites(branch.Condition, hidden, writes)
-			collectNullableStatementWrites(branch.Body, hidden, writes)
+	case *ast.LambdaExpression:
+		// Constructing a closure does not execute its writes. Keep them separate
+		// so repeated regions can account for callbacks created on a backedge.
+		captures := lambdaNullableWrites(node)
+		for name := range captures {
+			if !hidden[name] {
+				w.captures[name] = true
+			}
 		}
-		collectNullableStatementWrites(node.Else, hidden, writes)
+	case *ast.IfStatement:
+		w.expression(node.Condition, hidden)
+		w.statements(node.Then, hidden)
+		for _, branch := range node.ElseIf {
+			w.expression(branch.Condition, hidden)
+			w.statements(branch.Body, hidden)
+		}
+		w.statements(node.Else, hidden)
 	case *ast.CaseStatement:
-		collectNullableWrites(node.Value, hidden, writes)
-		collectNullableStatementWrites(node.Leading, hidden, writes)
+		w.expression(node.Value, hidden)
+		w.statements(node.Leading, hidden)
 		for _, branch := range node.Branches {
-			collectNullableWrites(branch.Value, hidden, writes)
+			w.expression(branch.Value, hidden)
 			for _, alternative := range branch.Alternatives {
-				collectNullableWrites(alternative, hidden, writes)
+				w.expression(alternative, hidden)
 			}
 			branchHidden := maps.Clone(hidden)
 			for _, binding := range branch.Bindings {
 				branchHidden[binding.Name] = true
 			}
-			collectNullableStatementWrites(branch.Body, branchHidden, writes)
+			w.statements(branch.Body, branchHidden)
 		}
-		collectNullableStatementWrites(node.Else, hidden, writes)
+		w.statements(node.Else, hidden)
 	case *ast.IterationExpression:
-		collectNullableWrites(node.Source, hidden, writes)
-		collectNullableWrites(node.Initial, hidden, writes)
-		collectNullableWrites(node.SliceSize, hidden, writes)
-		collectNullableWrites(node.Limit, hidden, writes)
-		collectNullableBlockWrites(node.Block, hidden, writes)
+		w.expression(node.Source, hidden)
+		w.expression(node.Initial, hidden)
+		w.expression(node.SliceSize, hidden)
+		w.expression(node.Limit, hidden)
+		w.block(node.Block, hidden)
 	case *ast.InterpolatedString:
 		for _, part := range node.Parts {
-			collectNullableWrites(part.Expression, hidden, writes)
+			w.expression(part.Expression, hidden)
 		}
 	case *ast.ArrayLiteral:
 		for _, element := range node.Elements {
-			collectNullableWrites(element, hidden, writes)
+			w.expression(element, hidden)
 		}
 	case *ast.HashLiteral:
 		for _, entry := range node.Entries {
-			collectNullableWrites(entry.Key, hidden, writes)
-			collectNullableWrites(entry.Value, hidden, writes)
+			w.expression(entry.Key, hidden)
+			w.expression(entry.Value, hidden)
 		}
 	case *ast.UnaryExpression:
-		collectNullableWrites(node.Operand, hidden, writes)
+		w.expression(node.Operand, hidden)
 	case *ast.BinaryExpression:
-		collectNullableWrites(node.Left, hidden, writes)
-		collectNullableWrites(node.Right, hidden, writes)
+		w.expression(node.Left, hidden)
+		w.expression(node.Right, hidden)
 	case *ast.RangeExpression:
-		collectNullableWrites(node.Start, hidden, writes)
-		collectNullableWrites(node.End, hidden, writes)
+		w.expression(node.Start, hidden)
+		w.expression(node.End, hidden)
 	case *ast.CallExpression:
-		collectNullableWrites(node.Callee, hidden, writes)
+		w.calls = true
+		w.expression(node.Callee, hidden)
 		for _, argument := range node.Arguments {
-			collectNullableWrites(argument.Value, hidden, writes)
+			w.expression(argument.Value, hidden)
 		}
-		collectNullableBlockWrites(node.Block, hidden, writes)
+		w.block(node.Block, hidden)
 	case *ast.GenericExpression:
-		collectNullableWrites(node.Receiver, hidden, writes)
+		w.expression(node.Receiver, hidden)
 	case *ast.MemberExpression:
-		collectNullableWrites(node.Receiver, hidden, writes)
+		w.expression(node.Receiver, hidden)
 	case *ast.IndexExpression:
-		collectNullableWrites(node.Receiver, hidden, writes)
-		collectNullableWrites(node.Index, hidden, writes)
+		w.expression(node.Receiver, hidden)
+		w.expression(node.Index, hidden)
 	case *ast.TryExpression:
-		collectNullableWrites(node.Value, hidden, writes)
+		w.expression(node.Value, hidden)
 	case *ast.CatchExpression:
-		collectNullableWrites(node.Value, hidden, writes)
+		w.expression(node.Value, hidden)
 		branchHidden := maps.Clone(hidden)
 		branchHidden[node.Binding.Name] = true
-		collectNullableStatementWrites(node.Body, branchHidden, writes)
+		w.statements(node.Body, branchHidden)
 	case *ast.AttemptExpression:
-		collectNullableWrites(node.Value, hidden, writes)
-		collectNullableStatementWrites(node.Body, hidden, writes)
+		w.expression(node.Value, hidden)
+		w.statements(node.Body, hidden)
 	case *ast.JSXElement:
-		collectNullableWrites(node.Component, hidden, writes)
+		w.expression(node.Component, hidden)
 		for _, attribute := range node.Attributes {
-			collectNullableWrites(attribute.Value, hidden, writes)
+			w.expression(attribute.Value, hidden)
 		}
 		for _, child := range node.Children {
 			switch child := child.(type) {
 			case *ast.JSXElement:
-				collectNullableWrites(child, hidden, writes)
+				w.expression(child, hidden)
 			case *ast.JSXExpression:
-				collectNullableWrites(child.Value, hidden, writes)
+				w.expression(child.Value, hidden)
 			}
 		}
 	}

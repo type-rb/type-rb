@@ -329,6 +329,7 @@ type scope struct {
 	values           map[string]symbol
 	nullableMembers  map[nullableMemberKey]nullableMemberFact
 	captureBoundary  bool
+	nullableCaptures map[nullableBindingKey]bool
 	constantsAllowed bool
 	constantOwner    string
 	enumsAllowed     bool
@@ -6302,6 +6303,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.CaseStatement:
 		typ = c.checkCase(n, sc, true)
 	case *ast.LambdaExpression:
+		markNullableCaptures(sc, lambdaNullableWrites(n))
 		lambdaScope := &scope{parent: sc, values: map[string]symbol{}, captureBoundary: true}
 		parameterTypes := make([]types.Type, 0, len(n.Parameters))
 		for _, parameter := range n.Parameters {
@@ -6600,6 +6602,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		right := c.checkExpression(n.Right, rightScope)
 		right = c.requireValueExpression(n.Right, right, "be used as an operand")
+		if n.Operator == "&&" || n.Operator == "||" {
+			invalidateConditionalNullableFacts(sc, n.Right)
+		}
 		typ = c.checkBinaryOperator(n.Span(), n.Operator, left, right)
 		if typ.Kind != types.Invalid && isNonNullableNumber(left) && isNonNullableNumber(right) && scalarType(left).Kind != scalarType(right).Kind {
 			if scalarType(left).Kind == types.Int {
@@ -7189,6 +7194,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 	case *ast.CallExpression:
+		defer invalidateCapturedNullableFacts(sc)
 		if identifier, ok := n.Callee.(*ast.Identifier); ok && identifier.Name == "value" && c.currentNewtype != nil && !c.classMethod {
 			if _, shadowed := sc.lookup("value"); !shadowed {
 				if len(n.Arguments) != 0 || n.Block != nil {
@@ -8006,6 +8012,7 @@ func (c *Checker) checkResultTry(node *ast.TryExpression, sc *scope) types.Type 
 }
 
 func (c *Checker) checkResultCatch(node *ast.CatchExpression, sc *scope) types.Type {
+	defer invalidateConditionalNullableFacts(sc, node)
 	resultType := c.checkExpression(node.Value, sc)
 	resultType = c.requireValueExpression(node.Value, resultType, "be used with catch")
 	if resultType.Kind == types.Invalid {
