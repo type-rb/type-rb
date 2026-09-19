@@ -1,0 +1,38 @@
+def invoke(callbacks: Array<(Integer) -> Integer>, value: Integer): Integer
+	return callbacks[0](value)
+end
+
+def main()
+	callback := fn()
+		puts("called")
+	end
+	callbacks: Array<() -> Void> := [callback]
+	callbacks[0]()
+
+	increment := fn(value: Integer): Integer
+		return value + 1
+	end
+	functions: Array<(Integer) -> Integer> := [increment]
+	puts(invoke(functions, 4))
+
+	named: Hash<String, (Integer) -> Integer> := { "next" => increment }
+	selected := named["next"]
+	puts(selected(8))
+
+	factory := fn(): (Integer) -> Integer
+		return increment
+	end
+	factories: Array<() -> (Integer) -> Integer> := [factory]
+	produced := factories[0]()
+	puts(produced(12))
+
+	apply := fn(callable: (Integer) -> Integer): Integer
+		return callable(16)
+	end
+	applications: Array<((Integer) -> Integer) -> Integer> := [apply]
+	puts(applications[0](increment))
+
+	nested: Array<Hash<String, () -> Void>> := [{ "call" => callback }]
+	saved := nested[0]["call"]
+	saved()
+end

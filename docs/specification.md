@@ -136,7 +136,9 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   type on every reachable path.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
   permitted in a function type, for example `(String) -> Void`, but remains
-  omitted from the corresponding `fn` declaration.
+  omitted from the corresponding `fn` declaration. Function types may be used
+  directly as type arguments, including `Array<() -> Void>` and
+  `Hash<String, (Integer) -> String>`, without declaring an alias.
 - `Void` is the compiler's no-result type, not a source value type. It is valid
   only as the return type of a function type. A Void expression may be used as
   a standalone statement but cannot be initialized, assigned, passed,

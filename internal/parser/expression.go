@@ -549,7 +549,7 @@ func parseTypeReporting(tokens []token.Token, report func(token.Span, string)) a
 		return ast.TypeRef{}
 	}
 	tokens = expandGenericClosers(tokens)
-	if arrow := topLevelIndex(tokens, "->"); arrow >= 0 {
+	if arrow := typeTopLevelIndex(tokens, "->"); arrow >= 0 {
 		result := ast.TypeRef{Base: ast.Base{SourceSpan: spanOf(tokens)}}
 		if arrow < 2 || tokens[0].Lexeme != "(" || tokens[arrow-1].Lexeme != ")" || matchingIndex(tokens, 0, "(", ")") != arrow-1 || arrow+1 >= len(tokens) {
 			result.Name = joinLexemes(tokens)
@@ -561,7 +561,7 @@ func parseTypeReporting(tokens []token.Token, report func(token.Span, string)) a
 			}
 		}
 		returnedTokens := tokens[arrow+1:]
-		if failsAt := topLevelIndex(returnedTokens, "fails"); failsAt >= 0 {
+		if failsAt := typeTopLevelIndex(returnedTokens, "fails"); failsAt >= 0 {
 			if failsAt == 0 || failsAt+1 >= len(returnedTokens) {
 				result.Name = joinLexemes(tokens)
 				return result
@@ -610,6 +610,26 @@ func parseTypeReporting(tokens []token.Token, report func(token.Span, string)) a
 		t.Name = joinLexemes(tokens[:end])
 	}
 	return t
+}
+
+// Type references include angle-bracket nesting, unlike expressions where
+// < and > may be comparisons. A nested function arrow belongs to its argument.
+func typeTopLevelIndex(tokens []token.Token, lexeme string) int {
+	depth := 0
+	for i, tok := range tokens {
+		if tok.Lexeme == lexeme && depth == 0 {
+			return i
+		}
+		switch tok.Lexeme {
+		case "(", "[", "{", "<":
+			depth++
+		case ")", "]", "}", ">":
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return -1
 }
 
 // The lexer must retain >> as an expression operator. In a type reference,

@@ -871,6 +871,9 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 		return !isSymbolColon(beforePrevious, previous, current.Lexeme)
 	}
 	if current.Lexeme == "(" {
+		if previous.Lexeme == "->" {
+			return true
+		}
 		if (previous.Lexeme == ">" || previous.Lexeme == ">>") && beforePrevious != nil && startsUpper(beforePrevious.Lexeme) {
 			return false
 		}
