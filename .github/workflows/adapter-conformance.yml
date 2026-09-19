@@ -1,0 +1,53 @@
+name: Adapter conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/**"
+      - "cmd/trb/**"
+      - "go.mod"
+      - "go.sum"
+      - "trb"
+      - "examples/adapters/htmx/**"
+      - ".github/workflows/adapter-conformance.yml"
+  pull_request:
+    paths:
+      - "internal/**"
+      - "cmd/trb/**"
+      - "go.mod"
+      - "go.sum"
+      - "trb"
+      - "examples/adapters/htmx/**"
+      - ".github/workflows/adapter-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  htmx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install fixed dependencies
+        run: ./trb install --frozen --config examples/adapters/htmx/trbconfig.jsonc
+      - name: Check and build TypeRB source
+        run: |
+          ./trb check --diagnostic-format json --config examples/adapters/htmx/trbconfig.jsonc
+          ./trb build --config examples/adapters/htmx/trbconfig.jsonc
+      - name: Verify native types and browser behavior
+        working-directory: examples/adapters/htmx
+        run: |
+          bunx playwright install --with-deps chromium
+          bun run check
