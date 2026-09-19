@@ -16,6 +16,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 	suffix := strconv.Itoa(g.temporary)
 	items, values := "__trbItems"+suffix, "__trbValues"+suffix
 	result, index := "__trbResult"+suffix, "__trbIndex"+suffix
+	current := "__trbCurrent" + suffix
 	visited := "__trbVisited" + suffix
 	item := g.bindingIdentifier(transform.Item)
 	if item == "" || item == "_" {
@@ -26,14 +27,24 @@ func (g *generator) transform(transform *ir.Transform) string {
 		// The initial argument can mutate the retained source before traversal.
 		setup += result + " := " + g.expr(transform.Initial) + "; "
 	}
-	if transform.Source.ExprType().Kind == types.Array {
+	sourceKind := transform.Source.ExprType().Kind
+	if sourceKind == types.Array {
 		// Keep the Array identity, reloading its length and storage each time.
 		values = g.arrayValues(items)
-	} else {
+	} else if sourceKind != types.Range {
 		setup += values + " := " + g.iterableValue(items, transform.Source.ExprType()) + "; "
 	}
-	loop := "for " + index + " := 0; " + index + " < len(" + values + "); " + index + "++ { " +
-		visited + " := " + values + "[" + index + "]; " + item + " := " + visited + "; _ = " + item + "; "
+	capacity := "len(" + values + ")"
+	header := "for " + index + " := 0; " + index + " < len(" + values + "); " + index + "++ { "
+	valueAt := values + "[" + index + "]"
+	if sourceKind == types.Range {
+		// Range transformations retain bounds; only result collections allocate.
+		capacity = "0"
+		condition := current + " < " + items + "[1] || (" + current + " == " + items + "[1] && " + items + "[2] == 0)"
+		header = "for " + current + ", " + index + " := " + items + "[0], 0; " + condition + "; " + current + ", " + index + " = " + current + "+1, " + index + "+1 { "
+		valueAt = current
+	}
+	loop := header + visited + " := " + valueAt + "; " + item + " := " + visited + "; _ = " + item + "; "
 	if transform.WithIndex && transform.Index != "" && transform.Index != "_" {
 		binding := g.bindingIdentifier(transform.Index)
 		loop += binding + " := " + index + "; _ = " + binding + "; "
@@ -50,7 +61,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		comparison := g.portableSortComparison("left.key", "right.key", keyType, transform.Operation == "sort_by_descending")
 		return wrap("type " + decorated + " struct { value " + g.goType(transform.ItemType) + "; key " + g.goType(keyType) + " }; ordered := make([]" + decorated + ", 0, len(" + values + ")); " + loop + "ordered = append(ordered, " + decorated + "{value: " + visited + ", key: " + value + "}) }; slices.SortStableFunc(ordered, func(left, right " + decorated + ") int { return " + comparison + " }); " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(ordered)); for _, entry := range ordered { " + result + " = append(" + result + ", entry.value) }; return " + g.arrayReference(result))
 	case "map", "select":
-		body := result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(" + values + ")); " + loop
+		body := result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, " + capacity + "); " + loop
 		if transform.Operation == "map" {
 			body += result + " = append(" + result + ", " + value + ")"
 		} else {
