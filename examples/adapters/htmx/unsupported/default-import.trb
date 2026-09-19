@@ -1,0 +1,5 @@
+import { default as htmx } from "htmx.org"
+
+def parse_delay(): Float?
+	return htmx.parseInterval("2s")
+end

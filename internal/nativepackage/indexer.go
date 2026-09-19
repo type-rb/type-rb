@@ -390,7 +390,10 @@ for (const moduleName of request.modules) {
 	const unsupported = {};
 	for (const original of checker.getExportsOfModule(moduleSymbol).sort((left, right) => left.getName().localeCompare(right.getName()))) {
 		const exportName = original.getName();
-		if (exportName === "default") continue;
+		if (exportName === "default") {
+			unsupported[exportName] = "uses a default export; automatic indexing supports named exports only";
+			continue;
+		}
 		let symbol = original;
 		if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
 		const declaration = symbol.valueDeclaration || symbol.declarations?.[0] || source;

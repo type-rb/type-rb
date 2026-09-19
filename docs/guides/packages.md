@@ -5,6 +5,9 @@ registry. A package contains TypeRB source and a strict `trbpackage.json`
 manifest. Application and package source share the same grammar, type checker,
 typed IR, and three backends.
 
+For the workflow from direct import to a tested projection, see
+[Authoring native package adapters](native-package-adapters.md).
+
 ## Package categories
 
 TypeRB uses three package boundaries and one distribution term:

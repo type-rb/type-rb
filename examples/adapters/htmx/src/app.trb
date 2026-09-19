@@ -1,0 +1,9 @@
+import { ReactNode } from trb/platform/typescript/react
+
+def FragmentButton(): ReactNode
+	return <button id="load" hx-get="/fragment" hx-target="#result" hx-swap="innerHTML">Load fragment</button>
+end
+
+def DataFragmentButton(): ReactNode
+	return <button id="load-data" data-hx-get="/fragment" data-hx-target="#result" data-hx-swap="innerHTML">Load data fragment</button>
+end

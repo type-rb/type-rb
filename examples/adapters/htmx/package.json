@@ -1,0 +1,21 @@
+{
+  "name": "htmx-attribute-conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun",
+  "scripts": {
+    "check": "tsc -p tsconfig.json && bun scripts/conformance.mjs"
+  },
+  "dependencies": {
+    "htmx.org": "4.0.0",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "playwright": "1.63.0",
+    "typescript": "6.0.3"
+  }
+}
