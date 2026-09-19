@@ -197,8 +197,13 @@ func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.B
 	}
 	prefix := line[:catchAt]
 	wrapper, valueTokens := expressionWrapper(prefix)
+	diagnostics, islands := len(p.diags), len(p.nativeIslands)
 	value, ok := p.parseExpression(valueTokens)
 	if !ok {
+		// A keyword inside another block header is not a catch boundary.
+		// Leave diagnostics to the parser that owns the complete expression.
+		p.diags = p.diags[:diagnostics]
+		p.nativeIslands = p.nativeIslands[:islands]
 		return nil
 	}
 
