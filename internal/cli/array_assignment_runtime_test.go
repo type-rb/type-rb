@@ -121,7 +121,7 @@ def main()
 end
 `
 
-func runArrayAssignmentCase(t *testing.T, source, want, failure string) {
+func runPortableExecutionCase(t *testing.T, source, want, failure string) {
 	t.Helper()
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, surface := range []string{"run", "repl"} {
@@ -176,7 +176,7 @@ func runArrayAssignmentCase(t *testing.T, source, want, failure string) {
 }
 
 func TestArrayAssignmentRetainsPositionAcrossAllExecutionPaths(t *testing.T) {
-	runArrayAssignmentCase(t, arrayAssignmentProgram, "9\n9\n66\n9\n11\n11\nfalse\ntrue\ntrue\nfalse\nouter\ninner\n9\n8\n0\n11\n2\n7\n11\nnew\n66\n", "")
+	runPortableExecutionCase(t, arrayAssignmentProgram, "9\n9\n66\n9\n11\n11\nfalse\ntrue\ntrue\nfalse\nouter\ninner\n9\n8\n0\n11\n2\n7\n11\nnew\n66\n", "")
 }
 
 func TestArrayAssignmentChecksBoundsBeforeRHSAndBeforeStore(t *testing.T) {
@@ -189,7 +189,7 @@ func TestArrayAssignmentChecksBoundsBeforeRHSAndBeforeStore(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := "def change(mut values: Array<Integer>): Integer\n\t" + test.mutation + "\n\tputs(\"rhs\")\n\treturn 9\nend\n\ndef main()\n\tmut values := [1, 2]\n\tvalues[" + test.index + "] " + test.operator + " change(values)\n\tputs(\"unexpected store\")\nend\n"
-			runArrayAssignmentCase(t, source, test.want, "out of bounds")
+			runPortableExecutionCase(t, source, test.want, "out of bounds")
 		})
 	}
 }
@@ -279,5 +279,5 @@ def main()
 	return
 end
 `
-	runArrayAssignmentCase(t, source, "missing\n2\n3\n11\n5\n7\n2\n3\n9\ntrue\ntrue\ntrue\nc\nstored\n", "")
+	runPortableExecutionCase(t, source, "missing\n2\n3\n11\n5\n7\n2\n3\n9\ntrue\ntrue\ntrue\nc\nstored\n", "")
 }
