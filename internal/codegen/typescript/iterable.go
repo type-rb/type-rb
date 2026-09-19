@@ -50,7 +50,7 @@ func (g *generator) iterableIterate(iteration *ir.Iterate) {
 	if indexed {
 		g.line("let " + counter + " = 0;")
 	}
-	item := iteration.Bindings[0].Name
+	item := tsBindingName(iteration.Bindings[0].Name)
 	if item == "_" {
 		item = "__trbItem" + suffix
 	}
@@ -58,7 +58,7 @@ func (g *generator) iterableIterate(iteration *ir.Iterate) {
 	g.indent++
 	g.line("void " + item + ";")
 	if indexed {
-		index := iteration.Bindings[1].Name
+		index := tsBindingName(iteration.Bindings[1].Name)
 		g.line("let " + index + " = " + counter + "++;")
 		g.line("void " + index + ";")
 	}

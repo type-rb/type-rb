@@ -1,0 +1,65 @@
+enum Payload
+	Value(function: Integer)
+end
+
+record Properties
+	function: Integer
+end
+
+def combine(function: Integer, *, await: Integer = function + 1): Integer
+	return function + await
+end
+
+def main()
+	mut function := 2
+	trb_function := 20
+	callback := fn(function: Integer): Integer
+		mut typeof := function + 1
+		typeof += 1
+		return typeof
+	end
+	captured := fn(): Integer
+		return function + trb_function
+	end
+	function = 3
+	puts(callback(4))
+	puts(captured())
+	puts(combine(5))
+	puts(combine(5, await: 9))
+
+	mut arguments := 0
+	[1, 2].each.with_index do |function, await|
+		arguments += function + await
+	end
+	puts(arguments)
+
+	values := [1, 2].map do |function|
+		callback(function)
+	end
+	puts(values[0])
+	puts(values[1])
+	total := [1, 2].reduce(0) do |arguments, function|
+		arguments + function
+	end
+	puts(total)
+
+	mut eval := 0
+	(1..2).each.with_index do |function, await|
+		eval += function + await
+	end
+	[1, 2, 3].each_slice(2) do |function|
+		eval += function.size()
+	end
+	{ "one" => 1 }.each do |function, await|
+		eval += await + function.size()
+	end
+	puts(eval)
+
+	properties := Properties.new(function: 7)
+	puts(properties.function)
+	payload := Payload::Value(8)
+	case payload
+	when Payload::Value(function)
+		puts(function)
+	end
+end

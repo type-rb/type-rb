@@ -970,13 +970,13 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth == 0 && n.Constant {
 			prefix = "export "
 		}
-		g.line(prefix + keyword + " " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
+		g.line(prefix + keyword + " " + tsBindingName(n.Name) + ": " + variableType + " = " + g.expr(n.Value) + ";")
 		g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(identity)
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
-			g.line("void " + n.Name + ";")
+			g.line("void " + tsBindingName(n.Name) + ";")
 		}
 	case *ir.Temporary:
-		g.line("let " + n.Name + ": " + g.tsType(n.Type) + ";")
+		g.line("let " + tsBindingName(n.Name) + ": " + g.tsType(n.Type) + ";")
 	case *ir.Assignment:
 		target := g.assignmentTarget(n.Target)
 		if n.Target.ExprType().Kind == types.Int && isCheckedIntegerAssignment(n.Operator) {
@@ -1070,9 +1070,9 @@ func (g *generator) statement(statement ir.Statement) {
 				if binding.Name == "_" {
 					continue
 				}
-				g.line("const " + binding.Name + " = " + value + "." + binding.Field + ";")
+				g.line("const " + tsBindingName(binding.Name) + " = " + value + "." + binding.Field + ";")
 				if namedUnusedBinding(binding.Name) {
-					g.line("void " + binding.Name + ";")
+					g.line("void " + tsBindingName(binding.Name) + ";")
 				}
 			}
 			g.statements(branch.Body)
@@ -1319,9 +1319,9 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 			if binding.Name == "_" {
 				continue
 			}
-			g.line("const " + binding.Name + " = " + value + ";")
+			g.line("const " + tsBindingName(binding.Name) + " = " + value + ";")
 			if namedUnusedBinding(binding.Name) {
-				g.line("void " + binding.Name + ";")
+				g.line("void " + tsBindingName(binding.Name) + ";")
 			}
 		}
 		g.statements(branch.Body)
@@ -1356,7 +1356,7 @@ func (g *generator) caseNarrowingCapture(node *ir.Case) (string, string) {
 	}
 	g.temporary++
 	temporary := "__trbNarrow" + strconv.Itoa(g.temporary)
-	g.line("const " + temporary + " = " + name + ";")
+	g.line("const " + temporary + " = " + tsBindingName(name) + ";")
 	return name, temporary
 }
 
@@ -1365,8 +1365,8 @@ func (g *generator) caseNarrowings(narrowings []ir.CaseBinding, name, temporary 
 		if narrowing.Name != name || temporary == "" {
 			continue
 		}
-		g.line("const " + name + " = " + temporary + " as " + g.tsType(narrowing.Type) + ";")
-		g.line("void " + name + ";")
+		g.line("const " + tsBindingName(name) + " = " + temporary + " as " + g.tsType(narrowing.Type) + ";")
+		g.line("void " + tsBindingName(name) + ";")
 	}
 }
 
@@ -1415,19 +1415,19 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 			g.exactTypes[keyBinding.Name] = projectTypeScriptTypeIdentity(keyBinding.Type, sourceType.Args[0], identityArgument(sourceIdentity, 0))
 			g.exactTypes[valueBinding.Name] = projectTypeScriptTypeIdentity(valueBinding.Type, sourceType.Args[1], identityArgument(sourceIdentity, 1))
 		}
-		key := keyBinding.Name
+		key := tsBindingName(keyBinding.Name)
 		loopKey := key
 		if keyBinding.Type.Kind == types.Int && key != "_" {
 			g.temporary++
 			loopKey = "__trbKey" + strconv.Itoa(g.temporary)
 		}
-		g.line("for (let [" + loopKey + ", " + valueBinding.Name + "] of Object.entries(" + g.expr(iteration.Source) + ")) {")
+		g.line("for (let [" + loopKey + ", " + tsBindingName(valueBinding.Name) + "] of Object.entries(" + g.expr(iteration.Source) + ")) {")
 		g.indent++
 		if loopKey != key {
 			g.line("let " + key + " = Number(" + loopKey + ");")
 		}
 		g.line("void " + key + ";")
-		g.line("void " + valueBinding.Name + ";")
+		g.line("void " + tsBindingName(valueBinding.Name) + ";")
 		g.statements(iteration.Body)
 		g.indent--
 		g.line("}")
@@ -1453,14 +1453,14 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.exactTypes[itemBinding.Name] = projectTypeScriptTypeIdentity(itemBinding.Type, sourceType.Args[0], identityArgument(sourceIdentity, 0))
 	}
 	if iteration.WithIndex {
-		g.line("for (let [" + indexBinding.Name + ", " + itemBinding.Name + "] of " + g.iterableExpr(iteration.Source) + ".entries()) {")
+		g.line("for (let [" + tsBindingName(indexBinding.Name) + ", " + tsBindingName(itemBinding.Name) + "] of " + g.iterableExpr(iteration.Source) + ".entries()) {")
 	} else {
-		g.line("for (let " + itemBinding.Name + " of " + g.iterableExpr(iteration.Source) + ") {")
+		g.line("for (let " + tsBindingName(itemBinding.Name) + " of " + g.iterableExpr(iteration.Source) + ") {")
 	}
 	g.indent++
-	g.line("void " + itemBinding.Name + ";")
+	g.line("void " + tsBindingName(itemBinding.Name) + ";")
 	if iteration.WithIndex {
-		g.line("void " + indexBinding.Name + ";")
+		g.line("void " + tsBindingName(indexBinding.Name) + ";")
 	}
 	g.statements(iteration.Body)
 	g.indent--
@@ -1517,7 +1517,12 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 			parameters := g.parameters(member.Fields)
 			fields := []string{"kind: " + strconv.Quote(member.Name)}
 			for _, field := range member.Fields {
-				fields = append(fields, field.Name)
+				local := tsBindingName(field.Name)
+				if local != field.Name {
+					fields = append(fields, field.Name+": "+local)
+				} else {
+					fields = append(fields, field.Name)
+				}
 			}
 			if hasNamedOnlyParameters(member.Fields) {
 				g.line(member.Name + ": " + typeParameters + "(" + parameters + "): " + enum.Name + typeArguments + " => {" + tsTrailingComment(member.TrailingComment))
@@ -1693,7 +1698,7 @@ func (g *generator) parameterList(parameters []ir.Parameter, lowerDefaults bool)
 				optionalPositional = true
 				continue
 			}
-			parts = append(parts, parameter.Name+": "+g.tsType(parameter.Type))
+			parts = append(parts, tsBindingName(parameter.Name)+": "+g.tsType(parameter.Type))
 		}
 		if optionalPositional {
 			parts = append(parts, "__trbOptional: unknown[]")
@@ -1705,7 +1710,7 @@ func (g *generator) parameterList(parameters []ir.Parameter, lowerDefaults bool)
 	}
 	parts := make([]string, len(parameters))
 	for i, parameter := range parameters {
-		name := parameter.Name
+		name := tsBindingName(parameter.Name)
 		if parameter.Rest || parameter.KeywordRest {
 			name = "..." + name
 		}
@@ -1730,7 +1735,7 @@ func hasNamedOnlyParameters(parameters []ir.Parameter) bool {
 func (g *generator) enumPayloadBindings(parameters []ir.Parameter) {
 	for _, parameter := range parameters {
 		if parameter.NamedOnly {
-			g.line("let " + parameter.Name + ": " + g.tsType(parameter.Type) + " = __trbNamed." + parameter.Name + ";")
+			g.line("let " + tsBindingName(parameter.Name) + ": " + g.tsType(parameter.Type) + " = __trbNamed." + parameter.Name + ";")
 		}
 	}
 }
@@ -1742,7 +1747,7 @@ func (g *generator) parameterDefaults(method *ir.Method) {
 	}
 	optionalIndex := 0
 	for _, parameter := range parameters {
-		name := parameter.Name
+		name := tsBindingName(parameter.Name)
 		typ := g.tsType(parameter.Type)
 		switch {
 		case !parameter.NamedOnly && parameter.Default != nil:
@@ -1850,6 +1855,7 @@ func (g *generator) identifierName(identifier *ir.Identifier) string {
 		if name := g.lexicalNames[identifier.Name]; name != "" {
 			return name
 		}
+		return tsBindingName(identifier.Name)
 	}
 	if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
 		return "this." + tsMethodName(identifier.Name)
@@ -1919,7 +1925,7 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Lambda:
 		parts := make([]string, len(n.Parameters))
 		for index, parameter := range n.Parameters {
-			parts[index] = parameter.Name + ": " + g.tsType(parameter.Type)
+			parts[index] = tsBindingName(parameter.Name) + ": " + g.tsType(parameter.Type)
 		}
 		child := *g
 		child.b = strings.Builder{}
@@ -2528,9 +2534,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			if branch.PayloadEnum {
 				bindingValue += "." + binding.Field
 			}
-			child.line("const " + binding.Name + " = " + bindingValue + ";")
+			child.line("const " + tsBindingName(binding.Name) + " = " + bindingValue + ";")
 			if namedUnusedBinding(binding.Name) {
-				child.line("void " + binding.Name + ";")
+				child.line("void " + tsBindingName(binding.Name) + ";")
 			}
 		}
 		child.statements(branch.Body)
@@ -2593,11 +2599,11 @@ func (g *generator) transform(transform *ir.Transform) string {
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
 		comparison := tsPortableSortComparison("left.key", "right.key", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
-		return source + ".map((" + transform.Item + ", index) => ({ value: " + transform.Item + ", key: " + result + ", index })).sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; }).map((entry) => entry.value)"
+		return source + ".map((" + tsBindingName(transform.Item) + ", index) => ({ value: " + tsBindingName(transform.Item) + ", key: " + result + ", index })).sort((left, right) => { const compared = " + comparison + "; return compared === 0 ? left.index - right.index : compared; }).map((entry) => entry.value)"
 	case "map", "select", "any?", "all?", "none?", "find", "find_index":
-		parameters := transform.Item
+		parameters := tsBindingName(transform.Item)
 		if transform.WithIndex {
-			parameters += ", " + transform.Index
+			parameters += ", " + tsBindingName(transform.Index)
 		}
 		operation := transform.Operation
 		if operation == "select" {
@@ -2621,7 +2627,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 		}
 		return value
 	case "reduce":
-		return source + ".reduce((" + transform.Accumulator + ", " + transform.Item + ") => " + result + ", " + g.expr(transform.Initial) + ")"
+		return source + ".reduce((" + tsBindingName(transform.Accumulator) + ", " + tsBindingName(transform.Item) + ") => " + result + ", " + g.expr(transform.Initial) + ")"
 	default:
 		return "undefined"
 	}
@@ -2653,14 +2659,14 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	workerAbort := "__trbWorkerAbort" + suffix
 	taskScope := "__trbTaskScope" + suffix
 	index := "__trbIndex" + suffix
-	item := transform.Item
+	item := tsBindingName(transform.Item)
 	if item == "" || item == "_" {
 		item = "__trbItem" + suffix
 	}
 	sourceType := transform.Source.ExprType()
 	sourceIdentity := child.expressionTypeIdentity(sourceType, transform.Source)
 	itemIdentity := projectTypeScriptTypeIdentity(transform.ItemType, sourceType, sourceIdentity)
-	child.exactTypes[item] = cloneTypeScriptTypeIdentity(itemIdentity)
+	child.exactTypes[transform.Item] = cloneTypeScriptTypeIdentity(itemIdentity)
 	limit := "8"
 	if transform.Limit != nil {
 		limit = child.expr(transform.Limit)
@@ -2806,14 +2812,14 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	items := "__trbItems" + suffix
 	result := "__trbResult" + suffix
 	index := "__trbIndex" + suffix
-	item := transform.Item
+	item := tsBindingName(transform.Item)
 	if item == "" {
 		item = "__trbItem" + suffix
 	}
 	sourceType := transform.Source.ExprType()
 	sourceIdentity := child.expressionTypeIdentity(sourceType, transform.Source)
 	itemIdentity := projectTypeScriptTypeIdentity(transform.ItemType, sourceType, sourceIdentity)
-	child.exactTypes[item] = cloneTypeScriptTypeIdentity(itemIdentity)
+	child.exactTypes[transform.Item] = cloneTypeScriptTypeIdentity(itemIdentity)
 	success := transform.ExprType()
 	successIdentity := child.expressionTypeIdentity(success, transform)
 	complete := func(value string) string { return value }
@@ -2828,7 +2834,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	emitBindings := func(includeIndex bool) {
 		child.line("let " + item + " = " + items + "[" + index + "]!;")
 		if includeIndex {
-			name := transform.Index
+			name := tsBindingName(transform.Index)
 			if name == "" {
 				name = "__trbSourceIndex" + suffix
 			}
@@ -2902,7 +2908,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
 		child.indent++
 		emitBindings(false)
-		accumulator := transform.Accumulator
+		accumulator := tsBindingName(transform.Accumulator)
 		if accumulator == "" {
 			accumulator = "__trbAccumulator" + suffix
 		}

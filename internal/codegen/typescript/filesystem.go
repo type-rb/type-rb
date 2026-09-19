@@ -170,7 +170,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.indent--
 	g.line("} catch (" + openError + ") { return " + g.filesystemResultErr(successType, errorType, openOther) + "; }")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
-		binding := block.Bindings[0].Name
+		binding := tsBindingName(block.Bindings[0].Name)
 		g.line("const " + binding + " = { fd: " + handle + ", path: " + path + " };")
 		if namedUnusedBinding(binding) {
 			g.line("void " + binding + ";")
@@ -204,7 +204,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 			if block.Result.Variable.Mutable {
 				keyword = "let"
 			}
-			g.line(keyword + " " + block.Result.Variable.Name + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
+			g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
 		} else if block.Result.Target != nil {
 			g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ";")
 		}
@@ -220,7 +220,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		if block.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + block.Result.Variable.Name + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
+		g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
 	} else if block.Result.Target != nil {
 		g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ".value;")
 	}
