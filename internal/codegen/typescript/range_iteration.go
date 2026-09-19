@@ -37,12 +37,12 @@ func (g *generator) rangeIterate(iteration *ir.Iterate) {
 		g.line("}")
 		value = chunk
 	}
-	if name := iteration.Bindings[0].Name; name != "_" {
+	if name := tsBindingName(iteration.Bindings[0].Name); name != "_" {
 		g.line("let " + name + " = " + value + ";")
 		g.line("void " + name + ";")
 	}
 	if iteration.WithIndex && iteration.Bindings[1].Name != "_" {
-		name := iteration.Bindings[1].Name
+		name := tsBindingName(iteration.Bindings[1].Name)
 		g.line("let " + name + " = " + index + ";")
 		g.line("void " + name + ";")
 	}

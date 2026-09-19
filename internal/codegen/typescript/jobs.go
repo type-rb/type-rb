@@ -83,8 +83,8 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		parameters := make([]string, len(job.Parameters))
 		arguments := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
-			parameters[index] = parameter.Name + ": " + g.tsType(parameter.Type)
-			arguments[index] = parameter.Name
+			parameters[index] = tsBindingName(parameter.Name) + ": " + g.tsType(parameter.Type)
+			arguments[index] = tsBindingName(parameter.Name)
 		}
 		g.line("export namespace " + job.Name + " {")
 		g.indent++

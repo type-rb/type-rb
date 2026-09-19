@@ -388,9 +388,9 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	g.line("const " + raw + ": " + g.runtimeName("DbResult") + "<" + g.tsType(success) + "> = await __trbOrm.withScope(__trbScope, async () => __trbOrm.transaction(" + parent + ", async (" + tx + ") => {")
 	g.indent++
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
-		g.line("const " + block.Bindings[0].Name + " = " + tx + ";")
+		g.line("const " + tsBindingName(block.Bindings[0].Name) + " = " + tx + ";")
 		if namedUnusedBinding(block.Bindings[0].Name) {
-			g.line("void " + block.Bindings[0].Name + ";")
+			g.line("void " + tsBindingName(block.Bindings[0].Name) + ";")
 		}
 	}
 	g.statements(block.Body)
@@ -411,7 +411,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 			if block.Result.Variable.Mutable {
 				keyword = "let"
 			}
-			g.line(keyword + " " + block.Result.Variable.Name + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
+			g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
 		} else if block.Result.Target != nil {
 			g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ";")
 		}
@@ -423,7 +423,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 		if block.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + block.Result.Variable.Name + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
+		g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
 	} else if block.Result.Target != nil {
 		g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ".value;")
 	}
@@ -484,7 +484,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	g.line(after + " = __trbOrm.column(" + batch + "[" + batch + ".length - 1]!, " + strconv.Quote(primary.Name) + ");")
 	binding := "_"
 	if len(iteration.Bindings) > 0 {
-		binding = iteration.Bindings[0].Name
+		binding = tsBindingName(iteration.Bindings[0].Name)
 	}
 	previousBreak := g.breakTarget
 	g.breakTarget = label
@@ -543,7 +543,7 @@ func (g *generator) ormAssignIterationResult(value string, iteration *ir.Iterate
 		if iteration.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + iteration.Result.Variable.Name + ": " + g.tsType(iteration.Result.Type) + " = " + value + ";")
+		g.line(keyword + " " + tsBindingName(iteration.Result.Variable.Name) + ": " + g.tsType(iteration.Result.Type) + " = " + value + ";")
 	case iteration.Result.Target != nil:
 		g.line(g.assignmentTarget(iteration.Result.Target) + " = " + value + ";")
 	}
