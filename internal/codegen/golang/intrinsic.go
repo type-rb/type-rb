@@ -648,18 +648,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.copy":
 		g.requireImport("slices", "")
 		return g.arrayReference("slices.Clone(" + g.arrayValues(arguments[0]) + ")")
-	case "trb.std.arrays.contains":
-		g.requireImport("slices", "")
-		return "slices.Contains(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
-	case "trb.std.arrays.index":
-		valuesType := call.Arguments[0].Value.ExprType()
-		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
-			valuesType = member.Receiver.ExprType()
-		}
-		valueType := valuesType.Args[0]
-		return "func(values " + g.goArraySliceType(valuesType) + ", target " + g.goType(valueType) + ") *int { for index, value := range values { if value == target { result := index; return &result } }; return nil }(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
-	case "trb.std.arrays.count":
-		return "func() int { values := " + g.arrayValues(arguments[0]) + "; target := " + arguments[1] + "; count := 0; for _, value := range values { if value == target { count++ } }; return count }()"
+	case "trb.std.arrays.contains", "trb.std.arrays.index", "trb.std.arrays.count":
+		return g.arrayQueryIntrinsic(name, call, arguments)
 	case "trb.std.arrays.uniq":
 		g.requireImport("slices", "")
 		return "func() " + g.goType(call.ExprType()) + " { result := " + g.goArraySliceType(call.ExprType()) + "{}; for _, value := range " + g.arrayValues(arguments[0]) + " { if !slices.Contains(result, value) { result = append(result, value) } }; return " + g.arrayReference("result") + " }()"

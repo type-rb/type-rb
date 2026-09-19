@@ -589,6 +589,10 @@ switches.
   changes the requested batch size.
 - Array `index(value)` returns the zero-based position of the first value that
   is equal under portable `==`, or `nil` when no value matches.
+- Array `include?`, `index`, and `count` retain the receiver once and evaluate
+  the target argument once before inspecting the Array. Mutations performed
+  by the argument are visible, including growth and shrinking through another
+  alias. Rebinding the receiver variable does not replace the retained Array.
 - String `index(substring)` and `rindex(substring)` search literal substrings
   and return a code-point position as `Integer?`. They return `nil` when the
   substring is absent. An empty substring is found at position zero for
