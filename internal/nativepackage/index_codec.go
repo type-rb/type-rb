@@ -55,6 +55,7 @@ type cacheType struct {
 	ResultBridge *cacheResultBridge `json:"resultBridge,omitempty"`
 	Nullable     bool               `json:"nullable,omitempty"`
 	Readonly     bool               `json:"readonly,omitempty"`
+	NativeNil    string             `json:"nativeNil,omitempty"`
 }
 
 type cacheResultBridge struct {
@@ -201,7 +202,7 @@ func (e *catalogEncoder) encodeType(typ Type, depth int) (int, error) {
 	if depth > maxCacheNesting {
 		return 0, fmt.Errorf("type nesting exceeds %d levels", maxCacheNesting)
 	}
-	encoded := cacheType{Kind: typ.Kind, Name: typ.Name, Nullable: typ.Nullable, Readonly: typ.Readonly}
+	encoded := cacheType{Kind: typ.Kind, Name: typ.Name, Nullable: typ.Nullable, Readonly: typ.Readonly, NativeNil: typ.NativeNil}
 	for _, argument := range typ.Args {
 		argumentID, err := e.encodeType(argument, depth+1)
 		if err != nil {
@@ -431,7 +432,13 @@ func (d *catalogDecoder) decodeTypeAt(id int, context string, depth int) (Type, 
 	}
 	d.typeStates[index] = 1
 	encoded := d.catalog.Types[index]
-	result := Type{Kind: encoded.Kind, Name: encoded.Name, Nullable: encoded.Nullable, Readonly: encoded.Readonly}
+	if encoded.NativeNil != "" && encoded.NativeNil != "null" && encoded.NativeNil != "undefined" && encoded.NativeNil != "null_or_undefined" {
+		return Type{}, fmt.Errorf("%s uses unsupported nativeNil %q", context, encoded.NativeNil)
+	}
+	if encoded.NativeNil != "" && !encoded.Nullable && encoded.Kind != "nil" {
+		return Type{}, fmt.Errorf("%s has nativeNil on a non-nullable type", context)
+	}
+	result := Type{Kind: encoded.Kind, Name: encoded.Name, Nullable: encoded.Nullable, Readonly: encoded.Readonly, NativeNil: encoded.NativeNil}
 	for argumentIndex, argumentID := range encoded.Args {
 		argument, err := d.decodeTypeAt(argumentID, fmt.Sprintf("types[%d].args[%d]", index, argumentIndex), depth+1)
 		if err != nil {

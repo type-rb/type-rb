@@ -1,0 +1,30 @@
+name: Native package index
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nullish-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install the native declaration compiler
+        run: npm install --global typescript@6.0.3
+      - name: Check indexed native nullish calls
+        run: go test -v ./internal/compiler ./internal/nativepackage -run 'TestNativeNullish|TestNativeNil|TestLoadRejectsInvalidAndCyclicNativeCacheReferences'

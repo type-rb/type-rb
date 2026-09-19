@@ -1456,6 +1456,9 @@ func (l *lowerer) reference(node ast.Expression) *ir.Reference {
 	if binding.Export != nil {
 		result.ExportKind = string(binding.Export.Kind)
 		result.Runtime = lowerRuntimeBinding(binding.Export.Runtime)
+		if boundary := binding.Export.NativeNil; boundary != nil {
+			result.NativeNil = &ir.NativeNilBoundary{Arguments: append([]string(nil), boundary.Arguments...), Result: boundary.Result}
+		}
 	}
 	if binding.Member != nil {
 		result.ExportKind = string(binding.Member.Kind)

@@ -20,7 +20,7 @@ import (
 const (
 	// FormatVersion belongs only to the generated TypeScript native type cache.
 	// Package-owned declaration adapters use their independent protocol version.
-	FormatVersion     = 6
+	FormatVersion     = 7
 	indexRelativePath = ".trb/native-types.json"
 )
 
@@ -85,6 +85,9 @@ type Type struct {
 	ResultBridge *ResultBridge `json:"resultBridge,omitempty"`
 	Nullable     bool          `json:"nullable,omitempty"`
 	Readonly     bool          `json:"readonly,omitempty"`
+	// NativeNil retains the native absence representation independently of the
+	// semantic nullable type. Values are null, undefined, or null_or_undefined.
+	NativeNil string `json:"nativeNil,omitempty"`
 }
 
 // ResultBridge describes a package-owned conversion between a native Promise

@@ -920,4 +920,11 @@ type Reference struct {
 	Intrinsic      string
 	ReceiverMethod bool
 	Runtime        *RuntimeBinding
+	NativeNil      *NativeNilBoundary
+}
+
+// NativeNilBoundary preserves checked native call conversions through lowering.
+type NativeNilBoundary struct {
+	Arguments []string
+	Result    string
 }

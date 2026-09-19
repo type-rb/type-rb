@@ -826,6 +826,19 @@ receivers, failure order and examples.
   produces `Err` from `Error.message` or `String(value)`. `Promise<void>` maps
   to `Result<Unit, String>`. If String conversion throws, the error is
   `"Unknown native rejection"`. Other error projections are not yet accepted.
+- Automatically indexed native TypeScript functions preserve their top-level
+  `null` and `undefined` representations at direct call boundaries. Both map to
+  TypeRB `nil`; a returned `undefined` becomes the TypeScript backend's `null`.
+  A `nil` argument becomes `undefined` only when that native parameter accepts
+  `undefined` but not `null`. Parameters accepting both receive `null` for an
+  explicit `nil`. An omitted optional argument stays omitted, so omission and
+  explicit `nil` may have different native behavior. Conversion evaluates each
+  argument once, preserves evaluation order and non-null values, and does not
+  copy arrays or other values. A native function requiring conversion must be
+  called directly; wrap its call in a typed `fn` to pass it as a value. Array
+  elements and callback signatures requiring nested `undefined` conversion are
+  not supported by automatic indexing and produce diagnostics. This rule does
+  not add native object member or JSX property conversion.
 - A package-owned declaration adapter uses a versioned, mode-independent
   semantic catalog selected for one native ecosystem by
   `declarationAdapters.<mode>` in the package manifest. The common host
