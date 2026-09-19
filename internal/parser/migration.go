@@ -12,11 +12,11 @@ const (
 )
 
 func (p *Parser) parseExpression(tokens []token.Token) (ast.Expression, bool) {
-	return parseExpressionTokensReporting(tokens, nil, p.migrationErrorAt)
+	return parseExpressionTokensReporting(tokens, nil, p.migrationErrorAt, p)
 }
 
 func (p *Parser) parseExpressionWithEmbedded(tokens []token.Token, embedded map[int]ast.Expression) (ast.Expression, bool) {
-	return parseExpressionTokensReporting(tokens, embedded, p.migrationErrorAt)
+	return parseExpressionTokensReporting(tokens, embedded, p.migrationErrorAt, p)
 }
 
 func (p *Parser) parseTypeRef(tokens []token.Token) ast.TypeRef {

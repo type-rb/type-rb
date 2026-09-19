@@ -197,8 +197,13 @@ func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.B
 	}
 	prefix := line[:catchAt]
 	wrapper, valueTokens := expressionWrapper(prefix)
+	diagnostics, islands := len(p.diags), len(p.nativeIslands)
 	value, ok := p.parseExpression(valueTokens)
 	if !ok {
+		// A keyword inside another block header is not a catch boundary.
+		// Leave diagnostics to the parser that owns the complete expression.
+		p.diags = p.diags[:diagnostics]
+		p.nativeIslands = p.nativeIslands[:islands]
 		return nil
 	}
 
@@ -747,12 +752,19 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 		return iteration, tail
 	}
 
-	braceAt := blockAt
+	parsed, close := p.parseBraceIteration(line, blockAt, base, iteration)
+	p.pos = next
+	if close < 0 {
+		return parsed, nil
+	}
+	return parsed, append([]token.Token(nil), line[close+1:]...)
+}
+
+func (p *Parser) parseBraceIteration(line []token.Token, braceAt int, base ast.Base, iteration *ast.IterationExpression) (*ast.IterationExpression, int) {
 	close := matchingIndex(line, braceAt, "{", "}")
 	if close < 0 {
 		p.errorAt(line[braceAt].Span, "unterminated iteration block; expected }")
-		p.pos = next
-		return iteration, nil
+		return iteration, -1
 	}
 	parameterEnd := -1
 	for index := braceAt + 1; index < close; index++ {
@@ -786,8 +798,7 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 	iteration.Base = base
 	iteration.SourceSpan.End = line[close].Span.End
 	iteration.Block = block
-	p.pos = next
-	return iteration, append([]token.Token(nil), line[close+1:]...)
+	return iteration, close
 }
 
 func (p *Parser) consumeIterationTerminator() (token.Span, []token.Token) {

@@ -206,7 +206,7 @@ func (p *jsxParser) expression(source string, relativeStart int) (ast.Expression
 		tokens[index].Span.Start = shiftJSXPosition(tokens[index].Span.Start, base)
 		tokens[index].Span.End = shiftJSXPosition(tokens[index].Span.End, base)
 	}
-	return parseExpressionTokensReporting(tokens, nil, p.report)
+	return parseExpressionTokensReporting(tokens, nil, p.report, nil)
 }
 
 func shiftJSXPosition(position, base token.Position) token.Position {
