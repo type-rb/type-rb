@@ -1329,15 +1329,12 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	if err != nil {
 		return Value{}, err
 	}
-	items, err := e.materializeIterable(source)
-	if err != nil {
-		return Value{}, err
-	}
-	if node.Operation == "concurrent_map" {
-		return e.concurrentMap(node, items, module, sc)
-	}
 	if node.Operation == "reduce" {
 		accumulator, err := e.expression(node.Initial, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		items, err := e.materializeIterable(source)
 		if err != nil {
 			return Value{}, err
 		}
@@ -1355,6 +1352,13 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 		}
 		accumulator.Type = node.ExprType()
 		return accumulator, nil
+	}
+	items, err := e.materializeIterable(source)
+	if err != nil {
+		return Value{}, err
+	}
+	if node.Operation == "concurrent_map" {
+		return e.concurrentMap(node, items, module, sc)
 	}
 	if node.Operation == "sort_by" || node.Operation == "sort_by_descending" {
 		type decoratedValue struct {

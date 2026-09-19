@@ -710,15 +710,18 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 }
 
 func (g *generator) iterableExpr(expression ir.Expression) string {
-	value := g.expr(expression)
-	if expression.ExprType().Kind == types.Array {
+	return g.iterableValue(g.expr(expression), expression.ExprType())
+}
+
+func (g *generator) iterableValue(value string, typ types.Type) string {
+	if typ.Kind == types.Array {
 		return g.arrayValues(value)
 	}
-	if expression.ExprType().Kind == types.Iterable {
-		element := g.goType(expression.ExprType().Args[0])
-		return "func(source " + g.goType(expression.ExprType()) + ") []" + element + " { values := []" + element + "{}; for value := range source { values = append(values, value) }; return values }(" + value + ")"
+	if typ.Kind == types.Iterable {
+		element := g.goType(typ.Args[0])
+		return "func(source " + g.goType(typ) + ") []" + element + " { values := []" + element + "{}; for value := range source { values = append(values, value) }; return values }(" + value + ")"
 	}
-	if expression.ExprType().Kind != types.Range {
+	if typ.Kind != types.Range {
 		return value
 	}
 	return "func(bounds [3]int) []int { start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; values := []int{}; for current := start; current < end; current++ { values = append(values, current) }; if !exclusive && start <= end { values = append(values, end) }; return values }(" + value + ")"
@@ -2298,7 +2301,12 @@ func (g *generator) transform(transform *ir.Transform) string {
 	if strings.HasPrefix(transform.Item, "_") {
 		itemUse = "_ = " + item + "; "
 	}
-	source := g.iterableExpr(transform.Source)
+	// Retain reduce's receiver before its initial argument, but traverse it only
+	// after that argument completes (including Array changes made by it).
+	source := g.expr(transform.Source)
+	if transform.Operation != "reduce" {
+		source = g.iterableValue(source, transform.Source.ExprType())
+	}
 	value := g.transformResult(transform)
 	switch transform.Operation {
 	case "sort_by", "sort_by_descending":
@@ -2369,7 +2377,7 @@ func (g *generator) transform(transform *ir.Transform) string {
 				binding += "_ = " + accumulator + "; "
 			}
 		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + result + " := " + g.expr(transform.Initial) + "; for _, " + item + " := range " + source + " { " + itemUse + binding + result + " = " + value + " }; return " + result + " }()"
+		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := " + g.expr(transform.Initial) + "; for _, " + item + " := range " + g.iterableValue(items, transform.Source.ExprType()) + " { " + itemUse + binding + result + " = " + value + " }; return " + result + " }()"
 	default:
 		return "nil"
 	}

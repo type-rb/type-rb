@@ -1,0 +1,65 @@
+def source(mut events: Array<Integer>): Array<Integer>
+	events.push(1)
+	return [3, 4]
+end
+
+def initial(mut events: Array<Integer>): Integer
+	events.push(2)
+	return 10
+end
+
+def bounds(mut events: Array<Integer>): Range<Integer>
+	events.push(1)
+	return 3..4
+end
+
+def grow(mut values: Array<Integer>): Integer
+	values.push(4)
+	values[0] = 2
+	return 10
+end
+
+def empty_source(mut events: Array<Integer>): Array<Integer>
+	events.push(1)
+	return []
+end
+
+def main()
+	mut events: Array<Integer> := []
+	array_total := source(events).reduce(initial(events)) do |sum, item|
+		events.push(item)
+		sum + item
+	end
+	puts(array_total)
+	events.each { |event| puts(event) }
+	events = []
+	range_total := bounds(events).reduce(initial(events)) do |sum, item|
+		events.push(item)
+		sum + item
+	end
+	puts(range_total)
+	events.each { |event| puts(event) }
+	events = []
+	empty_total := empty_source(events).reduce(initial(events)) do |sum, item|
+		events.push(99)
+		sum + item
+	end
+	puts(empty_total)
+	events.each { |event| puts(event) }
+	mut values := [3]
+	grown_total := values.reduce(grow(values)) { |sum, item| sum + item }
+	puts(grown_total)
+	puts(values.size())
+	events = []
+	conditional_total := source(events).reduce(true ? initial(events) : 0) { |sum, item| sum + item }
+	puts(conditional_total)
+	events.each { |event| puts(event) }
+	mut retained := [3, 4]
+	replace := fn(): Integer
+		retained = [100]
+		return 10
+	end
+	retained_total := retained.reduce(replace()) { |sum, item| sum + item }
+	puts(retained_total)
+	puts(retained[0])
+end

@@ -1109,7 +1109,14 @@ handler runs. Ordinary call blocks are not value-producing unless their
 package declaration explicitly provides structured lowering.
 
 Portable Array transformations `map`, `select`, and `reduce` use the same
-typed-IR boundary. The short-circuit predicates `any?`, `all?`, and `none?`
+typed-IR boundary. `reduce` evaluates its source once, then its initial argument
+once, before traversal begins. Changes to the retained source made by the
+initial argument are visible to traversal. An empty source still evaluates the
+initial argument and returns its value without invoking the block. Failure in
+the source prevents the initial argument from running; failure in the initial
+argument prevents traversal.
+
+The short-circuit predicates `any?`, `all?`, and `none?`
 and searches `find` and `find_index` require one non-nullable Boolean result
 expression at the end of their block. Transformation blocks may contain
 ordinary statements before that final expression; their locals are scoped to
