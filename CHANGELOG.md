@@ -80,6 +80,11 @@ This file records user-visible changes in stable TypeRB releases.
   example explain how to choose and validate integration boundaries.
   ([#726](https://github.com/type-rb/type-rb/pull/726))
 
+### Ruby toolchain
+
+- New Ruby projects default to Ruby 4.0.7, and the repository development
+  toolchain uses the same version.
+
 ### REPL
 
 - Generated type imports no longer make submissions skip or repeat statements.
