@@ -1118,6 +1118,32 @@ initial argument and returns its value without invoking the block. Failure in
 the source prevents the initial argument from running; failure in the initial
 argument prevents traversal.
 
+Sequential Array transformations retain their source reference once and use
+the same live traversal as `each`: before each invocation, read the current
+length and the element at the next nonnegative index. This applies to `map`,
+`select`, `reduce`, the predicates and searches below, and key collection for
+`sort_by` and `sort_by_descending`. Appended elements are visited, replacement
+of unvisited elements is visible, and shortening can end traversal. Insertion
+or removal before the next index can cause a value to be revisited or skipped.
+Rebinding the source variable does not replace the retained Array. Suspending
+and synchronous blocks follow the same rule.
+
+Each invocation retains the visited element before running the block.
+`select` and `find` return that value when their predicate matches, and keyed
+sorting pairs that value with the block's resulting key. Reassigning the block
+parameter or replacing the source entry does not replace the retained value;
+mutation of a referenced object remains shared. `with_index` binds the current
+position separately from the traversal cursor, so reassigning its block
+parameter does not affect traversal. Key collection completes before sorting,
+and equal keys retain visitation order.
+
+Readonly bindings restrict mutation through that reference; they do not freeze
+the Array, copy it, or hide changes made through a mutable alias. These rules
+therefore apply equally to traversal through a readonly alias. To isolate the
+outer sequence from mutations to the original Array, traverse an explicit
+`dup`; its referenced elements remain shallowly shared. `concurrent_map` has
+its separate concurrency and ownership contract below.
+
 The short-circuit predicates `any?`, `all?`, and `none?`
 and searches `find` and `find_index` require one non-nullable Boolean result
 expression at the end of their block. Transformation blocks may contain
