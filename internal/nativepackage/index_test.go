@@ -20,6 +20,32 @@ func TestNativeTypeRoundTripsFunctionTypes(t *testing.T) {
 	}
 }
 
+func TestNativeNilRepresentationsSurviveCachePooling(t *testing.T) {
+	root := t.TempDir()
+	exports := map[string]Export{}
+	for name, representation := range map[string]string{"portable": "", "null": "null", "undefined": "undefined", "both": "null_or_undefined"} {
+		typ := Type{Kind: "string", Name: "String", Nullable: true, NativeNil: representation}
+		exports[name] = Export{Kind: "function", Type: typ, Parameters: []Type{typ}, Required: 1}
+	}
+	catalog := &Catalog{Dependencies: map[string]string{"native": "1"}, Modules: map[string]Module{"native": {Exports: exports}}}
+	if err := Write(root, catalog); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(root, catalog.Dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, original := range exports {
+		restored := loaded.Modules["native"].Exports[name]
+		if restored.Type.NativeNil != original.Type.NativeNil || restored.Parameters[0].NativeNil != original.Type.NativeNil {
+			t.Fatalf("cache conflated the %s native representation: %#v", name, restored)
+		}
+		if !types.Equivalent(restored.Type.Semantic(), types.Type{Kind: types.String, Name: "String", Nullable: true}) {
+			t.Fatalf("native representation changed the portable type: %#v", restored.Type)
+		}
+	}
+}
+
 func TestCatalogOwnsOnlyDependenciesAndRuntimeBackedSemanticModules(t *testing.T) {
 	catalog := &Catalog{
 		Dependencies: map[string]string{"native": "1.0.0"},
@@ -290,6 +316,16 @@ func TestLoadRejectsInvalidAndCyclicNativeCacheReferences(t *testing.T) {
 		data string
 		want string
 	}{
+		{
+			name: "unknown native nil representation",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"string","nullable":true,"nativeNil":"missing"}],"modules":{}}`, FormatVersion),
+			want: "unsupported nativeNil",
+		},
+		{
+			name: "native nil on non-nullable type",
+			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"string","nativeNil":"undefined"}],"modules":{}}`, FormatVersion),
+			want: "nativeNil on a non-nullable type",
+		},
 		{
 			name: "unknown type",
 			data: fmt.Sprintf(`{"formatVersion":%d,"dependencies":{"ui":"1"},"types":[{"kind":"array","args":[2]}],"modules":{}}`, FormatVersion),

@@ -76,6 +76,14 @@ type Export struct {
 	// provider-only structural record used to describe another declaration.
 	NativeExported bool
 	Runtime        *RuntimeBinding
+	NativeNil      *NativeNilBoundary
+}
+
+// NativeNilBoundary describes the representation at an indexed native call.
+// It does not add a second absence value to the TypeRB type system.
+type NativeNilBoundary struct {
+	Arguments []string
+	Result    string
 }
 
 type RuntimeBinding struct {
@@ -1419,6 +1427,17 @@ func nativeExport(name string, exported nativepackage.Export, nativeExported boo
 	}
 	if exported.ResultBridge != nil {
 		result.CallResultBridge = NativeCallResultBridge{Kind: exported.ResultBridge.Kind, Error: exported.ResultBridge.Error.Semantic()}
+	}
+	if exported.Kind == "function" {
+		boundary := &NativeNilBoundary{Result: exported.Type.NativeNil}
+		needed := exported.Type.NativeNil == "undefined" || exported.Type.NativeNil == "null_or_undefined"
+		for _, parameter := range exported.Parameters {
+			boundary.Arguments = append(boundary.Arguments, parameter.NativeNil)
+			needed = needed || parameter.NativeNil == "undefined"
+		}
+		if needed {
+			result.NativeNil = boundary
+		}
 	}
 	if exported.AliasTarget != nil {
 		result.AliasTarget = exported.AliasTarget.Semantic()

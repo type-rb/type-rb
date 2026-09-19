@@ -6404,6 +6404,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if binding, ok := c.importedValueAt(n.Name, n.Span()); ok {
 			typ = c.resolvedBindingType(binding)
 			c.recordReference(n, binding)
+			if binding.Export != nil && binding.Export.NativeNil != nil && c.directCallCallee != n {
+				c.error(n.Span(), fmt.Sprintf("native function %s requires null/undefined conversion and must be called directly; wrap the call in a typed fn to pass it as a value", n.Name))
+				typ = invalidType()
+			}
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
 			typ = member.Return
 			c.external[n] = member

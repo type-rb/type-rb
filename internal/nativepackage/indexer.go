@@ -151,8 +151,13 @@ function sameType(left, right) {
 	return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function nullable(type) {
-	return { ...type, nullable: true };
+function nullable(type, nativeNil) {
+	return { ...type, nullable: true, ...(nativeNil ? { nativeNil } : {}) };
+}
+
+function containsNativeUndefined(type) {
+	return type.nativeNil === "undefined" || type.nativeNil === "null_or_undefined" ||
+		(type.args || []).some(containsNativeUndefined);
 }
 
 function sourceLooksReact(symbol) {
@@ -197,13 +202,16 @@ function portableType(type, state, depth = 0) {
 	if (type.flags & ts.TypeFlags.StringLike) return { type: wire("string", "String") };
 	if (type.flags & ts.TypeFlags.NumberLike) return { type: wire("float", "Float") };
 	if (type.flags & ts.TypeFlags.BooleanLike) return { type: wire("bool", "Boolean") };
-	if (type.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) return { type: wire("nil", "Nil") };
+	if (type.flags & ts.TypeFlags.Null) return { type: { ...wire("nil", "Nil"), nativeNil: "null" } };
+	if (type.flags & ts.TypeFlags.Undefined) return { type: { ...wire("nil", "Nil"), nativeNil: "undefined" } };
 	if (type.isUnion?.()) {
-		let isNullable = false;
+		let hasNull = false;
+		let hasUndefined = false;
 		const alternatives = [];
 		for (const alternative of type.types) {
 			if (alternative.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) {
-				isNullable = true;
+				hasNull ||= !!(alternative.flags & ts.TypeFlags.Null);
+				hasUndefined ||= !!(alternative.flags & ts.TypeFlags.Undefined);
 				continue;
 			}
 			if (alternative.flags & ts.TypeFlags.Never) continue;
@@ -211,15 +219,17 @@ function portableType(type, state, depth = 0) {
 			if (converted.error) return converted;
 			if (!alternatives.some((existing) => sameType(existing, converted.type))) alternatives.push(converted.type);
 		}
-		if (alternatives.length === 0) return { error: "contains no representable union alternative" };
-		if (alternatives.length === 1) return { type: isNullable ? nullable(alternatives[0]) : alternatives[0] };
-		return { type: wire("union", "Union", alternatives, isNullable) };
+		const nativeNil = hasUndefined ? (hasNull ? "null_or_undefined" : "undefined") : (hasNull ? "null" : "");
+		if (alternatives.length === 0) return nativeNil ? { type: { ...wire("nil", "Nil"), nativeNil } } : { error: "contains no representable union alternative" };
+		const result = alternatives.length === 1 ? alternatives[0] : wire("union", "Union", alternatives);
+		return { type: nativeNil ? nullable(result, nativeNil) : result };
 	}
 	if (checker.isArrayType(type)) {
 		const arguments = checker.getTypeArguments(type);
 		if (arguments.length !== 1) return { error: "has an unsupported Array shape" };
 		const element = portableType(arguments[0], state, depth + 1);
 		if (element.error) return element;
+		if (containsNativeUndefined(element.type)) return { error: "uses undefined in an Array element; native element conversion is not supported" };
 		return { type: wire("array", "Array", [element.type]) };
 	}
 	if (checker.isTupleType(type)) return { error: "uses a TypeScript tuple" };
@@ -235,10 +245,12 @@ function portableType(type, state, depth = 0) {
 			if (declaration?.dotDotDotToken) return { error: "uses rest callback parameters" };
 			const converted = portableType(checker.getTypeOfSymbolAtLocation(parameter, declaration || state.fallbackNode), state, depth + 1);
 			if (converted.error) return converted;
+			if (containsNativeUndefined(converted.type)) return { error: "uses undefined in a callback parameter; native callback conversion is not supported" };
 			parameters.push(converted.type);
 		}
 		const returned = portableType(checker.getReturnTypeOfSignature(signature), state, depth + 1);
 		if (returned.error) return returned;
+		if (containsNativeUndefined(returned.type)) return { error: "uses undefined in a callback return; native callback conversion is not supported" };
 		return { type: wire("function", "Function", [...parameters, returned.type]) };
 	}
 	return { error: "uses unsupported TypeScript type " + checker.typeToString(type) };

@@ -68,6 +68,7 @@ type generator struct {
 	sourceRecorder   *sourcemap.Recorder
 	sourcePath       string
 	checkedInteger   bool
+	nativeUndefined  bool
 }
 
 // typescriptTypeIdentity keeps the declaration owner that the portable type
@@ -226,6 +227,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	if g.checkedInteger || strings.Contains(g.b.String(), "__trbInteger") {
 		g.checkedIntegerRuntimeSupport()
+	}
+	if g.nativeUndefined {
+		g.line("function __trbNativeUndefined<T>(value: T) { return value ?? undefined; }")
 	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
@@ -2102,6 +2106,23 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if n.NewtypeMethod != nil {
 			return g.newtypeMethodCall(n, parts)
+		}
+		if reference := expressionReference(n.Callee); reference != nil && reference.NativeNil != nil {
+			for index, representation := range reference.NativeNil.Arguments {
+				if index < len(parts) && representation == "undefined" {
+					g.nativeUndefined = true
+					parts[index] = "__trbNativeUndefined(" + parts[index] + ")"
+				}
+			}
+			callee := g.expr(n.Callee)
+			if identifier, ok := n.Callee.(*ir.Identifier); ok {
+				callee = g.identifierName(identifier)
+			}
+			value := callee + "(" + strings.Join(parts, ", ") + ")"
+			if reference.NativeNil.Result == "undefined" || reference.NativeNil.Result == "null_or_undefined" {
+				value = "(" + value + " ?? null)"
+			}
+			return value
 		}
 		if reference := expressionReference(n.Callee); reference != nil && reference.Runtime != nil {
 			parts = g.executionArguments(n, parts)
