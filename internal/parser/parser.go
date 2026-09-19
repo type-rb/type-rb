@@ -389,17 +389,7 @@ func (p *Parser) tryCallBlockStatement(line []token.Token, next int, base ast.Ba
 	}
 	block := &ast.BlockExpression{Base: ast.Base{SourceSpan: token.Span{Start: line[blockAt].Span.Start, End: line[close].Span.End}}, Parameters: parameters, Brace: true}
 	if secondPipe >= 0 {
-		for _, part := range splitTopLevel(line[secondPipe+1:close], ";") {
-			if len(part) == 0 {
-				continue
-			}
-			statement := p.inlineBlockStatement(part)
-			if statement == nil {
-				p.errorAt(spanOf(part), "unsupported statement in inline call block")
-				continue
-			}
-			block.Body = append(block.Body, statement)
-		}
+		block.Body = p.braceBody(line[secondPipe].Span.End, line[close].Span.Start)
 	}
 	call.SourceSpan.End = line[close].Span.End
 	call.Block = block
@@ -554,7 +544,18 @@ func (p *Parser) consumeBlockTerminator() (token.Span, *catchHeader) {
 func (p *Parser) controlFlowExpressionTokens(line []token.Token, next int, base ast.Base, first int) ([]token.Token, map[int]ast.Expression, ast.Base, bool) {
 	controlAt := -1
 	construct := ""
-	for index, item := range line {
+	for index := 0; index < len(line); index++ {
+		item := line[index]
+		// A brace block owns its statements. Do not lift a nested condition
+		// out as the result expression of the enclosing call or iteration.
+		if item.Lexeme == "{" && index+1 < len(line) && line[index+1].Lexeme == "|" {
+			close := matchingIndex(line, index, "{", "}")
+			if close < 0 {
+				break
+			}
+			index = close
+			continue
+		}
 		if index >= first && (item.Lexeme == "case" || item.Lexeme == "if") {
 			controlAt = index
 			construct = item.Lexeme
@@ -780,17 +781,7 @@ func (p *Parser) parseIterationBlock(line []token.Token, next int, base ast.Base
 	}
 	block := &ast.BlockExpression{Base: ast.Base{SourceSpan: token.Span{Start: line[braceAt].Span.Start, End: line[close].Span.End}}, Parameters: parameters, Brace: true}
 	if secondPipe >= 0 {
-		for _, part := range splitTopLevel(line[secondPipe+1:close], ";") {
-			if len(part) == 0 {
-				continue
-			}
-			statement := p.inlineBlockStatement(part)
-			if statement == nil {
-				p.errorAt(spanOf(part), "unsupported statement in inline iteration block")
-				continue
-			}
-			block.Body = append(block.Body, statement)
-		}
+		block.Body = p.braceBody(line[secondPipe].Span.End, line[close].Span.Start)
 	}
 	iteration.Base = base
 	iteration.SourceSpan.End = line[close].Span.End
@@ -812,36 +803,6 @@ func (p *Parser) consumeIterationTerminator() (token.Span, []token.Token) {
 	}
 	p.pos = next
 	return line[0].Span, append([]token.Token(nil), line[1:]...)
-}
-
-func (p *Parser) inlineBlockStatement(line []token.Token) ast.Statement {
-	base := ast.Base{SourceSpan: spanOf(line)}
-	if line[0].Lexeme == "return" {
-		value, ok := p.parseExpression(line[1:])
-		if len(line) > 1 && !ok {
-			return nil
-		}
-		return &ast.ReturnStatement{Base: base, Value: value}
-	}
-	if line[0].Lexeme == "break" || line[0].Lexeme == "next" {
-		if len(line) != 1 {
-			p.errorAt(spanOf(line), fmt.Sprintf("%s does not take a value", line[0].Lexeme))
-		}
-		if line[0].Lexeme == "break" {
-			return &ast.BreakStatement{Base: base}
-		}
-		return &ast.NextStatement{Base: base}
-	}
-	if variable := p.tryVariable(line, base); variable != nil {
-		return variable
-	}
-	if assignment := p.tryAssignment(line, base); assignment != nil {
-		return assignment
-	}
-	if expression, ok := p.parseExpression(line); ok {
-		return &ast.ExpressionStatement{Base: base, Expression: expression}
-	}
-	return nil
 }
 
 func (p *Parser) blockParameters(tokens []token.Token) ([]string, bool) {

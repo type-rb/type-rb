@@ -17,6 +17,7 @@ func Complete(source string) bool {
 	blocks := 0
 	delimiters := []string{}
 	transferConditions := make(map[int]bool)
+	braceBodies := make(map[int]bool)
 	lineStart := true
 	lineOpenedBlock := false
 	for index, item := range tokens {
@@ -33,7 +34,13 @@ func Complete(source string) bool {
 		if at := conditionalTransferIf(tokens, index); at >= 0 {
 			transferConditions[at] = true
 		}
-		if item.Lexeme == ";" && len(delimiters) == 0 {
+		if item.Lexeme == "{" {
+			if at := braceParameterEnd(tokens, index+1); at >= 0 {
+				braceBodies[at] = true
+			}
+		}
+		statementContext := len(delimiters) == 0 || delimiters[len(delimiters)-1] == "{"
+		if item.Lexeme == ";" && statementContext || braceBodies[index] {
 			lineStart = true
 			lineOpenedBlock = false
 			continue
@@ -53,11 +60,11 @@ func Complete(source string) bool {
 			blocks++
 			lineOpenedBlock = true
 		}
-		if item.Kind == token.Identifier && (item.Lexeme == "fn" || item.Lexeme == "catch") && len(delimiters) == 0 {
+		if item.Kind == token.Identifier && (item.Lexeme == "fn" || item.Lexeme == "catch") && statementContext {
 			blocks++
 			lineOpenedBlock = true
 		}
-		if item.Lexeme == "do" && len(delimiters) == 0 && !lineOpenedBlock {
+		if item.Lexeme == "do" && statementContext && !lineOpenedBlock {
 			blocks++
 			lineOpenedBlock = true
 		}
@@ -72,6 +79,25 @@ func Complete(source string) bool {
 		}
 	}
 	return blocks == 0 && len(delimiters) == 0 && !strings.HasSuffix(strings.TrimSpace(source), "\\")
+}
+
+func braceParameterEnd(tokens []token.Token, start int) int {
+	for start < len(tokens) && (tokens[start].Kind == token.Newline || tokens[start].Kind == token.Comment) {
+		start++
+	}
+	if start >= len(tokens) || tokens[start].Lexeme != "|" {
+		return -1
+	}
+	for at := start + 1; at < len(tokens); at++ {
+		item := tokens[at]
+		if item.Lexeme == "|" {
+			return at
+		}
+		if item.Kind != token.Identifier && item.Kind != token.Newline && item.Kind != token.Comment && item.Lexeme != "," {
+			return -1
+		}
+	}
+	return -1
 }
 
 // A transfer's trailing condition does not open an end-delimited block. Only
