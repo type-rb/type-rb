@@ -2,6 +2,100 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.8 - 2026-09-19
+
+### Collections and expressions
+
+- Sequential Array transformations observe appended elements and changes to
+  unvisited entries consistently across Go, Ruby, TypeScript, and the REPL.
+  Rebinding the source variable does not replace the active traversal, and
+  selection and search return the visited value even when the block replaces
+  its parameter or the source entry.
+  ([#729](https://github.com/type-rb/type-rb/pull/729))
+- Range transformations stream their bounds without allocating a source Array.
+  Short-circuit predicates and searches can finish after a few visits even on
+  very large ranges. Reduce evaluates its source before its initial value,
+  preserving initial-value mutations and stopping if source evaluation fails.
+  ([#732](https://github.com/type-rb/type-rb/pull/732),
+  [#722](https://github.com/type-rb/type-rb/pull/722))
+- Collection blocks and full `if`/`case` expressions work inside calls,
+  collection literals, and compound expressions. Brace blocks accept ordinary
+  nested statements and newline-separated bodies. Function types can appear
+  directly inside nested collection annotations without an alias.
+  ([#730](https://github.com/type-rb/type-rb/pull/730),
+  [#691](https://github.com/type-rb/type-rb/pull/691),
+  [#723](https://github.com/type-rb/type-rb/pull/723),
+  [#724](https://github.com/type-rb/type-rb/pull/724))
+
+### Nullable values and checking
+
+- Nullable narrowing no longer survives conditional joins, loop iterations,
+  closure boundaries, or callback calls when the guarded mutable binding can
+  be replaced. Fresh guards establish the current value's type; facts about
+  immutable captures and unrelated bindings remain usable.
+  ([#700](https://github.com/type-rb/type-rb/pull/700),
+  [#695](https://github.com/type-rb/type-rb/pull/695),
+  [#717](https://github.com/type-rb/type-rb/pull/717),
+  [#719](https://github.com/type-rb/type-rb/pull/719))
+- Nullable Integer-to-Float conversions preserve absence and widen present
+  values consistently. Assigning `nil` no longer causes Go output to dereference
+  an absent payload in comparisons, arguments, or returns.
+  ([#692](https://github.com/type-rb/type-rb/pull/692),
+  [#696](https://github.com/type-rb/type-rb/pull/696))
+
+### Types and generated programs
+
+- Transparent aliases retain their declaring type identities across imports.
+  Aliased record construction preserves fields, defaults, and concrete generic
+  arguments, and generic identity aliases generate valid Go code.
+  ([#715](https://github.com/type-rb/type-rb/pull/715),
+  [#709](https://github.com/type-rb/type-rb/pull/709),
+  [#712](https://github.com/type-rb/type-rb/pull/712))
+- Generic functions and methods can return correctly checked function values.
+  Explicit type arguments on local values that shadow generic functions are
+  rejected consistently. Generic enum patterns work through import aliases,
+  and recursive enum payloads compile in Go, including cycles through records
+  and generic wrappers.
+  ([#716](https://github.com/type-rb/type-rb/pull/716),
+  [#705](https://github.com/type-rb/type-rb/pull/705),
+  [#704](https://github.com/type-rb/type-rb/pull/704),
+  [#702](https://github.com/type-rb/type-rb/pull/702))
+- Record field defaults support full control expressions and references to
+  preceding fields. Standalone value expressions preserve their side effects
+  in Go and TypeScript output. Valid TypeRB local and parameter names that are
+  reserved in JavaScript are emitted safely, including references in closures.
+  ([#706](https://github.com/type-rb/type-rb/pull/706),
+  [#703](https://github.com/type-rb/type-rb/pull/703),
+  [#727](https://github.com/type-rb/type-rb/pull/727))
+
+### Native TypeScript packages
+
+- Automatically indexed native calls convert between TypeRB `nil` and native
+  `undefined` according to the declared signature. Unsafe nested conversions
+  and unwrapped function values that require conversion produce diagnostics.
+  ([#728](https://github.com/type-rb/type-rb/pull/728))
+- Unsupported default exports report their unsupported shape instead of
+  appearing missing. Regenerate native indexes with `trb install` after
+  upgrading. A native adapter authoring guide and pinned browser conformance
+  example explain how to choose and validate integration boundaries.
+  ([#726](https://github.com/type-rb/type-rb/pull/726))
+
+### Ruby toolchain
+
+- New Ruby projects default to Ruby 4.0.7, and the repository development
+  toolchain uses the same version.
+
+### REPL
+
+- Generated type imports no longer make submissions skip or repeat statements.
+  Completed brace blocks with inline controls execute without requesting more
+  input. After failed or interrupted execution, stale nullable facts are
+  discarded while completed effects remain visible; statically rejected inputs
+  preserve the previous flow facts.
+  ([#710](https://github.com/type-rb/type-rb/pull/710),
+  [#723](https://github.com/type-rb/type-rb/pull/723),
+  [#698](https://github.com/type-rb/type-rb/pull/698))
+
 ## 0.4.7 - 2026-09-14
 
 ### Language and checking

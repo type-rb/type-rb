@@ -19,7 +19,7 @@ const ConfigName = "trbconfig.jsonc"
 const DefaultGoVersion = "1.27"
 
 // DefaultRubyVersion is the current Ruby toolchain supported by TypeRB.
-const DefaultRubyVersion = "4.0.6"
+const DefaultRubyVersion = "4.0.7"
 
 // DefaultTypeScriptVersion follows the latest compatible TypeScript 6 patch.
 const DefaultTypeScriptVersion = "^6.0.0"
