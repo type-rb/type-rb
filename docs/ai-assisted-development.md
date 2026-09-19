@@ -72,6 +72,16 @@ For a compiler or language change, use the repository's `develop-typerb` skill
 instead. It carries the additional AST, checker, typed IR, backend, formatter,
 and conformance requirements that application work should not load by default.
 
+For native package integration, follow the
+[adapter authoring guide](guides/native-package-adapters.md):
+
+```text
+Use $use-typerb and the native adapter authoring guide. Pin the native package
+and a small workflow, try direct imports first, and classify the diagnostics.
+Use the smallest supported boundary, then verify both TypeRB and native
+conformance. Record unsupported shapes without Any or generated-file edits.
+```
+
 ## Current limits
 
 The compiler service and LSP already expose structured diagnostics,

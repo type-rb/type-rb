@@ -168,6 +168,53 @@ func TestBuildRejectsStaleNativeTypeScriptPackageIndex(t *testing.T) {
 	}
 }
 
+func TestCheckReportsUnsupportedNativeDefaultExport(t *testing.T) {
+	root := t.TempDir()
+	config := project.New(root, "typescript")
+	config.SourceDir = "src"
+	config.PackageManagement = project.ExternalPackages
+	config.Dependencies["native-client"] = "1.0.0"
+	if err := config.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := "import { default as client } from \"native-client\"\n"
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := nativepackage.Empty(config.Dependencies)
+	catalog.Modules["native-client"] = nativepackage.Module{
+		Exports: map[string]nativepackage.Export{},
+		Unsupported: map[string]string{
+			"default": "uses a default export; automatic indexing supports named exports only",
+		},
+	}
+	if err := nativepackage.Write(root, catalog); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+	if status := command.Run([]string{"check", "--diagnostic-format", "json", "--config", config.Path}); status != 1 {
+		t.Fatalf("status=%d stderr=%s", status, stderr.String())
+	}
+	var report struct {
+		Diagnostics []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Diagnostics) != 1 || report.Diagnostics[0].Code != "TRB2000" ||
+		!strings.Contains(report.Diagnostics[0].Message, "default export; automatic indexing supports named exports only") ||
+		strings.Contains(report.Diagnostics[0].Message, "does not export") {
+		t.Fatalf("unexpected default export diagnostic: %s", stdout.String())
+	}
+}
+
 func TestInstallAppliesTypeRBPackageDeclarationAdapter(t *testing.T) {
 	root := t.TempDir()
 	config := project.New(root, "typescript")
