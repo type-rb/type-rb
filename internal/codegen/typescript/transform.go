@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) transform(transform *ir.Transform) string {
@@ -25,6 +26,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 	items := "__trbItems" + suffix
 	result := "__trbResult" + suffix
 	index := "__trbIndex" + suffix
+	current := "__trbCurrent" + suffix
 	visited := "__trbVisited" + suffix
 	item := tsBindingName(transform.Item)
 	if item == "" {
@@ -43,10 +45,19 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		child.line("((): " + child.tsTypeWithIdentity(success, successIdentity) + " => {")
 	}
 	child.indent++
-	child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
+	loop := "for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {"
+	valueAt := items + "[" + index + "]!"
+	if sourceType.Kind == types.Range {
+		child.line("const " + items + " = " + child.expr(transform.Source) + ";")
+		condition := current + " < " + items + "[1] || (" + current + " === " + items + "[1] && !" + items + "[2])"
+		loop = "for (let " + current + " = " + items + "[0], " + index + " = 0; " + condition + "; " + current + " += 1, " + index + " += 1) {"
+		valueAt = current
+	} else {
+		child.line("const " + items + " = " + child.iterableExpr(transform.Source) + ";")
+	}
 
 	emitBindings := func(includeIndex bool) {
-		child.line("const " + visited + " = " + items + "[" + index + "]!;")
+		child.line("const " + visited + " = " + valueAt + ";")
 		child.line("let " + item + " = " + visited + ";")
 		if includeIndex {
 			name := tsBindingName(transform.Index)
@@ -67,7 +78,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		itemType := child.tsTypeWithIdentity(transform.ItemType, itemIdentity)
 		decorated := "__trbDecorated" + suffix
 		child.line("const " + decorated + ": Array<{ value: " + itemType + "; key: " + keyType + "; index: number }> = [];")
-		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.line(loop)
 		child.indent++
 		emitBindings(false)
 		value := emitValue()
@@ -79,7 +90,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		child.line("return " + complete(decorated+".map((entry) => entry.value)") + ";")
 	case "map", "select":
 		child.line("const " + result + ": " + child.tsTypeWithIdentity(success, successIdentity) + " = [];")
-		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.line(loop)
 		child.indent++
 		emitBindings(transform.WithIndex)
 		value := emitValue()
@@ -92,7 +103,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		child.line("}")
 		child.line("return " + complete(result) + ";")
 	case "any?", "all?", "none?", "find", "find_index":
-		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.line(loop)
 		child.indent++
 		emitBindings(false)
 		value := emitValue()
@@ -120,7 +131,7 @@ func (g *generator) imperativeTransform(transform *ir.Transform, suspends bool) 
 		}
 	case "reduce":
 		child.line("let " + result + " = " + child.expr(transform.Initial) + ";")
-		child.line("for (let " + index + " = 0; " + index + " < " + items + ".length; " + index + " += 1) {")
+		child.line(loop)
 		child.indent++
 		emitBindings(false)
 		accumulator := tsBindingName(transform.Accumulator)

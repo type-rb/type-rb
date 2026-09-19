@@ -1130,6 +1130,10 @@ chaining. Both brace and `do/end` blocks retain ordinary statement bodies in
 these positions. For example, `puts([1, 2].map { |value| value * 2 }[1])`
 prints `4`.
 
+Sequential Range transformations traverse retained bounds directly. They do not
+first expand the Range into an Array. Short-circuit operations stop before
+visiting later elements; `map` and `select` allocate only their output sequence.
+
 `reduce` evaluates its source once, then its initial argument
 once, before traversal begins. Changes to the retained source made by the
 initial argument are visible to traversal. An empty source still evaluates the
