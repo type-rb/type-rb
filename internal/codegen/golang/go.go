@@ -2285,104 +2285,6 @@ func (g *generator) caseExpression(node *ir.Case) string {
 	return strings.TrimSpace(child.b.String())
 }
 
-func (g *generator) transform(transform *ir.Transform) string {
-	if transform.Operation == "concurrent_map" {
-		return g.concurrentMap(transform)
-	}
-	g.temporary++
-	suffix := strconv.Itoa(g.temporary)
-	items := "__trbItems" + suffix
-	result := "__trbResult" + suffix
-	item := g.bindingIdentifier(transform.Item)
-	if item == "" || item == "_" {
-		item = "__trbItem" + suffix
-	}
-	itemUse := ""
-	if strings.HasPrefix(transform.Item, "_") {
-		itemUse = "_ = " + item + "; "
-	}
-	// Retain reduce's receiver before its initial argument, but traverse it only
-	// after that argument completes (including Array changes made by it).
-	source := g.expr(transform.Source)
-	if transform.Operation != "reduce" {
-		source = g.iterableValue(source, transform.Source.ExprType())
-	}
-	value := g.transformResult(transform)
-	switch transform.Operation {
-	case "sort_by", "sort_by_descending":
-		g.requireImport("slices", "")
-		keyType := transform.Result.ExprType()
-		decorated := "__trbDecorated" + suffix
-		index := "__trbIndex" + suffix
-		comparison := g.portableSortComparison("left.key", "right.key", keyType, transform.Operation == "sort_by_descending")
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; type " + decorated + " struct { value " + g.goType(transform.ItemType) + "; key " + g.goType(keyType) + " }; ordered := make([]" + decorated + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { _ = " + index + "; " + itemUse + "ordered = append(ordered, " + decorated + "{value: " + item + ", key: " + value + "}) }; slices.SortStableFunc(ordered, func(left, right " + decorated + ") int { return " + comparison + " }); " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(ordered)); for _, entry := range ordered { " + result + " = append(" + result + ", entry.value) }; return " + g.arrayReference(result) + " }()"
-	case "map":
-		index := "_"
-		indexUse := ""
-		if transform.WithIndex {
-			index = g.bindingIdentifier(transform.Index)
-			if index == "" {
-				index = "_"
-			}
-			if namedUnusedBinding(transform.Index) {
-				indexUse = "_ = " + index + "; "
-			}
-		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + result + " = append(" + result + ", " + value + ") }; return " + g.arrayReference(result) + " }()"
-	case "select":
-		index := "_"
-		indexUse := ""
-		if transform.WithIndex {
-			index = g.bindingIdentifier(transform.Index)
-			if index == "" {
-				index = "_"
-			}
-			if namedUnusedBinding(transform.Index) {
-				indexUse = "_ = " + index + "; "
-			}
-		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := make(" + g.goArraySliceType(transform.ExprType()) + ", 0, len(" + items + ")); for " + index + ", " + item + " := range " + items + " { " + itemUse + indexUse + "if " + value + " { " + result + " = append(" + result + ", " + item + ") } }; return " + g.arrayReference(result) + " }()"
-	case "any?", "all?", "none?":
-		initial := "false"
-		match := value
-		if transform.Operation == "all?" || transform.Operation == "none?" {
-			initial = "true"
-		}
-		if transform.Operation == "all?" {
-			match = "!(" + value + ")"
-		}
-		matched := "true"
-		if transform.Operation == "all?" || transform.Operation == "none?" {
-			matched = "false"
-		}
-		return "func() bool { for _, " + item + " := range " + source + " { " + itemUse + "if " + match + " { return " + matched + " } }; return " + initial + " }()"
-	case "find":
-		found := "&" + item
-		if len(transform.Source.ExprType().Args) > 0 {
-			elementType := transform.Source.ExprType().Args[0]
-			if g.goType(elementType) == g.goType(transform.ExprType()) {
-				found = item
-			}
-		}
-		return "func() " + g.goType(transform.ExprType()) + " { for _, " + item + " := range " + source + " { " + itemUse + "if " + value + " { return " + found + " } }; return nil }()"
-	case "find_index":
-		index := "__trbIndex" + suffix
-		return "func() " + g.goType(transform.ExprType()) + " { for " + index + ", " + item + " := range " + source + " { " + itemUse + "if " + value + " { " + result + " := " + index + "; return &" + result + " } }; return nil }()"
-	case "reduce":
-		accumulator := g.bindingIdentifier(transform.Accumulator)
-		binding := ""
-		if accumulator != "" && accumulator != "_" {
-			binding = accumulator + " := " + result + "; "
-			if namedUnusedBinding(transform.Accumulator) {
-				binding += "_ = " + accumulator + "; "
-			}
-		}
-		return "func() " + g.goType(transform.ExprType()) + " { " + items + " := " + source + "; " + result + " := " + g.expr(transform.Initial) + "; for _, " + item + " := range " + g.iterableValue(items, transform.Source.ExprType()) + " { " + itemUse + binding + result + " = " + value + " }; return " + result + " }()"
-	default:
-		return "nil"
-	}
-}
-
 func (g *generator) concurrentMap(transform *ir.Transform) string {
 	g.requireImport("context", "trbcontext")
 	g.requireImport("sync", "")
@@ -2432,25 +2334,6 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 		workerCount + " := " + localLimit + "; if len(" + items + ") < " + workerCount + " { " + workerCount + " = len(" + items + ") }; " + jobs + " := make(chan int); var " + waitGroup + " sync.WaitGroup; var " + panicOnce + " sync.Once; var " + panicValue + " any; " +
 		"for " + worker + " := 0; " + worker + " < " + workerCount + "; " + worker + "++ { " + waitGroup + ".Add(1); go func() { defer " + waitGroup + ".Done(); for " + index + " := range " + jobs + " { select { case " + semaphore + " <- struct{}{}: case <-" + childScope + ".Done(): return }; func() { defer func() { <-" + semaphore + " }(); defer func() { if recovered := recover(); recovered != nil { " + panicOnce + ".Do(func() { " + panicValue + " = recovered; " + cancel + "() }) } }(); __trbScope := trbcontext.WithValue(" + childScope + ", \"type-rb/concurrency-held\", true); _ = __trbScope; " + item + " := " + items + "[" + index + "]; " + itemUse + result + "[" + index + "] = " + value + " }() } }() }; " +
 		"func() { defer close(" + jobs + "); for " + index + " := range " + items + " { select { case " + jobs + " <- " + index + ": case <-" + childScope + ".Done(): return } } }(); " + waitGroup + ".Wait(); if " + panicValue + " != nil { panic(" + panicValue + ") }; if err := __trbScope.Err(); err != nil { panic(err) }; return " + g.arrayReference(result) + " }()"
-}
-
-func (g *generator) transformResult(transform *ir.Transform) string {
-	if len(transform.Body) == 0 {
-		return g.expr(transform.Result)
-	}
-	child := *g
-	child.b = strings.Builder{}
-	child.recordSources = false
-	child.indent = 0
-	child.line("func() " + child.goType(transform.Result.ExprType()) + " {")
-	child.indent++
-	child.statements(transform.Body)
-	child.line("return " + child.expr(transform.Result))
-	child.indent--
-	child.line("}()")
-	g.temporary = child.temporary
-	g.absorbRuntimeRequirements(&child)
-	return strings.TrimSpace(child.b.String())
 }
 
 func (g *generator) portableSortComparison(left, right string, typ types.Type, descending bool) string {

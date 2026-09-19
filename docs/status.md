@@ -50,7 +50,9 @@ Range and Array conversions to `Iterable` retain a repeatable source instead of
 materializing a copy. Function, generic, and nullable boundaries preserve this
 behavior; each iteration starts at the beginning of the retained collection.
 Array `each` observes length and element changes during iteration consistently
-across all backends and the REPL. Batching retains the requested size and owns
+across all backends and the REPL. Sequential transformations, predicates,
+searches and keyed sorting use that same live traversal, including suspending
+TypeScript blocks. Batching retains the requested size and owns
 fresh shallow batch Arrays rather than exposing slices of source storage.
 
 `trb lint` runs project checking before a small configurable built-in ruleset.

@@ -1368,7 +1368,25 @@ func (g *generator) transform(transform *ir.Transform) string {
 	case "sort_by", "sort_by_descending":
 		comparison := rubyPortableSortComparison("left[1]", "right[1]", transform.Result.ExprType(), transform.Operation == "sort_by_descending")
 		return source + ".each_with_index.map { |" + transform.Item + ", index| [" + transform.Item + ", " + result + ", index] }.sort { |left, right| compared = " + comparison + "; compared.zero? ? left[2] <=> right[2] : compared }.map(&:first)"
-	case "map", "select", "any?", "all?", "none?", "find", "find_index":
+	case "select":
+		// Array#select can reread the source slot after the predicate mutates
+		// it. Retain the visited value separately from both that slot and the
+		// mutable block parameter, including for indexed selection.
+		g.temporary++
+		suffix := strconv.Itoa(g.temporary)
+		visited, selected := "__trb_visited_"+suffix, "__trb_selected_"+suffix
+		item := transform.Item
+		if item == "" || item == "_" {
+			item = "__trb_item_" + suffix
+		}
+		bindings := item
+		iteration := ".each_with_object([])"
+		if transform.WithIndex {
+			iteration = ".each_with_index.with_object([])"
+			bindings = "(" + item + ", " + transform.Index + ")"
+		}
+		return source + iteration + " { |" + bindings + ", " + selected + "; " + visited + "| " + visited + " = " + item + "; " + selected + " << " + visited + " if " + result + " }"
+	case "map", "any?", "all?", "none?", "find", "find_index":
 		operation := transform.Operation
 		parameters := []string{transform.Item}
 		if transform.WithIndex {

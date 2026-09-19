@@ -410,7 +410,15 @@ Hash safe fetch returns
 also carry a stable message.
 
 Array `map`, `select`, and `reduce` are structured language expressions rather
-than target callbacks. See the
+than target callbacks. Like `each`, sequential transforms retain the source
+Array and read its current length and next element for each invocation. They
+visit appended elements and observe replacement or shortening, even through a
+readonly alias and after backing-storage growth. Rebinding the source variable
+does not redirect traversal. `select` and `find` retain the element passed to
+the block rather than its reassigned parameter. Keyed sorting follows this
+same traversal while collecting keys, then sorts the retained values stably.
+See the [specification](specification.md#311-loop-control) for the contract
+and the
 [language guide](language.md#arrays-hashes-and-iteration) for examples.
 
 `Array#concurrent_map` is the import-free bounded I/O-concurrency form. It
