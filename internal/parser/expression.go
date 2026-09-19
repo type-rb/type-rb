@@ -9,6 +9,7 @@ import (
 )
 
 type exprParser struct {
+	owner            *Parser
 	tokens           []token.Token
 	pos              int
 	embedded         map[int]ast.Expression
@@ -17,7 +18,7 @@ type exprParser struct {
 	conditionalDepth map[int]int
 }
 
-func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.Expression, report func(token.Span, string)) (ast.Expression, bool) {
+func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.Expression, report func(token.Span, string), owner *Parser) (ast.Expression, bool) {
 	filtered := make([]token.Token, 0, len(tokens))
 	for _, tok := range tokens {
 		if tok.Kind != token.Newline && tok.Kind != token.Comment {
@@ -27,7 +28,7 @@ func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.E
 	if len(filtered) == 0 {
 		return nil, false
 	}
-	p := &exprParser{tokens: filtered, embedded: embedded, report: report}
+	p := &exprParser{tokens: filtered, embedded: embedded, report: report, owner: owner}
 	expr := p.parse(0)
 	return expr, expr != nil && p.pos == len(p.tokens)
 }
@@ -54,6 +55,17 @@ func (p *exprParser) parse(min int) ast.Expression {
 	}
 	for p.pos < len(p.tokens) {
 		tok := p.tokens[p.pos]
+		if p.owner != nil && (tok.Lexeme == "{" || tok.Lexeme == "do") {
+			iteration, ok := p.owner.iterationFromExpression(left)
+			if !ok {
+				break
+			}
+			left = p.parseIterationValue(left, iteration)
+			if left == nil {
+				return nil
+			}
+			continue
+		}
 		if tok.Lexeme == "<" {
 			if applied := p.parseGenericApplication(left); applied != nil {
 				left = applied
@@ -406,7 +418,7 @@ func parseInterpolatedString(tok token.Token, report func(token.Span, string)) (
 			innerTokens[index].Span.Start = shiftEmbeddedPosition(innerTokens[index].Span.Start, base)
 			innerTokens[index].Span.End = shiftEmbeddedPosition(innerTokens[index].Span.End, base)
 		}
-		expression, ok := parseExpressionTokensReporting(innerTokens, nil, report)
+		expression, ok := parseExpressionTokensReporting(innerTokens, nil, report, nil)
 		if !ok {
 			return nil, false
 		}

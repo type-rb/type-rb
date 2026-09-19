@@ -14,10 +14,10 @@ func Complete(source string) bool {
 	if len(diagnostics) > 0 {
 		return true
 	}
-	blocks := 0
+	blockDepths := []int{}
 	delimiters := []string{}
 	transferConditions := make(map[int]bool)
-	braceBodies := make(map[int]bool)
+	blockBodies := make(map[int]bool)
 	lineStart := true
 	lineOpenedBlock := false
 	for index, item := range tokens {
@@ -34,13 +34,14 @@ func Complete(source string) bool {
 		if at := conditionalTransferIf(tokens, index); at >= 0 {
 			transferConditions[at] = true
 		}
-		if item.Lexeme == "{" {
+		if item.Lexeme == "{" || item.Lexeme == "do" {
 			if at := braceParameterEnd(tokens, index+1); at >= 0 {
-				braceBodies[at] = true
+				blockBodies[at] = true
 			}
 		}
-		statementContext := len(delimiters) == 0 || delimiters[len(delimiters)-1] == "{"
-		if item.Lexeme == ";" && statementContext || braceBodies[index] {
+		statementContext := len(delimiters) == 0 || delimiters[len(delimiters)-1] == "{" ||
+			len(blockDepths) > 0 && blockDepths[len(blockDepths)-1] == len(delimiters)
+		if item.Lexeme == ";" && statementContext || blockBodies[index] {
 			lineStart = true
 			lineOpenedBlock = false
 			continue
@@ -48,24 +49,24 @@ func Complete(source string) bool {
 		if lineStart && item.Kind == token.Identifier {
 			switch item.Lexeme {
 			case "class", "record", "enum", "module", "interface", "def", "while":
-				blocks++
+				blockDepths = append(blockDepths, len(delimiters))
 				lineOpenedBlock = true
 			case "end":
-				if blocks > 0 {
-					blocks--
+				if len(blockDepths) > 0 {
+					blockDepths = blockDepths[:len(blockDepths)-1]
 				}
 			}
 		}
 		if item.Kind == token.Identifier && (item.Lexeme == "case" || item.Lexeme == "if" && !transferConditions[index]) {
-			blocks++
+			blockDepths = append(blockDepths, len(delimiters))
 			lineOpenedBlock = true
 		}
 		if item.Kind == token.Identifier && (item.Lexeme == "fn" || item.Lexeme == "catch") && statementContext {
-			blocks++
+			blockDepths = append(blockDepths, len(delimiters))
 			lineOpenedBlock = true
 		}
-		if item.Lexeme == "do" && statementContext && !lineOpenedBlock {
-			blocks++
+		if item.Lexeme == "do" && (statementContext && !lineOpenedBlock || braceParameterEnd(tokens, index+1) >= 0) {
+			blockDepths = append(blockDepths, len(delimiters))
 			lineOpenedBlock = true
 		}
 		lineStart = false
@@ -78,7 +79,7 @@ func Complete(source string) bool {
 			}
 		}
 	}
-	return blocks == 0 && len(delimiters) == 0 && !strings.HasSuffix(strings.TrimSpace(source), "\\")
+	return len(blockDepths) == 0 && len(delimiters) == 0 && !strings.HasSuffix(strings.TrimSpace(source), "\\")
 }
 
 func braceParameterEnd(tokens []token.Token, start int) int {

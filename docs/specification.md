@@ -1124,7 +1124,13 @@ handler runs. Ordinary call blocks are not value-producing unless their
 package declaration explicitly provides structured lowering.
 
 Portable Array transformations `map`, `select`, and `reduce` use the same
-typed-IR boundary. `reduce` evaluates its source once, then its initial argument
+typed-IR boundary. Their block expressions can appear directly in call
+arguments, collection literals and operator operands, and support postfix
+chaining. Both brace and `do/end` blocks retain ordinary statement bodies in
+these positions. For example, `puts([1, 2].map { |value| value * 2 }[1])`
+prints `4`.
+
+`reduce` evaluates its source once, then its initial argument
 once, before traversal begins. Changes to the retained source made by the
 initial argument are visible to traversal. An empty source still evaluates the
 initial argument and returns its value without invoking the block. Failure in
