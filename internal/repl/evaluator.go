@@ -397,7 +397,11 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 			e.definitions[symbolKey(module, runtimeDefinitionName(node.Declaration, node.Name))] = definition
 		case *ir.Method:
 			changed = true
-			e.definitions[symbolKey(module, node.Name)] = &functionDefinition{Module: module, Method: node}
+			name := node.Name
+			if node.Dispatch.Owner.Kind == identity.Module {
+				name = ownedName(node.Dispatch.Owner.Name, node.Dispatch.Name)
+			}
+			e.definitions[symbolKey(module, name)] = &functionDefinition{Module: module, Method: node}
 		case *ir.Newtype:
 			for _, statement := range node.Body {
 				if method, ok := statement.(*ir.Method); ok {
@@ -1078,6 +1082,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Reference != nil && node.Reference.Intrinsic != "" {
 			return Value{Type: node.ExprType(), Data: &callable{Intrinsic: node.Reference.Intrinsic, Module: module}}, nil
 		}
+		if node.Dispatch.Owner.Kind == identity.Module {
+			owner := node.Dispatch.Owner
+			if value, ok := e.symbol(owner.Module, ownedName(owner.Name, node.Dispatch.Name)); ok {
+				return value, nil
+			}
+		}
 		if node.Reference != nil && node.Reference.Package != "" {
 			if value, ok := e.symbol(node.Reference.Package, node.Reference.Symbol); ok {
 				return value, nil
@@ -1205,7 +1215,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			} else {
 				callee, err = e.callMember(*safeReceiver, member.Name, module)
 			}
-		} else if member, ok := node.Callee.(*ir.Member); ok && member.Reference != nil && member.Reference.Package != "" {
+		} else if member, ok := node.Callee.(*ir.Member); ok && (member.Dispatch.Owner.Kind == identity.Module || member.Reference != nil && member.Reference.Package != "") {
 			callee, err = e.expression(node.Callee, module, sc)
 		} else if member, ok := node.Callee.(*ir.Member); ok {
 			receiver := Value{}
