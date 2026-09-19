@@ -1129,6 +1129,13 @@ value-producing transformation block; use `each` when control must leave or
 skip the enclosing iteration. Indexed predicate blocks are not currently
 enabled.
 
+Brace iteration and call blocks use the same statement grammar as `do/end`
+blocks. Newlines and semicolons separate statements; nested `if`, `case`,
+`while` and iteration retain their ordinary lexical scope and control-transfer
+owners. Changing the delimiter does not relax a block's type, effect or
+control-transfer restrictions. Comments and diagnostics retain their original
+source positions.
+
 `Array#concurrent_map` is the import-free bounded concurrent transformation:
 
 ```trb

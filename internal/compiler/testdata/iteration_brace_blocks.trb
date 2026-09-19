@@ -1,0 +1,39 @@
+def probe(): Integer
+	mut values := ["a", "b" + "b"]
+	mut total := 0
+	values.each.with_index { |value, index|
+		if index == 0
+			values.push("c" + "cc")
+			next
+		end
+		(1..3).each { |step|
+			if step == 2
+				next
+			end
+			mut turn := 0
+			while turn < 3
+				turn += 1
+				break if turn == 2
+				total += value.size() + index + step
+			end
+			break if step == 3
+		}
+		if index == 2
+			return total
+		end
+	}
+	return - 1
+end
+
+def main()
+	puts(probe())
+	[1, 2].each { |value| if value == 1; puts("first"); else; puts("second"); end }
+		(2...4).each() { |value|
+			case value
+			when 2
+				puts("two")
+			else
+				puts("three")
+			end
+		}
+	end
