@@ -950,6 +950,13 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			return collectionValueAtType(owner.values[node.Name], node.ExprType()), nil
 		}
+		if node.Declaration.Kind == identity.Function && (node.Reference == nil || node.Reference.Intrinsic == "") {
+			definition, ok := e.definitions[symbolKey(node.Declaration.Module, node.Declaration.Name)].(*functionDefinition)
+			if !ok {
+				return Value{}, fmt.Errorf("%s is not available in the REPL environment", node.Name)
+			}
+			return Value{Type: node.ExprType(), Data: &callable{Function: definition, Module: definition.Module}}, nil
+		}
 		if node.Owner != "" {
 			if value, ok := e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))]; ok {
 				return collectionValueAtType(value, node.ExprType()), nil
