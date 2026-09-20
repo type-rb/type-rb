@@ -1588,6 +1588,11 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 		return value
 	}
 	conversionType := target
+	scalarSource := source
+	if base, ok := types.LiteralUnionBase(source); ok {
+		scalarSource = base
+		scalarSource.Nullable = source.Nullable
+	}
 	kind := ir.ConversionKind("")
 	switch {
 	case target.Kind == types.Iterable && (source.Kind == types.Array || source.Kind == types.Range || source.Kind == types.Iterable):
@@ -1615,7 +1620,7 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 		(source.Kind == types.Int || source.Kind == types.IntLiteral) && unionContainsNonNullableTypeKind(target, types.Float):
 		kind = ir.IntegerToFloatConversion
 		conversionType = types.FromName("Float")
-	case target.Kind == types.Float && (source.Kind == types.Int || source.Kind == types.IntLiteral):
+	case target.Kind == types.Float && (scalarSource.Kind == types.Int || scalarSource.Kind == types.IntLiteral):
 		kind = ir.IntegerToFloatConversion
 	}
 	if kind == "" {

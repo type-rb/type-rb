@@ -4840,6 +4840,7 @@ func scalarType(typ types.Type) types.Type {
 	}
 	if typ.Kind == types.Union && len(typ.Args) > 0 {
 		if base, ok := types.LiteralUnionBase(typ); ok {
+			base.Nullable = typ.Nullable
 			return base
 		}
 	}
