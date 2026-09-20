@@ -146,6 +146,8 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   precedence over a same-named top-level function. Generic functions and
   declarations with defaults or named-only parameters require an explicit
   typed `fn` wrapper that performs the desired call.
+- A nullable function value must be narrowed to its non-null function type
+  before it is called, just like other nullable values.
 - `Void` is the compiler's no-result type, not a source value type. It is valid
   only as the return type of a function type. A Void expression may be used as
   a standalone statement but cannot be initialized, assigned, passed,
