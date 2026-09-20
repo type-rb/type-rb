@@ -20,7 +20,7 @@ func (c *Checker) aliasRecordConstruction(typ types.Type) (RecordConstruction, b
 	var targetBinding *resolver.Binding
 	name := target.Name
 	if target.Declaration.Name != "" {
-		name = target.Declaration.Name
+		name = target.Declaration.LeafName()
 	}
 	if record := c.records[name]; record != nil && (target.Declaration.Empty() || target.Declaration == c.authoredTypeIdentities[name]) {
 		parameters = record.typeParameters

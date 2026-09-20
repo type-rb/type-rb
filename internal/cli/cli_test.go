@@ -1194,6 +1194,9 @@ func TestReplPreludeDoesNotDuplicateExplicitImports(t *testing.T) {
 	if got := replPrelude(imports, "import models/user\n"); got != "" {
 		t.Fatalf("whole-module import prelude=%q, want empty", got)
 	}
+	if got := replPrelude(imports, "import models/user as Accounts\n"); got != "" {
+		t.Fatalf("aliased module import prelude=%q, want empty", got)
+	}
 	if got, want := replPrelude(imports, "record User\nend\n"), "import { Profile } from models/user\n"; got != want {
 		t.Fatalf("session declaration prelude=%q, want %q", got, want)
 	}
