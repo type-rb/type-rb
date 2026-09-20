@@ -2401,7 +2401,13 @@ func goBindingIdentifier(name string) string {
 	if namedUnusedBinding(name) {
 		return "__trb_unused_" + hex.EncodeToString([]byte(name))
 	}
-	return goIdentifier(name, false)
+	target := goIdentifier(name, false)
+	if strings.HasPrefix(target, "__trb_keyword_") {
+		// Binding and private-callable namespaces stay distinct even when
+		// both spell a keyword after ordinary identifier normalization.
+		return "__trb_binding_" + hex.EncodeToString([]byte(name))
+	}
+	return target
 }
 
 func (g *generator) assignmentTarget(expression ir.Expression) string {
@@ -3396,7 +3402,12 @@ func goIdentifier(name string, exported bool) string {
 			parts[i] = lowerFirst(parts[i])
 		}
 	}
-	return strings.Join(parts, "")
+	target := strings.Join(parts, "")
+	if gotoken.Lookup(target).IsKeyword() {
+		// Source identifier normalization never produces this prefix.
+		return "__trb_keyword_" + target
+	}
+	return target
 }
 
 func goDeclaredTypeName(declaration, fallback string) string {
