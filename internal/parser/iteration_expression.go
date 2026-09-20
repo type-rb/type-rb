@@ -51,7 +51,7 @@ func (p *exprParser) parseIterationValue(receiver ast.Expression, iteration *ast
 	}
 	bodyTokens := append([]token.Token(nil), p.owner.tokens[first:last]...)
 	bodyTokens = append(bodyTokens, token.Token{Kind: token.EOF, Span: token.Span{Start: finish, End: finish}})
-	child := &Parser{source: p.owner.source, tokens: bodyTokens, statementDepth: p.owner.statementDepth}
+	child := &Parser{source: p.owner.source, tokens: bodyTokens, statementDepth: p.owner.statementDepth, symbolNames: p.owner.symbolNames}
 	body := child.parseStatements(map[string]bool{"end": true})
 	p.owner.diags = append(p.owner.diags, child.diags...)
 	p.owner.nativeIslands = append(p.owner.nativeIslands, child.nativeIslands...)

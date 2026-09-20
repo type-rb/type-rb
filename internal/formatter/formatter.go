@@ -40,7 +40,7 @@ func Format(source []byte) ([]byte, []diagnostic.Diagnostic) {
 }
 
 func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Diagnostic) {
-	program, diagnostics := parser.Parse(source)
+	program, diagnostics, symbols := parser.ParseWithSymbolNames(source)
 	if hasErrors(diagnostics) {
 		return nil, diagnostics
 	}
@@ -48,14 +48,14 @@ func FormatWithOptions(source []byte, options Options) ([]byte, []diagnostic.Dia
 		canonical := canonicalImportSource(source, program, options.ResolveImport)
 		if string(canonical) != string(source) {
 			source = canonical
-			program, diagnostics = parser.Parse(source)
+			program, diagnostics, symbols = parser.ParseWithSymbolNames(source)
 			if hasErrors(diagnostics) {
 				return nil, diagnostics
 			}
 		}
 	}
 	tokens := opaqueNativeTokens(source, canonicalImportTokens(program, options.CanonicalImportPath), program.NativeIslands)
-	return formatTokens(tokens), nil
+	return formatTokensWithSymbols(tokens, symbols), nil
 }
 
 type canonicalImport struct {
@@ -272,6 +272,10 @@ func opaqueNativeTokens(source []byte, tokens []token.Token, islands []ast.Nativ
 }
 
 func formatTokens(tokens []token.Token) []byte {
+	return formatTokensWithSymbols(tokens, nil)
+}
+
+func formatTokensWithSymbols(tokens []token.Token, symbols map[int]bool) []byte {
 	lines := tokensByLine(tokens)
 	var out strings.Builder
 	indent := 0
@@ -317,7 +321,7 @@ func formatTokens(tokens []token.Token) []byte {
 		}
 		blank = false
 		for _, statement := range statements {
-			writeStatement(&out, statement, &indent, &continuation)
+			writeStatement(&out, statement, &indent, &continuation, symbols)
 		}
 		if coveredLine > lineIndex {
 			lineIndex = coveredLine
@@ -342,7 +346,7 @@ func ReindentPartialWithIndentation(source []byte, indentation string) []byte {
 	if hasErrors(diagnostics) {
 		return append([]byte(nil), source...)
 	}
-	levels, _ := partialIndentation(tokens)
+	levels, _ := partialIndentation(tokens, parser.SymbolNameOffsets(source))
 	lines := strings.Split(string(source), "\n")
 	for lineIndex, level := range levels {
 		if lineIndex >= len(lines) || level < 0 || strings.TrimSpace(lines[lineIndex]) == "" {
@@ -366,11 +370,11 @@ func NextLineIndentWithIndentation(source []byte, indentation string) string {
 	if hasErrors(diagnostics) {
 		return ""
 	}
-	_, level := partialIndentation(tokens)
+	_, level := partialIndentation(tokens, parser.SymbolNameOffsets(source))
 	return strings.Repeat(indentation, level)
 }
 
-func partialIndentation(tokens []token.Token) ([]int, int) {
+func partialIndentation(tokens []token.Token, symbols map[int]bool) ([]int, int) {
 	lines := tokensByLine(tokens)
 	levels := make([]int, len(lines))
 	for index := range levels {
@@ -407,7 +411,7 @@ func partialIndentation(tokens []token.Token) ([]int, int) {
 		}
 		statements := splitStatements(code, continuation)
 		for statementIndex, statement := range statements {
-			level := advanceIndentation(statement, &indent, &continuation)
+			level := advanceIndentation(statement, &indent, &continuation, symbols)
 			if statementIndex == 0 {
 				levels[lineIndex] = level
 			}
@@ -522,15 +526,15 @@ func splitStatements(tokens []token.Token, initialDepth int) [][]token.Token {
 	return statements
 }
 
-func writeStatement(out *strings.Builder, code []token.Token, indent, continuation *int) {
-	lineIndent := advanceIndentation(code, indent, continuation)
+func writeStatement(out *strings.Builder, code []token.Token, indent, continuation *int, symbols map[int]bool) {
+	lineIndent := advanceIndentation(code, indent, continuation, symbols)
 	out.WriteString(strings.Repeat(indentation, lineIndent))
 	out.WriteString(formatTokensAt(code, lineIndent, false))
 	out.WriteByte('\n')
 }
 
-func advanceIndentation(code []token.Token, indent, continuation *int) int {
-	first := firstCode(code)
+func advanceIndentation(code []token.Token, indent, continuation *int, symbols map[int]bool) int {
+	first := firstControlCode(code, symbols)
 	dedent := isDedent(first)
 	if dedent && *indent > 0 {
 		*indent--
@@ -545,7 +549,7 @@ func advanceIndentation(code []token.Token, indent, continuation *int) int {
 	}
 	if dedent && isMidBlock(first) {
 		*indent++
-	} else if opensEndBlock(code, *continuation) {
+	} else if opensEndBlock(code, *continuation, symbols) {
 		*indent++
 	}
 	*continuation += delimiterDelta(code)
@@ -1024,8 +1028,20 @@ func isMidBlock(first string) bool {
 	return false
 }
 
-func opensEndBlock(tokens []token.Token, initialDepth int) bool {
-	first := firstCode(tokens)
+func firstControlCode(tokens []token.Token, symbols map[int]bool) string {
+	for _, item := range tokens {
+		if item.Kind != token.Comment {
+			if symbols[item.Span.Start.Offset] {
+				return ""
+			}
+			return item.Lexeme
+		}
+	}
+	return ""
+}
+
+func opensEndBlock(tokens []token.Token, initialDepth int, symbols map[int]bool) bool {
+	first := firstControlCode(tokens, symbols)
 	switch first {
 	case "class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for":
 		return true
@@ -1034,6 +1050,9 @@ func opensEndBlock(tokens []token.Token, initialDepth int) bool {
 	if first == "return" || first == "break" || first == "next" {
 		depth := 0
 		for index, item := range tokens {
+			if symbols[item.Span.Start.Offset] {
+				continue
+			}
 			switch item.Lexeme {
 			case "(", "[", "{":
 				depth++
@@ -1049,12 +1068,18 @@ func opensEndBlock(tokens []token.Token, initialDepth int) bool {
 		}
 	}
 	for index, item := range tokens {
+		if symbols[item.Span.Start.Offset] {
+			continue
+		}
 		if item.Lexeme == "case" || item.Lexeme == "if" && index != conditionalTransferIf {
 			return true
 		}
 	}
 	depth := initialDepth
 	for index, item := range tokens {
+		if symbols[item.Span.Start.Offset] {
+			continue
+		}
 		switch item.Lexeme {
 		case "(", "[", "{":
 			depth++
