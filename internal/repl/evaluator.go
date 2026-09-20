@@ -1144,6 +1144,12 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 		}
 		result, err := e.member(receiver, node.Name, module)
+		if err == nil && len(node.UnionAlternatives) > 0 && node.ExprType().Kind == types.Float {
+			if integer, ok := result.Data.(int64); ok {
+				result.Data = float64(integer)
+			}
+			result.Type = node.ExprType()
+		}
 		if node.Safe {
 			result.Type = node.ExprType()
 		}
