@@ -3418,11 +3418,14 @@ func equal(left, right Value) bool {
 	return reflect.DeepEqual(left.Data, right.Data)
 }
 
-func comparePortableValues(left, right Value) (int, error) {
+func comparePortableValues(left, right Value, descending bool) (int, error) {
 	if leftString, ok := left.Data.(string); ok {
 		rightString, rightOK := right.Data.(string)
 		if !rightOK {
 			return 0, fmt.Errorf("cannot compare %s and %s", left.Type, right.Type)
+		}
+		if descending {
+			return strings.Compare(rightString, leftString), nil
 		}
 		return strings.Compare(leftString, rightString), nil
 	}
@@ -3439,6 +3442,11 @@ func comparePortableValues(left, right Value) (int, error) {
 	}
 	if math.IsNaN(rightNumber) {
 		return -1, nil
+	}
+	// Direction changes ordinary numeric order, but NaNs stay last and equal
+	// keys (including signed zero and pairs of NaNs) remain stable.
+	if descending {
+		leftNumber, rightNumber = rightNumber, leftNumber
 	}
 	if leftNumber < rightNumber {
 		return -1, nil
