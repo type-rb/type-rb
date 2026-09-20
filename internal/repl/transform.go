@@ -69,13 +69,10 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 		var compareErr error
 		descending := node.Operation == "sort_by_descending"
 		sort.SliceStable(decorated, func(left, right int) bool {
-			compared, err := comparePortableValues(decorated[left].key, decorated[right].key)
+			compared, err := comparePortableValues(decorated[left].key, decorated[right].key, descending)
 			if err != nil {
 				compareErr = err
 				return false
-			}
-			if descending {
-				return compared > 0
 			}
 			return compared < 0
 		})

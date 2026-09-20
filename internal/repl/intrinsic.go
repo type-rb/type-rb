@@ -1138,13 +1138,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		descending := name == "trb.std.arrays.sort_descending"
 		var compareErr error
 		sort.SliceStable(items, func(left, right int) bool {
-			compared, err := comparePortableValues(items[left], items[right])
+			compared, err := comparePortableValues(items[left], items[right], descending)
 			if err != nil {
 				compareErr = err
 				return false
-			}
-			if descending {
-				return compared > 0
 			}
 			return compared < 0
 		})
