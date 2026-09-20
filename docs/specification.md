@@ -556,6 +556,11 @@ switches.
   nonnegative, ordered, and within the collection. The exclusive
   `size...size` range is a valid empty slice; an inclusive finish always names
   an existing element. Array slices return a new shallow Array.
+- Array `slice`, `try_slice`, and `try_fetch` retain the receiver once before
+  evaluating their argument, then inspect that Array's current storage. Argument
+  effects can grow, shorten or update the retained Array; rebinding the original
+  variable does not redirect the lookup. Bounds failures describe the retained
+  Array after those effects.
 - A Range literal evaluates its start and then its end exactly once, retaining
   each endpoint value before evaluating the next expression.
 - Range values retain their bounds and inclusivity through variables and

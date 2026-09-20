@@ -1,8 +1,6 @@
 package golang
 
 import (
-	"strconv"
-
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -12,14 +10,11 @@ func (g *generator) arrayQueryIntrinsic(name string, call *ir.Call, arguments []
 	if member, ok := receiverMember(call.Callee); ok && member.Receiver.ExprType().Kind == types.Array {
 		arrayType = member.Receiver.ExprType()
 	}
-	g.temporary++
-	id := strconv.Itoa(g.temporary)
-	receiver := "__trbArrayReceiver" + id
-	target := "__trbArrayTarget" + id
-	values := "__trbArrayValues" + id
+	receiver, target, prefix := g.arrayArgumentEvaluation(call, arguments, g.goType(arrayType.Args[0]))
+	values := receiver + "Values"
 	// Retain the Array identity before the argument, then read its current
 	// storage after the argument has had the opportunity to mutate it.
-	prefix := "func() " + g.goType(call.ExprType()) + " { " + receiver + " := " + arguments[0] + "; var " + target + " " + g.goType(arrayType.Args[0]) + " = " + arguments[1] + "; " + values + " := " + g.arrayValues(receiver) + "; "
+	prefix += values + " := " + g.arrayValues(receiver) + "; "
 	switch name {
 	case "trb.std.arrays.contains":
 		g.requireImport("slices", "")
