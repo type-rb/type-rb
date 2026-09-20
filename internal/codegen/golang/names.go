@@ -6,9 +6,23 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 )
+
+func (g *generator) variableIdentifier(variable *ir.Variable) string {
+	if variable.Declaration.Kind == identity.Value && !variable.Constant {
+		return naming.GlobalBindingIdentifier(variable.Declaration.Key())
+	}
+	if variable.Constant {
+		return g.projectConstantName(g.modulePath, variable.Owner, variable.Name)
+	}
+	if variable.Generated {
+		return variable.Name
+	}
+	return g.bindingIdentifier(variable.Name)
+}
 
 // goProjectNames resolves the package-level namespace after typed IR exists.
 // TypeRB keeps type and callable names distinct, while Go places both in one

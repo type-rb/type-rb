@@ -38,3 +38,9 @@ func PrivateSuffix(identity string) string {
 	sum := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(sum[:8])
 }
+
+// GlobalBindingIdentifier preserves checked source-module storage identity
+// across method boundaries, lexical shadowing and shared target namespaces.
+func GlobalBindingIdentifier(identity string) string {
+	return "__trb_global_" + PrivateSuffix(identity)
+}

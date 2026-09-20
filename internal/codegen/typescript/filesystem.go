@@ -204,7 +204,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 			if block.Result.Variable.Mutable {
 				keyword = "let"
 			}
-			g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
+			g.line(keyword + " " + g.variableName(block.Result.Variable) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
 		} else if block.Result.Target != nil {
 			g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ";")
 		}
@@ -220,7 +220,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 		if block.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
+		g.line(keyword + " " + g.variableName(block.Result.Variable) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
 	} else if block.Result.Target != nil {
 		g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ".value;")
 	}

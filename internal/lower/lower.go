@@ -378,13 +378,14 @@ func (l *lowerer) structuredResultStatement(node ast.Statement) ([]ir.Statement,
 	switch n := node.(type) {
 	case *ast.VariableStatement:
 		statement = &ir.Variable{
-			Base:     base(n.Base),
-			Name:     n.Name,
-			Type:     l.checked.Variables[n],
-			Value:    loweredValue,
-			Mutable:  n.Mutable,
-			Constant: n.Constant,
-			Owner:    l.checked.ConstantOwners[n],
+			Base:        base(n.Base),
+			Declaration: l.checked.Declarations[n],
+			Name:        n.Name,
+			Type:        l.checked.Variables[n],
+			Value:       loweredValue,
+			Mutable:     n.Mutable,
+			Constant:    n.Constant,
+			Owner:       l.checked.ConstantOwners[n],
 		}
 	case *ast.ReturnStatement:
 		statement = &ir.Return{Base: base(n.Base), Value: loweredValue}
@@ -699,19 +700,19 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 		l.requireGeneratedType(typ)
 		if block, ok := l.structuredBlock(n.Value); ok {
 			block.Result = &ir.StructuredBlockResult{
-				Variable: &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
+				Variable: &ir.Variable{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
 				Type:     typ,
 			}
 			return block
 		}
 		if iteration, ok := l.structuredIteration(n.Value); ok {
 			iteration.Result = &ir.IterationResult{
-				Variable: &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
+				Variable: &ir.Variable{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Type: typ, Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]},
 				Type:     typ,
 			}
 			return iteration
 		}
-		return &ir.Variable{Base: base(n.Base), Name: n.Name, Type: typ, Value: l.expression(n.Value), Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]}
+		return &ir.Variable{Base: base(n.Base), Declaration: l.checked.Declarations[n], Name: n.Name, Type: typ, Value: l.expression(n.Value), Mutable: n.Mutable, Constant: n.Constant, Owner: l.checked.ConstantOwners[n]}
 	case *ast.AssignmentStatement:
 		if block, ok := l.structuredBlock(n.Value); ok {
 			block.Result = &ir.StructuredBlockResult{Target: l.expression(n.Target), Type: l.checked.Expressions[n.Value]}

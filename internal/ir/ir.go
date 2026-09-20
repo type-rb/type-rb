@@ -330,12 +330,15 @@ func (*Method) irStatement() {}
 
 type Variable struct {
 	Base
-	Name     string
-	Type     types.Type
-	Value    Expression
-	Mutable  bool
-	Constant bool
-	Owner    string
+	// Declaration identifies non-constant source-module storage independently
+	// from lexical bindings with the same spelling.
+	Declaration identity.Declaration
+	Name        string
+	Type        types.Type
+	Value       Expression
+	Mutable     bool
+	Constant    bool
+	Owner       string
 	// Generated preserves the exact compiler-owned binding name.
 	Generated bool
 }

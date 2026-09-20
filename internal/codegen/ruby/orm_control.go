@@ -147,7 +147,7 @@ func (g *generator) ormAssignResultTarget(value string, variable *ir.Variable, t
 	case returned:
 		g.line("return "+value, "")
 	case variable != nil:
-		g.line(variable.Name+" = "+value, variable.TrailingComment)
+		g.line(g.variableName(variable)+" = "+value, variable.TrailingComment)
 	case target != nil:
 		g.line(g.assignmentTarget(target)+" = "+value, "")
 	}
@@ -161,7 +161,7 @@ func (g *generator) ormAssignIterationTarget(value string, result *ir.IterationR
 	case result.Return:
 		g.line("return "+value, "")
 	case result.Variable != nil:
-		g.line(result.Variable.Name+" = "+value, result.Variable.TrailingComment)
+		g.line(g.variableName(result.Variable)+" = "+value, result.Variable.TrailingComment)
 	case result.Target != nil:
 		g.line(g.assignmentTarget(result.Target)+" = "+value, "")
 	}

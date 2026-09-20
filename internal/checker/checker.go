@@ -2180,6 +2180,9 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
 			previousResourceUse := c.scopedResourceUse
+			if sc.parent == nil && !n.Constant {
+				c.result.Declarations[n] = identity.Declaration{Module: c.result.Program.ModulePath, Name: n.Name, Kind: identity.Value}
+			}
 			if !n.Mutable && !n.Constant {
 				c.scopedResourceUse = n.Value
 			}
@@ -6445,6 +6448,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			if !value.constant {
 				c.result.LexicalBindings[n] = true
+				if declaration := c.result.Declarations[value.variable]; declaration.Kind == identity.Value {
+					c.result.ExpressionDeclarations[n] = declaration
+				}
 			}
 			sc.markUsed(n.Name)
 			if value.constant {

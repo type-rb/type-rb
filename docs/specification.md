@@ -217,6 +217,11 @@ and typed IR signatures, and must not create mode-dependent source semantics.
 - Local variable initialization uses `:=`.
 - Type inference is enabled for `:=`.
 - Explicit type with initialization is allowed: `x: T := expr`.
+- A lowercase binding at source-module top level keeps that module's storage
+  when referenced from a function, method or closure. A local declaration with
+  the same spelling does not change earlier references, including a closure
+  created before that local declaration. Separate source modules retain
+  independent bindings. Ordinary `mut` and readonly rules still apply.
 - `nil` by itself cannot infer a binding type. `x := nil` is a compile error;
   use an explicit nullable annotation such as `x: String? := nil`.
 - `Nil` and `Void` are internal compiler types rather than ordinary source
