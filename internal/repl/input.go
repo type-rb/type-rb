@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/lexer"
+	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/token"
 )
 
@@ -13,6 +14,18 @@ func Complete(source string) bool {
 	tokens, diagnostics := lexer.Lex([]byte(source))
 	if len(diagnostics) > 0 {
 		return true
+	}
+	var symbolNames map[int]bool
+	for index, item := range tokens {
+		if item.Kind == token.Identifier && (index > 0 && tokens[index-1].Lexeme == ":" || index+1 < len(tokens) && tokens[index+1].Lexeme == ":") {
+			switch item.Lexeme {
+			case "class", "record", "enum", "module", "interface", "def", "while", "if", "case", "fn", "catch", "do", "return", "break", "next", "end":
+				symbolNames = parser.SymbolNameOffsets([]byte(source))
+			}
+		}
+		if symbolNames != nil {
+			break
+		}
 	}
 	blockDepths := []int{}
 	delimiters := []string{}
@@ -31,7 +44,11 @@ func Complete(source string) bool {
 		case token.EOF:
 			continue
 		}
-		if at := conditionalTransferIf(tokens, index); at >= 0 {
+		if symbolNames[item.Span.Start.Offset] {
+			lineStart = false
+			continue
+		}
+		if at := conditionalTransferIf(tokens, index, symbolNames); at >= 0 {
 			transferConditions[at] = true
 		}
 		if item.Lexeme == "{" || item.Lexeme == "do" {
@@ -104,7 +121,7 @@ func braceParameterEnd(tokens []token.Token, start int) int {
 // A transfer's trailing condition does not open an end-delimited block. Only
 // the first ungrouped if on that logical statement is the modifier; grouped
 // value-producing if expressions still contribute their own block depth.
-func conditionalTransferIf(tokens []token.Token, start int) int {
+func conditionalTransferIf(tokens []token.Token, start int, symbolNames map[int]bool) int {
 	item := tokens[start]
 	if item.Kind != token.Identifier || item.Lexeme != "return" && item.Lexeme != "break" && item.Lexeme != "next" {
 		return -1
@@ -119,6 +136,9 @@ func conditionalTransferIf(tokens []token.Token, start int) int {
 			break
 		}
 		if depth == 0 && next.Kind == token.Identifier && next.Lexeme == "if" {
+			if symbolNames[next.Span.Start.Offset] {
+				continue
+			}
 			return at
 		}
 		// break and next have no value form. Do not mistake a contextual

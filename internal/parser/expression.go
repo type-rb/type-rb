@@ -16,6 +16,7 @@ type exprParser struct {
 	report           func(token.Span, string)
 	groupDepth       int
 	conditionalDepth map[int]int
+	symbolNames      map[int]bool
 }
 
 func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.Expression, report func(token.Span, string), owner *Parser) (ast.Expression, bool) {
@@ -275,6 +276,12 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		}
 		name := p.tokens[p.pos]
 		p.pos++
+		if p.symbolNames != nil {
+			p.symbolNames[name.Span.Start.Offset] = true
+		}
+		if p.owner != nil && p.owner.symbolNames != nil {
+			p.owner.symbolNames[name.Span.Start.Offset] = true
+		}
 		raw := ""
 		value := name.Lexeme
 		if name.Kind == token.String {
@@ -495,6 +502,12 @@ func (p *exprParser) parseHash(open token.Token) ast.Expression {
 		}
 		if colon {
 			if identifier, ok := key.(*ast.Identifier); ok {
+				if p.symbolNames != nil {
+					p.symbolNames[identifier.Span().Start.Offset] = true
+				}
+				if p.owner != nil && p.owner.symbolNames != nil {
+					p.owner.symbolNames[identifier.Span().Start.Offset] = true
+				}
 				key = &ast.SymbolLiteral{Base: identifier.Base, Name: identifier.Name}
 			}
 		}
@@ -700,8 +713,17 @@ func splitTopLevel(tokens []token.Token, separator string) [][]token.Token {
 
 func topLevelIndex(tokens []token.Token, lexeme string) int {
 	depth := 0
+	var symbols map[int]bool
 	for i, tok := range tokens {
 		if tok.Lexeme == lexeme && depth == 0 {
+			if i > 0 && tokens[i-1].Lexeme == ":" || i+1 < len(tokens) && tokens[i+1].Lexeme == ":" {
+				if symbols == nil {
+					symbols = expressionSymbolNames(tokens, nil)
+				}
+				if symbols[tok.Span.Start.Offset] {
+					continue
+				}
+			}
 			return i
 		}
 		switch tok.Lexeme {

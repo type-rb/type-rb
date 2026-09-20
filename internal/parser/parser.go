@@ -21,11 +21,24 @@ type Parser struct {
 	statementDepth int
 	diags          []diagnostic.Diagnostic
 	nativeIslands  []ast.NativeIsland
+	symbolNames    map[int]bool
 }
 
 func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
+	return parseSource(source, nil)
+}
+
+// ParseWithSymbolNames additionally returns grammar-owned Symbol and Hash-label
+// name offsets for syntax consumers that must ignore control-keyword spellings.
+func ParseWithSymbolNames(source []byte) (*ast.Program, []diagnostic.Diagnostic, map[int]bool) {
+	names := map[int]bool{}
+	program, diagnostics := parseSource(source, names)
+	return program, diagnostics, names
+}
+
+func parseSource(source []byte, names map[int]bool) (*ast.Program, []diagnostic.Diagnostic) {
 	tokens, lexDiags := lexer.Lex(source)
-	p := &Parser{source: source, tokens: tokens, diags: append([]diagnostic.Diagnostic(nil), lexDiags...)}
+	p := &Parser{source: source, tokens: tokens, diags: append([]diagnostic.Diagnostic(nil), lexDiags...), symbolNames: names}
 	program := &ast.Program{Tokens: tokens}
 	if len(tokens) > 0 {
 		program.SourceSpan.Start = tokens[0].Span.Start
@@ -549,6 +562,7 @@ func (p *Parser) consumeBlockTerminator() (token.Span, *catchHeader) {
 func (p *Parser) controlFlowExpressionTokens(line []token.Token, next int, base ast.Base, first int) ([]token.Token, map[int]ast.Expression, ast.Base, bool) {
 	controlAt := -1
 	construct := ""
+	var symbols map[int]bool
 	for index := 0; index < len(line); index++ {
 		item := line[index]
 		// A brace block owns its statements. Do not lift a nested condition
@@ -562,6 +576,14 @@ func (p *Parser) controlFlowExpressionTokens(line []token.Token, next int, base 
 			continue
 		}
 		if index >= first && (item.Lexeme == "case" || item.Lexeme == "if") {
+			if index > 0 && line[index-1].Lexeme == ":" || index+1 < len(line) && line[index+1].Lexeme == ":" {
+				if symbols == nil {
+					symbols = expressionSymbolNames(line, p)
+				}
+				if symbols[item.Span.Start.Offset] {
+					continue
+				}
+			}
 			controlAt = index
 			construct = item.Lexeme
 			break
@@ -2090,7 +2112,8 @@ func (p *Parser) opensNativeBlock(line []token.Token) bool {
 		return true
 	}
 	depth := 0
-	for _, tok := range line {
+	var symbols map[int]bool
+	for index, tok := range line {
 		switch tok.Lexeme {
 		case "(", "[", "{":
 			depth++
@@ -2098,6 +2121,14 @@ func (p *Parser) opensNativeBlock(line []token.Token) bool {
 			depth--
 		case "do":
 			if depth == 0 {
+				if index > 0 && line[index-1].Lexeme == ":" {
+					if symbols == nil {
+						symbols = expressionSymbolNames(line, p)
+					}
+					if symbols[tok.Span.Start.Offset] {
+						continue
+					}
+				}
 				return true
 			}
 		}

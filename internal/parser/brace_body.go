@@ -19,7 +19,7 @@ func (p *Parser) braceBody(start, finish token.Position) []ast.Statement {
 	})
 	tokens := append([]token.Token(nil), p.tokens[first:last]...)
 	tokens = append(tokens, token.Token{Kind: token.EOF, Span: token.Span{Start: finish, End: finish}})
-	child := &Parser{source: p.source, tokens: tokens, statementDepth: p.statementDepth}
+	child := &Parser{source: p.source, tokens: tokens, statementDepth: p.statementDepth, symbolNames: p.symbolNames}
 	body := child.parseStatements(nil)
 	p.diags = append(p.diags, child.diags...)
 	p.nativeIslands = append(p.nativeIslands, child.nativeIslands...)
