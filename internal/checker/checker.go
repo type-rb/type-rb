@@ -7640,6 +7640,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		} else if member, ok := n.Callee.(*ast.MemberExpression); ok {
 			receiverType := c.checkExpression(member.Receiver, sc)
+			receiverType = c.expandAlias(receiverType, map[string]bool{})
 			classAccess := c.classMemberAccess(member.Receiver, sc)
 			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
 				local = c.specializeLocalEnumMember(receiverType, local)

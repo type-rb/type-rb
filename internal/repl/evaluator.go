@@ -399,7 +399,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 				continue
 			}
 			changed = true
-			enumNode := &ir.Enum{Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
+			enumNode := &ir.Enum{Declaration: node.Declaration, Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
 			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for index := range node.Variants {
 				member := node.Variants[index]
@@ -1295,24 +1295,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Reference != nil && node.Reference.Package != "" {
 			definitionModule = node.Reference.Package
 		}
-		var definition *enumDefinition
-		if !node.Declaration.Empty() {
-			for _, candidate := range e.definitions {
-				enum, ok := candidate.(*enumDefinition)
-				if ok && enum.Node.Declaration == node.Declaration {
-					definition = enum
-					break
-				}
-			}
-		}
-		if definition == nil {
-			symbol, ok := e.symbol(definitionModule, node.EnumName)
-			if ok {
-				if typeDefinition, typeOK := symbol.Data.(*typeValue); typeOK {
-					definition = typeDefinition.Enum
-				}
-			}
-		}
+		definition := e.enumDefinitionForIdentity(node.Declaration, definitionModule, node.EnumName)
 		if definition == nil {
 			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
 		}
@@ -1873,28 +1856,7 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 		arguments[index] = evaluatedArgument{Name: argument.Name, Value: value}
 	}
 	if node.Method == "from_raw" {
-		definitionModule := module
-		if node.Reference != nil && node.Reference.Package != "" {
-			definitionModule = node.Reference.Package
-		}
-		var definition *enumDefinition
-		if !node.OwnerIdentity.Empty() {
-			for _, candidate := range e.definitions {
-				enum, ok := candidate.(*enumDefinition)
-				if ok && enum.Node.Declaration == node.OwnerIdentity {
-					definition = enum
-					break
-				}
-			}
-		}
-		if definition == nil {
-			symbol, ok := e.symbol(definitionModule, node.EnumName)
-			if ok {
-				if typeValue, typeOK := symbol.Data.(*typeValue); typeOK {
-					definition = typeValue.Enum
-				}
-			}
-		}
+		definition := e.enumCallDefinition(node, module)
 		if definition == nil {
 			return Value{}, fmt.Errorf("enum %s is not available in the REPL environment", node.EnumName)
 		}
@@ -1903,7 +1865,7 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 			if member == nil || member.RawValue == nil {
 				continue
 			}
-			rawValue, err := e.expression(member.RawValue, definitionModule, e.global)
+			rawValue, err := e.expression(member.RawValue, definition.Module, e.global)
 			if err != nil {
 				return Value{}, err
 			}
@@ -1921,22 +1883,48 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 	if !ok {
 		return Value{}, fmt.Errorf("%s is not an enum value", receiver.Type)
 	}
+	definition := e.enumCallDefinition(node, module)
+	if definition == nil {
+		definition = variant.Definition
+	}
 	if node.Method == "raw_value" {
-		member := variant.Definition.Members[variant.Name]
+		member := definition.Members[variant.Name]
 		if member == nil || member.RawValue == nil {
 			return Value{}, fmt.Errorf("enum %s has no raw value", variant.Definition.Node.Name)
 		}
-		value, err := e.expression(member.RawValue, variant.Definition.Module, e.global)
+		value, err := e.expression(member.RawValue, definition.Module, e.global)
 		value.Type = node.ExprType()
 		return value, err
 	}
-	method := variant.Definition.Methods[node.Method]
+	method := definition.Methods[node.Method]
 	if method == nil {
 		return Value{}, fmt.Errorf("enum %s has no method %s", variant.Definition.Node.Name, node.Method)
 	}
-	value, err := e.call(&callable{Method: method, Receiver: receiver, Module: variant.Definition.Module}, arguments)
+	value, err := e.call(&callable{Method: method, Receiver: receiver, Module: definition.Module}, arguments)
 	value.Type = node.ExprType()
 	return value, err
+}
+
+func (e *Evaluator) enumCallDefinition(node *ir.EnumCall, module string) *enumDefinition {
+	if node.Reference != nil && node.Reference.Package != "" {
+		module = node.Reference.Package
+	}
+	return e.enumDefinitionForIdentity(node.OwnerIdentity, module, node.EnumName)
+}
+
+func (e *Evaluator) enumDefinitionForIdentity(declaration identity.Declaration, module, name string) *enumDefinition {
+	if !declaration.Empty() {
+		key := symbolKey(declaration.Module, declaration.Name)
+		if definition, ok := e.definitions[key].(*enumDefinition); ok && definition.Node.Declaration == declaration {
+			return definition
+		}
+	}
+	if symbol, ok := e.symbol(module, name); ok {
+		if value, ok := symbol.Data.(*typeValue); ok {
+			return value.Enum
+		}
+	}
+	return nil
 }
 
 func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evaluatedArgument, module string) error {
