@@ -15,6 +15,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
 	"github.com/type-rb/type-rb/internal/nativepackage"
@@ -26,6 +27,7 @@ import (
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 type Artifact struct {
@@ -391,8 +393,10 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 
 	checkedPrograms := make(map[string]checker.Result, len(units))
 	checkDiagnostics := make(map[string][]diagnostic.Diagnostic, len(units))
-	for _, source := range units {
+	constantTypes := map[identity.Declaration]types.Type{}
+	for _, source := range checkedModuleOrder(units, resolutions) {
 		program := programs[source.ModulePath]
+		resolutions[source.ModulePath] = resolutions[source.ModulePath].WithCheckedValues(constantTypes)
 		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:     options.AllowUnusedImports,
 			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
@@ -402,6 +406,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		})
 		checkedPrograms[source.ModulePath] = checked
 		checkDiagnostics[source.ModulePath] = diagnostics
+		collectCheckedConstants(checked, constantTypes)
 	}
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
 		return analyzeProjectFull(analyzer, append(units, runtimeUnits...), options, validateBackend, requestedUnits)

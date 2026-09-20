@@ -2032,16 +2032,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 		}
-		if n.Namespace && n.ExprType().Declaration.Kind.IsType() && n.ExprType().Declaration.Name != "" {
-			owner := g.declarationName(n.ExprType().Declaration)
-			if n.ExprType().Declaration.LeafName() == n.Name {
-				return owner
-			}
-			return owner + "." + tsMethodName(n.Name)
-		}
-		if n.Namespace && n.Reference != nil && n.Reference.Declaration.Kind.IsType() && n.Reference.Declaration.Name != "" {
-			owner := g.declarationName(n.Reference.Declaration)
-			if n.Reference.Declaration.LeafName() == n.Name {
+		if declaration := ir.ExpressionDeclaration(n); n.Namespace && declaration.Kind.IsType() && declaration.Name != "" {
+			owner := g.declarationName(declaration)
+			if declaration.LeafName() == n.Name {
 				return owner
 			}
 			return owner + "." + tsMethodName(n.Name)
