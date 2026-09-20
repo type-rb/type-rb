@@ -1102,7 +1102,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			var value ir.Expression
 			if semantic.Operation == "new" {
 				if len(n.Arguments) > 0 {
-					value = l.expression(n.Arguments[0].Value)
+					value = assignableConversion(n.Arguments[0].Value.Span(), l.expression(n.Arguments[0].Value), semantic.Representation)
 				}
 			} else {
 				kind = ir.NewtypeValueConversion

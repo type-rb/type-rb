@@ -1691,6 +1691,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
+		case ir.NewtypeConstructionConversion:
+			// Keep the checked storage type at inferred bindings too. In
+			// particular, a union representation must remain an interface.
+			return "(" + g.goType(n.ExprType()) + ")(" + g.expr(n.Value) + ")"
 		case ir.ToIterableConversion:
 			return g.iterableConversion(n)
 		case ir.IntegerToFloatConversion:

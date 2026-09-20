@@ -2085,6 +2085,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Span(), fmt.Sprintf("newtype %s requires a target type", n.Name))
 				break
 			}
+			info := c.newtypes[n.Name]
+			if info == nil || info.statement != n {
+				// Failed registration already diagnosed a declaration conflict.
+				// Never check this body using another declaration's methods.
+				break
+			}
 			target := c.expandAlias(c.typeFromRef(n.Target), map[string]bool{})
 			if target.Nullable {
 				c.error(n.Target.Span(), fmt.Sprintf("newtype %s representation must be non-nullable; make %s nullable at use sites instead", n.Name, n.Name))
@@ -2103,7 +2109,6 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				c.error(n.Target.Span(), "closed newtype "+n.Name+" requires a recursively immutable representation")
 			}
 			previousClass, previousNewtype := c.current, c.currentNewtype
-			info := c.newtypes[n.Name]
 			c.currentNewtype = info
 			c.current = &classInfo{name: n.Name, methods: info.methods, fields: map[string]*ast.FieldStatement{}}
 			owner := c.result.Declarations[n]
@@ -7363,7 +7368,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.constrainEmptyCollectionCall(n, argumentTypes)
 		typ = calleeType
 		if member, ok := n.Callee.(*ast.MemberExpression); ok {
-			receiverType := c.result.Expressions[member.Receiver]
+			receiverType := c.expandAlias(c.result.Expressions[member.Receiver], map[string]bool{})
 			if target, _, newtype := c.newtypeDefinitionForType(receiverType); newtype && c.result.References[n.Callee].Library == nil {
 				switch member.Name {
 				case "new":
