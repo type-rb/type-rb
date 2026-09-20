@@ -828,6 +828,8 @@ func (*EnumConstruct) irExpression() {}
 // Owner preserves the exact local declaration identity across namespaces.
 type EnumCall struct {
 	ExprBase
+	Safe          bool
+	PresentType   types.Type
 	EnumName      string
 	Owner         string
 	OwnerIdentity identity.Declaration

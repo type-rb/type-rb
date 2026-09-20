@@ -991,14 +991,14 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 	if target.Kind == "" {
 		target = alias.Target
 	}
-	targetName := goIdentifier(target.Name, true)
+	targetName := goDeclaredTypeName(target.Declaration.Name, target.Name)
 	targetPrefix := ""
 	if imported := g.typeAliases[target.Name]; alias.AuthoredTargetReference != nil && imported != "" {
 		targetPrefix = imported + "."
 	}
 	for _, variant := range alias.Variants {
-		aliasConstant := goConstantIdentifier(alias.Name, variant.Name)
-		targetConstant := targetPrefix + goConstantIdentifier(target.Name, variant.Name)
+		aliasConstant := goConstantIdentifier(name, variant.Name)
+		targetConstant := targetPrefix + goConstantIdentifier(targetName, variant.Name)
 		if len(variant.Fields) == 0 {
 			g.line("var " + aliasConstant + " = " + targetConstant)
 			continue

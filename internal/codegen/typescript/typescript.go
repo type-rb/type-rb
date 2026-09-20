@@ -871,7 +871,11 @@ func (g *generator) statement(statement ir.Statement) {
 		parameters := tsTypeParameterDeclarations(n.TypeParameters)
 		g.line("export type " + n.Name + parameters + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 		if len(n.Variants) > 0 {
-			g.line("export const " + n.Name + " = " + g.runtimeName(n.Target.Name) + ";")
+			target := g.runtimeName(n.Target.Name)
+			if !n.Target.Declaration.Empty() {
+				target = g.declarationName(n.Target.Declaration)
+			}
+			g.line("export const " + n.Name + " = " + target + ";")
 		}
 		popTypeParameters()
 	case *ir.Newtype:

@@ -1229,6 +1229,9 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		}
 		return n.finishExpression(prefix, &copy)
 	case *ir.EnumCall:
+		if node.Safe {
+			return n.safeNavigationEnumCall(node)
+		}
 		copy := *node
 		prefix := []ir.Statement{}
 		if node.Receiver != nil {
@@ -1380,4 +1383,24 @@ func (n *controlFlowNormalizer) expressions(input []ir.Expression) ([]ir.Stateme
 		result[index] = value
 	}
 	return prefix, result, true
+}
+
+// Enum dispatch keeps the same single receiver evaluation and lazy arguments as
+// ordinary safe calls before each backend consumes the shared control flow.
+func (n *controlFlowNormalizer) safeNavigationEnumCall(node *ir.EnumCall) ([]ir.Statement, ir.Expression) {
+	present := *node
+	present.Safe = false
+	present.Type = node.PresentType
+	present.PresentType = types.Type{}
+	if !node.Receiver.ExprType().Nullable {
+		return n.expression(&present)
+	}
+	prefix, receiver := n.expression(node.Receiver)
+	if receiver == nil {
+		return prefix, nil
+	}
+	stablePrefix, stable := n.materialize(receiver)
+	prefix = append(prefix, stablePrefix...)
+	present.Receiver = safePresentReceiver(stable)
+	return n.safeNavigationExpression(prefix, stable, &present, node.ExprType(), node.SourceSpan())
 }

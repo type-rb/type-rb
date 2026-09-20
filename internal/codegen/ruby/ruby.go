@@ -1007,6 +1007,10 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return callee + "(" + strings.Join(parts, ", ") + ")"
 	case *ir.EnumCall:
+		access := "."
+		if n.Safe {
+			access = "&."
+		}
 		parts := make([]string, len(n.Arguments))
 		for index, argument := range n.Arguments {
 			value := g.expr(argument.Value)
@@ -1017,7 +1021,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		switch n.Method {
 		case "raw_value":
-			return g.expr(n.Receiver) + ".raw_value"
+			return g.expr(n.Receiver) + access + "raw_value"
 		case "from_raw":
 			owner := n.EnumName
 			if n.OwnerIdentity.Name != "" {
@@ -1035,7 +1039,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append([]string{"__trb_scope"}, parts...)
 			}
-			return g.expr(n.Receiver) + "." + n.Method + "(" + strings.Join(parts, ", ") + ")"
+			return g.expr(n.Receiver) + access + n.Method + "(" + strings.Join(parts, ", ") + ")"
 		}
 	case *ir.EnumConstruct:
 		parts := make([]string, len(n.Arguments))

@@ -5957,6 +5957,10 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			return false
 		}
 		if declared, exists := c.declaredTypes[node.Name]; exists {
+			if declared.kind == "type alias" {
+				_, enum := c.enumVariants(c.expandAlias(c.result.Expressions[node], map[string]bool{}))
+				return enum
+			}
 			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype"
 		}
 		if c.declarationTypeVisible(node.Name) {
@@ -5966,6 +5970,8 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			switch binding.Export.Kind {
 			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
 				return true
+			case resolver.TypeAliasExport:
+				return binding.Export.AliasEnum
 			}
 		}
 	case *ast.MemberExpression:
@@ -7240,6 +7246,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
 			} else if _, exists := c.declarationMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
+			} else if c.enums[receiverType.Name] != nil {
+				c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
 			} else if c.classes[receiverType.Name] != nil {
 				kind := "instance"
 				if classAccess {
@@ -7421,7 +7429,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		// Resolved declarations expose their result type here. A Function result
 		// is produced by that call; it is not the declaration's call signature.
 		binding := c.result.References[n.Callee]
-		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport
+		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport ||
+			binding.Member != nil && binding.Member.Kind == resolver.FunctionExport
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && c.authoredMemberMethods[member] != nil {
+			directDeclaration = true
+		}
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && !directDeclaration {
 			c.result.IndirectCalls[n] = true
 			if calleeType.Nullable {
@@ -7475,6 +7487,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				call := EnumCall{EnumName: binding.Member.EnumOwner, Owner: binding.Member.EnumOwner, OwnerIdentity: binding.DeclarationIdentity(), Method: binding.Name, Reference: &copy}
 				if member, ok := n.Callee.(*ast.MemberExpression); ok {
 					call.Receiver = member.Receiver
+					owner := c.expandAlias(c.result.Expressions[member.Receiver], map[string]bool{})
+					owner = c.canonicalContractType(owner, c.activeTypeParameterSet(), binding.Import)
+					if owner.Declaration.Kind == identity.Enum {
+						call.OwnerIdentity = owner.Declaration
+						call.Owner = owner.Declaration.Name
+					}
 				}
 				if binding.Member.Generated != "" && binding.Export != nil {
 					raw := rawEnumFromExport(binding.Export)
@@ -7851,6 +7869,8 @@ func declarationExportOwnsMembers(binding resolver.Binding) bool {
 	switch binding.Export.Kind {
 	case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
 		return true
+	case resolver.TypeAliasExport:
+		return binding.Export.AliasEnum
 	default:
 		return false
 	}

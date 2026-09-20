@@ -1109,7 +1109,13 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value}
 		}
 		if semantic, ok := l.checked.EnumCalls[n]; ok {
+			safe := false
+			if member, memberCall := n.Callee.(*ast.MemberExpression); memberCall {
+				safe = member.Safe
+			}
 			result := &ir.EnumCall{
+				Safe:          safe,
+				PresentType:   l.checked.SafeNavigationCallTypes[n],
 				ExprBase:      base,
 				EnumName:      semantic.EnumName,
 				Owner:         semantic.Owner,
