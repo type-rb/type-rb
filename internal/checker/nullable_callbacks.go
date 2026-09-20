@@ -35,7 +35,7 @@ func markNullableCaptures(sc *scope, names map[string]bool) {
 func capturedNullableWrites(sc *scope) map[string]bool {
 	writes := map[string]bool{}
 	for current := sc; current != nil; current = current.parent {
-		if current.parent == nil {
+		if current.parent == nil || current.globalStorage {
 			// Source-module storage is reachable from ordinary functions as well
 			// as closures. Until calls carry replacement effects, a writable
 			// global cannot retain an earlier nullable or field proof.
