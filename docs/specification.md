@@ -148,6 +148,9 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   typed `fn` wrapper that performs the desired call.
 - A nullable function value must be narrowed to its non-null function type
   before it is called, just like other nullable values.
+- Calling a function value evaluates and retains that value before evaluating
+  its arguments from left to right. Argument effects cannot replace the selected
+  function by reassigning its binding or its containing field or collection.
 - `Void` is the compiler's no-result type, not a source value type. It is valid
   only as the return type of a function type. A Void expression may be used as
   a standalone statement but cannot be initialized, assigned, passed,

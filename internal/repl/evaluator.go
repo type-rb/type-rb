@@ -1189,6 +1189,40 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				arguments = append(arguments, evaluatedArgument{Value: receiver})
 			}
 		}
+		var callee Value
+		var err error
+		if reference == nil || reference.Intrinsic == "" {
+			if member, safe := safeCallMember(node.Callee); safe && safeReceiver != nil {
+				if member.Reference != nil && member.Reference.Package != "" {
+					if imported, ok := e.symbol(member.Reference.Package, member.Reference.Symbol); ok {
+						callee = imported
+					} else {
+						callee, err = e.callMember(*safeReceiver, member.Name, module)
+					}
+				} else {
+					callee, err = e.callMember(*safeReceiver, member.Name, module)
+				}
+			} else if member, ok := node.Callee.(*ir.Member); ok && (member.Dispatch.Owner.Kind == identity.Module || member.Reference != nil && member.Reference.Package != "") {
+				callee, err = e.expression(node.Callee, module, sc)
+			} else if member, ok := node.Callee.(*ir.Member); ok {
+				receiver := Value{}
+				if safeReceiver != nil {
+					receiver = *safeReceiver
+				} else {
+					var receiverErr error
+					receiver, receiverErr = e.expression(member.Receiver, module, sc)
+					if receiverErr != nil {
+						return Value{}, receiverErr
+					}
+				}
+				callee, err = e.callMember(receiver, member.Name, module)
+			} else {
+				callee, err = e.expression(node.Callee, module, sc)
+			}
+			if err != nil {
+				return Value{}, err
+			}
+		}
 		for _, argument := range node.Arguments {
 			value, err := e.expression(argument.Value, module, sc)
 			if err != nil {
@@ -1202,38 +1236,6 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 				result.Type = node.ExprType()
 			}
 			return result, err
-		}
-		var callee Value
-		var err error
-		if member, safe := safeCallMember(node.Callee); safe && safeReceiver != nil {
-			if member.Reference != nil && member.Reference.Package != "" {
-				if imported, ok := e.symbol(member.Reference.Package, member.Reference.Symbol); ok {
-					callee = imported
-				} else {
-					callee, err = e.callMember(*safeReceiver, member.Name, module)
-				}
-			} else {
-				callee, err = e.callMember(*safeReceiver, member.Name, module)
-			}
-		} else if member, ok := node.Callee.(*ir.Member); ok && (member.Dispatch.Owner.Kind == identity.Module || member.Reference != nil && member.Reference.Package != "") {
-			callee, err = e.expression(node.Callee, module, sc)
-		} else if member, ok := node.Callee.(*ir.Member); ok {
-			receiver := Value{}
-			if safeReceiver != nil {
-				receiver = *safeReceiver
-			} else {
-				var receiverErr error
-				receiver, receiverErr = e.expression(member.Receiver, module, sc)
-				if receiverErr != nil {
-					return Value{}, receiverErr
-				}
-			}
-			callee, err = e.callMember(receiver, member.Name, module)
-		} else {
-			callee, err = e.expression(node.Callee, module, sc)
-		}
-		if err != nil {
-			return Value{}, err
 		}
 		function, ok := callee.Data.(*callable)
 		if !ok {

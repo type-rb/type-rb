@@ -19,7 +19,7 @@ def sample(): String
 end
 `)
 	wants := map[string][]string{
-		"go":         {"callable func(int) string", "formatter := func(value int) string", "return callable(value)"},
+		"go":         {"callable func(int) string", "formatter := func(value int) string"},
 		"ruby":       {"formatter = ->(value) do", "callable.call(value)"},
 		"typescript": {"callable: (arg0: number) => string", "const formatter: (arg0: number) => string = (value: number): string =>", "return (await callable(value));"},
 	}

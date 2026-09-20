@@ -1880,6 +1880,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		callee := g.expr(n.Callee)
+		if n.Indirect {
+			return g.indirectCall(n, callee, args)
+		}
 		if _, converted := n.Callee.(*ir.Conversion); converted {
 			callee = "(" + callee + ")"
 		}

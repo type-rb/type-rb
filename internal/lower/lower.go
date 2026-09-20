@@ -1220,6 +1220,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 			CallSignature:   append([]callsignature.Parameter(nil), l.checked.CallSignatures[n]...),
 			DeclarationOnly: l.checked.DeclarationOnlyCalls[n],
 			PresentType:     l.checked.SafeNavigationCallTypes[n],
+			Indirect:        l.checked.IndirectCalls[n],
 		}
 		if semantic, ok := l.checked.NewtypeMethodCalls[n]; ok {
 			result.NewtypeMethod = &ir.NewtypeMethodCall{Dispatch: semantic.Dispatch, Reference: referenceFromBinding(semantic.Reference)}

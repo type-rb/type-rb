@@ -26,3 +26,15 @@ func (g *generator) namedFunctionValue(identifier *ir.Identifier, target, module
 	}
 	return "func(" + strings.Join(declarations, ", ") + ")" + g.goReturn(returned) + " { " + body + " }"
 }
+
+// Go need not read a function variable or field before a call in an argument.
+// Select the checked callable in its own statement before evaluating arguments.
+func (g *generator) indirectCall(call *ir.Call, callee, arguments string) string {
+	g.temporary++
+	binding := "__trbCallable" + strconv.Itoa(g.temporary)
+	invoke := binding + "(" + arguments + ")"
+	if call.ExprType().Kind != types.Void {
+		invoke = "return " + invoke
+	}
+	return "func()" + g.goReturn(call.ExprType()) + " { " + binding + " := " + callee + "; " + invoke + " }()"
+}
