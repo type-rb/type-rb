@@ -1839,6 +1839,14 @@ func Instantiate(symbol Symbol, arguments []types.Type) Symbol {
 		bindType(symbol.Parameters[parameterIndex].Type, actual, typeParameters, bindings)
 	}
 	result := symbol
+	// A successful binding may itself be an outer type parameter with the
+	// same spelling. Only unbound parameters still belong to this contract.
+	result.TypeParameters = nil
+	for _, name := range symbol.TypeParameters {
+		if _, bound := bindings[name]; !bound {
+			result.TypeParameters = append(result.TypeParameters, name)
+		}
+	}
 	result.Parameters = append([]Parameter(nil), symbol.Parameters...)
 	for index := range result.Parameters {
 		result.Parameters[index].Type = substituteType(result.Parameters[index].Type, bindings)
