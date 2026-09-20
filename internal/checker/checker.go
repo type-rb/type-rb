@@ -6487,6 +6487,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		}
 		typ = types.FromName("String")
 	case *ast.SymbolLiteral:
+		if strings.HasPrefix(n.Raw, `"`) {
+			if _, err := stringliteral.Unquote(n.Raw); err != nil {
+				c.error(n.Span(), "invalid quoted Symbol escape or literal")
+			}
+		}
 		typ = types.FromName("String")
 	case *ast.ArrayLiteral:
 		element := c.inferCollectionType(n.Elements, sc)
