@@ -618,14 +618,16 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "len(" + g.arrayValues(arguments[0]) + ") == 0"
 	case "trb.std.arrays.try_fetch":
 		resultType, _, _ := filesystemResultType()
+		receiver, requested, prefix := g.arrayArgumentEvaluation(call, arguments, "int")
 		valuesType := call.Arguments[0].Value.ExprType()
 		if member, ok := call.Callee.(*ir.Member); ok && member.Receiver.ExprType().Kind == types.Array {
 			valuesType = member.Receiver.ExprType()
 		}
 		receiverType := g.goType(valuesType)
-		return "func(receiver " + receiverType + ", requested int) " + resultType + " { values := " + g.arrayValues("receiver") + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }(" + arguments[0] + ", " + arguments[1] + ")"
+		return prefix + "return func(receiver " + receiverType + ", requested int) " + resultType + " { values := " + g.arrayValues("receiver") + "; index := requested; if index < 0 { index += len(values) }; if index < 0 || index >= len(values) { return " + indexLookupError("requested", "len(values)", "Array index is out of bounds") + " }; return " + filesystemOK("values[index]") + " }(" + receiver + ", " + requested + ") }()"
 	case "trb.std.arrays.slice", "trb.std.arrays.try_slice":
 		g.requireImport("slices", "")
+		receiver, bounds, prefix := g.arrayArgumentEvaluation(call, arguments, "[3]int")
 		safe := name == "trb.std.arrays.try_slice"
 		returnType := g.goType(call.ExprType())
 		invalid := "panic(\"Array slice range is out of bounds\")"
@@ -640,7 +642,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			valuesType = member.Receiver.ExprType()
 		}
 		receiverType := g.goType(valuesType)
-		return "func(receiver " + receiverType + ", bounds [3]int) " + returnType + " { values := " + g.arrayValues("receiver") + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }(" + arguments[0] + ", " + arguments[1] + ")"
+		return prefix + "return func(receiver " + receiverType + ", bounds [3]int) " + returnType + " { values := " + g.arrayValues("receiver") + "; start, end, exclusive := bounds[0], bounds[1], bounds[2] == 1; valid := start >= 0 && end >= 0 && start <= end && (exclusive && end <= len(values) || !exclusive && end < len(values)); if !valid { " + invalid + " }; stop := end; if !exclusive { stop++ }; " + success + " }(" + receiver + ", " + bounds + ") }()"
 	case "trb.std.arrays.first":
 		return "func() " + g.goType(call.ExprType()) + " { values := " + g.arrayValues(arguments[0]) + "; if len(values) == 0 { panic(\"Array is empty\") }; return values[0] }()"
 	case "trb.std.arrays.last":
