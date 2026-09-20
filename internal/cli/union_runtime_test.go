@@ -161,3 +161,18 @@ puts(mapping["none"] == nil)
 end
 `, "1\ntrue\n1\ntrue\n", "")
 }
+
+func TestNullableLiteralUnionStorageAcrossTargets(t *testing.T) {
+	runPortableExecutionCase(t, `alias One = 1
+alias Choice = 1 | 2
+def choose(value: One?): Choice?
+return value
+end
+def main()
+one: One := 1
+_present := choose(one)
+_absent := choose(nil)
+puts("stored")
+end
+`, "stored\n", "")
+}

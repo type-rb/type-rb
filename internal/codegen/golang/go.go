@@ -1706,11 +1706,13 @@ func (g *generator) expr(expression ir.Expression) string {
 		case ir.NullableToUnionConversion:
 			base := n.Value.ExprType()
 			base.Nullable = false
+			targetBase := n.ExprType()
+			targetBase.Nullable = false
 			payload := "value"
 			if g.goType(base) != g.goType(n.Value.ExprType()) {
 				payload = "*value"
 			}
-			return "func(value " + g.goType(n.Value.ExprType()) + ") " + g.goType(n.ExprType()) + " { if value == nil { return nil }; var converted any = " + payload + "; return &converted }(" + g.expr(n.Value) + ")"
+			return "func(value " + g.goType(n.Value.ExprType()) + ") " + g.goType(n.ExprType()) + " { if value == nil { return nil }; var converted " + g.goType(targetBase) + " = " + payload + "; return &converted }(" + g.expr(n.Value) + ")"
 		case ir.NonNullableToNullableConversion:
 			return g.nonNullableToNullableExpr(n, n.ExprType())
 		case ir.NullableToNonNullableConversion:
