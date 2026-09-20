@@ -1607,11 +1607,14 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" {
 			if alias := g.referenceAlias(n.Reference); alias != "" {
-				return alias + "." + g.goImportedName(n.Name, n.Reference)
+				return g.namedFunctionValue(n, alias+"."+g.goImportedName(n.Name, n.Reference), n.Reference.Package, n.Reference.Symbol)
 			}
 			if n.Reference.ExportKind == "function" {
-				return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
+				return g.namedFunctionValue(n, g.projectFunctionName(n.Reference.Package, n.Reference.Symbol), n.Reference.Package, n.Reference.Symbol)
 			}
+		}
+		if g.topMethods[n.Name] {
+			return g.namedFunctionValue(n, g.projectFunctionName(g.modulePath, n.Name), g.modulePath, n.Name)
 		}
 		if n.Owner != "" {
 			return goConstantIdentifier(n.Owner, n.Name)
@@ -1864,12 +1867,23 @@ func (g *generator) expr(expression ir.Expression) string {
 			if !identifier.Lexical && g.receiver != "" && g.methods[identifier.Name] {
 				return g.receiver + "." + goMethodName(identifier.Name) + "(" + args + ")"
 			}
-			if g.topMethods[identifier.Name] {
+			if !identifier.Lexical && g.topMethods[identifier.Name] {
 				name := g.projectFunctionName(g.modulePath, identifier.Name)
 				return name + "(" + args + ")"
 			}
+			if reference := identifier.Reference; !identifier.Lexical && reference != nil && reference.ExportKind == "function" {
+				name := g.projectFunctionName(reference.Package, reference.Symbol)
+				if alias := g.referenceAlias(reference); alias != "" {
+					name = alias + "." + g.goImportedName(identifier.Name, reference)
+				}
+				return name + "(" + args + ")"
+			}
 		}
-		return g.expr(n.Callee) + "(" + args + ")"
+		callee := g.expr(n.Callee)
+		if _, converted := n.Callee.(*ir.Conversion); converted {
+			callee = "(" + callee + ")"
+		}
+		return callee + "(" + args + ")"
 	case *ir.EnumCall:
 		parts := make([]string, 0, len(n.Arguments)+1)
 		for _, argument := range n.Arguments {
