@@ -156,7 +156,7 @@ end
 }
 
 func TestSnapshotArrayIterationKeepsUnsupportedBoundaries(t *testing.T) {
-	for _, expression := range []string{"[1].each_slice(1) do |batch|\nputs(batch.size())\nend", "(0..2).each do |value|\nputs(value)\nend"} {
+	for _, expression := range []string{"[1].each_slice(1) do |batch|\nputs(batch.size())\nend", "(0..2).each do |value|\nputs(value)\nend", "values: Array<Integer>? := nil\nvalues&.each { |value| puts(value) }"} {
 		_, err := BuildV4(analyzeV4Program(t, "def main()\n"+expression+"\nend\n"), "/project/src")
 		if err == nil || !strings.Contains(err.Error(), "does not support") {
 			t.Fatalf("accepted unsupported iteration: %v", err)

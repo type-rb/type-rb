@@ -1475,6 +1475,12 @@ func (e *Evaluator) iterate(node *ir.Iterate, module string, sc *scope) (flowRes
 	if err != nil {
 		return flowResult{}, err
 	}
+	if node.Safe {
+		if source.Data == nil {
+			return flowResult{}, nil
+		}
+		source.Type.Nullable = false
+	}
 	if node.Intrinsic != "" && e.runtimeHandles(node.Intrinsic) {
 		return e.runtimeIterate(node, source, module, sc)
 	}

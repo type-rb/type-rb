@@ -33,6 +33,7 @@ type Result struct {
 	SafeNavigationCallTypes    map[*ast.CallExpression]types.Type
 	Variables                  map[*ast.VariableStatement]types.Type
 	Iterations                 map[*ast.IterationExpression]types.Type
+	SafeIterationTypes         map[*ast.IterationExpression]types.Type
 	IterationBindings          map[*ast.IterationExpression][]types.Type
 	LexicalBindings            map[*ast.Identifier]bool
 	Constants                  map[ast.Expression]string
@@ -878,6 +879,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			SafeNavigationCallTypes:    map[*ast.CallExpression]types.Type{},
 			Variables:                  map[*ast.VariableStatement]types.Type{},
 			Iterations:                 map[*ast.IterationExpression]types.Type{},
+			SafeIterationTypes:         map[*ast.IterationExpression]types.Type{},
 			IterationBindings:          map[*ast.IterationExpression][]types.Type{},
 			LexicalBindings:            map[*ast.Identifier]bool{},
 			Constants:                  map[ast.Expression]string{},
@@ -6717,6 +6719,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 			break
 		}
+		if sourceType.Nullable {
+			if !n.Safe {
+				c.error(n.Source.Span(), "nullable iteration source requires safe navigation or explicit narrowing")
+				typ = invalidType()
+				break
+			}
+			sourceType.Nullable = false
+		}
 		elementType, iterable := iterableElementType(sourceType)
 		hashSource := sourceType.Kind == types.Hash && len(sourceType.Args) == 2
 		if hashSource {
@@ -7796,6 +7806,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ.Declaration = declaration
 			}
 		}
+	}
+	if iteration, ok := expression.(*ast.IterationExpression); ok && iteration.Safe {
+		c.result.SafeIterationTypes[iteration] = typ
+		typ = safeNavigationResultType(typ, c.result.Expressions[iteration.Source])
 	}
 	if member, ok := expression.(*ast.MemberExpression); ok && member.Safe {
 		c.result.SafeNavigationPresentTypes[member] = typ
@@ -9232,6 +9246,9 @@ func (c *Checker) contextualizeCollectionLiteral(expression ast.Expression, expe
 	if expression == nil {
 		return actual
 	}
+	// A literal constructs a present container. Keep outer optionality in the
+	// assignment conversion rather than changing the container construction.
+	expected.Nullable = false
 	if expected.Kind == types.Array && len(expected.Args) == 1 && actual.Kind == types.Array {
 		literal, ok := expression.(*ast.ArrayLiteral)
 		if !ok {
