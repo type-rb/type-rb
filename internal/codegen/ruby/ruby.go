@@ -828,7 +828,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return value.String()
 	case *ir.Symbol:
 		if !g.nativeSyntax {
-			return strconv.Quote(n.Name)
+			return quoteStringValue(n.Name)
 		}
 		if n.Raw != "" {
 			return ":" + n.Raw
