@@ -71,3 +71,52 @@ puts(marker_value())
 		})
 	}
 }
+
+func TestSingleQuotedStringsAcrossTargetsAndREPL(t *testing.T) {
+	const declarations = `def letter(value: String = 'a'): String
+return value
+end
+`
+	const body = `puts(letter())
+puts(letter('日'))
+puts('\u65e5')
+puts('😀')
+puts('\\')
+puts('\'')
+puts('"')
+puts("[" + '\n' + "]")
+puts("#{'a'}#{'日'}")
+puts(['a', 'b'].join('!'))
+`
+	const want = "a\n日\n日\n😀\n\\\n'\n\"\n[\n]\na日\na!b\n"
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			tool := map[string]string{"go": "go", "ruby": "ruby", "typescript": "node"}[mode]
+			if _, err := exec.LookPath(tool); err != nil {
+				t.Skipf("%s is not installed", tool)
+			}
+			path := filepath.Join(t.TempDir(), "main.trb")
+			formatted, diagnostics := formatter.Format([]byte(declarations + "def main()\n" + body + "end\n"))
+			if len(diagnostics) != 0 {
+				t.Fatal(diagnostics)
+			}
+			if !bytes.Contains(formatted, []byte("'日'")) || !bytes.Contains(formatted, []byte("'a'")) {
+				t.Fatalf("formatter changed single quotes:\n%s", formatted)
+			}
+			if err := os.WriteFile(path, formatted, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--mode", mode, path}); status != 0 || stderr.Len() != 0 || stdout.String() != want {
+				t.Fatalf("run status=%d stdout=%q stderr=%s", status, stdout.String(), stderr.String())
+			}
+			stdout.Reset()
+			stderr.Reset()
+			command.Stdin = strings.NewReader(declarations + body + ":quit\n")
+			if status := command.Run([]string{"repl", "--mode", mode}); status != 0 || stderr.Len() != 0 || stdout.String() != want {
+				t.Fatalf("repl status=%d stdout=%q stderr=%s", status, stdout.String(), stderr.String())
+			}
+		})
+	}
+}

@@ -980,9 +980,12 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		}
 	case *ast.Literal:
 		raw := n.Raw
-		if n.Kind == ast.StringLiteral && strings.HasPrefix(raw, `"`) {
-			decoded, _ := stringliteral.Unquote(raw) // Validated by the checker.
-			raw = strconv.Quote(decoded)
+		if n.Kind == ast.StringLiteral {
+			// The literal's checked type is String, including accepted single-quoted
+			// spellings. Preserve its value rather than target-language rune syntax.
+			if decoded, err := stringliteral.Unquote(raw); err == nil {
+				raw = strconv.Quote(decoded)
+			}
 		}
 		return &ir.Literal{ExprBase: base, Kind: string(n.Kind), Raw: raw}
 	case *ast.InterpolatedString:
