@@ -324,7 +324,13 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.method(n, nil)
 	case *ir.Variable:
-		g.line(n.Name+" = "+g.expr(n.Value), n.TrailingComment)
+		name := n.Name
+		if n.Constant && n.Owner == "" && g.projectNames != nil {
+			if target := g.projectNames.constants[g.modulePath][n.Name]; target != "" {
+				name = target
+			}
+		}
+		g.line(name+" = "+g.expr(n.Value), n.TrailingComment)
 	case *ir.Temporary:
 		g.line(n.Name+" = nil", n.TrailingComment)
 	case *ir.Assignment:
@@ -785,6 +791,17 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.statements(n.Body)
 		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
 	case *ir.Identifier:
+		if !n.Lexical && g.projectNames != nil {
+			module, name := g.modulePath, n.Name
+			if n.Reference != nil && n.Reference.ExportKind == "value" && n.Reference.Intrinsic == "" {
+				module, name = n.Reference.Package, n.Reference.Symbol
+			}
+			if n.Owner == "" {
+				if target := g.projectNames.constants[module][name]; target != "" {
+					return target
+				}
+			}
+		}
 		if n.Lexical {
 			if name := g.lexicalNames[n.Name]; name != "" {
 				return name

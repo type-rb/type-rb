@@ -449,7 +449,7 @@ func (g *generator) statement(statement ir.Statement) {
 				name = n.Name
 			}
 			if n.Constant {
-				name = goConstantIdentifier(n.Owner, n.Name)
+				name = g.projectConstantName(g.modulePath, n.Owner, n.Name)
 			}
 			value := g.exprExpected(n.Value, n.Type)
 			if g.cli != nil {
@@ -1619,15 +1619,18 @@ func (g *generator) expr(expression ir.Expression) string {
 			if n.Reference.ExportKind == "function" {
 				return g.namedFunctionValue(n, g.projectFunctionName(n.Reference.Package, n.Reference.Symbol), n.Reference.Package, n.Reference.Symbol)
 			}
+			if n.Reference.ExportKind == "value" {
+				return g.goImportedName(n.Name, n.Reference)
+			}
 		}
 		if g.topMethods[n.Name] {
 			return g.namedFunctionValue(n, g.projectFunctionName(g.modulePath, n.Name), g.modulePath, n.Name)
 		}
 		if n.Owner != "" {
-			return goConstantIdentifier(n.Owner, n.Name)
+			return g.projectConstantName(g.modulePath, n.Owner, n.Name)
 		}
 		if isUpper(n.Name) {
-			return goConstantIdentifier("", n.Name)
+			return g.projectConstantName(g.modulePath, "", n.Name)
 		}
 		return goIdentifier(n.Name, isUpper(n.Name))
 	case *ir.Literal:
@@ -1771,7 +1774,11 @@ func (g *generator) expr(expression ir.Expression) string {
 			if owner == "" {
 				owner = irExpressionName(n.Receiver)
 			}
-			name := goConstantIdentifier(owner, n.Name)
+			module := g.modulePath
+			if n.Reference != nil && n.Reference.Package != "" {
+				module = n.Reference.Package
+			}
+			name := g.projectConstantName(module, owner, n.Name)
 			if alias := g.referenceAlias(n.Reference); alias != "" {
 				return alias + "." + name
 			}
@@ -3199,8 +3206,8 @@ func (g *generator) goImportedName(name string, reference *ir.Reference) string 
 	if reference != nil && reference.ExportKind == "function" {
 		return g.projectFunctionName(reference.Package, reference.Symbol)
 	}
-	if reference != nil && reference.ExportKind == "value" && isUpper(name) {
-		return goConstantIdentifier("", name)
+	if reference != nil && reference.ExportKind == "value" {
+		return g.projectConstantName(reference.Package, reference.Owner, reference.Symbol)
 	}
 	if reference != nil && reference.Declaration.Kind.IsType() && reference.Declaration.Name != "" {
 		return goIdentifier(reference.Declaration.Name, true)
@@ -3399,6 +3406,15 @@ func (g *generator) projectFunctionName(modulePath, sourceName string) string {
 		return "main"
 	}
 	return goMethodName(sourceName)
+}
+
+func (g *generator) projectConstantName(modulePath, owner, sourceName string) string {
+	if g.projectNames != nil {
+		if name := g.projectNames.constants[modulePath][identity.Qualify(owner, sourceName)]; name != "" {
+			return name
+		}
+	}
+	return goConstantIdentifier(owner, sourceName)
 }
 
 func (g *generator) goReturn(t types.Type) string {

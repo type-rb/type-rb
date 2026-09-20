@@ -557,6 +557,7 @@ type Checker struct {
 	authoredTypeIdentities      map[string]identity.Declaration
 	authoredOwnerIdentities     map[string]identity.Declaration
 	authoredConstants           map[identity.Declaration]types.Type
+	authoredModuleScopes        map[string]*scope
 	activeTypeParameters        map[string]int
 	activeTypeOwner             string
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
@@ -948,6 +949,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		authoredTypeIdentities:     map[string]identity.Declaration{},
 		authoredOwnerIdentities:    map[string]identity.Declaration{},
 		authoredConstants:          map[identity.Declaration]types.Type{},
+		authoredModuleScopes:       map[string]*scope{},
 		activeTypeParameters:       map[string]int{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
@@ -2122,7 +2124,12 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 				owner = sc.constantOwner + "::" + n.Name
 			}
 			c.moduleDepth++
-			c.checkStatements(n.Body, &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true})
+			moduleScope := c.authoredModuleScopes[owner]
+			if moduleScope == nil {
+				moduleScope = &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true}
+				c.authoredModuleScopes[owner] = moduleScope
+			}
+			c.checkStatements(n.Body, moduleScope)
 			c.moduleDepth--
 		case *ast.InterfaceStatement:
 			popTypeParameters := c.pushActiveTypeParameters(n.TypeParameters)
@@ -2243,10 +2250,13 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if !n.Mutable && isReferenceType(variableType) {
 				variableType.Readonly = true
 			}
+			if !isReferenceType(variableType) {
+				variableType.Readonly = false
+			}
 			if previous, exists := sc.values[n.Name]; exists {
 				c.errorRelated(diagnostic.DuplicateBinding, n.Span(), fmt.Sprintf("%s was already declared; use = to reassign", n.Name), "first declaration", previous.span)
 			} else {
-				if n.Constant {
+				if n.Constant && isReferenceType(variableType) {
 					variableType.Readonly = true
 				}
 				declared := symbol{typ: variableType, mutable: n.Mutable && !n.Constant, constant: n.Constant, owner: sc.constantOwner, span: n.Span(), variable: n, pending: pending}
