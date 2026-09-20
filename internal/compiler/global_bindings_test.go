@@ -69,3 +69,49 @@ func TestTopLevelBindingsKeepTheirSourceModuleIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestTopLevelMutableBindingsForgetStaleNullableFacts(t *testing.T) {
+	const declarations = "mut value: Integer? := 1\ndef clear()\nvalue = nil\nend\n"
+	for name, body := range map[string]string{
+		"direct":      "if value != nil\nclear()\nputs(value + 1)\nend\n",
+		"callback":    "call := fn(); clear(); end\nif value != nil\ncall()\nputs(value + 1)\nend\n",
+		"conditional": "if value != nil\nif true\nclear()\nend\nputs(value + 1)\nend\n",
+		"repeated":    "while value != nil\nclear()\nputs(value + 1)\nend\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertNullableCallbackRejected(t, declarations+"def main()\n"+body+"end\n")
+		})
+	}
+}
+
+func TestTopLevelNullableBindingsPermitFreshGuardsAndLocalShadowing(t *testing.T) {
+	source := []byte(`mut value: Integer? := 1
+fixed: Integer? := 4
+def clear()
+  value = nil
+end
+def local(): Integer
+  mut value: Integer? := 2
+  if value != nil
+    clear()
+    return value + 1
+  end
+  return 0
+end
+def main()
+  puts(local())
+  if value != nil
+    puts(value + 1)
+  else
+    puts("absent")
+  end
+  if fixed != nil
+    clear()
+    puts(fixed + 1)
+  end
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) { runEffectSource(t, mode, "global_nullable.trb", source, "3\nabsent\n5") })
+	}
+}

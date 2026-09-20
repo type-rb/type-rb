@@ -82,3 +82,29 @@ func TestGlobalBindingsRemainIndependentOfSessionBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestGlobalNullableFactsAreCheckedBeforeExecutingSubmission(t *testing.T) {
+	const input = `mut value: Integer? := 1
+def clear()
+  value = nil
+end
+if value != nil
+  clear()
+  puts(value + 1)
+end
+value
+:quit
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := Run(Options{Mode: mode, Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr, Compile: conditionalSessionCompiler(mode)})
+			if err != nil || !strings.Contains(stderr.String(), "operator + does not support Integer? and Integer") {
+				t.Fatalf("expected static stale proof rejection: err=%v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+			}
+			if stdout.String() != "1 : Integer? [mut]\n1 : Integer? [mut]\n" {
+				t.Fatalf("invalid submission changed global storage: %q", stdout.String())
+			}
+		})
+	}
+}
