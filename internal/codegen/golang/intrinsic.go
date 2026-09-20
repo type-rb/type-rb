@@ -657,20 +657,22 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "func() " + g.goType(call.ExprType()) + " { result := " + g.goArraySliceType(call.ExprType()) + "{}; for _, value := range " + g.arrayValues(arguments[0]) + " { if !slices.Contains(result, value) { result = append(result, value) } }; return " + g.arrayReference("result") + " }()"
 	case "trb.std.arrays.concat":
 		g.requireImport("slices", "")
-		return g.arrayReference("append(slices.Clone(" + g.arrayValues(arguments[0]) + "), " + g.arrayValues(arguments[1]) + "...)")
+		receiver, other, prefix := g.arrayArgumentEvaluation(call, arguments, g.goType(arrayReceiverType(call)))
+		return prefix + "return " + g.arrayReference("append(slices.Clone("+g.arrayValues(receiver)+"), "+g.arrayValues(other)+"...)") + " }()"
 	case "trb.std.arrays.join":
 		g.requireImport("strings", "")
-		return "strings.Join(" + g.arrayValues(arguments[0]) + ", " + arguments[1] + ")"
+		receiver, separator, prefix := g.arrayArgumentEvaluation(call, arguments, "string")
+		return prefix + "return strings.Join(" + g.arrayValues(receiver) + ", " + separator + ") }()"
 	case "trb.std.arrays.pop":
 		return "func(values *[]" + g.goType(call.ExprType()) + ") " + g.goType(call.ExprType()) + " { items := *values; if len(items) == 0 { panic(\"Array is empty\") }; index := len(items) - 1; value := items[index]; *values = items[:index]; return value }(" + arguments[0] + ")"
 	case "trb.std.arrays.shift":
 		return "func(values *[]" + g.goType(call.ExprType()) + ") " + g.goType(call.ExprType()) + " { items := *values; if len(items) == 0 { panic(\"Array is empty\") }; value := items[0]; *values = items[1:]; return value }(" + arguments[0] + ")"
 	case "trb.std.arrays.push":
-		valueType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
-		return "func(values *[]" + g.goType(valueType) + ", value " + g.goType(valueType) + ") { *values = append(*values, value) }(" + arguments[0] + ", " + arguments[1] + ")"
+		receiver, value, prefix := g.arrayArgumentEvaluation(call, arguments, g.goType(arrayReceiverType(call).Args[0]))
+		return prefix + "*" + receiver + " = append(" + g.arrayValues(receiver) + ", " + value + ") }()"
 	case "trb.std.arrays.unshift":
-		valueType := call.Arguments[len(call.Arguments)-1].Value.ExprType()
-		return "func(values *[]" + g.goType(valueType) + ", value " + g.goType(valueType) + ") { items := *values; items = append(items, value); copy(items[1:], items[:len(items)-1]); items[0] = value; *values = items }(" + arguments[0] + ", " + arguments[1] + ")"
+		receiver, value, prefix := g.arrayArgumentEvaluation(call, arguments, g.goType(arrayReceiverType(call).Args[0]))
+		return prefix + "items := " + g.arrayValues(receiver) + "; items = append(items, " + value + "); copy(items[1:], items[:len(items)-1]); items[0] = " + value + "; *" + receiver + " = items }()"
 	case "trb.std.arrays.reverse":
 		g.requireImport("slices", "")
 		return "func() " + g.goType(call.ExprType()) + " { values := slices.Clone(" + g.arrayValues(arguments[0]) + "); slices.Reverse(values); return " + g.arrayReference("values") + " }()"

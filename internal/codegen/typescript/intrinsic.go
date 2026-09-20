@@ -414,7 +414,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.arrays.uniq":
 		return "((values: " + callType + "): " + callType + " => { const result: " + callType + " = []; for (const value of values) { if (result.indexOf(value) < 0) { result.push(value); } } return result; })(" + arguments[0] + ")"
 	case "trb.std.arrays.concat":
-		return "[..." + arguments[0] + ", ..." + arguments[1] + "]"
+		return "((values: " + callType + ", other: " + callType + "): " + callType + " => [...values, ...other])(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.arrays.join":
 		return arguments[0] + ".join(" + arguments[1] + ")"
 	case "trb.std.arrays.pop":
