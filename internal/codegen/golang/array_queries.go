@@ -2,14 +2,10 @@ package golang
 
 import (
 	"github.com/type-rb/type-rb/internal/ir"
-	"github.com/type-rb/type-rb/internal/types"
 )
 
 func (g *generator) arrayQueryIntrinsic(name string, call *ir.Call, arguments []string) string {
-	arrayType := call.Arguments[0].Value.ExprType()
-	if member, ok := receiverMember(call.Callee); ok && member.Receiver.ExprType().Kind == types.Array {
-		arrayType = member.Receiver.ExprType()
-	}
+	arrayType := arrayReceiverType(call)
 	receiver, target, prefix := g.arrayArgumentEvaluation(call, arguments, g.goType(arrayType.Args[0]))
 	values := receiver + "Values"
 	// Retain the Array identity before the argument, then read its current

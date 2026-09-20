@@ -4389,7 +4389,7 @@ end
 			t.Fatalf("%s: %v", mode, err)
 		}
 		output := string(artifact.Output)
-		if mode == "go" && !strings.Contains(output, "*values = append(*values, value)") {
+		if mode == "go" && !strings.Contains(output, "*__trbArrayReceiver1 = append(trbArrayValues_") {
 			t.Fatalf("Go member push was not lowered portably:\n%s", output)
 		}
 	}

@@ -1668,7 +1668,7 @@ end
 		"go": {
 			`slices.Clone(trbArrayValues_`,
 			`trbArrayIndex_`,
-			`*values = append(*values, value)`,
+			`*__trbArrayReceiver1 = append(trbArrayValues_`,
 			`*values = items[1:]`,
 			`copy(items[1:], items[:len(items)-1])`,
 			`slices.Reverse(values)`,
@@ -1721,7 +1721,7 @@ end
 			`values.indexOf(Number(1)) >= 0`,
 			`if (value === target)`,
 			`if (result.indexOf(value) < 0)`,
-			`[...[1, 2], ...[3, 4]]`,
+			`=> [...values, ...other])([1, 2], [3, 4])`,
 			`Object.keys(labels).map(Number)`,
 			`Object.values(({ ...labels }))`,
 			`({ ...values, ...incoming })`,
@@ -2112,7 +2112,8 @@ end
 			`func parseQueryParameter(value string)`,
 			`func ParseQuery(value string)`,
 			`func BuildQuery(parameters *[]URLQueryParameter) string`,
-			`DecodeComponent(strings.Join`,
+			`DecodeComponent(func() string {`,
+			`return strings.Join(`,
 			`encoded := EncodeComponent(value)`,
 		},
 		"ruby": {
