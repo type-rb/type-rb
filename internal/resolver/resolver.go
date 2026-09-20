@@ -444,6 +444,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 				exported.Members = substituteMembers(target.Members, substitutions)
 				exported.EnumMembers = append([]string(nil), target.EnumMembers...)
 				exported.EnumVariants = substituteEnumVariants(target.EnumVariants, substitutions)
+				exported.EnumRawType = substituteType(target.EnumRawType, substitutions)
 				exported.AliasEnum = target.Kind == EnumExport || target.Kind == TypeAliasExport && target.AliasEnum
 			}
 		}

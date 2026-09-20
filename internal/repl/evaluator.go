@@ -1852,6 +1852,18 @@ func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Val
 }
 
 func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value, error) {
+	var receiver Value
+	if node.Method != "from_raw" {
+		var err error
+		receiver, err = e.expression(node.Receiver, module, sc)
+		if err != nil {
+			return Value{}, err
+		}
+		if node.Safe && receiver.Data == nil {
+			return Value{Type: node.ExprType(), Data: nil}, nil
+		}
+		receiver.Type.Nullable = false
+	}
 	arguments := make([]evaluatedArgument, len(node.Arguments))
 	for index, argument := range node.Arguments {
 		value, err := e.expression(argument.Value, module, sc)
@@ -1905,10 +1917,6 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 			"message": {Type: types.FromName("String"), Data: "unknown raw value for " + node.EnumName},
 		})
 	}
-	receiver, err := e.expression(node.Receiver, module, sc)
-	if err != nil {
-		return Value{}, err
-	}
 	variant, ok := receiver.Data.(*enumValue)
 	if !ok {
 		return Value{}, fmt.Errorf("%s is not an enum value", receiver.Type)
@@ -1918,13 +1926,17 @@ func (e *Evaluator) enumCall(node *ir.EnumCall, module string, sc *scope) (Value
 		if member == nil || member.RawValue == nil {
 			return Value{}, fmt.Errorf("enum %s has no raw value", variant.Definition.Node.Name)
 		}
-		return e.expression(member.RawValue, variant.Definition.Module, e.global)
+		value, err := e.expression(member.RawValue, variant.Definition.Module, e.global)
+		value.Type = node.ExprType()
+		return value, err
 	}
 	method := variant.Definition.Methods[node.Method]
 	if method == nil {
 		return Value{}, fmt.Errorf("enum %s has no method %s", variant.Definition.Node.Name, node.Method)
 	}
-	return e.call(&callable{Method: method, Receiver: receiver, Module: variant.Definition.Module}, arguments)
+	value, err := e.call(&callable{Method: method, Receiver: receiver, Module: variant.Definition.Module}, arguments)
+	value.Type = node.ExprType()
+	return value, err
 }
 
 func (e *Evaluator) bind(sc *scope, parameters []ir.Parameter, arguments []evaluatedArgument, module string) error {
