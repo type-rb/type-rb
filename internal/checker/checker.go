@@ -4054,6 +4054,14 @@ func substituteType(typ types.Type, substitutions map[string]types.Type) types.T
 	for index, argument := range typ.Args {
 		result.Args[index] = substituteType(argument, substitutions)
 	}
+	if result.Kind == types.Union {
+		// Substitution may introduce duplicates, nested unions or numeric
+		// widening. Apply the same canonical rules as an authored union.
+		normalized := types.UnionOf(result.Args...)
+		normalized.Nullable = normalized.Nullable || result.Nullable
+		normalized.Readonly = normalized.Readonly || result.Readonly
+		return normalized
+	}
 	return result
 }
 

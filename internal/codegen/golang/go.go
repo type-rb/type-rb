@@ -462,7 +462,12 @@ func (g *generator) statement(statement ir.Statement) {
 			if n.Generated {
 				name = n.Name
 			}
-			g.line(name + " := " + g.exprExpected(n.Value, n.Type))
+			if n.Type.Kind == types.Union {
+				// The initializer's concrete Go type must not narrow checked storage.
+				g.line("var " + name + " " + g.goType(n.Type) + " = " + g.exprExpected(n.Value, n.Type))
+			} else {
+				g.line(name + " := " + g.exprExpected(n.Value, n.Type))
+			}
 			if namedUnusedBinding(n.Name) {
 				g.line("_ = " + name)
 			}
@@ -628,6 +633,7 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 		}
 		g.line(header + typed + ", ok := " + value + ".(" + g.goType(branch.MatchType) + "); ok {" + goTrailingComment(branch.TrailingComment))
 		g.indent++
+		g.line("_ = " + typed)
 		for _, binding := range branch.Bindings {
 			if binding.Name == "_" {
 				continue
@@ -1693,6 +1699,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			return "float64(" + g.expr(n.Value) + ")"
 		case ir.UnionIntegerToFloatConversion:
+			if n.Value.ExprType().Nullable && n.ExprType().Nullable {
+				return "func(value *any) *any { if value == nil { return nil }; converted := *value; if integer, ok := converted.(int); ok { converted = float64(integer) }; return &converted }(" + g.expr(n.Value) + ")"
+			}
 			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"
 		case ir.NonNullableToNullableConversion:
 			return g.nonNullableToNullableExpr(n, n.ExprType())
@@ -2251,6 +2260,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 		for _, branch := range node.Branches {
 			child.line("case " + child.goType(branch.MatchType) + ":" + goTrailingComment(branch.TrailingComment))
 			child.indent++
+			child.line("_ = " + typed)
 			for _, binding := range branch.Bindings {
 				if binding.Name == "_" {
 					continue
@@ -3380,7 +3390,7 @@ func (g *generator) goType(t types.Type) string {
 		}
 		result += "[" + strings.Join(arguments, ", ") + "]"
 	}
-	if t.Nullable && result != "" && result != "any" && !strings.HasPrefix(result, "*") {
+	if t.Nullable && result != "" && (result != "any" || t.Kind == types.Union) && !strings.HasPrefix(result, "*") {
 		return "*" + result
 	}
 	return result

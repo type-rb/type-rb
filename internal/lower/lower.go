@@ -915,19 +915,7 @@ func (l *lowerer) expressionConversions(node ast.Expression, result ir.Expressio
 		}
 	}
 	if target, ok := l.checked.Conversions[node]; ok && result != nil {
-		kind := ir.IntegerToFloatConversion
-		if target.Kind == types.Iterable && (result.ExprType().Kind == types.Array || result.ExprType().Kind == types.Range || result.ExprType().Kind == types.Iterable) {
-			kind = ir.ToIterableConversion
-		} else if target.Nullable && !result.ExprType().Nullable && result.ExprType().Kind != types.Nil {
-			kind = ir.NonNullableToNullableConversion
-		} else if result.ExprType().Kind == types.Union {
-			kind = ir.UnionIntegerToFloatConversion
-		}
-		result = &ir.Conversion{
-			ExprBase: ir.NewExprBase(node.Span(), target),
-			Kind:     kind,
-			Value:    result,
-		}
+		result = assignableConversion(node.Span(), result, target)
 	}
 	if bridge, ok := l.checked.NativeResultBridges[node]; ok && result != nil {
 		if _, _, valid := types.FunctionSignature(bridge.Type); valid {
@@ -1593,6 +1581,11 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 	case target.Kind == types.Iterable && (source.Kind == types.Array || source.Kind == types.Range || source.Kind == types.Iterable):
 		kind = ir.ToIterableConversion
 	case target.Nullable && !source.Nullable && source.Kind != types.Nil:
+		// Convert the present payload before introducing optional storage. A
+		// union may require Integer widening even when the outer step is nullable.
+		base := target
+		base.Nullable = false
+		value = assignableConversion(span, value, base)
 		kind = ir.NonNullableToNullableConversion
 	case target.Kind == types.Union && source.Kind == types.Union &&
 		unionContainsTypeKind(target, types.Float) && unionContainsTypeKind(source, types.Int):
