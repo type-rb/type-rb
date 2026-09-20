@@ -7757,19 +7757,19 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.IndexExpression:
 		receiver := c.checkExpression(n.Receiver, sc)
 		indexType := c.checkExpression(n.Index, sc)
-		receiver = c.requireValueExpression(n.Receiver, receiver, "be indexed")
+		receiver = scalarType(c.expandAlias(c.requireValueExpression(n.Receiver, receiver, "be indexed"), map[string]bool{}))
 		indexType = c.requireValueExpression(n.Index, indexType, "be used as an index")
 		if receiver.Kind == types.Invalid || indexType.Kind == types.Invalid {
 			typ = invalidType()
 		} else if receiver.Kind == types.Never || indexType.Kind == types.Never {
 			typ = types.Type{Kind: types.Never, Name: "Never"}
 		} else if receiver.Kind == types.Array && len(receiver.Args) > 0 {
-			if indexType.Kind != types.Int || indexType.Nullable {
+			if !c.assignable(n.Index, types.FromName("Integer"), indexType) {
 				c.error(n.Index.Span(), fmt.Sprintf("Array index must be Integer, got %s", indexType))
 			}
 			typ = receiver.Args[0]
 		} else if receiver.Kind == types.String {
-			if indexType.Kind != types.Int || indexType.Nullable {
+			if !c.assignable(n.Index, types.FromName("Integer"), indexType) {
 				c.error(n.Index.Span(), fmt.Sprintf("String index must be Integer, got %s", indexType))
 			}
 			typ = types.FromName("String")
@@ -8763,7 +8763,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 			assignable = libraryAssignable(
 				c.expandAlias(expected, map[string]bool{}),
 				c.expandAlias(actualType, map[string]bool{}),
-			)
+			) || c.literalTargetAcceptsExpression(expected, arguments[i].Value)
 		}
 		if library != nil && parameterIndex < len(library.Parameters) && library.Parameters[parameterIndex].Exact {
 			assignable = types.Equivalent(
@@ -10498,11 +10498,13 @@ func newtypeRepresentationFullyInstantiated(typ types.Type) bool {
 
 func (c *Checker) expandAlias(typ types.Type, visiting map[string]bool) types.Type {
 	if typ.Kind == types.Union {
-		result := typ
-		result.Args = make([]types.Type, len(typ.Args))
+		alternatives := make([]types.Type, len(typ.Args))
 		for index, alternative := range typ.Args {
-			result.Args[index] = c.expandAlias(alternative, visiting)
+			alternatives[index] = c.expandAlias(alternative, visiting)
 		}
+		result := types.UnionOf(alternatives...)
+		result.Nullable = result.Nullable || typ.Nullable
+		result.Readonly = result.Readonly || typ.Readonly
 		return result
 	}
 	arguments := make([]types.Type, len(typ.Args))
