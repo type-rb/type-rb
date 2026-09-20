@@ -2001,6 +2001,8 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.expr(n.Value)
 		case ir.NullableToNonNullableConversion:
 			return g.expr(n.Value)
+		case ir.NullableToUnionConversion:
+			return g.expr(n.Value)
 		default:
 			return g.expr(n.Value)
 		}

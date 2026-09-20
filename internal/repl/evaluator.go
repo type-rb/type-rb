@@ -999,7 +999,7 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			return Value{}, err
 		}
 		switch node.Kind {
-		case ir.ToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion:
+		case ir.ToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion, ir.NullableToUnionConversion:
 			value.Type = node.ExprType()
 			return value, nil
 		case ir.IntegerToFloatConversion:
