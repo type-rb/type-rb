@@ -985,6 +985,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		application, applied := n.Callee.(*ir.TypeApply)
 		directGeneric := applied && (application.Kind == "function" || application.Kind == "method")
 		if !directGeneric && n.Callee.ExprType().Kind == types.Function {
+			if member, ok := receiverMember(n.Callee); ok && member.Safe {
+				return callee + "&.call(" + strings.Join(parts, ", ") + ")"
+			}
 			return callee + ".call(" + strings.Join(parts, ", ") + ")"
 		}
 		return callee + "(" + strings.Join(parts, ", ") + ")"

@@ -700,6 +700,8 @@ type Call struct {
 	Block           *Block
 	Codec           *CodecSchema
 	DeclarationOnly bool
+	// Indirect selects a checked function value before evaluating arguments.
+	Indirect bool
 	// NewtypeMethod selects a statically dispatched authored nominal member.
 	// Storage erasure must not turn it into a representation method call.
 	NewtypeMethod *NewtypeMethodCall

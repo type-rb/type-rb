@@ -54,6 +54,7 @@ type Result struct {
 	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
 	CallSpecializations        map[*ast.CallExpression]CallSpecialization
 	CallSignatures             map[*ast.CallExpression][]callsignature.Parameter
+	IndirectCalls              map[*ast.CallExpression]bool
 	DeclarationOnlyCalls       map[*ast.CallExpression]bool
 	RawEnums                   map[*ast.EnumStatement]RawEnum
 	EnumCalls                  map[*ast.CallExpression]EnumCall
@@ -896,6 +897,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
 			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
 			CallSignatures:             map[*ast.CallExpression][]callsignature.Parameter{},
+			IndirectCalls:              map[*ast.CallExpression]bool{},
 			DeclarationOnlyCalls:       map[*ast.CallExpression]bool{},
 			RawEnums:                   map[*ast.EnumStatement]RawEnum{},
 			EnumCalls:                  map[*ast.CallExpression]EnumCall{},
@@ -7363,6 +7365,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		binding := c.result.References[n.Callee]
 		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && !directDeclaration {
+			c.result.IndirectCalls[n] = true
 			if calleeType.Nullable {
 				c.error(n.Callee.Span(), "nullable function value must be narrowed before calling")
 			}
