@@ -1692,9 +1692,14 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Conversion:
 		switch n.Kind {
 		case ir.NewtypeConstructionConversion:
-			// Keep the checked storage type at inferred bindings too. In
-			// particular, a union representation must remain an interface.
-			return "(" + g.goType(n.ExprType()) + ")(" + g.expr(n.Value) + ")"
+			// An inferred binding must retain union storage even when its
+			// initial value is a scalar. Other nominal conversions erase.
+			if n.Representation.Kind == types.Union {
+				if _, literal := types.LiteralUnionBase(n.Representation); !literal {
+					return "any(" + g.expr(n.Value) + ")"
+				}
+			}
+			return g.expr(n.Value)
 		case ir.ToIterableConversion:
 			return g.iterableConversion(n)
 		case ir.IntegerToFloatConversion:

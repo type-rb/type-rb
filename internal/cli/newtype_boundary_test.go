@@ -23,13 +23,25 @@ when String(text)
 return text
 end
 end
+
+def inferred(): String
+mut held := Value.new(1)
+held = Value.new("changed")
+case held.value()
+when Integer(number)
+return number.to_s()
+when String(text)
+return text
+end
+end
 `
 	const body = `puts(Name.new(7).value())
 puts(show(Value.new("held")))
 puts(show(Value.new(9)))
 puts(Price.new(2).value().floor())
+puts(inferred())
 `
-	const want = "7\nheld\n9\n2\n"
+	const want = "7\nheld\n9\n2\nchanged\n"
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			tool := map[string]string{"go": "go", "ruby": "ruby", "typescript": "node"}[mode]

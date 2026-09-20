@@ -1112,7 +1112,7 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 					value = &ir.Identifier{ExprBase: ir.NewExprBase(n.Span(), semantic.Type), Name: "self", Lexical: true}
 				}
 			}
-			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value}
+			return &ir.Conversion{ExprBase: base, Kind: kind, Value: value, Representation: semantic.Representation}
 		}
 		if semantic, ok := l.checked.EnumCalls[n]; ok {
 			safe := false
