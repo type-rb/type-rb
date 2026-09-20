@@ -224,6 +224,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   independent bindings. Ordinary `mut` and readonly rules still apply.
   Calls invalidate nullable and field narrowing for visible mutable top-level
   bindings; establish a fresh guard after a call that may replace the value.
+- A reference checked as a named function retains that declaration when a later
+  binding uses the same spelling. This includes earlier function bodies,
+  default arguments and closures, as well as retained REPL submissions and
+  explicit replay. References after the binding use its value instead.
 - `nil` by itself cannot infer a binding type. `x := nil` is a compile error;
   use an explicit nullable annotation such as `x: String? := nil`.
 - `Nil` and `Void` are internal compiler types rather than ordinary source

@@ -2128,13 +2128,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
 				return g.awaitCall(n, "this."+tsMethodName(identifier.Name)+"("+args+")")
 			}
-			if g.topFunctions[identifier.Name] {
-				name := identifier.Name
-				if target := g.topTargets[identifier.Name]; target != "" {
-					name = target
-				}
-				return g.awaitCall(n, tsCallableName(name)+"("+args+")")
-			}
 			return g.awaitCall(n, g.identifierName(identifier)+"("+args+")")
 		}
 		return g.awaitCall(n, g.expr(n.Callee)+"("+args+")")
