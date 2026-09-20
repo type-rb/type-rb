@@ -3260,11 +3260,7 @@ func (g *generator) qualifiedNamedType(name string, arguments []types.Type, null
 func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescriptRecordConstructionTarget, bool) {
 	switch node := expression.(type) {
 	case *ir.Identifier:
-		name := node.Name
-		if node.Declaration.Kind.IsType() && node.Declaration.Name != "" {
-			name = node.Declaration.Name
-		}
-		return g.namedRecordTarget(name), true
+		return g.namedRecordTarget(node.Name), true
 	case *ir.Member:
 		if !node.Namespace {
 			return typescriptRecordConstructionTarget{}, false
