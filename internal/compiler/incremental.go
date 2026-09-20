@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
 	"github.com/type-rb/type-rb/internal/official"
@@ -19,6 +20,7 @@ import (
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stdlib"
 	"github.com/type-rb/type-rb/internal/typeprovider"
+	"github.com/type-rb/type-rb/internal/types"
 )
 
 // analyzeChangedProject reuses resolution and checking results when exactly
@@ -141,15 +143,20 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		return nil, true, ownerErr
 	}
 	checkedPrograms := make(map[string]checker.Result, len(previous.checkedPrograms))
+	constantTypes := map[identity.Declaration]types.Type{}
 	for modulePath, cached := range previous.checkedPrograms {
 		checkedPrograms[modulePath] = cached
+		if !affected[modulePath] {
+			collectCheckedConstants(cached, constantTypes)
+		}
 	}
 	var typeErrors []diagnostic.Diagnostic
-	for _, source := range units {
+	for _, source := range checkedModuleOrder(units, resolutions) {
 		if !affected[source.ModulePath] {
 			continue
 		}
 		program := programs[source.ModulePath]
+		resolutions[source.ModulePath] = resolutions[source.ModulePath].WithCheckedValues(constantTypes)
 		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
 			AllowUnusedImports:     options.AllowUnusedImports,
 			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
@@ -167,6 +174,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 			return nil, false, nil
 		}
 		checkedPrograms[source.ModulePath] = checked
+		collectCheckedConstants(checked, constantTypes)
 		typeErrors = append(typeErrors, normalizeSourceDiagnostics(diagnostics, source, diagnostic.TypeError)...)
 	}
 	if hasErrors(typeErrors) {
@@ -306,6 +314,11 @@ func affectedProjectModules(previous *projectAnalysis, catalog *resolver.Catalog
 	downstreamChanges := map[string]bool{}
 	previousChanged := previous.catalog.Modules[changedModule]
 	currentChanged := catalog.Modules[changedModule]
+	// An initializer can infer a different type while its syntax-only export
+	// remains Any. Recheck its consumers using the new checked value contract.
+	if previousChanged != nil && hasInferredConstants(previousChanged.Program.Statements) || currentChanged != nil && hasInferredConstants(currentChanged.Program.Statements) {
+		downstreamChanges[changedModule] = true
+	}
 	if previousChanged == nil || currentChanged == nil || !reflect.DeepEqual(previousChanged.Exports, currentChanged.Exports) {
 		for modulePath, module := range catalog.Modules {
 			previousModule := previous.catalog.Modules[modulePath]
