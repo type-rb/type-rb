@@ -49,6 +49,21 @@ type Expression interface {
 	SourceSpan() token.Span
 }
 
+// ExpressionDeclaration returns the checked owner carried by a declaration
+// reference, independently from the spelling used to select or import it.
+func ExpressionDeclaration(expression Expression) identity.Declaration {
+	switch node := expression.(type) {
+	case *Identifier:
+		return node.Declaration
+	case *Member:
+		return node.Declaration
+	case *TypeApply:
+		return node.Declaration
+	default:
+		return identity.Declaration{}
+	}
+}
+
 type Comment struct {
 	Base
 	Text string

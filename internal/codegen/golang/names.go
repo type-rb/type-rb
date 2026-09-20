@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
@@ -103,23 +104,31 @@ func collectGoProjectDeclarations(modulePath string, statements []ir.Statement, 
 			}
 			occupied[name] = true
 		case *ir.Method:
-			target := node.Name
+			source := goMethodSourceName(node)
+			target := source
 			if node.TargetName != "" {
 				target = node.TargetName
 			}
 			candidate := goMethodName(target)
-			if node.Name == "main" {
+			if source == "main" {
 				candidate = "main"
 			}
 			functions[candidate] = append(functions[candidate], goFunctionDeclaration{
 				modulePath: modulePath,
-				sourceName: node.Name,
+				sourceName: source,
 				targetName: target,
 			})
 		case *ir.Module:
 			collectGoProjectDeclarations(modulePath, node.Body, occupied, functions)
 		}
 	}
+}
+
+func goMethodSourceName(method *ir.Method) string {
+	if method.Dispatch.Owner.Kind == identity.Module {
+		return identity.Qualify(method.Dispatch.Owner.Name, method.Name)
+	}
+	return method.Name
 }
 
 func goPackageGroup(modulePath string) string {

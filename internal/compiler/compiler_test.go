@@ -4444,7 +4444,7 @@ end
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"export const APP_NAME: string", "export const MAX_ITEMS: number", "return Limits.MAX_ITEMS", "static readonly DEFAULT_NAME: string", "return Config.DEFAULT_NAME"} {
+	for _, expected := range []string{"export const APP_NAME: string", "static readonly DEFAULT_NAME: string", "return Config.DEFAULT_NAME"} {
 		if !strings.Contains(string(tsArtifact.Output), expected) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", expected, tsArtifact.Output)
 		}

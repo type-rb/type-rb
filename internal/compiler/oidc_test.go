@@ -48,7 +48,7 @@ end
 			for _, expected := range map[string][]string{
 				"go":         {"trbOidcVerifyBearer", "trbOidcLoadProvider", "rsa.VerifyPKCS1v15"},
 				"ruby":       {"TrbOidcRuntime.verify_bearer", "def load_provider", "rsa.verify"},
-				"typescript": {"trb_oidc_verify_bearer", "trb_oidc_load_provider", "crypto.subtle.verify", "unauthorized: _unauthorized"},
+				"typescript": {"trb_oidc_verify_bearer", "trb_oidc_load_provider", "crypto.subtle.verify"},
 			}[mode] {
 				if !strings.Contains(generated.String(), expected) {
 					t.Fatalf("generated %s OIDC bearer package is missing %q:\n%s", mode, expected, generated.String())

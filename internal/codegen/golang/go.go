@@ -1314,14 +1314,15 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 }
 
 func (g *generator) topLevelMethod(method *ir.Method) {
-	name := g.projectFunctionName(g.modulePath, method.Name)
+	sourceName := goMethodSourceName(method)
+	name := g.projectFunctionName(g.modulePath, sourceName)
 	parameters := g.methodParameters(method)
-	if method.Name == "main" {
+	if sourceName == "main" {
 		parameters = g.parameters(method.Parameters)
 	}
 	g.line("func " + name + goTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 	g.indent++
-	if method.Name == "main" && g.methodUsesExecutionScope(method) {
+	if sourceName == "main" && g.methodUsesExecutionScope(method) {
 		g.requireImport("context", "trbcontext")
 		g.line("__trbScope := trbcontext.Background()")
 	}
@@ -1330,11 +1331,11 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	g.parameterDefaults(method.Parameters)
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
-	if method.Name == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+	if sourceName == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
-	cliMain := method.Name == "main" && g.cli != nil
-	ormMain := method.Name == "main" && g.orm != nil && len(g.orm.Models) > 0
+	cliMain := sourceName == "main" && g.cli != nil
+	ormMain := sourceName == "main" && g.orm != nil && len(g.orm.Models) > 0
 	if ormMain && !cliMain {
 		g.line("defer " + g.ormLifecycleAlias() + ".TrbOrmCloseDatabase()")
 	}
@@ -1725,6 +1726,17 @@ func (g *generator) expr(expression ir.Expression) string {
 		if len(n.UnionAlternatives) > 0 {
 			return g.unionMemberExpression(n)
 		}
+		if n.Dispatch.Owner.Kind == identity.Module && (n.Reference == nil || n.Reference.ExportKind == "function" && n.Reference.Intrinsic == "" && n.Reference.Runtime == nil) {
+			owner := n.Dispatch.Owner
+			if g.projectNames != nil {
+				if name := g.projectNames.functions[owner.Module][identity.Qualify(owner.Name, n.Dispatch.Name)]; name != "" {
+					if alias := g.declarationAlias(owner); alias != "" {
+						return alias + "." + name
+					}
+					return name
+				}
+			}
+		}
 		moduleFunction := false
 		if receiver, ok := n.Receiver.(*ir.Identifier); ok && g.moduleName != "" && receiver.Name == g.moduleName && g.moduleMethods[n.Name] {
 			moduleFunction = true
@@ -1743,7 +1755,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if n.Namespace && isUpper(n.Name) {
 			owner := n.Receiver.ExprType().Name
-			if n.Declaration.Name != "" {
+			if declaration := ir.ExpressionDeclaration(n.Receiver); !declaration.Empty() {
+				owner = declaration.Name
+			} else if n.Declaration.Name != "" {
 				owner = n.Declaration.Name
 			} else if canonical := g.typeNames[owner]; canonical != "" {
 				owner = canonical

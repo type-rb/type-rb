@@ -556,6 +556,7 @@ type Checker struct {
 	authoredEnumOwners          map[string]string
 	authoredTypeIdentities      map[string]identity.Declaration
 	authoredOwnerIdentities     map[string]identity.Declaration
+	authoredConstants           map[identity.Declaration]types.Type
 	activeTypeParameters        map[string]int
 	activeTypeOwner             string
 	authoredCalls               map[*ast.MethodStatement]map[*ast.MethodStatement]bool
@@ -946,6 +947,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		authoredEnumOwners:         map[string]string{},
 		authoredTypeIdentities:     map[string]identity.Declaration{},
 		authoredOwnerIdentities:    map[string]identity.Declaration{},
+		authoredConstants:          map[identity.Declaration]types.Type{},
 		activeTypeParameters:       map[string]int{},
 		authoredCalls:              map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
 		authoredConstructorCalls:   map[*ast.MethodStatement]map[*ast.MethodStatement]bool{},
@@ -2266,6 +2268,10 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			}
 			if n.Constant {
 				c.result.ConstantOwners[n] = sc.constantOwner
+				if owner := c.authoredOwnerIdentities[sc.constantOwner]; owner.Kind == identity.Module {
+					declaration := identity.Declaration{Module: owner.Module, Name: identity.Qualify(owner.Name, n.Name), Kind: identity.Value}
+					c.authoredConstants[declaration] = variableType
+				}
 			}
 			c.result.Variables[n] = variableType
 		case *ast.AssignmentStatement:
@@ -5937,6 +5943,12 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			}
 		}
 	case *ast.MemberExpression:
+		if declaration := c.result.ExpressionDeclarations[node]; declaration.Kind == identity.Value {
+			return false
+		}
+		if binding, exists := c.result.References[node]; exists && binding.Member != nil && binding.Member.Kind == resolver.ValueExport {
+			return false
+		}
 		return node.Namespace
 	}
 	return false
@@ -6432,7 +6444,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = c.namedFunctionValueType(n.Span(), n.Name, c.signatureFromMethod(method), len(method.TypeParameters) != 0)
 		} else if isConstant(n.Name) {
 			typ = types.FromName(n.Name)
-			if declaration := c.authoredTypeIdentities[n.Name]; !declaration.Empty() {
+			if declaration := c.authoredModuleInScope(n.Name, sc); !declaration.Empty() {
+				typ.Declaration = declaration
+				c.result.ExpressionDeclarations[n] = declaration
+			} else if declaration := c.authoredTypeIdentities[n.Name]; !declaration.Empty() {
 				c.result.ExpressionDeclarations[n] = declaration
 			}
 			if c.declarationReferences == 0 && !c.declarationTypeVisible(n.Name) {
@@ -6935,6 +6950,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			receiverType = c.requireValueExpression(n.Receiver, receiverType, "be used as a member receiver")
 		}
 		if n.Namespace {
+			if declaration := c.authoredModuleInScope(expressionTypeName(n), sc); !declaration.Empty() {
+				typ = types.FromName(declaration.LeafName())
+				typ.Declaration = declaration
+				c.result.ExpressionDeclarations[n] = declaration
+				break
+			}
 			if declaration, authored := c.authoredTypeIdentityInScope(expressionTypeName(n), sc); authored {
 				typ = types.FromName(declaration.LeafName())
 				typ.Declaration = declaration
@@ -7003,7 +7024,15 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if n.Namespace {
-			if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists && binding.Export != nil && binding.Member == nil && binding.Export.Kind != resolver.ModuleExport {
+			if owner := receiverType.Declaration; owner.Kind == identity.Module {
+				declaration := identity.Declaration{Module: owner.Module, Name: identity.Qualify(owner.Name, n.Name), Kind: identity.Value}
+				if constant, exists := c.authoredConstants[declaration]; exists {
+					typ = constant
+					c.result.ExpressionDeclarations[n] = declaration
+					break
+				}
+			}
+			if binding, exists := c.resolution.TypeMemberIdentity(receiverType.Declaration, n.Name); exists && binding.Export != nil && binding.Member == nil {
 				typ = c.resolvedBindingType(binding)
 				c.recordReference(n, binding)
 				break
@@ -7085,6 +7114,16 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
+		if strings.HasPrefix(n.Name, "_") {
+			self, ok := n.Receiver.(*ast.Identifier)
+			internalModule := false
+			if owner := c.result.ExpressionDeclarations[n.Receiver]; owner.Kind == identity.Module {
+				internalModule = owner.Module == c.result.Program.ModulePath && owner.Name == scopeConstantOwner(sc)
+			}
+			if !internalModule && (!ok || self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
+				c.error(n.Span(), fmt.Sprintf("private member %s cannot be accessed externally", n.Name))
+			}
+		}
 		if classAccess || authoredOwnerAccess(n.Receiver, sc) {
 			if method := c.authoredOwnedMethodInScope(expressionTypeName(n.Receiver), n.Name, sc); method != nil {
 				typ = c.methodReturnType(method)
@@ -7106,12 +7145,6 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ = c.resolvedBindingType(binding)
 				c.recordReference(n, binding)
 				break
-			}
-		}
-		if strings.HasPrefix(n.Name, "_") {
-			self, ok := n.Receiver.(*ast.Identifier)
-			if !ok || (self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
-				c.error(n.Span(), fmt.Sprintf("private member %s cannot be accessed externally", n.Name))
 			}
 		}
 		if c.resourceCallCallee == n && !classAccess && !n.Namespace {
@@ -7827,6 +7860,9 @@ func (c *Checker) declarationOwnerExpression(expression ast.Expression, sc *scop
 		}
 		if binding, exists := c.result.References[node]; exists {
 			return declarationExportOwnsMembers(binding)
+		}
+		if declaration := c.result.ExpressionDeclarations[node]; declaration.Kind == identity.Module {
+			return true
 		}
 		_, authored := c.authoredTypeIdentityInScope(expressionTypeName(node), sc)
 		return authored
