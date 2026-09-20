@@ -841,11 +841,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ir.Hash:
-		parts := make([]string, len(n.Entries))
-		for i, entry := range n.Entries {
-			parts[i] = g.expr(entry.Key) + " => " + g.expr(entry.Value)
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
+		return g.hashLiteral(n)
 	case *ir.Unary:
 		op := n.Operator
 		if op == "!" {
