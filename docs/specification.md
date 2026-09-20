@@ -1393,6 +1393,10 @@ variant and exhaustive-case model for two related but distinct purposes.
   `EnumName.from_raw(raw)` returns
   `Result<EnumName, EnumValueError>`. These generated names are reserved only
   inside enum declarations.
+- A qualified variant such as `OrderStatus::Completed` is an enum value and
+  supports the same instance methods as a stored value. Nested module names
+  and import aliases preserve the enum's declaration identity for both raw
+  conversion directions.
 
 ```trb
 enum OrderStatus

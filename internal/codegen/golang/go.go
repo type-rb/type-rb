@@ -1151,13 +1151,19 @@ func goTypeParameterArguments(parameters []string) string {
 func (g *generator) enumTag(branch ir.CaseBranch) string {
 	owner := branch.EnumName
 	if member, ok := branch.Value.(*ir.Member); ok {
-		if member.Reference != nil && member.Reference.Declaration.Kind.IsType() && member.Reference.Declaration.Name != "" {
+		declaration := ir.ExpressionDeclaration(member)
+		if declaration.Kind.IsType() && declaration.Name != "" {
+			owner = declaration.Name
+		} else if member.Reference != nil && member.Reference.Declaration.Kind.IsType() && member.Reference.Declaration.Name != "" {
 			owner = member.Reference.Declaration.Name
 		} else if declaration := member.ExprType().Declaration; declaration.Kind.IsType() && declaration.Name != "" {
 			owner = declaration.Name
 		}
 		name := goConstantIdentifier(owner, branch.Member) + "Tag"
 		if alias := g.referenceAlias(member.Reference); alias != "" {
+			return alias + "." + name
+		}
+		if alias := g.declarationAlias(declaration); alias != "" {
 			return alias + "." + name
 		}
 		return name
@@ -2085,16 +2091,25 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	if resultAlias == "" {
 		resultAlias = "__trb_result"
 	}
-	valueType := g.goType(types.FromName(call.EnumName))
+	enumType := types.FromName(call.EnumName)
+	enumType.Declaration = call.OwnerIdentity
+	owner := call.EnumName
+	if call.OwnerIdentity.Name != "" {
+		owner = call.OwnerIdentity.Name
+		enumType.Name = owner
+	}
+	valueType := g.goType(enumType)
 	errorType := g.goType(types.FromName("EnumValueError"))
 	resultType := g.goType(call.ExprType())
 	prefix := ""
 	if alias := g.referenceAlias(call.Reference); alias != "" {
 		prefix = alias + "."
+	} else if alias := g.declarationAlias(call.OwnerIdentity); alias != "" {
+		prefix = alias + "."
 	}
 	lines := []string{"func() " + resultType + " { value := " + argument + "; switch value {"}
 	for _, item := range call.RawValues {
-		constant := prefix + goConstantIdentifier(call.EnumName, item.Member)
+		constant := prefix + goConstantIdentifier(owner, item.Member)
 		lines = append(lines, "case "+item.Raw+": return "+resultAlias+".NewResultOk["+valueType+", "+errorType+"]("+constant+");")
 	}
 	message := strconv.Quote("unknown raw value for " + call.EnumName)

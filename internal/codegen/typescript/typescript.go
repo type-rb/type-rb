@@ -631,6 +631,9 @@ func (g *generator) statement(statement ir.Statement) {
 		if !n.Native {
 			importPath = tsImportPath(g.modulePath, n.Path, g.moduleExtensions[n.Path])
 		}
+		if !n.Standard && !n.Official && !n.Native {
+			g.importProjectNestedTypes(n, nestedTypeSymbols, importPath)
+		}
 		if len(nestedTypeSymbols) > 0 {
 			if n.Standard || n.Official || strings.HasPrefix(n.Path, "trb/") {
 				alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Path))
@@ -1110,6 +1113,9 @@ func (g *generator) registerNestedTypeMappings(imported *ir.Import) {
 	}
 	for canonical, local := range nested {
 		mapped := tsOwnedTypeName(local)
+		if imported.Namespace && imported.Alias != "" {
+			mapped = imported.Alias + "." + tsOwnedTypeName(canonical)
+		}
 		g.typeMappings[canonical] = mapped
 		g.typeMappings[local] = mapped
 	}
@@ -3275,7 +3281,9 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 			helper := tsRecordConstructorName(tsOwnedTypeName(declaration.Name))
 			if mapped := g.typeMappings[declaration.Name]; mapped != "" {
 				if separator := strings.LastIndex(mapped, "."); separator >= 0 {
-					helper = mapped[:separator+1] + helper
+					helper = mapped[:separator+1] + tsRecordConstructorName(mapped[separator+1:])
+				} else {
+					helper = tsRecordConstructorName(mapped)
 				}
 			}
 			return typescriptRecordConstructionTarget{typeName: name, helperName: helper}, true

@@ -3637,9 +3637,13 @@ func (c *Checker) enumVariants(typ types.Type) ([]EnumVariant, bool) {
 	}
 	if exported, ok := c.resolution.CompilerOwnedType(typ.Name); ok && exported.Kind == resolver.EnumExport {
 		substitutions := typeSubstitutions(exported.TypeParameters, typ.Args)
+		declaration := typ.Declaration
+		if definition, _, found := stdlib.LookupRuntimeExport(typ.Name); found {
+			declaration = identity.Declaration{Module: definition.ModulePath, Name: exported.Name, Kind: identity.Enum}
+		}
 		variants := make([]EnumVariant, 0, len(exported.EnumVariants))
 		for _, imported := range exported.EnumVariants {
-			variant := EnumVariant{EnumName: typ.Name, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
+			variant := EnumVariant{EnumName: typ.Name, Declaration: declaration, Name: imported.Name, TypeArguments: append([]types.Type(nil), typ.Args...)}
 			for _, field := range imported.Fields {
 				variant.Fields = append(variant.Fields, EnumField{Name: field.Name, Type: substituteType(field.Type, substitutions), NamedOnly: field.NamedOnly})
 			}
@@ -5943,13 +5947,7 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			}
 		}
 	case *ast.MemberExpression:
-		if declaration := c.result.ExpressionDeclarations[node]; declaration.Kind == identity.Value {
-			return false
-		}
-		if binding, exists := c.result.References[node]; exists && binding.Member != nil && binding.Member.Kind == resolver.ValueExport {
-			return false
-		}
-		return node.Namespace
+		return c.declarationOwnerExpression(node, sc)
 	}
 	return false
 }

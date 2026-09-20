@@ -1001,7 +1001,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.expr(n.Receiver) + ".raw_value"
 		case "from_raw":
 			owner := n.EnumName
-			if n.Reference == nil && n.Owner != "" {
+			if n.OwnerIdentity.Name != "" {
+				owner = n.OwnerIdentity.Name
+			} else if n.Owner != "" {
 				owner = n.Owner
 			}
 			branches := make([]string, 0, len(n.RawValues))
