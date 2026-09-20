@@ -115,7 +115,7 @@ def text_size(): Integer
 end
 `)
 	wants := map[string][]string{
-		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(-2.75)`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
+		"go":         {`strconv.Itoa(123)`, `strconv.FormatFloat(value, 'f', -1, 64)`, `float64(2)`, `math.Trunc(func(value float64) float64 { return -value }(2.75))`, `fmt.Println(func() string`, `regexp.MatchString`, `strconv.ParseInt`, `utf8.RuneCountInString("a😀")`},
 		"ruby":       {`123.to_s`, `raw = value.to_s`, `(2).to_f`, `value.truncate`, `$stdout.puts(->(value)`, `Integer(input, 10)`, `"a😀".each_codepoint.count`},
 		"typescript": {`String(123)`, `const raw = String(value)`, `Number(2)`, `Math.trunc(value)`, `console.log(((value: number): string`, `Number.isSafeInteger(__trbValue)`, `Array.from("a😀").length`},
 	}

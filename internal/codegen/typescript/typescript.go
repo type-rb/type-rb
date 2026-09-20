@@ -2011,6 +2011,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			g.checkedInteger = true
 			return "__trbIntegerNegate(" + g.expr(n.Operand) + ")"
 		}
+		if op == "-" && n.ExprType().Kind == types.Float {
+			return "-(" + g.expr(n.Operand) + ")"
+		}
 		return op + g.unaryOperand(n.Operand)
 	case *ir.Conversion:
 		switch n.Kind {
