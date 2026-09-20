@@ -2371,10 +2371,11 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 					}
 				}
 			}
+			accepted := types.Assignable(leftType, assignedType)
 			if n.Operator == "=" && leftType.Kind != types.Any {
-				c.assignable(n.Value, leftType, rightType)
+				accepted = c.assignable(n.Value, leftType, rightType)
 			}
-			if leftType.Kind != types.Any && !types.Assignable(leftType, assignedType) {
+			if leftType.Kind != types.Any && !accepted {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
@@ -5181,7 +5182,7 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 				c.error(parameter.Span(), "rest parameters are not supported in portable TypeRB")
 			}
 			_, literalType := types.LiteralFromSource(parameter.Type.Name)
-			if parameter.Keyword || parameter.NativeKeyword && !literalType {
+			if parameter.Keyword || parameter.NativeKeyword && !literalType && len(parameter.Type.Union) == 0 {
 				c.error(parameter.Span(), "Ruby keyword parameter syntax requires an explicit Ruby-native import; use bare * for a named-only TypeRB parameter")
 			}
 			if parameter.NamedOnly {
