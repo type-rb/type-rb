@@ -12,20 +12,22 @@ import (
 
 // goProjectNames resolves the package-level namespace after typed IR exists.
 // TypeRB keeps type and callable names distinct, while Go places both in one
-// namespace and normalizes snake_case identifiers. Only colliding functions
+// namespace and normalizes snake_case identifiers. Only colliding values
 // receive a compiler-owned fallback, keeping ordinary generated names stable.
 type goProjectNames struct {
 	functions map[string]map[string]string
+	constants map[string]map[string]string
 }
 
 type goFunctionDeclaration struct {
 	modulePath string
 	sourceName string
 	targetName string
+	constant   bool
 }
 
 func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
-	result := &goProjectNames{functions: map[string]map[string]string{}}
+	result := &goProjectNames{functions: map[string]map[string]string{}, constants: map[string]map[string]string{}}
 	occupied := map[string]map[string]bool{}
 	functions := map[string]map[string][]goFunctionDeclaration{}
 
@@ -69,11 +71,15 @@ func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
 					}
 				}
 				occupied[group][name] = true
-				if result.functions[declaration.modulePath] == nil {
-					result.functions[declaration.modulePath] = map[string]string{}
+				bindings := result.functions
+				if declaration.constant {
+					bindings = result.constants
 				}
-				result.functions[declaration.modulePath][declaration.sourceName] = name
-				result.functions[declaration.modulePath][declaration.targetName] = name
+				if bindings[declaration.modulePath] == nil {
+					bindings[declaration.modulePath] = map[string]string{}
+				}
+				bindings[declaration.modulePath][declaration.sourceName] = name
+				bindings[declaration.modulePath][declaration.targetName] = name
 			}
 		}
 	}
@@ -101,8 +107,13 @@ func collectGoProjectDeclarations(modulePath string, statements []ir.Statement, 
 			name := goBindingIdentifier(node.Name)
 			if node.Constant {
 				name = goConstantIdentifier(node.Owner, node.Name)
+				source := identity.Qualify(node.Owner, node.Name)
+				functions[name] = append(functions[name], goFunctionDeclaration{
+					modulePath: modulePath, sourceName: source, targetName: source, constant: true,
+				})
+			} else {
+				occupied[name] = true
 			}
-			occupied[name] = true
 		case *ir.Method:
 			source := goMethodSourceName(node)
 			target := source
@@ -143,6 +154,9 @@ func goFunctionFallback(declaration goFunctionDeclaration) string {
 	prefix := "TrbFunction_"
 	if strings.HasPrefix(declaration.sourceName, "_") {
 		prefix = "trbFunction_"
+	}
+	if declaration.constant {
+		prefix = "TrbConstant_"
 	}
 	identity := declaration.modulePath + "\x00" + declaration.sourceName + "\x00" + declaration.targetName
 	return prefix + hex.EncodeToString([]byte(identity))

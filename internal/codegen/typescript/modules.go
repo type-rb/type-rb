@@ -16,13 +16,16 @@ type moduleNames struct {
 	constants map[string]string
 	methods   map[*ir.Method]string
 	calls     map[identity.Dispatch]string
+	members   map[string][]ir.Statement
+	emitted   map[string]bool
 }
 
 func analyzeModuleNames(statements []ir.Statement) *moduleNames {
 	names := &moduleNames{
 		modules: map[*ir.Module]string{}, owners: map[*ir.Module]string{},
 		constants: map[string]string{}, methods: map[*ir.Method]string{},
-		calls: map[identity.Dispatch]string{},
+		calls:   map[identity.Dispatch]string{},
+		members: map[string][]ir.Statement{}, emitted: map[string]bool{},
 	}
 	var collect func([]ir.Statement, string)
 	collect = func(statements []ir.Statement, owner string) {
@@ -31,6 +34,7 @@ func analyzeModuleNames(statements []ir.Statement) *moduleNames {
 			case *ir.Module:
 				qualified := identity.Qualify(owner, node.Name)
 				names.owners[node] = qualified
+				names.members[qualified] = append(names.members[qualified], node.Body...)
 				names.modules[node] = node.Name
 				if owner != "" {
 					names.modules[node] = tsModuleMemberName("module", qualified)
@@ -65,24 +69,41 @@ func tsModuleMemberName(kind, qualified string) string {
 
 func (g *generator) module(module *ir.Module) {
 	owner := g.moduleNames.owners[module]
-	properties := []string{}
 	for _, statement := range module.Body {
 		switch node := statement.(type) {
 		case *ir.Method:
 			g.function(node)
-			if !strings.HasPrefix(node.Name, "_") {
-				properties = append(properties, tsMethodName(node.Name)+": "+g.moduleNames.methods[node])
-			}
 		case *ir.Variable:
 			g.statement(node)
-			properties = append(properties, node.Name+": "+g.moduleNames.constants[identity.Qualify(owner, node.Name)])
 		case *ir.Module:
 			g.statement(node)
-			properties = append(properties, node.Name+": "+g.moduleNames.modules[node])
 		case *ir.Class, *ir.Record, *ir.Enum, *ir.Interface, *ir.TypeAlias, *ir.Newtype:
 			g.ownedModuleDeclarations([]ir.Statement{statement}, owner)
 		default:
 			g.statement(statement)
+		}
+	}
+	if g.moduleNames.emitted[owner] {
+		return
+	}
+	g.moduleNames.emitted[owner] = true
+	properties := []string{}
+	nested := map[string]bool{}
+	for _, statement := range g.moduleNames.members[owner] {
+		switch node := statement.(type) {
+		case *ir.Method:
+			if !strings.HasPrefix(node.Name, "_") {
+				properties = append(properties, tsMethodName(node.Name)+": "+g.moduleNames.methods[node])
+			}
+		case *ir.Variable:
+			// Reopened bodies still initialize in source order. A getter does
+			// not read a later declaration while constructing the namespace.
+			properties = append(properties, "get "+node.Name+"() { return "+g.moduleNames.constants[identity.Qualify(owner, node.Name)]+"; }")
+		case *ir.Module:
+			if !nested[node.Name] {
+				properties = append(properties, "get "+node.Name+"() { return "+g.moduleNames.modules[node]+"; }")
+				nested[node.Name] = true
+			}
 		}
 	}
 	g.line("export const " + g.moduleNames.modules[module] + " = { " + strings.Join(properties, ", ") + " } as const;")

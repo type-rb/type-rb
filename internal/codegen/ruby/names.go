@@ -12,6 +12,7 @@ import (
 // declarations that collide after lowering receive compiler-owned names.
 type rubyProjectNames struct {
 	functions map[string]map[string]string
+	constants map[string]map[string]string
 }
 
 type rubyFunctionDeclaration struct {
@@ -21,7 +22,7 @@ type rubyFunctionDeclaration struct {
 }
 
 func analyzeRubyProjectNames(programs []*ir.Program) *rubyProjectNames {
-	result := &rubyProjectNames{functions: map[string]map[string]string{}}
+	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs)}
 	occupied := map[string]bool{}
 	reserved := map[string]bool{}
 	functions := map[string][]rubyFunctionDeclaration{}
@@ -85,6 +86,61 @@ func analyzeRubyProjectNames(programs []*ir.Program) *rubyProjectNames {
 			}
 			result.functions[declaration.modulePath][declaration.sourceName] = name
 			result.functions[declaration.modulePath][declaration.targetName] = name
+		}
+	}
+	return result
+}
+
+// Source files share Ruby's root constant namespace. Retain source identity
+// for collisions instead of letting a later require replace an earlier value.
+func analyzeRubyConstantNames(programs []*ir.Program) map[string]map[string]string {
+	declarations := map[string][]string{}
+	occupied := map[string]bool{}
+	for _, program := range programs {
+		for _, statement := range program.Statements {
+			switch node := statement.(type) {
+			case *ir.Variable:
+				occupied[node.Name] = true
+				if node.Constant && node.Owner == "" {
+					declarations[node.Name] = append(declarations[node.Name], program.ModulePath)
+				}
+			case *ir.Class:
+				occupied[node.Name] = true
+			case *ir.Record:
+				occupied[node.Name] = true
+			case *ir.Enum:
+				occupied[node.Name] = true
+			case *ir.Module:
+				occupied[node.Name] = true
+			case *ir.Newtype:
+				occupied[node.Name] = true
+			case *ir.TypeAlias:
+				occupied[node.Name] = true
+			}
+		}
+	}
+	ordered := make([]string, 0, len(declarations))
+	for name := range declarations {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	result := map[string]map[string]string{}
+	for _, name := range ordered {
+		modules := declarations[name]
+		if len(modules) < 2 {
+			continue
+		}
+		sort.Strings(modules)
+		for _, module := range modules {
+			target := "TrbConstant_" + naming.PrivateSuffix(module+"\x00"+name)
+			for occupied[target] {
+				target += "_"
+			}
+			occupied[target] = true
+			if result[module] == nil {
+				result[module] = map[string]string{}
+			}
+			result[module][name] = target
 		}
 	}
 	return result
