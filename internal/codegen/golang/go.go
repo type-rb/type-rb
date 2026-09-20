@@ -1188,7 +1188,7 @@ func (g *generator) statements(statements []ir.Statement) {
 
 func (g *generator) typeAliasTarget(alias *ir.TypeAlias) string {
 	target := alias.AuthoredTarget
-	if target.Kind == "" {
+	if target.Kind == "" || target.Kind == types.Union {
 		target = alias.Target
 	}
 	if alias.AuthoredTargetReference != nil || target.Kind != types.Named || target.Name == "" {
@@ -2011,7 +2011,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			valueType := g.goType(hashType.Args[1])
 			return "func(values " + g.goType(hashType) + ", key " + keyType + ") " + valueType + " { value, ok := values[key]; if !ok { panic(\"Hash key is missing\") }; return value }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
-		if n.Receiver.ExprType().Kind == types.String {
+		if g.goType(n.Receiver.ExprType()) == "string" {
 			return "func(value string, index int) string { characters := []rune(value); if index < 0 { index += len(characters) }; if index < 0 || index >= len(characters) { panic(\"String index is out of bounds\") }; return string(characters[index]) }(" + g.expr(n.Receiver) + ", " + g.expr(n.Index) + ")"
 		}
 		if n.Receiver.ExprType().Kind == types.Array {
