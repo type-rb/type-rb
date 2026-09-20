@@ -43,7 +43,7 @@ func TestEffectfulParameterDefaultsUseTheCalleeExecutionScope(t *testing.T) {
 		want     []string
 	}{
 		{name: "go", generate: golang.Generate, want: []string{"func Load(__trbScope trbcontext.Context", "Trb__RecordNew__Config(__trbScope", "Load(trbcontext.Background())"}},
-		{name: "ruby", generate: ruby.Generate, want: []string{"def load(__trb_scope", "Config.__trb_record_new(__trb_scope", "load.call(TrbExecutionScope.root)"}},
+		{name: "ruby", generate: ruby.Generate, want: []string{"def load(__trb_scope", "Config.__trb_record_new(__trb_scope", "load(TrbExecutionScope.root)"}},
 		{name: "typescript", generate: typescript.Generate, want: []string{"export async function load(__trbScope: AbortSignal | undefined, __trbOptional: unknown[])", "(await __trbRecordNewConfig(__trbScope", "(await load(undefined, []))"}},
 	}
 	for _, test := range tests {

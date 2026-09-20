@@ -790,6 +790,14 @@ func (g *generator) expr(expression ir.Expression) string {
 				return name
 			}
 		}
+		if !n.Lexical && n.ExprType().Kind == types.Function {
+			if g.topFunctions[n.Name] {
+				return g.namedFunctionValue(g.projectFunctionName(g.modulePath, n.Name), g.modulePath, n.Name)
+			}
+			if n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.ExportKind == "function" {
+				return g.namedFunctionValue(g.projectFunctionName(n.Reference.Package, n.Reference.Symbol), n.Reference.Package, n.Reference.Symbol)
+			}
+		}
 		if !n.Lexical && g.topTargets[n.Name] != "" {
 			return g.topTargets[n.Name]
 		}
@@ -963,6 +971,14 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.intrinsic(reference.Intrinsic, n, parts)
 		}
 		parts = g.executionArguments(n, parts)
+		if identifier, ok := n.Callee.(*ir.Identifier); ok && !identifier.Lexical {
+			if g.topFunctions[identifier.Name] {
+				return g.projectFunctionName(g.modulePath, identifier.Name) + "(" + strings.Join(parts, ", ") + ")"
+			}
+			if reference := identifier.Reference; reference != nil && reference.ExportKind == "function" {
+				return g.projectFunctionName(reference.Package, reference.Symbol) + "(" + strings.Join(parts, ", ") + ")"
+			}
+		}
 		callee := g.expr(n.Callee)
 		// A generic declaration carries its return type, which may be callable.
 		// Apply its own arguments before invoking any returned function value.

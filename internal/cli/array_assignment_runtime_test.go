@@ -123,6 +123,11 @@ end
 
 func runPortableExecutionCase(t *testing.T, source, want, failure string) {
 	t.Helper()
+	runPortableExecutionFiles(t, map[string]string{"main.trb": source}, want, failure)
+}
+
+func runPortableExecutionFiles(t *testing.T, files map[string]string, want, failure string) {
+	t.Helper()
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, surface := range []string{"run", "repl"} {
 			t.Run(mode+"/"+surface, func(t *testing.T) {
@@ -145,8 +150,11 @@ func runPortableExecutionCase(t *testing.T, source, want, failure string) {
 					t.Fatal(err)
 				}
 				path := filepath.Join(config.SourcePath(), "main.trb")
-				if surface == "run" {
-					if err := os.WriteFile(path, []byte(source), 0644); err != nil {
+				for name, source := range files {
+					if name == "main.trb" && surface != "run" {
+						continue
+					}
+					if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0644); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -155,7 +163,7 @@ func runPortableExecutionCase(t *testing.T, source, want, failure string) {
 				if surface == "run" {
 					args = append(args, path)
 				} else {
-					input = source + "\nmain()\n:quit\n"
+					input = files["main.trb"] + "\nmain()\n:quit\n"
 				}
 				var stdout, stderr bytes.Buffer
 				command := &CLI{Stdin: strings.NewReader(input), Stdout: &stdout, Stderr: &stderr}

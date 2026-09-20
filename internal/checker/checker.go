@@ -6404,6 +6404,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if binding, ok := c.importedValueAt(n.Name, n.Span()); ok {
 			typ = c.resolvedBindingType(binding)
 			c.recordReference(n, binding)
+			if c.directCallCallee != n && binding.Export != nil && binding.Export.Source && binding.Export.Kind == resolver.FunctionExport {
+				signature := methodSignature{returnType: typ, parameters: append([]callsignature.Parameter(nil), binding.Export.Parameters...), variadic: binding.Export.Variadic}
+				for index := range signature.parameters {
+					signature.parameters[index].Type = c.canonicalContractType(signature.parameters[index].Type, c.activeTypeParameterSet(), binding.Import)
+				}
+				typ = c.namedFunctionValueType(n.Span(), n.Name, signature, len(binding.Export.TypeParameters) != 0)
+			}
 			if binding.Export != nil && binding.Export.NativeNil != nil && c.directCallCallee != n {
 				c.error(n.Span(), fmt.Sprintf("native function %s requires null/undefined conversion and must be called directly; wrap the call in a typed fn to pass it as a value", n.Name))
 				typ = invalidType()
@@ -6419,6 +6426,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		} else if c.recordDefaultUnavailable[n.Name] && (c.directCallCallee != n || !c.recordDefaultCallable(n.Name)) {
 			c.error(n.Span(), fmt.Sprintf("record field default cannot reference current or later field %s", n.Name))
 			typ = invalidType()
+		} else if method := c.functions[n.Name]; method != nil && c.directCallCallee != n {
+			typ = c.namedFunctionValueType(n.Span(), n.Name, c.signatureFromMethod(method), len(method.TypeParameters) != 0)
 		} else if isConstant(n.Name) {
 			typ = types.FromName(n.Name)
 			if declaration := c.authoredTypeIdentities[n.Name]; !declaration.Empty() {
@@ -7349,9 +7358,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
-		// Library members expose their result type here. A Function result is
-		// produced by that library call; it is not the member's call signature.
-		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && c.result.References[n.Callee].Library == nil {
+		// Resolved declarations expose their result type here. A Function result
+		// is produced by that call; it is not the declaration's call signature.
+		binding := c.result.References[n.Callee]
+		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport
+		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && !directDeclaration {
 			for _, argument := range n.Arguments {
 				if argument.Name != "" || argument.Splat != "" {
 					c.error(argument.Value.Span(), "fn values accept positional arguments only")
