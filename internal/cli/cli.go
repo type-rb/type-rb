@@ -1642,8 +1642,11 @@ func replPrelude(imports []replImport, sessionSource string) string {
 			if !ok {
 				continue
 			}
-			if len(imported.Symbols) == 0 && imported.Alias == "" {
+			if len(imported.Symbols) == 0 {
 				explicitPaths[imported.Path] = true
+			}
+			if imported.Alias != "" {
+				explicit[imported.Alias] = true
 			}
 			for _, name := range imported.Symbols {
 				explicit[name] = true

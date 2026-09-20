@@ -3260,14 +3260,11 @@ func (g *generator) qualifiedNamedType(name string, arguments []types.Type, null
 func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescriptRecordConstructionTarget, bool) {
 	switch node := expression.(type) {
 	case *ir.Identifier:
-		target := typescriptRecordConstructionTarget{
-			typeName:   g.runtimeName(node.Name),
-			helperName: tsRecordConstructorName(node.Name),
+		name := node.Name
+		if node.Declaration.Kind.IsType() && node.Declaration.Name != "" {
+			name = node.Declaration.Name
 		}
-		if alias := g.typeAliases[node.Name]; alias != "" {
-			target.helperName = alias + "." + target.helperName
-		}
-		return target, true
+		return g.namedRecordTarget(name), true
 	case *ir.Member:
 		if !node.Namespace {
 			return typescriptRecordConstructionTarget{}, false
@@ -3277,16 +3274,7 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 			declaration = node.Reference.Declaration
 		}
 		if declaration.Kind.IsType() && declaration.Name != "" {
-			name := g.runtimeName(declaration.Name)
-			helper := tsRecordConstructorName(tsOwnedTypeName(declaration.Name))
-			if mapped := g.typeMappings[declaration.Name]; mapped != "" {
-				if separator := strings.LastIndex(mapped, "."); separator >= 0 {
-					helper = mapped[:separator+1] + tsRecordConstructorName(mapped[separator+1:])
-				} else {
-					helper = tsRecordConstructorName(mapped)
-				}
-			}
-			return typescriptRecordConstructionTarget{typeName: name, helperName: helper}, true
+			return g.namedRecordTarget(declaration.Name), true
 		}
 		return typescriptRecordConstructionTarget{
 			typeName:   g.expr(node),
@@ -3302,6 +3290,16 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 	default:
 		return typescriptRecordConstructionTarget{}, false
 	}
+}
+
+// Constructor helpers share the record's resolved local or imported name.
+func (g *generator) namedRecordTarget(name string) typescriptRecordConstructionTarget {
+	mapped := g.runtimeName(name)
+	helper := tsRecordConstructorName(mapped)
+	if separator := strings.LastIndex(mapped, "."); separator >= 0 {
+		helper = mapped[:separator+1] + tsRecordConstructorName(mapped[separator+1:])
+	}
+	return typescriptRecordConstructionTarget{typeName: mapped, helperName: helper}
 }
 
 func (g *generator) recordTargetLiteral(target typescriptRecordConstructionTarget, arguments []ir.CallArgument, identity *typescriptTypeIdentity) string {
