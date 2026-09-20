@@ -84,19 +84,19 @@ func collectGoProjectDeclarations(modulePath string, statements []ir.Statement, 
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ir.Class:
-			name := goIdentifier(node.Name, true)
+			name := goDeclaredTypeName(node.Declaration.Name, node.Name)
 			occupied[name] = true
 			occupied["New"+name] = true
 		case *ir.Record:
-			occupied[goIdentifier(node.Name, true)] = true
+			occupied[goDeclaredTypeName(node.Declaration.Name, node.Name)] = true
 		case *ir.Enum:
-			occupied[goIdentifier(node.Name, true)] = true
+			occupied[goDeclaredTypeName(node.Declaration.Name, node.Name)] = true
 		case *ir.TypeAlias:
-			occupied[goIdentifier(node.Name, true)] = true
+			occupied[goDeclaredTypeName(node.Declaration.Name, node.Name)] = true
 		case *ir.Newtype:
-			occupied[goIdentifier(node.Name, true)] = true
+			occupied[goDeclaredTypeName(node.Declaration.Name, node.Name)] = true
 		case *ir.Interface:
-			occupied[goIdentifier(node.Name, true)] = true
+			occupied[goDeclaredTypeName(node.Declaration.Name, node.Name)] = true
 		case *ir.Variable:
 			name := goBindingIdentifier(node.Name)
 			if node.Constant {
