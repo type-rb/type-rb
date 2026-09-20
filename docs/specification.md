@@ -1062,8 +1062,9 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   out-of-range result is a runtime failure rather than wraparound, rounding, or
   a recoverable `Result`.
 - Float arithmetic follows binary64 edge behavior in every backend and the
-  REPL. Division by positive or negative zero produces the corresponding
-  infinity, `0.0 / 0.0` produces NaN, overflow produces infinity, and a
+  REPL. Unary negation reverses the sign of zero, including literal operands
+  and nested negation. Division by positive or negative zero produces the
+  corresponding infinity, `0.0 / 0.0` produces NaN, overflow produces infinity, and a
   negative base raised to a non-integral Float exponent produces NaN rather
   than a target-specific complex value.
 - Parenthesized TypeRB expressions retain their AST precedence in generated
