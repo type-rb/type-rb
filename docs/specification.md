@@ -649,6 +649,8 @@ receivers, failure order and examples.
 
 - Private class/method names must start with `_`.
 - External access to private members is forbidden and must be a compile-time error.
+- A module may call its own private methods through its declaration name;
+  selecting that private method from outside the owning module is rejected.
 
 ### 3.4 Instance Variables
 
@@ -700,6 +702,10 @@ receivers, failure order and examples.
 - Constants are always immutable and cannot be declared with `mut`, rebound,
   or passed to destructive APIs. For example,
   `DEFAULT_TAGS.push("work")` is a compile-time error.
+- `Owner::NAME` selects a constant by its declaration owner, including nested
+  modules and imported aliases. It retains the constant's checked type and
+  immutability. Same-named constants in different owners remain distinct, and
+  unqualified reads inside a method retain their lexical declaration owner.
 
 ### 3.7 Imports and Formatting
 

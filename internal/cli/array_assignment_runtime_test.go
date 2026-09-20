@@ -154,6 +154,9 @@ func runPortableExecutionFiles(t *testing.T, files map[string]string, want, fail
 					if name == "main.trb" && surface != "run" {
 						continue
 					}
+					if err := os.MkdirAll(filepath.Dir(filepath.Join(config.SourcePath(), name)), 0755); err != nil {
+						t.Fatal(err)
+					}
 					if err := os.WriteFile(filepath.Join(config.SourcePath(), name), []byte(source), 0644); err != nil {
 						t.Fatal(err)
 					}

@@ -31,6 +31,7 @@ type generator struct {
 	functionDepth    int
 	methods          map[string]*ir.Method
 	modulePath       string
+	moduleNames      *moduleNames
 	moduleExtensions map[string]string
 	topFunctions     map[string]bool
 	topMethods       map[string]*ir.Method
@@ -180,7 +181,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -874,39 +875,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.line("export type " + n.Name + " = " + g.tsType(n.Target) + ";" + tsTrailingComment(n.TrailingComment))
 		g.newtypeMethods(n)
 	case *ir.Module:
-		if methods, ok := functionOnlyModule(n); ok {
-			properties := make([]string, 0, len(methods))
-			for _, member := range n.Body {
-				if comment, ok := member.(*ir.Comment); ok {
-					g.statement(comment)
-				}
-			}
-			for _, method := range methods {
-				g.function(method)
-				target := method.Name
-				if method.TargetName != "" {
-					target = method.TargetName
-				}
-				target = tsCallableName(target)
-				property := tsMethodName(method.Name)
-				if property != target {
-					property += ": " + target
-				}
-				properties = append(properties, property)
-			}
-			g.line("export const " + n.Name + " = { " + strings.Join(properties, ", ") + " } as const;")
-			break
-		}
-		if declarationOnlyModule(n) {
-			g.ownedModuleDeclarations(n.Body, n.Name)
-			g.line("export const " + n.Name + " = {} as const;")
-			break
-		}
-		g.line("export namespace " + n.Name + " {")
-		g.indent++
-		g.statements(n.Body)
-		g.indent--
-		g.line("}")
+		g.module(n)
 	case *ir.Interface:
 		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		g.line("export interface " + n.Name + tsTypeParameterDeclarations(n.TypeParameters) + " {")
@@ -953,14 +922,14 @@ func (g *generator) statement(statement ir.Statement) {
 			g.function(n)
 		}
 	case *ir.Variable:
-		identity := g.expressionTypeIdentity(n.Type, n.Value)
-		variableType := g.tsTypeWithIdentity(n.Type, identity)
+		typeIdentity := g.expressionTypeIdentity(n.Type, n.Value)
+		variableType := g.tsTypeWithIdentity(n.Type, typeIdentity)
 		if lambda, ok := n.Value.(*ir.Lambda); ok && g.suspension.Lambdas[lambda] {
 			variableType = g.tsSuspendingFunctionType(n.Type)
 		}
 		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
 			g.line("static readonly " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")
-			g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(identity)
+			g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(typeIdentity)
 			break
 		}
 		keyword := "const"
@@ -974,8 +943,12 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth == 0 && n.Constant {
 			prefix = "export "
 		}
-		g.line(prefix + keyword + " " + tsBindingName(n.Name) + ": " + variableType + " = " + g.expr(n.Value) + ";")
-		g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(identity)
+		name := tsBindingName(n.Name)
+		if owned := g.moduleNames.constants[identity.Qualify(n.Owner, n.Name)]; n.Constant && owned != "" {
+			name = owned
+		}
+		g.line(prefix + keyword + " " + name + ": " + variableType + " = " + g.expr(n.Value) + ";")
+		g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(typeIdentity)
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
 			g.line("void " + tsBindingName(n.Name) + ";")
 		}
@@ -1212,35 +1185,6 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 		declaration := identity.Declaration{Module: imported.Path, Name: symbol, Kind: kind}
 		g.declarationNames[declaration] = name
 	}
-}
-
-func functionOnlyModule(module *ir.Module) ([]*ir.Method, bool) {
-	methods := make([]*ir.Method, 0, len(module.Body))
-	for _, member := range module.Body {
-		switch node := member.(type) {
-		case *ir.Comment:
-		case *ir.Method:
-			methods = append(methods, node)
-		default:
-			return nil, false
-		}
-	}
-	return methods, true
-}
-
-func declarationOnlyModule(module *ir.Module) bool {
-	for _, member := range module.Body {
-		switch node := member.(type) {
-		case *ir.Comment, *ir.Class, *ir.Record, *ir.Enum, *ir.Interface, *ir.TypeAlias, *ir.Newtype:
-		case *ir.Module:
-			if !declarationOnlyModule(node) {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
 }
 
 func (g *generator) ownedModuleDeclarations(statements []ir.Statement, owner string) {
@@ -1652,6 +1596,9 @@ func (g *generator) function(method *ir.Method) {
 		name = method.TargetName
 	}
 	name = tsCallableName(name)
+	if owned := g.moduleNames.methods[method]; owned != "" {
+		name = owned
+	}
 	prefix := "export function "
 	if name == "main" {
 		prefix = "function "
@@ -1873,6 +1820,9 @@ func (g *generator) identifierName(identifier *ir.Identifier) string {
 		return "this." + tsMethodName(identifier.Name)
 	}
 	if identifier.Owner != "" {
+		if owned := g.moduleNames.constants[identity.Qualify(identifier.Owner, identifier.Name)]; owned != "" {
+			return owned
+		}
 		return strings.ReplaceAll(identifier.Owner, "::", ".") + "." + tsCallableName(identifier.Name)
 	}
 	if identifier.Reference != nil && identifier.Reference.ExportKind == "function" {
@@ -2065,6 +2015,17 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if owned := g.moduleNames.calls[n.Dispatch]; owned != "" && (n.Reference == nil || n.Reference.Intrinsic == "" && n.Reference.Runtime == nil) {
+			return owned
+		}
+		if n.Namespace {
+			owner := ir.ExpressionDeclaration(n.Receiver)
+			if owner.Module == g.modulePath && owner.Kind == identity.Module {
+				if name := g.moduleNames.constants[identity.Qualify(owner.Name, n.Name)]; name != "" {
+					return name
+				}
+			}
+		}
 		if n.Namespace && n.ExprType().Declaration.Kind.IsType() && n.ExprType().Declaration.Name != "" {
 			owner := g.declarationName(n.ExprType().Declaration)
 			if n.ExprType().Declaration.LeafName() == n.Name {

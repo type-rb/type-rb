@@ -353,7 +353,7 @@ end
 	for _, fragment := range []string{
 		"export async function __trbRecordNewConfig(",
 		"export function __trbRecordNewConfigSync(__trbScope: AbortSignal | undefined, __trbArgs: { values: Array<number>; label?: string }): Config",
-		"export const CONFIG: Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
+		": Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("generated TypeScript is missing %q:\n%s", fragment, output)
@@ -398,7 +398,7 @@ end
 	output := string(artifactForModule(artifacts, "main").Output)
 	for _, fragment := range []string{
 		`import { __trbRecordNewConfig, __trbRecordNewConfigSync } from "./models/config.ts";`,
-		"export const CONFIG: Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
+		": Config = __trbRecordNewConfigSync(undefined, { values: [2] });",
 	} {
 		if !strings.Contains(output, fragment) {
 			t.Fatalf("generated importing module is missing %q:\n%s", fragment, output)

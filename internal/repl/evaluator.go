@@ -516,12 +516,15 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 	case *ir.Comment, *ir.Import, *ir.Record, *ir.Enum, *ir.EnumMember, *ir.TypeAlias, *ir.Newtype, *ir.Interface, *ir.Field, *ir.RecordField, *ir.Method:
 		return flowResult{}, nil
 	case *ir.Class:
-		if err := e.evaluateOwnedConstants(node.Body, module, sc); err != nil {
+		owned := &scope{parent: sc, values: map[string]Value{}, persistent: true}
+		if err := e.evaluateOwnedConstants(node.Body, module, owned); err != nil {
 			return flowResult{}, err
 		}
 		return flowResult{}, nil
 	case *ir.Module:
-		return e.evaluate(node.Body, module, sc)
+		owned := &scope{parent: sc, values: map[string]Value{}, persistent: true}
+		_, err := e.evaluate(node.Body, module, owned)
+		return flowResult{}, err
 	case *ir.Variable:
 		value, err := e.expression(node.Value, module, sc)
 		if err != nil {
@@ -920,13 +923,13 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Name == "self" || strings.HasPrefix(node.Name, "@") {
 			return e.selfValue(node.Name, sc)
 		}
-		if value, ok := sc.get(node.Name); ok {
-			return collectionValueAtType(value, node.ExprType()), nil
-		}
 		if node.Owner != "" {
 			if value, ok := e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))]; ok {
 				return collectionValueAtType(value, node.ExprType()), nil
 			}
+		}
+		if value, ok := sc.get(node.Name); ok {
+			return collectionValueAtType(value, node.ExprType()), nil
 		}
 		if node.Reference != nil {
 			if node.Reference.Intrinsic != "" {
@@ -1096,6 +1099,14 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		if node.Namespace && node.Declaration.Kind.IsType() && strings.HasSuffix(node.Declaration.Name, "::"+node.Name) {
 			if value, ok := e.symbol(node.Declaration.Module, node.Declaration.Name); ok {
 				return value, nil
+			}
+		}
+		if node.Namespace {
+			owner := ir.ExpressionDeclaration(node.Receiver)
+			if !owner.Empty() {
+				if value, ok := e.symbol(owner.Module, ownedName(owner.Name, node.Name)); ok {
+					return collectionValueAtType(value, node.ExprType()), nil
+				}
 			}
 		}
 		receiver := Value{}
