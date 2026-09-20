@@ -10,6 +10,13 @@ import (
 // Sequential stores preserve all entry effects and avoid target warnings for
 // duplicate literal keys, which are valid overwrites in portable TypeRB.
 func (g *generator) hashLiteral(hash *ir.Hash) string {
+	if g.nativeSyntax {
+		parts := make([]string, len(hash.Entries))
+		for index, entry := range hash.Entries {
+			parts[index] = g.expr(entry.Key) + " => " + g.expr(entry.Value)
+		}
+		return "{" + strings.Join(parts, ", ") + "}"
+	}
 	if len(hash.Entries) == 0 {
 		return "{}"
 	}
