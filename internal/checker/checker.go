@@ -7363,6 +7363,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		binding := c.result.References[n.Callee]
 		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport
 		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && !directDeclaration {
+			if calleeType.Nullable {
+				c.error(n.Callee.Span(), "nullable function value must be narrowed before calling")
+			}
 			for _, argument := range n.Arguments {
 				if argument.Name != "" || argument.Splat != "" {
 					c.error(argument.Value.Span(), "fn values accept positional arguments only")
