@@ -7349,7 +7349,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
-		if parameters, returned, callable := types.FunctionSignature(calleeType); callable {
+		// Library members expose their result type here. A Function result is
+		// produced by that library call; it is not the member's call signature.
+		if parameters, returned, callable := types.FunctionSignature(calleeType); callable && c.result.References[n.Callee].Library == nil {
 			for _, argument := range n.Arguments {
 				if argument.Name != "" || argument.Splat != "" {
 					c.error(argument.Value.Span(), "fn values accept positional arguments only")
