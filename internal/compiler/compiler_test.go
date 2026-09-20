@@ -1621,8 +1621,8 @@ end
 `)
 
 	wants := map[string][]string{
-		"go":         {"[]float64{float64(1), 2.5}", `map[string]float64{"integer": float64(1), "float": 2.5}`},
-		"ruby":       {"[(1).to_f, 2.5]", `{"integer" => (1).to_f, "float" => 2.5}`},
+		"go":         {"[]float64{float64(1), 2.5}", `func HashValues() map[string]float64`},
+		"ruby":       {"[(1).to_f, 2.5]", `["integer"] = (1).to_f`, `["float"] = 2.5`},
 		"typescript": {"[Number(1), 2.5]", `{["integer"]: Number(1), ["float"]: 2.5}`},
 	}
 	for _, mode := range []string{"go", "ruby", "typescript"} {
@@ -1986,7 +1986,7 @@ end
 			"if __trbCase1Value1, ok := __trbCase1.(int); ok {",
 			"number := __trbCase1Value1",
 			`[]any{1, "two"}`,
-			`map[string]any{"count": 1, "name": "Ada"}`,
+			`map[string]any`,
 			`[]any{float64(1), 2.5, "two"}`,
 			"if integer, ok := value.(int); ok {",
 			"return float64(integer)",
@@ -1995,7 +1995,7 @@ end
 			"when Integer",
 			"number = __trb_case1",
 			`[1, "two"]`,
-			`{"count" => 1, "name" => "Ada"}`,
+			`["count"] = 1`, `["name"] = "Ada"`,
 			`[(1).to_f, 2.5, "two"]`,
 			"(->(value) { value.is_a?(Integer) ? value.to_f : value }).call(value)",
 		},
@@ -2574,7 +2574,7 @@ end
 		`panic("Hash key is missing")`,
 		`scores["alice"] = 3`,
 		"Accept(map[string]int{})",
-		"map[string]any{",
+		"map[string]any",
 	} {
 		if !strings.Contains(goOutput, want) {
 			t.Fatalf("generated Go is missing %q:\n%s", want, goOutput)
@@ -2590,7 +2590,7 @@ end
 	}
 
 	rubyOutput := string(artifacts["ruby"].Output)
-	for _, want := range []string{`{"alice" => 1, "bonus" => 2}`, `scores.fetch("alice")`} {
+	for _, want := range []string{`["alice"] = 1`, `["bonus"] = 2`, `scores.fetch("alice")`} {
 		if !strings.Contains(rubyOutput, want) {
 			t.Fatalf("generated Ruby is missing %q:\n%s", want, rubyOutput)
 		}

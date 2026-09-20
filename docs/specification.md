@@ -1305,6 +1305,9 @@ position as `Integer?` without a block.
   literal must use one homogeneous key type. The label-style `name: value` literal
   spelling has a `String` key in portable TypeRB; it becomes a Ruby `Symbol`
   only under an explicit Ruby-native import.
+- Literal entries are evaluated in authored order, with each key evaluated
+  before its value. Every entry is evaluated exactly once, including entries
+  overwritten by a later equal key; the last value for that key is retained.
 - Non-empty literals infer their key and value types. Equivalent values retain
   their type; values with a safe most-specific common type use that type and
   receive the required implicit conversions. For example, Integer and Float
