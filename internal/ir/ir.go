@@ -681,6 +681,9 @@ type Conversion struct {
 	ExprBase
 	Kind  ConversionKind
 	Value Expression
+	// Representation is the checked storage type of a newtype conversion.
+	// It stays distinct from ExprType, which preserves nominal identity.
+	Representation types.Type
 }
 
 func (*Conversion) irExpression() {}
