@@ -1703,6 +1703,14 @@ func (g *generator) expr(expression ir.Expression) string {
 				return "func(value *any) *any { if value == nil { return nil }; converted := *value; if integer, ok := converted.(int); ok { converted = float64(integer) }; return &converted }(" + g.expr(n.Value) + ")"
 			}
 			return "func(value any) any { if integer, ok := value.(int); ok { return float64(integer) }; return value }(" + g.expr(n.Value) + ")"
+		case ir.NullableToUnionConversion:
+			base := n.Value.ExprType()
+			base.Nullable = false
+			payload := "value"
+			if g.goType(base) != g.goType(n.Value.ExprType()) {
+				payload = "*value"
+			}
+			return "func(value " + g.goType(n.Value.ExprType()) + ") " + g.goType(n.ExprType()) + " { if value == nil { return nil }; var converted any = " + payload + "; return &converted }(" + g.expr(n.Value) + ")"
 		case ir.NonNullableToNullableConversion:
 			return g.nonNullableToNullableExpr(n, n.ExprType())
 		case ir.NullableToNonNullableConversion:
@@ -3236,7 +3244,7 @@ func (g *generator) goType(t types.Type) string {
 		// appears inside a target type (for example Result<Never, E>); callable
 		// return positions are handled by goReturn and remain result-less.
 		result = "any"
-	case types.Any, types.Invalid:
+	case types.Any, types.Invalid, types.Nil:
 		result = "any"
 	case types.Union:
 		if base, ok := types.LiteralUnionBase(t); ok {

@@ -71,7 +71,7 @@ func resourceOpaqueNode(node any) bool {
 		return value.Reference != nil && value.Reference.Runtime != nil
 	case *ir.Conversion:
 		switch value.Kind {
-		case ir.IntegerToFloatConversion, ir.UnionIntegerToFloatConversion,
+		case ir.IntegerToFloatConversion, ir.UnionIntegerToFloatConversion, ir.NullableToUnionConversion,
 			ir.NonNullableToNullableConversion, ir.NullableToNonNullableConversion,
 			ir.ToIterableConversion, ir.NewtypeConstructionConversion, ir.NewtypeValueConversion:
 			return false

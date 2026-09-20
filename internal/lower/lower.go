@@ -1587,6 +1587,15 @@ func assignableConversion(span token.Span, value ir.Expression, target types.Typ
 		base.Nullable = false
 		value = assignableConversion(span, value, base)
 		kind = ir.NonNullableToNullableConversion
+	case target.Nullable && source.Nullable && target.Kind == types.Union && source.Kind != types.Union:
+		// Map present scalar/container storage into the optional union. Keep
+		// numeric widening explicit before the representation conversion.
+		if (source.Kind == types.Int || source.Kind == types.IntLiteral) && unionContainsNonNullableTypeKind(target, types.Float) {
+			widened := types.FromName("Float")
+			widened.Nullable = true
+			value = &ir.Conversion{ExprBase: ir.NewExprBase(span, widened), Kind: ir.IntegerToFloatConversion, Value: value}
+		}
+		kind = ir.NullableToUnionConversion
 	case target.Kind == types.Union && source.Kind == types.Union &&
 		unionContainsTypeKind(target, types.Float) && unionContainsTypeKind(source, types.Int):
 		kind = ir.UnionIntegerToFloatConversion

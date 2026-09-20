@@ -103,3 +103,61 @@ puts(text("nested"))
 end
 `, "2.0\n3\nnested\n", "")
 }
+
+func TestNullablePayloadsEnterUnionStorageAcrossTargets(t *testing.T) {
+	runPortableExecutionCase(t, `alias Choice = Float | String | Boolean
+alias Collection = Array<Integer> | String
+def number(value: Integer?): Choice?
+return value
+end
+def word(value: String?): Choice?
+return value
+end
+def flag(value: Boolean?): Choice?
+return value
+end
+def collection(value: Array<Integer>?): Collection?
+return value
+end
+def produce(mut calls: Array<Integer>): Integer?
+calls[0] += 1
+return 7
+end
+def text(value: Choice?): String
+if value != nil
+case value
+when Float(number)
+return number.to_s()
+when String(word)
+return word
+when Boolean(flag)
+return flag.to_s()
+end
+end
+return "absent"
+end
+def main()
+mut calls := [0]
+puts(text(number(produce(calls))))
+puts(calls[0])
+puts(text(number(nil)))
+puts(text(word("kept")))
+puts(text(word(nil)))
+puts(text(flag(false)))
+puts(collection([1]) == nil)
+puts(collection(nil) == nil)
+end
+`, "7.0\n1\nabsent\nkept\nabsent\nfalse\nfalse\ntrue\n", "")
+}
+
+func TestInferredNilCollectionsAcrossTargets(t *testing.T) {
+	runPortableExecutionCase(t, `def main()
+values := [nil]
+mapping := {"none" => nil}
+puts(values.size())
+puts(values[0] == nil)
+puts(mapping.size())
+puts(mapping["none"] == nil)
+end
+`, "1\ntrue\n1\ntrue\n", "")
+}
