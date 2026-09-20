@@ -14,6 +14,12 @@ func (e *Evaluator) transform(node *ir.Transform, module string, sc *scope) (Val
 	if err != nil {
 		return Value{}, err
 	}
+	if node.Safe {
+		if source.Data == nil {
+			return Value{Type: node.ExprType()}, nil
+		}
+		source.Type.Nullable = false
+	}
 	if node.Operation == "reduce" {
 		accumulator, err := e.expression(node.Initial, module, sc)
 		if err != nil {

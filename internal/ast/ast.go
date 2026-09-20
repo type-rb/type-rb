@@ -339,6 +339,7 @@ func (*WhileStatement) statementNode() {}
 // of a target-language callback.
 type IterationExpression struct {
 	Base
+	Safe      bool
 	Source    Expression
 	Operation string
 	SliceSize Expression

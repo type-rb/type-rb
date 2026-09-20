@@ -431,6 +431,10 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Iterate:
+		if n.Safe {
+			g.safeIteration(n)
+			break
+		}
 		if strings.HasPrefix(n.Intrinsic, "trb.orm.") {
 			g.ormBatchIterate(n)
 			break
@@ -1396,6 +1400,9 @@ func (g *generator) caseExpression(node *ir.Case) string {
 }
 
 func (g *generator) transform(transform *ir.Transform) string {
+	if transform.Safe {
+		return g.safeTransform(transform)
+	}
 	if transform.Operation == "concurrent_map" {
 		return g.concurrentMap(transform)
 	}
@@ -1461,6 +1468,8 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	workerCount := "__trb_worker_count_" + suffix
 	index := "__trb_index_" + suffix
 	taskScope := "__trb_task_scope_" + suffix
+	claimedIndex := "__trb_claimed_index_" + suffix
+	taskError := "__trb_task_error_" + suffix
 	item := transform.Item
 	if item == "" || item == "_" {
 		item = "__trb_item_" + suffix
@@ -1511,25 +1520,24 @@ func (g *generator) concurrentMap(transform *ir.Transform) string {
 	child.line(index+" = "+indexMutex+".synchronize do", "")
 	child.indent++
 	child.line("next nil if "+nextIndex+" >= "+items+".length", "")
-	child.line("value = "+nextIndex, "")
+	child.line(claimedIndex+" = "+nextIndex, "")
 	child.line(nextIndex+" += 1", "")
-	child.line("value", "")
+	child.line(claimedIndex, "")
 	child.indent--
 	child.line("end", "")
 	child.line("break if "+index+".nil?", "")
 	child.line(semaphore+".pop", "")
 	child.line("begin", "")
 	child.indent++
-	child.line(result+"["+index+"] = ->(__trb_scope) do", "")
+	child.line(result+"["+index+"] = ->(__trb_scope, "+item+") do", "")
 	child.indent++
-	child.line(item+" = "+items+"["+index+"]", "")
 	child.statements(transform.Body)
 	child.line(child.expr(transform.Result), "")
 	child.indent--
-	child.line("end.call("+taskScope+")", "")
-	child.line("rescue Exception => error", "")
+	child.line("end.call("+taskScope+", "+items+"["+index+"])", "")
+	child.line("rescue Exception => "+taskError, "")
 	child.indent++
-	child.line(errorMutex+".synchronize { "+errors+" << error if "+errors+".empty? }", "")
+	child.line(errorMutex+".synchronize { "+errors+" << "+taskError+" if "+errors+".empty? }", "")
 	child.line(childScope+".cancel", "")
 	child.indent--
 	child.line("ensure", "")

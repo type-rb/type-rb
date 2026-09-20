@@ -470,6 +470,7 @@ type IterationResult struct {
 
 type Iterate struct {
 	Base
+	Safe      bool
 	Source    Expression
 	Operation string
 	Intrinsic string
@@ -522,6 +523,8 @@ func (*StructuredBlock) irStatement() {}
 // retained until backend lowering.
 type Transform struct {
 	ExprBase
+	Safe        bool
+	PresentType types.Type
 	Source      Expression
 	Operation   string
 	Initial     Expression

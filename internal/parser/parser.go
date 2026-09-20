@@ -864,10 +864,16 @@ func (p *Parser) iterationHeader(tokens []token.Token) (*ast.IterationExpression
 func (p *Parser) iterationFromExpression(expression ast.Expression) (*ast.IterationExpression, bool) {
 	withIndex := false
 	if member, ok := expression.(*ast.MemberExpression); ok && member.Name == "with_index" {
+		if member.Safe {
+			p.errorAt(member.Span(), "safe navigation must precede the iteration operation, not with_index")
+		}
 		withIndex = true
 		expression = member.Receiver
 	} else if call, ok := expression.(*ast.CallExpression); ok {
 		if member, memberOK := call.Callee.(*ast.MemberExpression); memberOK && member.Name == "with_index" {
+			if member.Safe {
+				p.errorAt(member.Span(), "safe navigation must precede the iteration operation, not with_index")
+			}
 			if len(call.Arguments) != 0 {
 				p.errorAt(call.Span(), "with_index does not take arguments in TypeRB v0.1")
 			}
@@ -884,6 +890,7 @@ func (p *Parser) iterationFromExpression(expression ast.Expression) (*ast.Iterat
 		}
 		iteration.Source = node.Receiver
 		iteration.Operation = node.Name
+		iteration.Safe = node.Safe
 	case *ast.CallExpression:
 		member, memberOK := node.Callee.(*ast.MemberExpression)
 		if !memberOK || !portableIterationOperation(member.Name) {
@@ -891,6 +898,7 @@ func (p *Parser) iterationFromExpression(expression ast.Expression) (*ast.Iterat
 		}
 		iteration.Source = member.Receiver
 		iteration.Operation = member.Name
+		iteration.Safe = member.Safe
 		if member.Name == "each" || member.Name == "map" || member.Name == "select" || member.Name == "any?" || member.Name == "all?" || member.Name == "none?" || member.Name == "find" || member.Name == "find_index" || member.Name == "sort_by" || member.Name == "sort_by_descending" {
 			if len(node.Arguments) != 0 {
 				p.errorAt(node.Span(), member.Name+" does not take arguments")

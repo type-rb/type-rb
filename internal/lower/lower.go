@@ -747,6 +747,7 @@ func (l *lowerer) statement(node ast.Statement) ir.Statement {
 			}
 			result := &ir.Iterate{
 				Base:      base(n.Base),
+				Safe:      iteration.Safe,
 				Source:    l.expression(iteration.Source),
 				Operation: iteration.Operation,
 				SliceSize: l.expression(iteration.SliceSize),
@@ -1052,13 +1053,15 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 		initial := l.expression(n.Initial)
 		limit := l.expression(n.Limit)
 		result := &ir.Transform{
-			ExprBase:  base,
-			Source:    source,
-			Operation: n.Operation,
-			Initial:   initial,
-			Limit:     limit,
-			WithIndex: n.WithIndex,
-			ItemType:  l.checked.Iterations[n],
+			ExprBase:    base,
+			Safe:        n.Safe,
+			PresentType: l.checked.SafeIterationTypes[n],
+			Source:      source,
+			Operation:   n.Operation,
+			Initial:     initial,
+			Limit:       limit,
+			WithIndex:   n.WithIndex,
+			ItemType:    l.checked.Iterations[n],
 		}
 		if n.Block != nil {
 			if n.Operation == "reduce" {

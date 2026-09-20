@@ -494,6 +494,16 @@ declared-type and flow-type split.
   does not turn `Void` into a value. If the present branch has the internal
   `Never` type, the only completing outcome is `nil`, so the safe expression
   has the internal `Nil` type.
+- Portable collection blocks preserve the same safe boundary: use
+  `values&.each`, `values&.map`, `values&.sort_by`, and the other supported
+  iteration operations. An absent receiver skips the block and the operation's
+  arguments, including `each_slice` size, `reduce` initial value and
+  `concurrent_map` limit. A value-producing operation has a nullable result;
+  statement-only iteration remains `Void`. Ordinary iteration of a nullable
+  receiver requires explicit narrowing or `&.`.
+- For indexed iteration, place safe navigation before the operation:
+  `values&.each.with_index` or `values&.map.with_index`. The `with_index`
+  modifier itself uses ordinary member syntax; `each&.with_index` is rejected.
 - Go, Ruby, TypeScript, and the REPL preserve the same receiver-once and
   argument-laziness rules. No backend substitutes a zero value for `nil`.
 

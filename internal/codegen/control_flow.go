@@ -616,6 +616,9 @@ func (n *controlFlowNormalizer) statement(statement ir.Statement) []ir.Statement
 	case *ir.While:
 		return n.whileStatement(node)
 	case *ir.Iterate:
+		if node.Safe {
+			return n.safeIteration(node)
+		}
 		expressions := []ir.Expression{node.Source}
 		if node.SliceSize != nil {
 			expressions = append(expressions, node.SliceSize)
@@ -1298,6 +1301,9 @@ func (n *controlFlowNormalizer) expression(expression ir.Expression) ([]ir.State
 		copy.Body = n.executableStatements(node.Body)
 		return nil, &copy
 	case *ir.Transform:
+		if node.Safe {
+			return n.safeTransform(node)
+		}
 		copy := *node
 		expressions := []ir.Expression{node.Source}
 		initialIndex := -1
