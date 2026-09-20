@@ -1413,6 +1413,9 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 	sourceType := iteration.Source.ExprType()
 	sourceIdentity := g.expressionTypeIdentity(sourceType, iteration.Source)
 	if iteration.Source.ExprType().Kind == types.Hash {
+		g.temporary++
+		entries := "__trbEntries" + strconv.Itoa(g.temporary)
+		g.line("const " + entries + " = Object.entries(" + g.expr(iteration.Source) + ");")
 		keyBinding := binding(0)
 		valueBinding := binding(1)
 		if len(sourceType.Args) == 2 {
@@ -1425,7 +1428,7 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 			g.temporary++
 			loopKey = "__trbKey" + strconv.Itoa(g.temporary)
 		}
-		g.line("for (let [" + loopKey + ", " + tsBindingName(valueBinding.Name) + "] of Object.entries(" + g.expr(iteration.Source) + ")) {")
+		g.line("for (let [" + loopKey + ", " + tsBindingName(valueBinding.Name) + "] of " + entries + ") {")
 		g.indent++
 		if loopKey != key {
 			g.line("let " + key + " = Number(" + loopKey + ");")
@@ -1452,14 +1455,19 @@ func (g *generator) iterate(iteration *ir.Iterate) {
 		g.iterableIterate(iteration)
 		return
 	}
+	// A for-of binding is in scope while JavaScript evaluates its RHS. Capture
+	// the receiver before introducing block names that may shadow it.
+	g.temporary++
+	items := "__trbItems" + strconv.Itoa(g.temporary)
+	g.line("const " + items + " = " + g.iterableExpr(iteration.Source) + ";")
 	indexBinding := binding(1)
 	if len(sourceType.Args) == 1 {
 		g.exactTypes[itemBinding.Name] = projectTypeScriptTypeIdentity(itemBinding.Type, sourceType.Args[0], identityArgument(sourceIdentity, 0))
 	}
 	if iteration.WithIndex {
-		g.line("for (let [" + tsBindingName(indexBinding.Name) + ", " + tsBindingName(itemBinding.Name) + "] of " + g.iterableExpr(iteration.Source) + ".entries()) {")
+		g.line("for (let [" + tsBindingName(indexBinding.Name) + ", " + tsBindingName(itemBinding.Name) + "] of " + items + ".entries()) {")
 	} else {
-		g.line("for (let " + tsBindingName(itemBinding.Name) + " of " + g.iterableExpr(iteration.Source) + ") {")
+		g.line("for (let " + tsBindingName(itemBinding.Name) + " of " + items + ") {")
 	}
 	g.indent++
 	g.line("void " + tsBindingName(itemBinding.Name) + ";")

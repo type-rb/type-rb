@@ -448,7 +448,7 @@ end
 		t.Fatal(err)
 	}
 	tsOutput := string(tsArtifact.Output)
-	for _, expected := range []string{"for (let value of [1, 2, 3])", "index = __trbIndex", "const __trbIterable2 = [1, 2, 3, 4, 5];", "for (let slice of (function* ()", "function sum(values: Iterable<number>): number", "return sum(((source: [number, number, boolean])"} {
+	for _, expected := range []string{"const __trbItems1 = [1, 2, 3];", "for (let value of __trbItems1)", "index = __trbIndex", "const __trbIterable4 = [1, 2, 3, 4, 5];", "for (let slice of (function* ()", "function sum(values: Iterable<number>): number", "return sum(((source: [number, number, boolean])"} {
 		if !strings.Contains(tsOutput, expected) {
 			t.Fatalf("missing %q in generated TypeScript:\n%s", expected, tsOutput)
 		}
@@ -525,7 +525,7 @@ end
 		t.Fatal(err)
 	}
 	typescriptOutput := string(typescriptArtifact.Output)
-	for _, expected := range []string{"Object.entries(labels)", "let key = Number(__trbKey1);", "void value;"} {
+	for _, expected := range []string{"Object.entries(labels)", "let key = Number(__trbKey2);", "void value;"} {
 		if !strings.Contains(typescriptOutput, expected) {
 			t.Fatalf("missing %q in generated TypeScript:\n%s", expected, typescriptOutput)
 		}
