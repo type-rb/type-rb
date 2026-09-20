@@ -4,8 +4,21 @@ import (
 	"sort"
 
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 )
+
+func (g *generator) variableName(variable *ir.Variable) string {
+	if variable.Declaration.Kind == identity.Value && !variable.Constant {
+		return "$" + naming.GlobalBindingIdentifier(variable.Declaration.Key())
+	}
+	if variable.Constant && variable.Owner == "" && g.projectNames != nil {
+		if target := g.projectNames.constants[g.modulePath][variable.Name]; target != "" {
+			return target
+		}
+	}
+	return variable.Name
+}
 
 // rubyProjectNames resolves top-level functions that share Ruby's Object
 // method namespace. TypeRB modules have separate function namespaces, so only

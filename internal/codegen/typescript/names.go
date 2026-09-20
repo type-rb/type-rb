@@ -1,6 +1,22 @@
 package typescript
 
-import "encoding/hex"
+import (
+	"encoding/hex"
+
+	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/ir"
+)
+
+func (g *generator) variableName(variable *ir.Variable) string {
+	if variable.Declaration.Kind == identity.Value && !variable.Constant {
+		return naming.GlobalBindingIdentifier(variable.Declaration.Key())
+	}
+	if owned := g.moduleNames.constants[identity.Qualify(variable.Owner, variable.Name)]; variable.Constant && owned != "" {
+		return owned
+	}
+	return tsBindingName(variable.Name)
+}
 
 // Source bindings are portable identifiers, not JavaScript keywords. The dollar
 // namespace cannot be authored in TypeRB and keeps this encoding collision-free.

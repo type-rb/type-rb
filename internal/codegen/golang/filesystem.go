@@ -181,7 +181,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	rawType := block.Call.ExprType()
 	target := ""
 	if block.Result.Variable != nil {
-		target = g.bindingIdentifier(block.Result.Variable.Name)
+		target = g.variableIdentifier(block.Result.Variable)
 	} else if block.Result.Target != nil {
 		target = g.assignmentTarget(block.Result.Target)
 	}

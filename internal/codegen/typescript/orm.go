@@ -411,7 +411,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 			if block.Result.Variable.Mutable {
 				keyword = "let"
 			}
-			g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
+			g.line(keyword + " " + g.variableName(block.Result.Variable) + ": " + g.tsType(block.Result.Type) + " = " + raw + ";")
 		} else if block.Result.Target != nil {
 			g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ";")
 		}
@@ -423,7 +423,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 		if block.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + tsBindingName(block.Result.Variable.Name) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
+		g.line(keyword + " " + g.variableName(block.Result.Variable) + ": " + g.tsType(block.Result.Type) + " = " + raw + ".value;")
 	} else if block.Result.Target != nil {
 		g.line(g.assignmentTarget(block.Result.Target) + " = " + raw + ".value;")
 	}
@@ -543,7 +543,7 @@ func (g *generator) ormAssignIterationResult(value string, iteration *ir.Iterate
 		if iteration.Result.Variable.Mutable {
 			keyword = "let"
 		}
-		g.line(keyword + " " + tsBindingName(iteration.Result.Variable.Name) + ": " + g.tsType(iteration.Result.Type) + " = " + value + ";")
+		g.line(keyword + " " + g.variableName(iteration.Result.Variable) + ": " + g.tsType(iteration.Result.Type) + " = " + value + ";")
 	case iteration.Result.Target != nil:
 		g.line(g.assignmentTarget(iteration.Result.Target) + " = " + value + ";")
 	}

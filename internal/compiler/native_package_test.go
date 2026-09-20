@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -514,7 +515,11 @@ func TestCompileTypeScriptCallsIndexedNativeFunction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`import { format } from "tiny-format";`, `const value: string = format("hello");`} {
+	binding := regexp.MustCompile(`const ([A-Za-z_$][A-Za-z0-9_$]*): string = format\("hello"\);`).FindStringSubmatch(string(artifact.Output))
+	if len(binding) != 2 {
+		t.Fatalf("missing typed native function result:\n%s", artifact.Output)
+	}
+	for _, expected := range []string{`import { format } from "tiny-format";`, `console.log(` + binding[1] + `);`} {
 		if !strings.Contains(string(artifact.Output), expected) {
 			t.Fatalf("generated native function call is missing %q:\n%s", expected, artifact.Output)
 		}
@@ -552,7 +557,12 @@ puts(other.run())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{`new Client()`, `client.run()`, `Client.create()`, `other.run()`} {
+	created := regexp.MustCompile(`const ([A-Za-z_$][A-Za-z0-9_$]*): Client = new Client\(\);`).FindStringSubmatch(string(artifact.Output))
+	factory := regexp.MustCompile(`const ([A-Za-z_$][A-Za-z0-9_$]*): Client = Client.create\(\);`).FindStringSubmatch(string(artifact.Output))
+	if len(created) != 2 || len(factory) != 2 || created[1] == factory[1] {
+		t.Fatalf("missing distinct constructor and factory results:\n%s", artifact.Output)
+	}
+	for _, expected := range []string{created[1] + `.run()`, factory[1] + `.run()`} {
 		if !strings.Contains(string(artifact.Output), expected) {
 			t.Fatalf("generated native class access is missing %q:\n%s", expected, artifact.Output)
 		}
@@ -592,12 +602,15 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	binding := regexp.MustCompile(`const ([A-Za-z_$][A-Za-z0-9_$]*): AnyRouter = useRouter\(\);`).FindStringSubmatch(string(artifact.Output))
+	if len(binding) != 2 {
+		t.Fatalf("missing typed interface result:\n%s", artifact.Output)
+	}
 	for _, expected := range []string{
 		`import { useRouter } from "router-library";`,
 		`import type { AnyRouter } from "router-library";`,
-		`const router: AnyRouter = useRouter();`,
-		`console.log(String(router.ready));`,
-		`router.navigate("/todos/42");`,
+		`console.log(String(` + binding[1] + `.ready));`,
+		binding[1] + `.navigate("/todos/42");`,
 	} {
 		if !strings.Contains(string(artifact.Output), expected) {
 			t.Fatalf("generated native interface access is missing %q:\n%s", expected, artifact.Output)

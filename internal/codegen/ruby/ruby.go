@@ -9,6 +9,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
@@ -324,13 +325,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.method(n, nil)
 	case *ir.Variable:
-		name := n.Name
-		if n.Constant && n.Owner == "" && g.projectNames != nil {
-			if target := g.projectNames.constants[g.modulePath][n.Name]; target != "" {
-				name = target
-			}
-		}
-		g.line(name+" = "+g.expr(n.Value), n.TrailingComment)
+		g.line(g.variableName(n)+" = "+g.expr(n.Value), n.TrailingComment)
 	case *ir.Temporary:
 		g.line(n.Name+" = nil", n.TrailingComment)
 	case *ir.Assignment:
@@ -795,6 +790,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.statements(n.Body)
 		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
 	case *ir.Identifier:
+		if n.Lexical && n.Declaration.Kind == identity.Value {
+			return "$" + naming.GlobalBindingIdentifier(n.Declaration.Key())
+		}
 		if !n.Lexical && g.projectNames != nil {
 			module, name := g.modulePath, n.Name
 			if n.Reference != nil && n.Reference.ExportKind == "value" && n.Reference.Intrinsic == "" {

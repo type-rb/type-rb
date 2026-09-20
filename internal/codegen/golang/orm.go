@@ -897,7 +897,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		resultType := g.goType(iteration.Result.Type)
 		switch {
 		case iteration.Result.Variable != nil:
-			resultTarget = g.bindingIdentifier(iteration.Result.Variable.Name)
+			resultTarget = g.variableIdentifier(iteration.Result.Variable)
 			g.line(resultTarget + " := func() " + resultType + " {")
 		case iteration.Result.Target != nil:
 			resultTarget = g.assignmentTarget(iteration.Result.Target)
@@ -907,7 +907,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		}
 		g.indent++
 	} else if iteration.Result != nil && iteration.Result.Variable != nil {
-		resultTarget = g.bindingIdentifier(iteration.Result.Variable.Name)
+		resultTarget = g.variableIdentifier(iteration.Result.Variable)
 		g.line("var " + resultTarget + " " + g.goType(iteration.Result.Type))
 	} else if iteration.Result != nil && iteration.Result.Target != nil {
 		resultTarget = g.assignmentTarget(iteration.Result.Target)
@@ -1494,7 +1494,7 @@ func (g *generator) structuredBlock(block *ir.StructuredBlock) {
 	}
 	target := ""
 	if block.Result.Variable != nil {
-		target = g.bindingIdentifier(block.Result.Variable.Name)
+		target = g.variableIdentifier(block.Result.Variable)
 	} else if block.Result.Target != nil {
 		target = g.assignmentTarget(block.Result.Target)
 	}

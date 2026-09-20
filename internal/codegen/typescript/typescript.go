@@ -950,10 +950,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if g.functionDepth == 0 && n.Constant {
 			prefix = "export "
 		}
-		name := tsBindingName(n.Name)
-		if owned := g.moduleNames.constants[identity.Qualify(n.Owner, n.Name)]; n.Constant && owned != "" {
-			name = owned
-		}
+		name := g.variableName(n)
 		g.line(prefix + keyword + " " + name + ": " + variableType + " = " + g.expr(n.Value) + ";")
 		g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(typeIdentity)
 		if g.functionDepth > 0 && !n.Constant && namedUnusedBinding(n.Name) {
@@ -1819,6 +1816,9 @@ func (g *generator) awaitRecordConstruct(construction *ir.RecordConstruct, value
 func (g *generator) identifierName(identifier *ir.Identifier) string {
 	if identifier == nil {
 		return ""
+	}
+	if identifier.Lexical && identifier.Declaration.Kind == identity.Value {
+		return naming.GlobalBindingIdentifier(identifier.Declaration.Key())
 	}
 	if identifier.Lexical {
 		if name := g.lexicalNames[identifier.Name]; name != "" {

@@ -444,13 +444,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.topLevelMethod(n)
 	case *ir.Variable:
 		if g.functionDepth == 0 {
-			name := g.bindingIdentifier(n.Name)
-			if n.Generated {
-				name = n.Name
-			}
-			if n.Constant {
-				name = g.projectConstantName(g.modulePath, n.Owner, n.Name)
-			}
+			name := g.variableIdentifier(n)
 			value := g.exprExpected(n.Value, n.Type)
 			if g.cli != nil {
 				g.cliBoundary = true
@@ -458,10 +452,7 @@ func (g *generator) statement(statement ir.Statement) {
 			}
 			g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
 		} else {
-			name := g.bindingIdentifier(n.Name)
-			if n.Generated {
-				name = n.Name
-			}
+			name := g.variableIdentifier(n)
 			if n.Type.Kind == types.Union {
 				// The initializer's concrete Go type must not narrow checked storage.
 				g.line("var " + name + " " + g.goType(n.Type) + " = " + g.exprExpected(n.Value, n.Type))
@@ -1605,6 +1596,9 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Identifier:
 		if n.Generated {
 			return n.Name
+		}
+		if n.Lexical && n.Declaration.Kind == identity.Value {
+			return naming.GlobalBindingIdentifier(n.Declaration.Key())
 		}
 		if strings.HasPrefix(n.Name, "@") {
 			return "self." + goFieldName(n.Name)
