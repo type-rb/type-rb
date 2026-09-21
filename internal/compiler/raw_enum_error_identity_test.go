@@ -96,6 +96,9 @@ end
 			if got := strings.TrimSpace(runEffectProject(t, mode, artifacts, options.GoModule)); got != "missing\nready\ntrue\nfalse" {
 				t.Fatalf("got %q", got)
 			}
+			if mode == "typescript" {
+				checkTypeScriptArtifacts(t, artifacts, "raw_enum_standard_aliases")
+			}
 		})
 	}
 }

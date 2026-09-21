@@ -2350,7 +2350,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	valueType := g.rawEnumValueType(call)
 	errorType := g.tsType(call.ExprType().Args[1])
 	resultType := g.rawEnumResultType(call)
-	result := g.runtimeName("Result")
+	result := g.declarationName(stdlib.ResultType(types.Type{}, types.Type{}).Declaration)
 	owner := g.enumCallOwner(call)
 	parts := []string{"((value: " + g.tsType(call.RawType) + "): " + resultType + " => { switch (value) {"}
 	for _, item := range call.RawValues {
@@ -2421,7 +2421,7 @@ func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
 
 func (g *generator) rawEnumResultType(call *ir.EnumCall) string {
 	errorType := g.tsType(call.ExprType().Args[1])
-	result := g.runtimeName("Result") + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
+	result := g.declarationName(stdlib.ResultType(types.Type{}, types.Type{}).Declaration) + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
 	if call.ExprType().Nullable {
 		result += " | null"
 	}
