@@ -33,6 +33,38 @@ func TestLexUnicodeIdentifier(t *testing.T) {
 	}
 }
 
+func TestLexRejectsUnsupportedUnicodeAsOneCharacter(t *testing.T) {
+	for _, text := range []string{"😀", "١", "\u0301", "²", "Ⅳ", "\u200d", "\u0378"} {
+		t.Run(text, func(t *testing.T) {
+			prefix := "名前 := 1\n1"
+			tokens, diags := Lex([]byte(prefix + text + "\n次 := 2\n"))
+			if len(diags) != 1 || diags[0].Code != diagnostic.SyntaxError {
+				t.Fatalf("diagnostics=%#v", diags)
+			}
+			span := diags[0].Span
+			if span.Start.Offset != len(prefix) || span.End.Offset != len(prefix)+len(text) || span.Start.Line != 2 || span.Start.Column != 2 || span.End.Column != 3 {
+				t.Fatalf("character span=%#v", span)
+			}
+			found := false
+			for _, item := range tokens {
+				if item.Span == span {
+					found = item.Lexeme == text
+				}
+			}
+			if !found {
+				t.Fatalf("original Unicode character was not retained: %#v", tokens)
+			}
+		})
+	}
+}
+
+func TestLexKeepsUnicodeLiteralAndIdentifierBoundaries(t *testing.T) {
+	_, diags := Lex([]byte("値١ := \"😀 e\u0301 Ⅳ\" # \u0378\nputs(値١)\n"))
+	if len(diags) != 0 {
+		t.Fatalf("valid Unicode source: %#v", diags)
+	}
+}
+
 func TestLexRejectsInvalidUTF8AtTheFirstInvalidByte(t *testing.T) {
 	source := append([]byte("名前 := 1\nvalue := "), 0xff, 0xfe)
 	tokens, diagnostics := Lex(source)
