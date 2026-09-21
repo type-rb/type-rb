@@ -15,13 +15,14 @@ import (
 )
 
 type Parser struct {
-	source         []byte
-	tokens         []token.Token
-	pos            int
-	statementDepth int
-	diags          []diagnostic.Diagnostic
-	nativeIslands  []ast.NativeIsland
-	symbolNames    map[int]bool
+	source              []byte
+	tokens              []token.Token
+	pos                 int
+	statementDepth      int
+	diags               []diagnostic.Diagnostic
+	nativeIslands       []ast.NativeIsland
+	symbolNames         map[int]bool
+	functionExpressions map[int]parsedFunctionExpression
 }
 
 func Parse(source []byte) (*ast.Program, []diagnostic.Diagnostic) {
@@ -229,46 +230,18 @@ func (p *Parser) tryCatchBlockStatement(line []token.Token, next int, base ast.B
 
 func (p *Parser) tryLambdaExpressionStatement(line []token.Token, next int, base ast.Base) ast.Statement {
 	fnAt := topLevelIndex(line, "fn")
-	if fnAt < 0 || fnAt+1 >= len(line) || line[fnAt+1].Lexeme != "(" {
+	if !startsFunctionExpression(line, fnAt) {
 		return nil
 	}
-	close := matchingIndex(line, fnAt+1, "(", ")")
-	if close < 0 {
-		p.errorAt(spanOf(line[fnAt:]), "unterminated fn parameters; expected )")
-		p.pos = next
-		return &ast.ExpressionStatement{Base: base, Expression: &ast.LambdaExpression{Base: ast.Base{SourceSpan: spanOf(line[fnAt:])}}}
-	}
-	node := &ast.LambdaExpression{
-		Base:       ast.Base{SourceSpan: token.Span{Start: line[fnAt].Span.Start, End: line[close].Span.End}},
-		Parameters: p.parseParameters(line[fnAt+2 : close]),
-	}
-	tail := line[close+1:]
-	if len(tail) > 0 {
-		failsAt := topLevelIndex(tail, "fails")
-		returnTail := tail
-		if failsAt >= 0 {
-			p.migrationErrorAt(tail[failsAt].Span, failsRemovedMessage)
-			returnTail = tail[:failsAt]
-			if failsAt+1 < len(tail) {
-				node.Fails = p.parseTypeRef(tail[failsAt+1:])
-			}
-		}
-		if len(returnTail) > 0 {
-			if returnTail[0].Lexeme != ":" || len(returnTail) == 1 {
-				p.errorAt(spanOf(returnTail), "fn return type must be written as : Type")
-			} else {
-				node.ReturnType = p.parseReturnType(returnTail[1:])
-			}
-		}
-	}
-
-	p.pos = next
-	node.Body = p.parseStatements(map[string]bool{"end": true})
-	_, closeSpan := p.consumeTerminator("end")
-	node.SourceSpan.End = closeSpan.End
-	base.SourceSpan.End = closeSpan.End
-
+	node, after := p.functionExpressionAt(line[fnAt].Span.Start.Offset)
+	_, tailEnd, tailNext, _ := p.logicalLine(after)
 	wrapper := append([]token.Token(nil), line[:fnAt+1]...)
+	wrapper = append(wrapper, p.codeTokens(after, tailEnd)...)
+	p.pos = max(next, tailNext)
+	base.SourceSpan.End = node.SourceSpan.End
+	if tailEnd > after {
+		base.SourceSpan.End = p.tokens[tailEnd-1].Span.End
+	}
 	embedded := map[int]ast.Expression{line[fnAt].Span.Start.Offset: node}
 	if len(wrapper) > 0 && wrapper[0].Lexeme == "return" {
 		if value, valid := p.parseExpressionWithEmbedded(wrapper[1:], embedded); valid {
@@ -565,6 +538,13 @@ func (p *Parser) controlFlowExpressionTokens(line []token.Token, next int, base 
 	var symbols map[int]bool
 	for index := 0; index < len(line); index++ {
 		item := line[index]
+		if startsFunctionExpression(line, index) {
+			function, _ := p.functionExpressionAt(item.Span.Start.Offset)
+			for index+1 < len(line) && line[index+1].Span.Start.Offset < function.Span().End.Offset {
+				index++
+			}
+			continue
+		}
 		// A brace block owns its statements. Do not lift a nested condition
 		// out as the result expression of the enclosing call or iteration.
 		if item.Lexeme == "{" && index+1 < len(line) && line[index+1].Lexeme == "|" {

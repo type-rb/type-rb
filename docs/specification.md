@@ -134,6 +134,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   value. Every parameter has an explicit type. An absent return annotation
   means no return value; a non-Void function uses `: Type` and must return that
   type on every reachable path.
+- A function literal may appear directly in an expression, including a call
+  argument, collection element, or constructor field value. Its `end` closes
+  only the function body; following arguments and enclosing delimiters retain
+  their ordinary meaning.
 - Function types are written `(ParameterType, ...) -> ReturnType`. `Void` is
   permitted in a function type, for example `(String) -> Void`, but remains
   omitted from the corresponding `fn` declaration. Function types may be used
