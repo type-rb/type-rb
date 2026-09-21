@@ -1032,6 +1032,7 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 		case *ast.InterfaceStatement:
 			qualified := nestedAuthoredOwner(owner, node.Name)
 			c.registerAuthoredType(node, node.Name, qualified, identity.Interface)
+			c.authoredTypes[qualified] = node.Name
 			for _, method := range node.Methods {
 				dispatch := identity.Dispatch{Owner: c.authoredOwnerIdentities[qualified], Name: method.Name, Class: method.Class}
 				c.result.MethodDispatches[method] = dispatch
@@ -7067,6 +7068,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if n.Name == "new" && authoredOwnerAccess(n.Receiver, sc) && methodReceiverType.Declaration.Kind == identity.Interface {
+			c.error(n.Span(), fmt.Sprintf("cannot construct interface %s; construct a class that implements it", receiverType))
+			typ = invalidType()
+			break
+		}
 		if n.Name == "new" && authoredOwnerAccess(n.Receiver, sc) {
 			if construction, ok := c.aliasRecordConstruction(receiverType); ok {
 				typ = construction.ResolvedType
@@ -7896,7 +7902,7 @@ func declarationExportOwnsMembers(binding resolver.Binding) bool {
 		return false
 	}
 	switch binding.Export.Kind {
-	case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
+	case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport, resolver.InterfaceExport:
 		return true
 	case resolver.TypeAliasExport:
 		return binding.Export.AliasEnum
@@ -7920,7 +7926,7 @@ func (c *Checker) declarationOwnerExpression(expression ast.Expression, sc *scop
 			return declarationExportOwnsMembers(binding)
 		}
 		if declared, exists := c.declaredTypes[node.Name]; exists {
-			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype"
+			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype" || declared.kind == "interface"
 		}
 		return c.declarationTypeVisible(node.Name)
 	case *ast.MemberExpression:

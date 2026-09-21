@@ -618,7 +618,7 @@ func TestCompileTypeScriptUsesNativeInterfaceInstanceMembers(t *testing.T) {
 	}
 
 	_, err = CompileWithOptions("invalid.trb", []byte("import { AnyRouter } from router-library\nrouter := AnyRouter.new()\n"), Options{Mode: "typescript", NativePackages: catalog})
-	if err == nil || !strings.Contains(err.Error(), "type AnyRouter imported from router-library has no member new") {
+	if err == nil || !strings.Contains(err.Error(), "cannot construct interface AnyRouter") {
 		t.Fatalf("expected non-constructible interface diagnostic, got %v", err)
 	}
 

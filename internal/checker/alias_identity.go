@@ -33,7 +33,11 @@ func (c *Checker) aliasDefinition(typ types.Type) ([]string, types.Type, bool) {
 	}
 	if !typ.Declaration.Empty() {
 		if binding, ok := c.resolution.ImportedTypeIdentity(typ.Declaration); ok && binding.Export != nil && binding.Export.Kind == resolver.TypeAliasExport {
-			return binding.Export.TypeParameters, binding.Export.AliasTarget, true
+			parameters := map[string]bool{}
+			for _, parameter := range binding.Export.TypeParameters {
+				parameters[parameter] = true
+			}
+			return binding.Export.TypeParameters, c.canonicalContractType(binding.Export.AliasTarget, parameters, binding.Import), true
 		}
 		return nil, types.Type{}, false
 	}

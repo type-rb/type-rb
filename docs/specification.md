@@ -1565,6 +1565,9 @@ end
 
 ### 3.16 Class member model and deferred design
 
+- An interface describes an instance contract and cannot be constructed with
+  `.new`, including through a type alias, namespace, import, or type application.
+  Construct a class that explicitly implements the interface instead.
 - Instance fields and instance methods are accessed through an instance. A
   method declared with `def self.name()` is a class member and is accessed
   through the class. Using either member kind through the wrong receiver is a
