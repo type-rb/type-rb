@@ -1866,6 +1866,20 @@ func (g *generator) expr(expression ir.Expression) string {
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
+			if declaration := ir.ExpressionDeclaration(member.Receiver); declaration.Kind == identity.Class {
+				name := "New" + goIdentifier(declaration.Name, true)
+				if alias := g.declarationAlias(declaration); alias != "" {
+					name = alias + "." + name
+				}
+				if application, generic := member.Receiver.(*ir.TypeApply); generic {
+					arguments := make([]string, len(application.Arguments))
+					for index, argument := range application.Arguments {
+						arguments[index] = g.goType(argument)
+					}
+					name += "[" + strings.Join(arguments, ", ") + "]"
+				}
+				return name + "(" + args + ")"
+			}
 			if application, generic := member.Receiver.(*ir.TypeApply); generic && application.Kind == "class" {
 				identifier, named := application.Receiver.(*ir.Identifier)
 				if named {

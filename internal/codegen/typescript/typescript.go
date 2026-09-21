@@ -1119,6 +1119,10 @@ func (g *generator) registerNestedTypeMappings(imported *ir.Import) {
 		}
 		g.typeMappings[canonical] = mapped
 		g.typeMappings[local] = mapped
+		kind := identity.Kind(imported.SymbolKinds[canonical])
+		if kind.IsType() {
+			g.declarationNames[identity.Declaration{Module: imported.Path, Name: canonical, Kind: kind}] = mapped
+		}
 	}
 }
 
@@ -2346,7 +2350,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	valueType := g.rawEnumValueType(call)
 	errorType := g.tsType(call.ExprType().Args[1])
 	resultType := g.rawEnumResultType(call)
-	result := g.runtimeName("Result")
+	result := g.declarationName(stdlib.ResultType(types.Type{}, types.Type{}).Declaration)
 	owner := g.enumCallOwner(call)
 	parts := []string{"((value: " + g.tsType(call.RawType) + "): " + resultType + " => { switch (value) {"}
 	for _, item := range call.RawValues {
@@ -2417,7 +2421,7 @@ func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
 
 func (g *generator) rawEnumResultType(call *ir.EnumCall) string {
 	errorType := g.tsType(call.ExprType().Args[1])
-	result := g.runtimeName("Result") + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
+	result := g.declarationName(stdlib.ResultType(types.Type{}, types.Type{}).Declaration) + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
 	if call.ExprType().Nullable {
 		result += " | null"
 	}
@@ -3252,6 +3256,14 @@ func (g *generator) qualifiedNamedType(name string, arguments []types.Type, null
 func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescriptRecordConstructionTarget, bool) {
 	switch node := expression.(type) {
 	case *ir.Identifier:
+		if node.Declaration.Kind == identity.Record {
+			if name := g.declarationNames[node.Declaration]; name != "" {
+				return recordTargetName(name), true
+			}
+			if name := g.localDeclarationName(node.Declaration); name != "" {
+				return recordTargetName(name), true
+			}
+		}
 		return g.namedRecordTarget(node.Name), true
 	case *ir.Member:
 		if !node.Namespace {
@@ -3262,7 +3274,7 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 			declaration = node.Reference.Declaration
 		}
 		if declaration.Kind.IsType() && declaration.Name != "" {
-			return g.namedRecordTarget(declaration.Name), true
+			return recordTargetName(g.declarationName(declaration)), true
 		}
 		return typescriptRecordConstructionTarget{
 			typeName:   g.expr(node),
@@ -3282,7 +3294,10 @@ func (g *generator) typescriptRecordTarget(expression ir.Expression) (typescript
 
 // Constructor helpers share the record's resolved local or imported name.
 func (g *generator) namedRecordTarget(name string) typescriptRecordConstructionTarget {
-	mapped := g.runtimeName(name)
+	return recordTargetName(g.runtimeName(name))
+}
+
+func recordTargetName(mapped string) typescriptRecordConstructionTarget {
 	helper := tsRecordConstructorName(mapped)
 	if separator := strings.LastIndex(mapped, "."); separator >= 0 {
 		helper = mapped[:separator+1] + tsRecordConstructorName(mapped[separator+1:])

@@ -24,9 +24,10 @@ func (g *generator) variableName(variable *ir.Variable) string {
 // Ruby output shares root method and constant namespaces. Preserve TypeRB
 // declaration identity when independently declared names collide there.
 type rubyProjectNames struct {
-	functions map[string]map[string]string
-	constants map[string]map[string]string
-	records   map[string]string
+	functions  map[string]map[string]string
+	constants  map[string]map[string]string
+	records    map[string]string
+	namespaces map[string]map[string]string
 }
 
 type rubyFunctionDeclaration struct {
@@ -36,7 +37,7 @@ type rubyFunctionDeclaration struct {
 }
 
 func analyzeRubyProjectNames(programs []*ir.Program) *rubyProjectNames {
-	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs), records: analyzeRubyRecordNames(programs)}
+	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs), records: analyzeRubyRecordNames(programs), namespaces: analyzeRubyNamespaceNames(programs)}
 	occupied := map[string]bool{}
 	reserved := map[string]bool{}
 	functions := map[string][]rubyFunctionDeclaration{}
@@ -217,10 +218,17 @@ func analyzeRubyRecordNames(programs []*ir.Program) map[string]string {
 	return result
 }
 
-func (g *generator) recordName(name string, declaration identity.Declaration) string {
+func (g *generator) declarationName(name string, declaration identity.Declaration) string {
 	if g.projectNames != nil {
 		if target := g.projectNames.records[declaration.Key()]; target != "" {
 			return target
+		}
+		root, member, nested := strings.Cut(declaration.Name, "::")
+		if target := g.projectNames.namespaces[declaration.Module][root]; target != "" {
+			if nested {
+				target += "::" + member
+			}
+			return "::" + target
 		}
 	}
 	return name

@@ -2048,7 +2048,7 @@ func bindingFor(imported *Import, name string) (Binding, bool) {
 
 func CollectExports(statements []ast.Statement) map[string]Export {
 	result := map[string]Export{}
-	for _, statement := range statements {
+	for _, statement := range mergeExportModules(statements) {
 		switch node := statement.(type) {
 		case *ast.ClassStatement:
 			if public(node.Name) {

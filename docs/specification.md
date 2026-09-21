@@ -228,6 +228,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   declaration. Their identity includes the enclosing namespace and source module;
   nested or reopened namespaces and method-local shadowing preserve that identity.
   Calls also invalidate narrowing for visible mutable namespace bindings.
+- Reopening a module in the same source file extends its existing namespace,
+  including the members and nested types visible to importers. Initializers
+  still execute in source order. Same-named modules in different source files
+  have distinct declarations and runtime storage in every output mode.
 - A reference checked as a named function retains that declaration when a later
   binding uses the same spelling. This includes earlier function bodies,
   default arguments and closures, as well as retained REPL submissions and

@@ -243,7 +243,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Record:
-		name := g.recordName(n.Name, n.Declaration)
+		name := g.declarationName(n.Name, n.Declaration)
 		fields := []*ir.RecordField{}
 		for _, member := range n.Body {
 			if field, ok := member.(*ir.RecordField); ok {
@@ -303,7 +303,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Newtype:
 		g.newtypeMethods(n)
 	case *ir.Module:
-		g.line("module "+n.Name, n.TrailingComment)
+		g.line("module "+g.declarationName(n.Name, n.Declaration), n.TrailingComment)
 		g.indent++
 		g.statements(n.Body)
 		g.indent--
@@ -824,7 +824,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if !n.Lexical && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.ExportKind == "function" {
 			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 		}
-		return g.recordName(g.rubyClassName(n.Name, n.Reference), n.Declaration)
+		return g.declarationName(g.rubyClassName(n.Name, n.Reference), n.Declaration)
 	case *ir.Literal:
 		if n.Kind == "string" && strings.HasPrefix(n.Raw, `"`) {
 			text, _ := strconv.Unquote(n.Raw)
@@ -1037,6 +1037,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			} else if n.Owner != "" {
 				owner = n.Owner
 			}
+			owner = g.declarationName(owner, n.OwnerIdentity)
 			branches := make([]string, 0, len(n.RawValues))
 			for _, item := range n.RawValues {
 				branches = append(branches, "when "+quoteRawValue(item.Raw)+" then Result::Ok.new("+owner+"::"+item.Member+")")
@@ -1064,6 +1065,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Reference == nil && n.Owner != "" {
 			owner = n.Owner
 		}
+		owner = g.declarationName(owner, n.Declaration)
 		return owner + "::" + n.Member + ".new(" + strings.Join(parts, ", ") + ")"
 	case *ir.TypeApply:
 		return g.expr(n.Receiver)
@@ -1289,7 +1291,7 @@ func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
 		return rubyTimeRuntimeClass(name)
 	}
 	if reference != nil {
-		return g.recordName(name, reference.Declaration)
+		return g.declarationName(name, reference.Declaration)
 	}
 	return name
 }

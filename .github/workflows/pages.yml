@@ -69,6 +69,11 @@ jobs:
         if: steps.test-scope.outputs.full-tests == 'true'
         run: npm install --global typescript@7.0.2
 
+      - uses: oven-sh/setup-bun@v2
+        if: steps.test-scope.outputs.full-tests == 'true'
+        with:
+          bun-version: 1.4.2
+
       - name: Verify compiler and tour
         if: steps.test-scope.outputs.full-tests == 'true'
         run: go test ./...
