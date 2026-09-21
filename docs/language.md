@@ -551,6 +551,12 @@ Instance fields are declared at class scope. Names beginning with `_` and
 `@_` are private. `readonly` fields can be assigned during initialization but
 not externally. Class methods use `def self.name()`.
 
+Every completing constructor path must initialize all fields, including paths
+that return early. Reads and compound assignments require an initialized field.
+Initialize the complete receiver before passing or capturing `self`, or calling
+its instance methods. Branches are checked separately, and assignments made only
+inside a possibly empty loop do not establish initialization after that loop.
+
 Classes support inheritance, generic interfaces, modules, class constants, and
 checked instance/class member access. Superclass construction, override rules,
 generic interface methods, and a final field/method collision rule remain alpha
