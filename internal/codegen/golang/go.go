@@ -2128,7 +2128,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 		enumType.Name = owner
 	}
 	valueType := g.goType(enumType)
-	errorType := g.goType(types.FromName("EnumValueError"))
+	errorType := g.goType(call.ExprType().Args[1])
 	resultType := g.goType(call.ExprType())
 	prefix := ""
 	if alias := g.referenceAlias(call.Reference); alias != "" {
@@ -3366,6 +3366,14 @@ func (g *generator) goType(t types.Type) string {
 		} else if t.Name == "HTTPHandler" {
 			g.requireImport("net/http", "http")
 			result = "http.Handler"
+		} else if t.Declaration.Kind.IsType() && t.Declaration.Module != "" {
+			result = goIdentifier(t.Declaration.Name, true)
+			if alias := g.declarationAlias(t.Declaration); alias != "" {
+				result = alias + "." + result
+			}
+			if t.Declaration.Kind == identity.Class {
+				result = "*" + result
+			}
 		} else if alias := g.typeAliases[t.Name]; alias != "" {
 			name := t.Name
 			if canonical := g.typeNames[name]; canonical != "" {
@@ -3373,14 +3381,6 @@ func (g *generator) goType(t types.Type) string {
 			}
 			result = alias + "." + goIdentifier(name, true)
 			if g.typeKinds[t.Name] == "class" {
-				result = "*" + result
-			}
-		} else if t.Declaration.Kind.IsType() && t.Declaration.Module != "" {
-			result = goIdentifier(t.Declaration.Name, true)
-			if alias := g.declarationAlias(t.Declaration); alias != "" {
-				result = alias + "." + result
-			}
-			if t.Declaration.Kind == identity.Class {
 				result = "*" + result
 			}
 		} else {

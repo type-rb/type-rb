@@ -2147,7 +2147,7 @@ func CollectExports(statements []ast.Statement) map[string]Export {
 				if raw {
 					exported.EnumRawType = enumRawType(node)
 					exported.Members["raw_value"] = Member{Name: "raw_value", Kind: FunctionExport, Type: exported.EnumRawType, EnumOwner: node.Name, Generated: "raw_value"}
-					exported.Members["from_raw"] = Member{Name: "from_raw", Kind: FunctionExport, Type: types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{typ, types.FromName("EnumValueError")}}, Parameters: callsignature.FromPositionalTypes([]types.Type{exported.EnumRawType}, 1), Class: true, EnumOwner: node.Name, Generated: "from_raw"}
+					exported.Members["from_raw"] = Member{Name: "from_raw", Kind: FunctionExport, Type: stdlib.ResultType(typ, stdlib.EnumValueErrorType()), Parameters: callsignature.FromPositionalTypes([]types.Type{exported.EnumRawType}, 1), Class: true, EnumOwner: node.Name, Generated: "from_raw"}
 				}
 				result[node.Name] = exported
 			}
