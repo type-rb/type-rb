@@ -67,3 +67,26 @@ factory: Factory<Integer> := Holder<Integer>.new()
 `+tc.source+"\nend\n", "", tc.diagnostic)
 	}
 }
+
+func TestImportedCallableFieldsKeepFunctionInvocation(t *testing.T) {
+	runPortableExecutionFiles(t, map[string]string{
+		"library/callback.trb": `record Callback
+apply: (Integer) -> String
+end
+class Stored
+@run: () -> Integer
+def initialize()
+@run = fn(): Integer; return 7; end
+end
+end
+`,
+		"main.trb": `import { Callback, Stored } from library/callback
+def main()
+render := fn(value: Integer): String; return value.to_s(); end
+callback := Callback.new(apply: render)
+puts(callback.apply(3))
+puts(Stored.new().run())
+end
+`,
+	}, "3\n7\n", "")
+}
