@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
+	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/types"
 )
@@ -79,7 +80,9 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return g.filesystemResultName() + ".Err<" + successType + ", " + errorType + ">(" + value + ")"
 	}
 	numberParseError := func(kind, input, message string) string {
-		value := "({ kind: " + g.runtimeName("NumberParseErrorKind") + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("NumberParseError") + ")"
+		_, _, errorType := filesystemResultType()
+		kindName := g.tsType(types.Type{Kind: types.Named, Name: "NumberParseErrorKind", Declaration: identity.Declaration{Module: "trb/std/errors/index", Name: "NumberParseErrorKind", Kind: identity.Enum}})
+		value := "({ kind: " + kindName + "." + kind + ", input: " + input + ", message: " + strconv.Quote(message) + " } satisfies " + errorType + ")"
 		return resultError(value)
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
@@ -95,15 +98,18 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return resultError(value)
 	}
 	indexLookupError := func(index, size, message string) string {
-		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("IndexLookupError") + ")"
+		_, _, errorType := filesystemResultType()
+		value := "({ index: " + index + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + errorType + ")"
 		return resultError(value)
 	}
 	sliceRangeError := func(start, end, exclusive, size, message string) string {
-		value := "({ start: " + start + ", finish: " + end + ", exclusive: " + exclusive + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("SliceRangeError") + ")"
+		_, _, errorType := filesystemResultType()
+		value := "({ start: " + start + ", finish: " + end + ", exclusive: " + exclusive + ", size: " + size + ", message: " + strconv.Quote(message) + " } satisfies " + errorType + ")"
 		return resultError(value)
 	}
 	keyLookupError := func(key, message string) string {
-		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies " + g.runtimeName("KeyLookupError") + ")"
+		_, _, errorType := filesystemResultType()
+		value := "({ key: " + key + ", message: " + strconv.Quote(message) + " } satisfies " + errorType + ")"
 		return resultError(value)
 	}
 	filesystemMessage := `const message = error instanceof Error ? error.message : String(error); `
