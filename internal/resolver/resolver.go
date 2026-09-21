@@ -1051,25 +1051,35 @@ func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding,
 			}
 		}
 	}
-	// Inferred aliases can belong to a native package contract without being
+	// Inferred types can belong to a native package contract without being
 	// selected by name. Match the exact import, never another alias's spelling.
-	if declaration.Kind == identity.TypeAlias {
+	if declaration.Kind == identity.TypeAlias || declaration.Kind == identity.Interface {
 		for _, imported := range r.Imports {
 			if imported == nil || imported.RuntimePath() != declaration.Module {
 				continue
 			}
-			if exported, ok := exportNamed(imported.Exports, declaration.Name); ok && exported.Kind == TypeAliasExport {
+			if exported, ok := exportNamed(imported.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
 				return Binding{Import: imported, Name: exported.Name, Export: &exported}, true
 			}
 		}
 	}
 	// A returned alias or nominal value may come through a third module. Its exact
 	// identity permits contract lookup, but never adds a source-visible name.
-	if (declaration.Kind == identity.Newtype || declaration.Kind == identity.TypeAlias) && r.Catalog != nil {
-		if module := r.Catalog.Modules[declaration.Module]; module != nil {
-			if exported, ok := exportNamed(module.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
-				return catalogTypeBinding(module, exported), true
-			}
+	if declaration.Kind == identity.Newtype || declaration.Kind == identity.TypeAlias || declaration.Kind == identity.Interface {
+		return r.ContractTypeIdentity(declaration)
+	}
+	return Binding{}, false
+}
+
+// ContractTypeIdentity follows an already checked nominal contract without
+// exposing a new source binding or selecting a callable member implementation.
+func (r Result) ContractTypeIdentity(declaration identity.Declaration) (Binding, bool) {
+	if !declaration.Kind.IsType() || r.Catalog == nil {
+		return Binding{}, false
+	}
+	if module := r.Catalog.Modules[declaration.Module]; module != nil {
+		if exported, ok := exportNamed(module.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
+			return catalogTypeBinding(module, exported), true
 		}
 	}
 	return Binding{}, false

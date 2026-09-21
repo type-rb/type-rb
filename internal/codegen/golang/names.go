@@ -29,8 +29,9 @@ func (g *generator) variableIdentifier(variable *ir.Variable) string {
 // namespace and normalizes snake_case identifiers. Only colliding values
 // receive a compiler-owned fallback, keeping ordinary generated names stable.
 type goProjectNames struct {
-	functions map[string]map[string]string
-	constants map[string]map[string]string
+	interfaces map[identity.Declaration]string
+	functions  map[string]map[string]string
+	constants  map[string]map[string]string
 }
 
 type goFunctionDeclaration struct {
@@ -41,7 +42,7 @@ type goFunctionDeclaration struct {
 }
 
 func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
-	result := &goProjectNames{functions: map[string]map[string]string{}, constants: map[string]map[string]string{}}
+	result := &goProjectNames{interfaces: analyzeGoInterfaceNames(programs), functions: map[string]map[string]string{}, constants: map[string]map[string]string{}}
 	occupied := map[string]map[string]bool{}
 	functions := map[string]map[string][]goFunctionDeclaration{}
 
@@ -56,6 +57,9 @@ func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
 		collectGoProjectDeclarations(program.ModulePath, program.Statements, occupied[group], functions[group])
 	}
 
+	for declaration, name := range result.interfaces {
+		occupied[goPackageGroup(declaration.Module)][name] = true
+	}
 	groups := make([]string, 0, len(functions))
 	for group := range functions {
 		groups = append(groups, group)

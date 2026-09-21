@@ -1585,6 +1585,9 @@ end
   names that interface with `implements`, or inherits that declaration from a
   superclass. Matching members alone do not create structural conformance.
   The rule applies to parameters, returns, bindings, and imported classes.
+- An interface's identity includes its declaring source module and namespace.
+  Import aliases preserve that identity. A same-named class or another
+  interface cannot supply conformance or extra members through its spelling.
 - Interfaces may declare invariant type parameters, such as
   `interface Repository<T>`. Classes implement a concrete application such as
   `class MemoryRepository implements Repository<User>`, and every interface

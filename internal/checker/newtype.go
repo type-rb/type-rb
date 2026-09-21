@@ -297,7 +297,7 @@ func (c *Checker) localNewtypeMember(typ types.Type, name string, class bool) (c
 	if local == nil || !typ.Declaration.Empty() && typ.Declaration != c.result.Declarations[local.statement] {
 		return classMember{}, false
 	}
-	return c.localMember(typ.Name, name, class, map[string]bool{})
+	return c.localMember(typ, name, class, map[string]bool{})
 }
 
 func (c *Checker) checkNewtypeMethodCall(call *ast.CallExpression, typ types.Type, name string, class bool, arguments []types.Type) types.Type {

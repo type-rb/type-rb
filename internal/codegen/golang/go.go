@@ -432,7 +432,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.moduleName = previousModule
 		g.moduleMethods = previousModuleMethods
 	case *ir.Interface:
-		g.line("type " + goDeclaredTypeName(n.Declaration.Name, n.Name) + goTypeParameterDeclarations(n.TypeParameters) + " interface {")
+		g.line("type " + g.namedDeclaration(n.Declaration, n.Name) + goTypeParameterDeclarations(n.TypeParameters) + " interface {")
 		g.indent++
 		for _, method := range n.Methods {
 			g.line(goMethodName(method.Name) + "(" + g.methodParameters(method) + ")" + g.goReturn(method.ReturnType))
@@ -3345,12 +3345,12 @@ func (g *generator) goType(t types.Type) string {
 			g.requireImport("os", "")
 			result = "*os.Root"
 		} else if t.Declaration.Kind.IsType() && t.Declaration.Module == g.modulePath && t.Declaration.Name != "" {
-			result = goIdentifier(t.Declaration.Name, true)
+			result = g.namedDeclaration(t.Declaration, t.Name)
 			if t.Declaration.Kind == identity.Class {
 				result = "*" + result
 			}
 		} else if t.Declaration.Kind == identity.Newtype && t.Declaration.Module != "" {
-			result = goIdentifier(t.Declaration.Name, true)
+			result = g.namedDeclaration(t.Declaration, t.Name)
 			if alias := g.declarationAlias(t.Declaration); alias != "" {
 				result = alias + "." + result
 			}
@@ -3399,7 +3399,7 @@ func (g *generator) goType(t types.Type) string {
 			g.requireImport("net/http", "http")
 			result = "http.Handler"
 		} else if t.Declaration.Kind.IsType() && t.Declaration.Module != "" {
-			result = goIdentifier(t.Declaration.Name, true)
+			result = g.namedDeclaration(t.Declaration, t.Name)
 			if alias := g.declarationAlias(t.Declaration); alias != "" {
 				result = alias + "." + result
 			}
@@ -3422,7 +3422,7 @@ func (g *generator) goType(t types.Type) string {
 			} else if canonical := g.typeNames[name]; canonical != "" {
 				name = canonical
 			}
-			result = goIdentifier(name, true)
+			result = g.namedDeclaration(t.Declaration, name)
 			if g.classes[t.Name] {
 				result = "*" + result
 			}
