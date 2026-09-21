@@ -7222,9 +7222,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if member.method != nil {
 				if c.interfaces[receiverType.Name] == nil {
 					c.authoredMemberMethods[n] = member.method
-					if dispatch := c.result.MethodDispatches[member.method]; !dispatch.Empty() {
-						c.result.ExpressionDispatches[n] = dispatch
-					}
+				}
+				if dispatch := c.result.MethodDispatches[member.method]; !dispatch.Empty() {
+					c.result.ExpressionDispatches[n] = dispatch
 				}
 			}
 			c.result.ClassFieldAccesses[n] = member.field != nil
@@ -7460,7 +7460,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		// is produced by that call; it is not the declaration's call signature.
 		binding := c.result.References[n.Callee]
 		directDeclaration := binding.Library != nil || binding.Export != nil && binding.Export.Kind == resolver.FunctionExport ||
-			binding.Member != nil && binding.Member.Kind == resolver.FunctionExport
+			binding.Member != nil && binding.Member.Kind == resolver.FunctionExport || c.result.ExpressionDispatches[n.Callee].Owner.Kind == identity.Interface
 		if member, ok := n.Callee.(*ast.MemberExpression); ok && c.authoredMemberMethods[member] != nil {
 			directDeclaration = true
 		}

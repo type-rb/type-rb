@@ -1006,20 +1006,9 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 		}
 		callee := g.expr(n.Callee)
-		// A generic declaration carries its return type, which may be callable.
-		// Apply its own arguments before invoking any returned function value.
-		application, applied := n.Callee.(*ir.TypeApply)
-		directGeneric := applied && (application.Kind == "function" || application.Kind == "method")
-		// A class method likewise carries its result type, not the
-		// type of a stored callable. Do not invoke a returned closure here.
-		directMethod := false
-		switch callee := n.Callee.(type) {
-		case *ir.Member:
-			directMethod = !callee.ClassField && callee.Dispatch.Owner.Kind == identity.Class
-		case *ir.Identifier:
-			directMethod = !callee.Lexical && callee.Dispatch.Owner.Kind == identity.Class
-		}
-		if !directGeneric && !directMethod && n.Callee.ExprType().Kind == types.Function {
+		// Checking distinguishes a function value from a declaration that returns
+		// one; the declaration's result type cannot select its invocation form.
+		if n.Indirect {
 			if member, ok := receiverMember(n.Callee); ok && member.Safe {
 				return callee + "&.call(" + strings.Join(parts, ", ") + ")"
 			}
