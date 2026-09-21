@@ -93,7 +93,7 @@ func (g *generator) module(module *ir.Module) {
 		switch node := statement.(type) {
 		case *ir.Method:
 			if !strings.HasPrefix(node.Name, "_") {
-				properties = append(properties, tsMethodName(node.Name)+": "+g.moduleNames.methods[node])
+				properties = append(properties, tsCallableName(node.Name)+": "+g.moduleNames.methods[node])
 			}
 		case *ir.Variable:
 			// Reopened bodies still initialize in source order. A getter does

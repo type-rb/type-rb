@@ -893,7 +893,7 @@ func (g *generator) statement(statement ir.Statement) {
 			if g.suspension.Methods[method] {
 				returnType = "Promise<" + returnType + ">"
 			}
-			g.line(tsMethodName(method.Name) + "(" + g.methodParameters(method) + "): " + returnType + ";")
+			g.line(tsCallableName(method.Name) + "(" + g.methodParameters(method) + "): " + returnType + ";")
 			popMethodTypeParameters()
 		}
 		g.indent--
@@ -1567,15 +1567,15 @@ func (g *generator) method(method *ir.Method) {
 		g.line("constructor(" + g.methodParameters(method) + ") {")
 	} else {
 		prefix := ""
-		name := tsMethodName(method.Name)
+		name := tsCallableName(method.Name)
 		if method.Name == "component_did_mount" {
 			name = "componentDidMount"
 		}
-		if method.Class {
-			prefix = "static "
-		}
 		if strings.HasPrefix(method.Name, "_") {
-			prefix += "private "
+			prefix = "private "
+		}
+		if method.Class {
+			prefix += "static "
 		}
 		returnType := g.tsType(method.ReturnType)
 		if suspends {
@@ -1830,7 +1830,7 @@ func (g *generator) identifierName(identifier *ir.Identifier) string {
 		return tsBindingName(identifier.Name)
 	}
 	if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
-		return "this." + tsMethodName(identifier.Name)
+		return "this." + tsCallableName(identifier.Name)
 	}
 	if identifier.Owner != "" {
 		if owned := g.moduleNames.constants[identity.Qualify(identifier.Owner, identifier.Name)]; owned != "" {
@@ -2046,7 +2046,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			if declaration.LeafName() == n.Name {
 				return owner
 			}
-			return owner + "." + tsMethodName(n.Name)
+			return owner + "." + tsCallableName(n.Name)
 		}
 		if n.Reference != nil && n.Reference.PackageRoot {
 			alias := "__trb_" + pathpkg.Base(pathpkg.Dir(n.Reference.Package))
@@ -2063,7 +2063,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.ClassField {
 			return receiver + op + "__trb_" + n.Name
 		}
-		return receiver + op + tsMethodName(n.Name)
+		return receiver + op + tsCallableName(n.Name)
 	case *ir.RecordConstruct:
 		target, record := g.typescriptRecordTarget(n.Target)
 		if !record {
@@ -2129,7 +2129,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if identifier, ok := n.Callee.(*ir.Identifier); ok {
 			if !identifier.Lexical && g.inClass > 0 && g.methods[identifier.Name] != nil {
-				return g.awaitCall(n, "this."+tsMethodName(identifier.Name)+"("+args+")")
+				return g.awaitCall(n, "this."+tsCallableName(identifier.Name)+"("+args+")")
 			}
 			return g.awaitCall(n, g.identifierName(identifier)+"("+args+")")
 		}
@@ -2568,13 +2568,6 @@ func tsCallableName(name string) string {
 		return "$trb$" + kind + "$" + encoded
 	}
 	return name
-}
-
-func tsMethodName(name string) string {
-	if _, _, ok := naming.CallableSuffix(name); ok {
-		return tsCallableName(name)
-	}
-	return strings.TrimPrefix(name, "_")
 }
 
 func namedUnusedBinding(name string) bool {
@@ -3808,7 +3801,7 @@ func (g *generator) jsxComponentName(component ir.Expression, fallback string) s
 		if receiver == "" {
 			return fallback
 		}
-		return receiver + "." + tsMethodName(node.Name)
+		return receiver + "." + tsCallableName(node.Name)
 	default:
 		return fallback
 	}

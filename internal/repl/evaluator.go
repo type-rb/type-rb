@@ -957,6 +957,24 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 			}
 			return Value{Type: node.ExprType(), Data: &callable{Function: definition, Module: definition.Module}}, nil
 		}
+		if !node.Lexical && node.Dispatch.Owner.Kind == identity.Class {
+			owner := node.Dispatch.Owner
+			var receiver Value
+			if node.Dispatch.Class {
+				var ok bool
+				receiver, ok = e.symbol(owner.Module, owner.Name)
+				if !ok {
+					return Value{}, fmt.Errorf("class %s is not available in the REPL environment", owner.Name)
+				}
+			} else {
+				var err error
+				receiver, err = e.selfValue("self", sc)
+				if err != nil {
+					return Value{}, err
+				}
+			}
+			return e.callMember(receiver, node.Dispatch.Name, owner.Module)
+		}
 		if node.Owner != "" {
 			if value, ok := e.moduleValue[symbolKey(module, ownedName(node.Owner, node.Name))]; ok {
 				return collectionValueAtType(value, node.ExprType()), nil

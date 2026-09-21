@@ -1010,7 +1010,16 @@ func (g *generator) expr(expression ir.Expression) string {
 		// Apply its own arguments before invoking any returned function value.
 		application, applied := n.Callee.(*ir.TypeApply)
 		directGeneric := applied && (application.Kind == "function" || application.Kind == "method")
-		if !directGeneric && n.Callee.ExprType().Kind == types.Function {
+		// A class method likewise carries its result type, not the
+		// type of a stored callable. Do not invoke a returned closure here.
+		directMethod := false
+		switch callee := n.Callee.(type) {
+		case *ir.Member:
+			directMethod = !callee.ClassField && callee.Dispatch.Owner.Kind == identity.Class
+		case *ir.Identifier:
+			directMethod = !callee.Lexical && callee.Dispatch.Owner.Kind == identity.Class
+		}
+		if !directGeneric && !directMethod && n.Callee.ExprType().Kind == types.Function {
 			if member, ok := receiverMember(n.Callee); ok && member.Safe {
 				return callee + "&.call(" + strings.Join(parts, ", ") + ")"
 			}
