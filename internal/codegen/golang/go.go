@@ -3472,6 +3472,18 @@ func goMethodName(name string) string {
 }
 
 func goIdentifier(name string, exported bool) string {
+	// Unicode case mappings are not injective (for example Å and Å both
+	// lowercase to å). Preserve the complete spelling before normalization.
+	// Ordinary ASCII normalization cannot produce the doubled underscore.
+	for _, character := range name {
+		if character > unicode.MaxASCII {
+			prefix := "x__trb_unicode_"
+			if exported {
+				prefix = "X__trb_unicode_"
+			}
+			return prefix + hex.EncodeToString([]byte(name))
+		}
+	}
 	parts := strings.FieldsFunc(name, func(r rune) bool { return r == '_' || r == '-' || r == '/' || r == '.' || r == ':' })
 	if len(parts) == 0 {
 		return "value"
