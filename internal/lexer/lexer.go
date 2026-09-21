@@ -4,6 +4,7 @@ package lexer
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -89,6 +90,15 @@ func (l *Lexer) run() {
 			l.emit(token.Punct, string(b), start)
 		case isOperatorStart(b):
 			l.scanOperator(start)
+		case b >= utf8.RuneSelf:
+			r := l.peekRune()
+			l.advanceRune(r)
+			l.emit(token.Punct, string(r), start)
+			l.diags = append(l.diags, diagnostic.Diagnostic{
+				Severity: diagnostic.Error,
+				Message:  fmt.Sprintf("unsupported source character %q", r),
+				Span:     token.Span{Start: start, End: l.position()},
+			})
 		default:
 			l.advance()
 			// Ruby has deliberately broad punctuation (globals, regexps, ternary
