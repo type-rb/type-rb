@@ -226,6 +226,10 @@ func (p *exprParser) parsePrefix() ast.Expression {
 		return expression
 	}
 	switch tok.Lexeme {
+	case "fn":
+		if p.owner != nil && p.pos < len(p.tokens) && p.tokens[p.pos].Lexeme == "(" {
+			return p.parseFunctionValue(tok)
+		}
 	case "not":
 		p.reportAt(tok.Span, "unexpected token not")
 		return nil

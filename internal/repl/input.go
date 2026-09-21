@@ -31,6 +31,7 @@ func Complete(source string) bool {
 	delimiters := []string{}
 	transferConditions := make(map[int]bool)
 	blockBodies := make(map[int]bool)
+	interfaceBodies := make(map[int]bool)
 	lineStart := true
 	lineOpenedBlock := false
 	for index, item := range tokens {
@@ -67,9 +68,13 @@ func Complete(source string) bool {
 			switch item.Lexeme {
 			case "class", "record", "enum", "module", "interface", "def", "while":
 				blockDepths = append(blockDepths, len(delimiters))
+				if item.Lexeme == "interface" {
+					interfaceBodies[len(blockDepths)] = true
+				}
 				lineOpenedBlock = true
 			case "end":
 				if len(blockDepths) > 0 {
+					delete(interfaceBodies, len(blockDepths))
 					blockDepths = blockDepths[:len(blockDepths)-1]
 				}
 			}
@@ -78,7 +83,10 @@ func Complete(source string) bool {
 			blockDepths = append(blockDepths, len(delimiters))
 			lineOpenedBlock = true
 		}
-		if item.Kind == token.Identifier && (item.Lexeme == "fn" || item.Lexeme == "catch") && statementContext {
+		functionLiteral := item.Lexeme == "fn" && index+1 < len(tokens) && tokens[index+1].Lexeme == "(" &&
+			(index == 0 || tokens[index-1].Lexeme != "." && tokens[index-1].Lexeme != "&." && tokens[index-1].Lexeme != "::" && tokens[index-1].Lexeme != "def") &&
+			!(lineStart && interfaceBodies[len(blockDepths)])
+		if item.Kind == token.Identifier && (functionLiteral || item.Lexeme == "catch" && statementContext) {
 			blockDepths = append(blockDepths, len(delimiters))
 			lineOpenedBlock = true
 		}
