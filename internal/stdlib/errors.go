@@ -1,5 +1,16 @@
 package stdlib
 
+import (
+	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/types"
+)
+
+// EnumValueErrorType retains the generated conversion's standard declaration
+// independently of an authored declaration with the same visible name.
+func EnumValueErrorType() types.Type {
+	return declaredType(identity.Declaration{Module: errorsModulePath, Name: "EnumValueError", Kind: identity.Record})
+}
+
 func errorsSource() string {
 	return `import { Path, RelativePath } from trb/std/path
 

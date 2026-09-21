@@ -5750,7 +5750,7 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 				signature := methodSignature{returnType: info.raw.Type}
 				return classMember{typ: signature.returnType, sig: &signature}, true
 			case memberName == "from_raw" && class:
-				resultType := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName(className), types.FromName("EnumValueError")}}
+				resultType := stdlib.ResultType(types.FromName(className), stdlib.EnumValueErrorType())
 				signature := methodSignature{returnType: resultType, parameters: callsignature.FromPositionalTypes([]types.Type{info.raw.Type}, 1)}
 				return classMember{typ: resultType, sig: &signature}, true
 			}

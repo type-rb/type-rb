@@ -243,6 +243,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Record:
+		name := g.recordName(n.Name, n.Declaration)
 		fields := []*ir.RecordField{}
 		for _, member := range n.Body {
 			if field, ok := member.(*ir.RecordField); ok {
@@ -254,13 +255,13 @@ func (g *generator) statement(statement ir.Statement) {
 			names[index] = ":" + field.Name
 		}
 		if rubyRecordFieldsHaveDefaults(fields) {
-			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+") do", n.TrailingComment)
+			g.line(name+" = Data.define("+strings.Join(names, ", ")+") do", n.TrailingComment)
 			g.indent++
 			g.recordDefaultConstructor(n, fields)
 			g.indent--
 			g.line("end", "")
 		} else {
-			g.line(n.Name+" = Data.define("+strings.Join(names, ", ")+")", n.TrailingComment)
+			g.line(name+" = Data.define("+strings.Join(names, ", ")+")", n.TrailingComment)
 		}
 	case *ir.Enum:
 		if enumHasPayload(n) {
@@ -823,7 +824,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if !n.Lexical && n.Reference != nil && n.Reference.Intrinsic == "" && n.Reference.Package != "" && n.Reference.ExportKind == "function" {
 			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 		}
-		return g.rubyClassName(n.Name, n.Reference)
+		return g.recordName(g.rubyClassName(n.Name, n.Reference), n.Declaration)
 	case *ir.Literal:
 		if n.Kind == "string" && strings.HasPrefix(n.Raw, `"`) {
 			text, _ := strconv.Unquote(n.Raw)
@@ -914,6 +915,11 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Transform:
 		return g.transform(n)
 	case *ir.Member:
+		if n.Namespace && n.Reference != nil && g.projectNames != nil {
+			if target := g.projectNames.records[n.Reference.Declaration.Key()]; target != "" {
+				return target
+			}
+		}
 		if n.Reference != nil && n.Reference.PackageRoot {
 			return g.projectFunctionName(n.Reference.Package, n.Reference.Symbol)
 		}
@@ -1036,7 +1042,7 @@ func (g *generator) expr(expression ir.Expression) string {
 				branches = append(branches, "when "+quoteRawValue(item.Raw)+" then Result::Ok.new("+owner+"::"+item.Member+")")
 			}
 			message := strconv.Quote("unknown raw value for " + n.EnumName)
-			return "begin; value = " + parts[0] + "; case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(EnumValueError.new(value: value, message: " + message + ")); end; end"
+			return "->(value) { case value; " + strings.Join(branches, "; ") + "; else Result::Err.new(::EnumValueError.new(value: value, message: " + message + ")); end }.call(" + parts[0] + ")"
 		default:
 			if g.execution != nil && g.execution.EnumCalls[n] {
 				parts = append([]string{"__trb_scope"}, parts...)
@@ -1281,6 +1287,9 @@ func (g *generator) rubyClassName(name string, reference *ir.Reference) string {
 	}
 	if g.modulePath == "trb/std/time/index" || reference != nil && reference.Package == "trb/std/time/index" {
 		return rubyTimeRuntimeClass(name)
+	}
+	if reference != nil {
+		return g.recordName(name, reference.Declaration)
 	}
 	return name
 }

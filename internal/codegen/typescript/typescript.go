@@ -2344,7 +2344,7 @@ func (g *generator) promiseRejectionToResult(conversion *ir.Conversion) string {
 
 func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string {
 	valueType := g.rawEnumValueType(call)
-	errorType := g.tsType(types.FromName("EnumValueError"))
+	errorType := g.tsType(call.ExprType().Args[1])
 	resultType := g.rawEnumResultType(call)
 	result := g.runtimeName("Result")
 	owner := g.enumCallOwner(call)
@@ -2416,7 +2416,7 @@ func (g *generator) rawEnumValueType(call *ir.EnumCall) string {
 }
 
 func (g *generator) rawEnumResultType(call *ir.EnumCall) string {
-	errorType := g.tsType(types.FromName("EnumValueError"))
+	errorType := g.tsType(call.ExprType().Args[1])
 	result := g.runtimeName("Result") + "<" + g.rawEnumValueType(call) + ", " + errorType + ">"
 	if call.ExprType().Nullable {
 		result += " | null"

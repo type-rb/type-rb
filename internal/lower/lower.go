@@ -69,16 +69,35 @@ func (l *lowerer) requireGeneratedType(typ types.Type) {
 		if module == nil || modulePath == l.checked.Program.ModulePath || module.CompilerOwned || module.Official {
 			continue
 		}
-		exported, exists := module.Exports[typ.Name]
+		name := typ.Name
+		if !typ.Declaration.Empty() {
+			if typ.Declaration.Module != modulePath {
+				continue
+			}
+			name = typ.Declaration.Name
+		}
+		exported, exists := generatedTypeExport(module.Exports, name)
 		if !exists || !contractTypeExport(exported.Kind) {
 			continue
 		}
 		if l.generatedTypes[modulePath] == nil {
 			l.generatedTypes[modulePath] = map[string]resolver.Export{}
 		}
-		l.generatedTypes[modulePath][typ.Name] = exported
+		l.generatedTypes[modulePath][name] = exported
 		return
 	}
+}
+
+func generatedTypeExport(exports map[string]resolver.Export, name string) (resolver.Export, bool) {
+	for _, exported := range exports {
+		if exported.Name == name {
+			return exported, true
+		}
+		if nested, ok := generatedTypeExport(exported.Nested, name); ok {
+			return nested, true
+		}
+	}
+	return resolver.Export{}, false
 }
 
 // generatedTypeImports merges compiler-introduced project type dependencies

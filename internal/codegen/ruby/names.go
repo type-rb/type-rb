@@ -2,6 +2,7 @@ package ruby
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/codegen/naming"
 	"github.com/type-rb/type-rb/internal/identity"
@@ -20,12 +21,12 @@ func (g *generator) variableName(variable *ir.Variable) string {
 	return variable.Name
 }
 
-// rubyProjectNames resolves top-level functions that share Ruby's Object
-// method namespace. TypeRB modules have separate function namespaces, so only
-// declarations that collide after lowering receive compiler-owned names.
+// Ruby output shares root method and constant namespaces. Preserve TypeRB
+// declaration identity when independently declared names collide there.
 type rubyProjectNames struct {
 	functions map[string]map[string]string
 	constants map[string]map[string]string
+	records   map[string]string
 }
 
 type rubyFunctionDeclaration struct {
@@ -35,7 +36,7 @@ type rubyFunctionDeclaration struct {
 }
 
 func analyzeRubyProjectNames(programs []*ir.Program) *rubyProjectNames {
-	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs)}
+	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs), records: analyzeRubyRecordNames(programs)}
 	occupied := map[string]bool{}
 	reserved := map[string]bool{}
 	functions := map[string][]rubyFunctionDeclaration{}
@@ -162,4 +163,65 @@ func analyzeRubyConstantNames(programs []*ir.Program) map[string]map[string]stri
 func rubyFunctionFallback(declaration rubyFunctionDeclaration) string {
 	identity := declaration.modulePath + "\x00" + declaration.sourceName + "\x00" + declaration.targetName
 	return "__trb_function_" + naming.PrivateSuffix(identity)
+}
+
+// Compiler-owned standard records retain the names used by runtime helpers.
+// Authored records get a distinct root constant only when a collision exists.
+func analyzeRubyRecordNames(programs []*ir.Program) map[string]string {
+	counts := map[string]int{}
+	occupied := map[string]bool{}
+	records := []identity.Declaration{}
+	for _, program := range programs {
+		for _, statement := range program.Statements {
+			name := ""
+			switch node := statement.(type) {
+			case *ir.Record:
+				name = node.Name
+				records = append(records, node.Declaration)
+			case *ir.Class:
+				name = node.Name
+			case *ir.Enum:
+				name = node.Name
+			case *ir.Module:
+				name = node.Name
+			case *ir.Interface:
+				name = node.Name
+			case *ir.Newtype:
+				name = node.Name
+			case *ir.TypeAlias:
+				name = node.Name
+			case *ir.Variable:
+				if node.Constant && node.Owner == "" {
+					name = node.Name
+				}
+			}
+			if name != "" {
+				counts[name]++
+				occupied[name] = true
+			}
+		}
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].Key() < records[j].Key() })
+	result := map[string]string{}
+	for _, declaration := range records {
+		if declaration.Empty() || counts[declaration.Name] < 2 || strings.HasPrefix(declaration.Module, "trb/std/") {
+			continue
+		}
+		target := "TrbRecord_" + naming.PrivateSuffix(declaration.Key())
+		for occupied[target] {
+			target += "_"
+		}
+		occupied[target] = true
+		result[declaration.Key()] = target
+	}
+	return result
+}
+
+func (g *generator) recordName(name string, declaration identity.Declaration) string {
+	if g.projectNames != nil {
+		if target := g.projectNames.records[declaration.Key()]; target != "" {
+			return target
+		}
+	}
+	return name
 }
