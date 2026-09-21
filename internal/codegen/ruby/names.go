@@ -26,7 +26,7 @@ func (g *generator) variableName(variable *ir.Variable) string {
 type rubyProjectNames struct {
 	functions  map[string]map[string]string
 	constants  map[string]map[string]string
-	records    map[string]string
+	types      map[string]string
 	namespaces map[string]map[string]string
 }
 
@@ -37,7 +37,7 @@ type rubyFunctionDeclaration struct {
 }
 
 func analyzeRubyProjectNames(programs []*ir.Program) *rubyProjectNames {
-	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs), records: analyzeRubyRecordNames(programs), namespaces: analyzeRubyNamespaceNames(programs)}
+	result := &rubyProjectNames{functions: map[string]map[string]string{}, constants: analyzeRubyConstantNames(programs), types: analyzeRubyTypeNames(programs), namespaces: analyzeRubyNamespaceNames(programs)}
 	occupied := map[string]bool{}
 	reserved := map[string]bool{}
 	functions := map[string][]rubyFunctionDeclaration{}
@@ -166,27 +166,31 @@ func rubyFunctionFallback(declaration rubyFunctionDeclaration) string {
 	return "__trb_function_" + naming.PrivateSuffix(identity)
 }
 
-// Compiler-owned standard records retain the names used by runtime helpers.
-// Authored records get a distinct root constant only when a collision exists.
-func analyzeRubyRecordNames(programs []*ir.Program) map[string]string {
+// Compiler-owned standard types retain the names used by runtime helpers.
+// Authored declarations get distinct constants only when a collision exists.
+func analyzeRubyTypeNames(programs []*ir.Program) map[string]string {
 	counts := map[string]int{}
 	occupied := map[string]bool{}
-	records := []identity.Declaration{}
+	declarations := []identity.Declaration{}
 	for _, program := range programs {
 		for _, statement := range program.Statements {
 			name := ""
 			switch node := statement.(type) {
 			case *ir.Record:
 				name = node.Name
-				records = append(records, node.Declaration)
+				declarations = append(declarations, node.Declaration)
 			case *ir.Class:
 				name = node.Name
+				if !node.External {
+					declarations = append(declarations, node.Declaration)
+				}
 			case *ir.Enum:
 				name = node.Name
 			case *ir.Module:
 				name = node.Name
 			case *ir.Interface:
 				name = node.Name
+				declarations = append(declarations, node.Declaration)
 			case *ir.Newtype:
 				name = node.Name
 			case *ir.TypeAlias:
@@ -202,13 +206,14 @@ func analyzeRubyRecordNames(programs []*ir.Program) map[string]string {
 			}
 		}
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].Key() < records[j].Key() })
+	sort.Slice(declarations, func(i, j int) bool { return declarations[i].Key() < declarations[j].Key() })
 	result := map[string]string{}
-	for _, declaration := range records {
+	for _, declaration := range declarations {
 		if declaration.Empty() || counts[declaration.Name] < 2 || strings.HasPrefix(declaration.Module, "trb/std/") {
 			continue
 		}
-		target := "TrbRecord_" + naming.PrivateSuffix(declaration.Key())
+		prefix := map[identity.Kind]string{identity.Record: "TrbRecord_", identity.Class: "TrbClass_", identity.Interface: "TrbInterface_"}[declaration.Kind]
+		target := prefix + naming.PrivateSuffix(declaration.Key())
 		for occupied[target] {
 			target += "_"
 		}
@@ -220,7 +225,7 @@ func analyzeRubyRecordNames(programs []*ir.Program) map[string]string {
 
 func (g *generator) declarationName(name string, declaration identity.Declaration) string {
 	if g.projectNames != nil {
-		if target := g.projectNames.records[declaration.Key()]; target != "" {
+		if target := g.projectNames.types[declaration.Key()]; target != "" {
 			return target
 		}
 		root, member, nested := strings.Cut(declaration.Name, "::")

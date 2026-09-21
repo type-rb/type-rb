@@ -442,6 +442,7 @@ func (s *scope) resetNullableMembers(rootName string, rootOffset int) {
 }
 
 type classInfo struct {
+	declaration    identity.Declaration
 	name           string
 	typeParameters []string
 	superclass     string
@@ -1058,7 +1059,7 @@ func (c *Checker) registerAuthoredType(statement ast.Statement, leaf, qualified 
 	declaration := identity.Declaration{Module: c.result.Program.ModulePath, Name: qualified, Kind: kind}
 	c.result.Declarations[statement] = declaration
 	c.authoredOwnerIdentities[qualified] = declaration
-	if previous, exists := c.authoredTypeIdentities[leaf]; !exists || previous.Name == qualified {
+	if previous, exists := c.authoredTypeIdentities[leaf]; !exists || previous.Name == qualified || leaf == qualified {
 		c.authoredTypeIdentities[leaf] = declaration
 	}
 }
@@ -1549,7 +1550,7 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 	for _, argument := range ref.Arguments {
 		c.validateTypeReference(argument, typeParameters, false)
 	}
-	_, declared := c.declaredTypes[ref.Name]
+	_, declared := c.localTypeDeclaration(ref.Name)
 	if !declared {
 		declaration := c.authoredOwnerIdentities[ref.Name]
 		declared = declaration.Kind.IsType()
@@ -1566,7 +1567,7 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 		if len(ref.Arguments) != expected {
 			c.error(ref.Span(), fmt.Sprintf("%s expects %d type argument(s), got %d", ref.Name, expected, len(ref.Arguments)))
 		}
-	} else if declaration, declared := c.declaredTypes[ref.Name]; declared && len(ref.Arguments) > 0 {
+	} else if declaration, declared := c.localTypeDeclaration(ref.Name); declared && len(ref.Arguments) > 0 {
 		c.error(ref.Span(), fmt.Sprintf("%s is not generic", declaration.kind+" "+ref.Name))
 	} else if binding, imported := c.importedTypeAt(ref.Name, ref.Span()); imported && len(binding.Export.TypeParameters) == 0 && len(ref.Arguments) > 0 {
 		c.error(ref.Span(), fmt.Sprintf("%s is not generic", ref.Name))
@@ -1630,7 +1631,7 @@ func extendTypeParameters(parent map[string]bool, parameters []ast.TypeParameter
 }
 
 func (c *Checker) genericTypeArity(name string) (int, bool) {
-	if declaration, ok := c.declaredTypes[name]; ok && len(declaration.typeParameters) > 0 {
+	if declaration, ok := c.localTypeDeclaration(name); ok && len(declaration.typeParameters) > 0 {
 		return len(declaration.typeParameters), true
 	}
 	if binding, ok := c.resolution.ImportedType(name); ok && len(binding.Export.TypeParameters) > 0 {
@@ -1640,7 +1641,7 @@ func (c *Checker) genericTypeArity(name string) (int, bool) {
 }
 
 func (c *Checker) genericTypeArityAt(name string, span token.Span) (int, bool) {
-	if declaration, ok := c.declaredTypes[name]; ok && len(declaration.typeParameters) > 0 {
+	if declaration, ok := c.localTypeDeclaration(name); ok && len(declaration.typeParameters) > 0 {
 		return len(declaration.typeParameters), true
 	}
 	if binding, ok := c.importedTypeAt(name, span); ok && len(binding.Export.TypeParameters) > 0 {
@@ -1677,7 +1678,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			if !c.declareType(n.Name, "class", n.Span()) {
 				continue
 			}
-			info := &classInfo{name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
+			info := &classInfo{declaration: c.result.Declarations[n], name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
 			for _, parameter := range n.TypeParameters {
 				info.typeParameters = append(info.typeParameters, parameter.Name)
 			}
@@ -1811,13 +1812,15 @@ func (c *Checker) collect(statements []ast.Statement) {
 			}
 			c.newtypes[n.Name] = info
 		case *ast.InterfaceStatement:
-			if c.declareType(n.Name, "interface", n.Span()) {
-				declaration := c.declaredTypes[n.Name]
+			name := c.result.Declarations[n].Name
+			if c.declareType(name, "interface", n.Span()) {
+				declaration := c.declaredTypes[name]
 				for _, parameter := range n.TypeParameters {
 					declaration.typeParameters = append(declaration.typeParameters, parameter.Name)
 				}
-				c.declaredTypes[n.Name] = declaration
-				c.interfaces[n.Name] = n
+				declaration.identity = c.result.Declarations[n]
+				c.declaredTypes[name] = declaration
+				c.interfaces[name] = n
 			}
 		case *ast.ModuleStatement:
 			c.collect(n.Body)
@@ -2820,6 +2823,13 @@ func (c *Checker) markImportUsed(binding resolver.Binding) {
 		return
 	}
 	c.markImportNodeUsed(binding.Import, binding.Name)
+	if binding.Export != nil {
+		for _, name := range binding.Import.Symbols {
+			if strings.HasPrefix(binding.Export.Name, name+"::") {
+				c.markImportNodeUsed(binding.Import, name)
+			}
+		}
+	}
 }
 
 func (c *Checker) recordReference(expression ast.Expression, binding resolver.Binding) {
@@ -3854,7 +3864,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression, sc *sco
 			application.Variadic = binding.Library.Variadic
 			application.ReturnType = binding.Library.Return
 			c.canonicalizeContractApplication(&application, binding.Import)
-		} else if local, found := c.localMember(receiver.Name, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
+		} else if local, found := c.localMember(receiver, member.Name, classAccess, map[string]bool{}); found && local.method != nil {
 			local = c.specializeLocalClassMember(receiver, local)
 			if len(local.method.TypeParameters) > 0 {
 				application.Kind = "method"
@@ -4959,61 +4969,13 @@ func (c *Checker) typesAssignable(target, actual types.Type) bool {
 		}
 		return true
 	}
-	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target.Name) && c.classImplements(actual, target, map[string]bool{})
+	return target.Kind == types.Named && actual.Kind == types.Named && c.isInterface(target) && c.classImplements(actual, target, map[string]bool{})
 }
 
 func (c *Checker) typesEquivalent(left, right types.Type) bool {
 	left = c.expandAlias(left, map[string]bool{})
 	right = c.expandAlias(right, map[string]bool{})
 	return types.Equivalent(left, right)
-}
-
-func (c *Checker) isInterface(name string) bool {
-	if c.interfaces[name] != nil {
-		return true
-	}
-	binding, ok := c.resolution.ImportedType(name)
-	if !ok {
-		binding, ok = c.resolution.InferredType(name)
-	}
-	if !ok {
-		binding, ok = c.resolution.ContractType(name)
-	}
-	return ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport
-}
-
-func (c *Checker) classImplements(classType, interfaceType types.Type, seen map[string]bool) bool {
-	className := classType.Name
-	if className == "" || seen[classType.String()] {
-		return false
-	}
-	seen[classType.String()] = true
-	if info := c.classes[className]; info != nil {
-		substitutions := typeSubstitutions(info.typeParameters, classType.Args)
-		for _, implemented := range info.interfaces {
-			if c.typesEquivalent(substituteType(implemented, substitutions), interfaceType) {
-				return true
-			}
-		}
-		return c.classImplements(types.FromName(info.superclass), interfaceType, seen)
-	}
-	binding, ok := c.resolution.ImportedType(className)
-	if !ok {
-		binding, ok = c.resolution.InferredType(className)
-	}
-	if !ok {
-		binding, ok = c.resolution.ContractType(className)
-	}
-	if !ok || binding.Export == nil || binding.Export.Kind != resolver.ClassExport {
-		return false
-	}
-	substitutions := typeSubstitutions(binding.Export.TypeParameters, classType.Args)
-	for _, implemented := range binding.Export.Interfaces {
-		if c.typesEquivalent(substituteType(implemented, substitutions), interfaceType) {
-			return true
-		}
-	}
-	return c.classImplements(types.FromName(binding.Export.Superclass), interfaceType, seen)
 }
 
 func (c *Checker) recordAssignableConversion(expression ast.Expression, target, actual types.Type) {
@@ -5500,44 +5462,28 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 			continue
 		}
 		required := map[string]methodSignature{}
-		externalTarget := c.aliasTargetIsExternal(fromTypeRef(reference), map[string]bool{})
 		implementation := InterfaceImplementation{Type: interfaceType}
-		externalBinding := resolver.Binding{}
-		externalFound := false
-		externalResolved := false
-		if externalTarget {
-			if binding, ok := c.externalAliasTargetBinding(interfaceName); ok {
-				externalFound = true
-				if binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
-					externalBinding = binding
-					externalResolved = true
-					implementation.TargetBinding = &binding
-				}
-			}
-		}
-		c.result.InterfaceImplementations[class] = append(c.result.InterfaceImplementations[class], implementation)
-		if externalFound && !externalResolved {
-			c.error(class.Span(), fmt.Sprintf("implemented type %s must resolve to an interface", interfaceType))
-			continue
-		}
-		if local := c.interfaces[interfaceName]; local != nil && !externalResolved {
+		if local := c.localInterface(interfaceType); local != nil {
 			substitutions := typeSubstitutions(typeParameterNames(local.TypeParameters), interfaceType.Args)
 			for _, method := range local.Methods {
-				required[method.Name] = substituteMethodSignature(c.signatureFromMethod(method), substitutions)
+				required[method.Name] = substituteMethodSignature(c.interfaceMethodSignature(local, method), substitutions)
 			}
-		} else if imported, ok := c.resolvedInterface(interfaceName); externalResolved || ok {
-			if externalResolved {
-				imported = externalBinding
-			}
+		} else if imported, ok := c.resolvedInterface(interfaceType); ok {
+			implementation.TargetBinding = &imported
 			c.markImportUsed(imported)
 			substitutions := typeSubstitutions(imported.Export.TypeParameters, interfaceType.Args)
 			for name, member := range imported.Export.Members {
 				required[name] = substituteMethodSignature(signatureFromResolvedMember(member), substitutions)
 			}
 		} else {
-			c.error(class.Span(), fmt.Sprintf("interface %s is not declared or imported", interfaceName))
+			if !interfaceType.Declaration.Empty() {
+				c.error(class.Span(), fmt.Sprintf("implemented type %s must resolve to an interface", interfaceType))
+			} else {
+				c.error(class.Span(), fmt.Sprintf("interface %s is not declared or imported", interfaceName))
+			}
 			continue
 		}
+		c.result.InterfaceImplementations[class] = append(c.result.InterfaceImplementations[class], implementation)
 		for name, expected := range required {
 			actual, ok := c.classMethodSignature(class.Name, name, map[string]bool{})
 			if !ok {
@@ -5549,20 +5495,6 @@ func (c *Checker) checkInterfaces(class *ast.ClassStatement) {
 			}
 		}
 	}
-}
-
-func (c *Checker) resolvedInterface(name string) (resolver.Binding, bool) {
-	lookups := []func(string) (resolver.Binding, bool){
-		c.resolution.ImportedType,
-		c.resolution.ContractType,
-	}
-	for _, lookup := range lookups {
-		binding, ok := lookup(name)
-		if ok && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
-			return binding, true
-		}
-	}
-	return resolver.Binding{}, false
 }
 
 func (c *Checker) checkOverrides(class *ast.ClassStatement) {
@@ -5720,22 +5652,29 @@ func (c *Checker) sameSignatureParameter(left, right callsignature.Parameter) bo
 	return types.Assignable(left.Type, right.Type) && types.Assignable(right.Type, left.Type)
 }
 
-func (c *Checker) localMember(className, memberName string, class bool, seen map[string]bool) (classMember, bool) {
+func (c *Checker) localMember(receiver types.Type, memberName string, class bool, seen map[string]bool) (classMember, bool) {
+	receiver = c.canonicalType(receiver, c.activeTypeParameterSet())
+	if !receiver.Declaration.Empty() && receiver.Declaration.Module != c.result.Program.ModulePath {
+		return classMember{}, false
+	}
+	className := receiver.Name
 	if className == "" || seen[className] {
 		return classMember{}, false
 	}
 	seen[className] = true
+	if receiver.Declaration.Kind == identity.Interface {
+		if info := c.localInterface(receiver); info != nil && !class {
+			for _, method := range info.Methods {
+				if method.Name == memberName {
+					signature := c.interfaceMethodSignature(info, method)
+					return classMember{typ: signature.returnType, method: method, sig: &signature}, true
+				}
+			}
+		}
+		return classMember{}, false
+	}
 	if info := c.newtypes[className]; info != nil {
 		if method := info.methods[memberName]; method != nil && method.Class == class {
-			signature := c.signatureFromMethod(method)
-			return classMember{typ: signature.returnType, method: method, sig: &signature}, true
-		}
-	}
-	if info := c.interfaces[className]; info != nil && !class {
-		for _, method := range info.Methods {
-			if method.Name != memberName {
-				continue
-			}
 			signature := c.signatureFromMethod(method)
 			return classMember{typ: signature.returnType, method: method, sig: &signature}, true
 		}
@@ -5770,7 +5709,7 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 				return classMember{typ: c.typeFromRef(field.Type), field: field}, true
 			}
 		}
-		if member, ok := c.localMember(info.superclass, memberName, class, seen); ok {
+		if member, ok := c.localMember(types.FromName(info.superclass), memberName, class, seen); ok {
 			return member, true
 		}
 	}
@@ -5779,10 +5718,10 @@ func (c *Checker) localMember(className, memberName string, class bool, seen map
 
 func (c *Checker) specializeLocalClassMember(receiver types.Type, member classMember) classMember {
 	parameters := []string{}
-	if info := c.classes[receiver.Name]; info != nil {
-		parameters = info.typeParameters
-	} else if info := c.interfaces[receiver.Name]; info != nil {
+	if info := c.localInterface(receiver); info != nil {
 		parameters = typeParameterNames(info.TypeParameters)
+	} else if info := c.classes[receiver.Name]; info != nil {
+		parameters = info.typeParameters
 	}
 	if len(parameters) == 0 {
 		return member
@@ -5836,7 +5775,7 @@ func (c *Checker) dataMember(receiver types.Type, name string) (types.Type, bool
 			}
 		}
 	}
-	if member, found := c.localMember(receiver.Name, name, false, map[string]bool{}); found && member.field != nil {
+	if member, found := c.localMember(receiver, name, false, map[string]bool{}); found && member.field != nil {
 		member = c.specializeLocalClassMember(receiver, member)
 		return member.typ, member.field.ReadOnly, true, true
 	}
@@ -5947,7 +5886,7 @@ func (c *Checker) readonlyAssignmentField(member *ast.MemberExpression, sc *scop
 	if c.readonlyDataMember(receiverType, member.Name) {
 		return true
 	}
-	if local, ok := c.localMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && local.field != nil {
+	if local, ok := c.localMember(receiverType, member.Name, false, map[string]bool{}); ok && local.field != nil {
 		return local.field.ReadOnly
 	}
 	if binding, ok := c.importedAncestorMember(receiverType.Name, member.Name, false, map[string]bool{}); ok && binding.Member != nil {
@@ -7213,14 +7152,18 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		if !classAccess && !n.Namespace {
 			receiverType = dataReceiverType
 		}
+		if c.isInterface(receiverType) {
+			typ = c.checkInterfaceMember(n, receiverType, classAccess || authoredOwnerAccess(n.Receiver, sc))
+			break
+		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
 			typ = substituteType(c.typeFromRef(record.byName[n.Name].Type), typeSubstitutions(record.typeParameters, receiverType.Args))
-		} else if member, found := c.localMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); found {
+		} else if member, found := c.localMember(receiverType, n.Name, classAccess, map[string]bool{}); found {
 			member = c.specializeLocalEnumMember(receiverType, member)
 			member = c.specializeLocalClassMember(receiverType, member)
 			typ = member.typ
 			if member.method != nil {
-				if c.interfaces[receiverType.Name] == nil {
+				if c.localInterface(receiverType) == nil {
 					c.authoredMemberMethods[n] = member.method
 				}
 				if dispatch := c.result.MethodDispatches[member.method]; !dispatch.Empty() {
@@ -7270,7 +7213,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			// Constructors are validated against their initialize method or record
 			// fields when the surrounding call expression is checked.
 		} else {
-			if _, exists := c.localMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
+			if _, exists := c.localMember(receiverType, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
 			} else if _, exists := c.importedAncestorMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
@@ -7672,7 +7615,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			receiverType := c.checkExpression(member.Receiver, sc)
 			receiverType = c.expandAlias(receiverType, map[string]bool{})
 			classAccess := c.classMemberAccess(member.Receiver, sc)
-			if local, found := c.localMember(receiverType.Name, member.Name, classAccess, map[string]bool{}); found {
+			if local, found := c.localMember(receiverType, member.Name, classAccess, map[string]bool{}); found {
 				local = c.specializeLocalEnumMember(receiverType, local)
 				local = c.specializeLocalClassMember(receiverType, local)
 				if local.method != nil && len(local.method.TypeParameters) > 0 {
@@ -9139,21 +9082,7 @@ func (c *Checker) concurrentConstructorInitializesField(root *scope, target ast.
 }
 
 func (c *Checker) concurrencyInterfaceType(typ types.Type) bool {
-	typ = c.expandAlias(typ, map[string]bool{})
-	if typ.Kind != types.Named {
-		return false
-	}
-	if c.interfaces[typ.Name] != nil {
-		return true
-	}
-	if binding, exists := c.resolution.ImportedType(typ.Name); exists && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
-		return true
-	}
-	if binding, exists := c.resolution.InferredType(typ.Name); exists && binding.Export != nil && binding.Export.Kind == resolver.InterfaceExport {
-		return true
-	}
-	exported, exists := c.resolution.CompilerOwnedType(typ.Name)
-	return exists && exported.Kind == resolver.InterfaceExport
+	return c.isInterface(c.expandAlias(typ, map[string]bool{}))
 }
 
 func scopeWithin(candidate, root *scope) bool {

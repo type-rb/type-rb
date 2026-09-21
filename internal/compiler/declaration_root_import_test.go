@@ -99,17 +99,17 @@ end
 }
 
 func TestNamedImportAliasKeepsOneCanonicalDeclarationIdentity(t *testing.T) {
+	requireEffectRuntime(t, "ruby")
 	artifacts, err := CompileProject([]SourceUnit{
-		{Filename: "web/response.trb", ModulePath: "web/response", Source: []byte("class Response\nend\n")},
-		{Filename: "browser/response.trb", ModulePath: "browser/response", Source: []byte("class Response\nend\n")},
-		{Filename: "main.trb", ModulePath: "main", Source: []byte("import { Response as WebResponse } from web/response\nimport { Response as BrowserResponse } from browser/response\n\ndef values(): Array<Any>\n\treturn [WebResponse.new(), BrowserResponse.new()]\nend\n")},
-	}, Options{Mode: "ruby", SourceRoot: "/project"})
+		{Filename: "web/response.trb", ModulePath: "web/response", Source: []byte("class Response\ndef name(): String\nreturn \"web\"\nend\nend\n")},
+		{Filename: "browser/response.trb", ModulePath: "browser/response", Source: []byte("class Response\ndef name(): String\nreturn \"browser\"\nend\nend\n")},
+		{Filename: "main.trb", ModulePath: "main", Source: []byte("import { Response as WebResponse } from web/response\nimport { Response as BrowserResponse } from browser/response\n\ndef main()\nputs(WebResponse.new().name())\nputs(BrowserResponse.new().name())\nend\n")},
+	}, Options{Mode: "ruby", SourceRoot: "/project", RubyLoader: "require_relative"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	main := findArtifactByModule(artifacts, "main")
-	if main == nil || !strings.Contains(string(main.Output), "Response.new") {
-		t.Fatalf("aliased declarations were not lowered to their exported runtime names: %s", main.Output)
+	if output := strings.TrimSpace(runEffectProject(t, "ruby", artifacts, "")); output != "web\nbrowser" {
+		t.Fatalf("aliased classes lost their declaration identities: %q", output)
 	}
 }
 

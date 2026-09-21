@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"path"
+	"strings"
 
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/callsignature"
@@ -39,7 +40,7 @@ func canonicalizeTypeContracts(catalog *Catalog) {
 				}
 				for _, name := range names {
 					exported, found := exportNamed(dependency.Exports, name)
-					if !found || !catalogAliasContractExport(dependency, exported) {
+					if !found || !catalogContractExport(dependency, exported) {
 						continue
 					}
 					local := name
@@ -54,7 +55,7 @@ func canonicalizeTypeContracts(catalog *Catalog) {
 			}
 		}
 		for name, exported := range flattenExports(module.Exports) {
-			if exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport {
+			if typeExport(exported.Kind) {
 				scope[name] = catalogTypeBinding(module, exported)
 			}
 		}
@@ -64,8 +65,8 @@ func canonicalizeTypeContracts(catalog *Catalog) {
 	}
 }
 
-func catalogAliasContractExport(module *Module, exported Export) bool {
-	if exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport {
+func catalogContractExport(module *Module, exported Export) bool {
+	if !module.CompilerOwned && (typeExport(exported.Kind) || exported.Kind == ModuleExport) || exported.Kind == TypeAliasExport || exported.Kind == NewtypeExport {
 		return true
 	}
 	if !module.CompilerOwned {
@@ -142,9 +143,26 @@ func canonicalContractType(typ types.Type, scope map[string]Binding, parameters 
 			return typ
 		}
 	}
-	if binding, found := scope[typ.Name]; found {
+	if binding, found := contractTypeBinding(scope, typ.Name); found {
 		typ.Name = binding.Export.Name
 		typ.Declaration = binding.DeclarationIdentity()
 	}
 	return typ
+}
+
+func contractTypeBinding(scope map[string]Binding, name string) (Binding, bool) {
+	if binding, found := scope[name]; found && binding.Export != nil && typeExport(binding.Export.Kind) {
+		return binding, true
+	}
+	root, nested, qualified := strings.Cut(name, "::")
+	binding, found := scope[root]
+	if !qualified || !found || binding.Export == nil {
+		return Binding{}, false
+	}
+	if exported, found := exportNamed(binding.Export.Nested, nested); found && typeExport(exported.Kind) {
+		binding.Export = &exported
+		binding.Name = exported.Name
+		return binding, true
+	}
+	return Binding{}, false
 }

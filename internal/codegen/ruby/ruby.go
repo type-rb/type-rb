@@ -191,7 +191,7 @@ func (g *generator) statement(statement ir.Statement) {
 		if n.External {
 			return
 		}
-		header := "class " + g.rubyClassName(n.Name, nil)
+		header := "class " + g.declarationName(g.rubyClassName(n.Name, nil), n.Declaration)
 		if n.Superclass != nil {
 			header += " < " + g.expr(n.Superclass)
 		}
@@ -309,7 +309,7 @@ func (g *generator) statement(statement ir.Statement) {
 		g.indent--
 		g.line("end", "")
 	case *ir.Interface:
-		g.line("module "+n.Name, n.TrailingComment)
+		g.line("module "+g.declarationName(n.Name, n.Declaration), n.TrailingComment)
 		g.indent++
 		for _, method := range n.Methods {
 			g.line("def "+method.Name+"("+g.methodParameters(method)+")", method.TrailingComment)
@@ -916,7 +916,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return g.transform(n)
 	case *ir.Member:
 		if n.Namespace && n.Reference != nil && g.projectNames != nil {
-			if target := g.projectNames.records[n.Reference.Declaration.Key()]; target != "" {
+			if target := g.projectNames.types[n.Reference.Declaration.Key()]; target != "" {
 				return target
 			}
 		}
