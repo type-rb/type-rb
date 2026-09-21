@@ -93,6 +93,9 @@ func canonicalTypeExport(exported Export, scope map[string]Binding, outerParamet
 	exported.NewtypeTarget = qualify(exported.NewtypeTarget)
 	exported.AliasTarget = qualify(exported.AliasTarget)
 	exported.EnumRawType = qualify(exported.EnumRawType)
+	if exported.Superclass != "" {
+		exported.Superclass = qualify(types.FromName(exported.Superclass)).Name
+	}
 	exported.Parameters = append([]callsignature.Parameter(nil), exported.Parameters...)
 	for index := range exported.Parameters {
 		exported.Parameters[index].Type = qualify(exported.Parameters[index].Type)
@@ -159,7 +162,7 @@ func contractTypeBinding(scope map[string]Binding, name string) (Binding, bool) 
 	if !qualified || !found || binding.Export == nil {
 		return Binding{}, false
 	}
-	if exported, found := exportNamed(binding.Export.Nested, nested); found && typeExport(exported.Kind) {
+	if exported, found := exportNamed(binding.Export.Nested, binding.Export.Name+"::"+nested); found && typeExport(exported.Kind) {
 		binding.Export = &exported
 		binding.Name = exported.Name
 		return binding, true

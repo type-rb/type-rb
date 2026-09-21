@@ -450,6 +450,12 @@ func (e *Evaluator) linkSuperclasses() {
 			continue
 		}
 		definition.Superclass = nil
+		if declaration := ir.ExpressionDeclaration(definition.Node.Superclass); declaration.Kind == identity.Class {
+			if parent, ok := e.definitions[symbolKey(declaration.Module, declaration.Name)].(*classDefinition); ok {
+				definition.Superclass = parent
+			}
+			continue
+		}
 		name := expressionName(definition.Node.Superclass)
 		if parent, ok := e.definitions[symbolKey(definition.Module, name)].(*classDefinition); ok {
 			definition.Superclass = parent
@@ -1853,6 +1859,9 @@ func (e *Evaluator) call(function *callable, arguments []evaluatedArgument) (Val
 	}
 	if method == nil {
 		return Value{}, errors.New("invalid callable")
+	}
+	if owner := method.Dispatch.Owner; owner.Module != "" {
+		module = owner.Module
 	}
 	callScope := &scope{parent: e.global, values: map[string]Value{}}
 	if function.Receiver.Data != nil {

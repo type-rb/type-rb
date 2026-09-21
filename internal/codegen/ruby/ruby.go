@@ -193,7 +193,11 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		header := "class " + g.declarationName(g.rubyClassName(n.Name, nil), n.Declaration)
 		if n.Superclass != nil {
-			header += " < " + g.expr(n.Superclass)
+			superclass := g.expr(n.Superclass)
+			if declaration := ir.ExpressionDeclaration(n.Superclass); declaration.Kind == identity.Class {
+				superclass = g.declarationName(declaration.Name, declaration)
+			}
+			header += " < " + superclass
 		}
 		g.line(header, n.TrailingComment)
 		g.indent++
