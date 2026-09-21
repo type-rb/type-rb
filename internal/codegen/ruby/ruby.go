@@ -934,6 +934,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		receiver := g.receiverOperand(n.Receiver)
 		if n.ClassField {
+			if identifier, ok := n.Receiver.(*ir.Identifier); ok && identifier.Name == "self" && strings.HasPrefix(n.Name, "_") {
+				return "@" + n.Name
+			}
 			return receiver + op + "__trb_field_" + n.Name
 		}
 		return receiver + op + n.Name

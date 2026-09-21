@@ -12,7 +12,7 @@ func (g *generator) timeIntrinsic(name string, call *ir.Call, arguments []string
 		return "", false
 	}
 	operation := strings.TrimPrefix(name, "trb.internal.time.")
-	field := func(value, name string) string { return value + ".__trb_" + name }
+	field := func(value, name string) string { return value + ".__trb__" + name }
 	resultTypes := func() (string, string, string) {
 		result := call.ExprType()
 		if len(result.Args) != 2 {
