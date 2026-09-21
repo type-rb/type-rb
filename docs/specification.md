@@ -224,6 +224,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   independent bindings. Ordinary `mut` and readonly rules still apply.
   Calls invalidate nullable and field narrowing for visible mutable top-level
   bindings; establish a fresh guard after a call that may replace the value.
+- The same storage rule applies to lowercase bindings directly inside a module
+  declaration. Their identity includes the enclosing namespace and source module;
+  nested or reopened namespaces and method-local shadowing preserve that identity.
+  Calls also invalidate narrowing for visible mutable namespace bindings.
 - A reference checked as a named function retains that declaration when a later
   binding uses the same spelling. This includes earlier function bodies,
   default arguments and closures, as well as retained REPL submissions and

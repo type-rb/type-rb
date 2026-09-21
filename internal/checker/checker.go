@@ -327,6 +327,7 @@ func tracksUnusedBinding(name string) bool {
 }
 
 type scope struct {
+	globalStorage    bool
 	parent           *scope
 	values           map[string]symbol
 	nullableMembers  map[nullableMemberKey]nullableMemberFact
@@ -2133,7 +2134,7 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.moduleDepth++
 			moduleScope := c.authoredModuleScopes[owner]
 			if moduleScope == nil {
-				moduleScope = &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true}
+				moduleScope = &scope{parent: sc, values: map[string]symbol{}, constantsAllowed: true, constantOwner: owner, enumsAllowed: true, globalStorage: true}
 				c.authoredModuleScopes[owner] = moduleScope
 			}
 			c.checkStatements(n.Body, moduleScope)
@@ -2180,8 +2181,8 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			c.checkMethod(n, sc)
 		case *ast.VariableStatement:
 			previousResourceUse := c.scopedResourceUse
-			if sc.parent == nil && !n.Constant {
-				c.result.Declarations[n] = identity.Declaration{Module: c.result.Program.ModulePath, Name: n.Name, Kind: identity.Value}
+			if (sc.parent == nil || sc.globalStorage) && !n.Constant {
+				c.result.Declarations[n] = identity.Declaration{Module: c.result.Program.ModulePath, Name: identity.Qualify(sc.constantOwner, n.Name), Kind: identity.Value}
 			}
 			if !n.Mutable && !n.Constant {
 				c.scopedResourceUse = n.Value
