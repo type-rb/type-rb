@@ -24,13 +24,18 @@ end
 import { Holder as Stored } from models
 class Factory
 end
+class Holder
+end
+def stored(value: Stored<String>): Stored<String>
+return value
+end
 def describe(value: Reader<String>): String
 return value.read()
 end
 def main()
 reader: Reader<Integer> := Stored<Integer>.new(9)
 puts(reader.read())
-puts(describe(Stored<String>.new("kept")))
+puts(describe(stored(Stored<String>.new("kept"))))
 end
 `)},
 	}, Options{Mode: "typescript", SourceRoot: "/project", ProjectRoot: "/project"})

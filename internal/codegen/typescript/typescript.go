@@ -1169,12 +1169,13 @@ func (g *generator) registerImportedDeclarationNames(imported *ir.Import) {
 		return
 	}
 	runtimeAlias := "__trb_" + pathpkg.Base(pathpkg.Dir(imported.Path))
+	sourceTypes := !imported.Standard && !imported.Official && !imported.Native
 	for _, symbol := range append(append([]string(nil), imported.Symbols...), imported.GeneratedTypeSymbols...) {
 		kind := identity.Kind(imported.SymbolKinds[symbol])
 		if typeOnly && kind != identity.Newtype {
 			continue
 		}
-		if !standardIdentity && kind != identity.Newtype && kind != identity.Enum {
+		if !sourceTypes && !standardIdentity && kind != identity.Newtype && kind != identity.Enum {
 			continue
 		}
 		if !kind.IsType() || strings.Contains(symbol, "::") {
