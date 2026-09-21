@@ -904,7 +904,6 @@ func (g *generator) statement(statement ir.Statement) {
 		prefix := ""
 		if strings.HasPrefix(name, "_") {
 			prefix = "private "
-			name = strings.TrimPrefix(name, "_")
 		}
 		name = "__trb_" + name
 		if n.ReadOnly {
@@ -1921,7 +1920,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		return prefix + "(" + strings.Join(parts, ", ") + "): " + returnType + " => {\n" + child.b.String() + strings.Repeat("  ", g.indent) + "}"
 	case *ir.Identifier:
 		if strings.HasPrefix(n.Name, "@") {
-			return "this.__trb_" + strings.TrimPrefix(strings.TrimPrefix(n.Name, "@"), "_")
+			return "this.__trb_" + strings.TrimPrefix(n.Name, "@")
 		}
 		if n.Name == "nil" {
 			return "null"
