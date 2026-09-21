@@ -67,9 +67,7 @@ func TestNamespaceMutableBindingsInvalidateNullableFacts(t *testing.T) {
 }
 
 func TestNamespaceBindingsKeepSourceModuleIdentity(t *testing.T) {
-	// Ruby still merges same-named namespaces from different source modules;
-	// issue #785 tracks that separate declaration-lowering defect.
-	for _, mode := range []string{"go", "typescript"} {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireEffectRuntime(t, mode)
 			units := []SourceUnit{
