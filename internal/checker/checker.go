@@ -460,6 +460,7 @@ type classMember struct {
 }
 
 type recordInfo struct {
+	declaration    identity.Declaration
 	name           string
 	typeParameters []string
 	fields         []*ast.RecordFieldStatement
@@ -1675,7 +1676,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 	for _, statement := range statements {
 		switch n := statement.(type) {
 		case *ast.ClassStatement:
-			if !c.declareType(n.Name, "class", n.Span()) {
+			if !c.declareType(n.Name, "class", n.Span(), c.result.Declarations[n]) {
 				continue
 			}
 			info := &classInfo{declaration: c.result.Declarations[n], name: n.Name, superclass: expressionTypeName(n.Superclass), fields: map[string]*ast.FieldStatement{}, methods: map[string]*ast.MethodStatement{}}
@@ -1715,16 +1716,18 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.classes[n.Name] = info
 			c.collect(n.Body)
 		case *ast.RecordStatement:
-			if !c.declareType(n.Name, "record", n.Span()) {
+			name := c.result.Declarations[n].Name
+			if !c.declareType(name, "record", n.Span(), c.result.Declarations[n]) {
 				continue
 			}
-			info := &recordInfo{name: n.Name, byName: map[string]*ast.RecordFieldStatement{}}
+			info := &recordInfo{declaration: c.result.Declarations[n], name: n.Name, byName: map[string]*ast.RecordFieldStatement{}}
 			for _, parameter := range n.TypeParameters {
 				info.typeParameters = append(info.typeParameters, parameter.Name)
 			}
-			declaration := c.declaredTypes[n.Name]
+			declaration := c.declaredTypes[name]
+			declaration.identity = info.declaration
 			declaration.typeParameters = append([]string(nil), info.typeParameters...)
-			c.declaredTypes[n.Name] = declaration
+			c.declaredTypes[name] = declaration
 			for _, member := range n.Body {
 				field, ok := member.(*ast.RecordFieldStatement)
 				if !ok {
@@ -1737,9 +1740,9 @@ func (c *Checker) collect(statements []ast.Statement) {
 				info.fields = append(info.fields, field)
 				info.byName[field.Name] = field
 			}
-			c.records[n.Name] = info
+			c.records[name] = info
 		case *ast.EnumStatement:
-			if !c.declareType(n.Name, "enum", n.Span()) {
+			if !c.declareType(n.Name, "enum", n.Span(), c.result.Declarations[n]) {
 				continue
 			}
 			info := &enumInfo{name: n.Name, byName: map[string]*ast.EnumMemberStatement{}, methods: map[string]*ast.MethodStatement{}}
@@ -1783,7 +1786,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			}
 			c.enums[n.Name] = info
 		case *ast.TypeAliasStatement:
-			if !c.declareType(n.Name, "type alias", n.Span()) {
+			if !c.declareType(n.Name, "type alias", n.Span(), c.result.Declarations[n]) {
 				continue
 			}
 			info := &aliasInfo{statement: n, target: fromTypeRef(n.Target)}
@@ -1795,7 +1798,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.declaredTypes[n.Name] = declaration
 			c.aliases[n.Name] = info
 		case *ast.NewtypeStatement:
-			if !c.declareType(n.Name, "newtype", n.Span()) {
+			if !c.declareType(n.Name, "newtype", n.Span(), c.result.Declarations[n]) {
 				continue
 			}
 			info := &newtypeInfo{statement: n, target: fromTypeRef(n.Target), methods: map[string]*ast.MethodStatement{}}
@@ -1813,7 +1816,7 @@ func (c *Checker) collect(statements []ast.Statement) {
 			c.newtypes[n.Name] = info
 		case *ast.InterfaceStatement:
 			name := c.result.Declarations[n].Name
-			if c.declareType(name, "interface", n.Span()) {
+			if c.declareType(name, "interface", n.Span(), c.result.Declarations[n]) {
 				declaration := c.declaredTypes[name]
 				for _, parameter := range n.TypeParameters {
 					declaration.typeParameters = append(declaration.typeParameters, parameter.Name)
@@ -1830,12 +1833,14 @@ func (c *Checker) collect(statements []ast.Statement) {
 	}
 }
 
-func (c *Checker) declareType(name, kind string, span token.Span) bool {
-	if previous, exists := c.declaredTypes[name]; exists {
-		c.error(span, fmt.Sprintf("type %s is already declared as %s at %s", name, previous.kind, previous.span.Start))
-		return false
+func (c *Checker) declareType(name, kind string, span token.Span, declaration identity.Declaration) bool {
+	for _, key := range []string{name, declaration.Name, declaration.LeafName()} {
+		if previous, exists := c.declaredTypes[key]; exists && (key == name || previous.identity.Name == declaration.Name) {
+			c.error(span, fmt.Sprintf("type %s is already declared as %s at %s", declaration.Name, previous.kind, previous.span.Start))
+			return false
+		}
 	}
-	c.declaredTypes[name] = typeDeclaration{kind: kind, span: span, identity: c.authoredTypeIdentities[name]}
+	c.declaredTypes[name] = typeDeclaration{kind: kind, span: span, identity: declaration}
 	return true
 }
 
@@ -3919,11 +3924,11 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression, sc *sco
 	if application.Kind != "" {
 		// A generic member application has already been resolved from its
 		// receiver. Continue below to validate and substitute method arguments.
-	} else if info := c.classes[name]; info != nil {
-		application.Kind = "class"
-		application.TypeParameters = append([]string(nil), info.typeParameters...)
-	} else if info := c.records[name]; info != nil {
+	} else if info := c.localRecord(c.result.Expressions[node.Receiver]); info != nil {
 		application.Kind = "record"
+		application.TypeParameters = append([]string(nil), info.typeParameters...)
+	} else if info := c.classes[name]; info != nil && (c.result.ExpressionDeclarations[node.Receiver].Empty() || info.declaration == c.result.ExpressionDeclarations[node.Receiver]) {
+		application.Kind = "class"
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
 	} else if info := c.enums[name]; info != nil {
 		application.Kind = "enum"
@@ -4160,11 +4165,11 @@ func (c *Checker) callSpecializationType(typ types.Type, includeRecord bool) pac
 	if typ.Kind != types.Named {
 		return result
 	}
-	result.Definition = c.callSpecializationDefinition(typ.Name)
+	result.Definition = c.callSpecializationDefinition(typ)
 	if !includeRecord {
 		return result
 	}
-	fields, module, reference, ok := c.codecRecord(typ.Name)
+	fields, module, reference, ok := c.codecRecord(typ)
 	if !ok {
 		return result
 	}
@@ -4179,8 +4184,9 @@ func (c *Checker) callSpecializationType(typ types.Type, includeRecord bool) pac
 	return result
 }
 
-func (c *Checker) callSpecializationDefinition(name string) *packageextension.Definition {
-	if c.records[name] != nil || c.classes[name] != nil || c.enums[name] != nil || c.aliases[name] != nil || c.interfaces[name] != nil {
+func (c *Checker) callSpecializationDefinition(typ types.Type) *packageextension.Definition {
+	name := typ.Name
+	if c.localRecord(typ) != nil || c.classes[name] != nil || c.enums[name] != nil || c.aliases[name] != nil || c.interfaces[name] != nil {
 		return &packageextension.Definition{ModulePath: c.result.Program.ModulePath}
 	}
 	if binding, ok := c.resolution.ImportedType(name); ok {
@@ -4211,7 +4217,7 @@ func (c *Checker) parameterSchema(span token.Span, typ types.Type, operation str
 		c.error(span, fmt.Sprintf("web parameter binding type %s must be a non-nullable record", typ))
 		return schema, false
 	}
-	fields, module, reference, ok := c.codecRecord(base.Name)
+	fields, module, reference, ok := c.codecRecord(base)
 	if !ok {
 		c.error(span, fmt.Sprintf("web parameter binding type %s must be a non-nullable record", typ))
 		return schema, false
@@ -4367,12 +4373,15 @@ func (c *Checker) codecSchemaResolved(span token.Span, typ types.Type, visiting 
 			}
 			break
 		}
-		fields, module, reference, ok := c.codecRecordResolved(base.Name, catalogContext)
+		fields, module, reference, ok := c.codecRecordResolved(base, catalogContext)
 		if !ok {
 			c.error(span, fmt.Sprintf("JSON codec type %s must be a record or JSON-compatible built-in type", typ))
 			return schema, false
 		}
 		key := module + "#" + base.Name
+		if !base.Declaration.Empty() {
+			key = base.Declaration.Key()
+		}
 		if visiting[key] {
 			c.error(span, fmt.Sprintf("recursive JSON codec record %s is not supported yet", base.Name))
 			return schema, false
@@ -4488,39 +4497,6 @@ func (c *Checker) codecRawEnumResolved(name string, catalogContext bool) (RawEnu
 	return RawEnum{}, "", nil, false
 }
 
-func (c *Checker) codecRecord(name string) ([]resolver.RecordField, string, *resolver.Binding, bool) {
-	return c.codecRecordResolved(name, false)
-}
-
-func (c *Checker) codecRecordResolved(name string, catalogContext bool) ([]resolver.RecordField, string, *resolver.Binding, bool) {
-	if catalogContext {
-		if binding, ok := c.resolution.CatalogType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
-			copy := binding
-			return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
-		}
-	}
-	if binding, ok := c.resolution.ImportedType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
-		copy := binding
-		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
-	}
-	if record := c.records[name]; record != nil {
-		fields := make([]resolver.RecordField, len(record.fields))
-		for index, field := range record.fields {
-			fields[index] = resolver.RecordField{Name: field.Name, JSONName: checkerRecordJSONName(field), Type: c.typeFromRef(field.Type)}
-		}
-		return fields, c.result.Program.ModulePath, nil, true
-	}
-	if binding, ok := c.resolution.InferredType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
-		copy := binding
-		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
-	}
-	if binding, ok := c.resolution.ContractType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
-		copy := binding
-		return append([]resolver.RecordField(nil), binding.Export.Fields...), binding.Import.RuntimePath(), &copy, true
-	}
-	return nil, "", nil, false
-}
-
 func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type) ([]resolver.RecordField, map[string]string, bool) {
 	identifier, identifierComponent := element.Component.(*ast.Identifier)
 	if !identifierComponent {
@@ -4539,7 +4515,7 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type
 			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", element.Name))
 			return nil, nil, false
 		}
-		fields, _, _, found := c.codecRecord(binding.Member.Parameters[0].Type.Name)
+		fields, _, _, found := c.codecRecord(binding.Member.Parameters[0].Type)
 		if !found {
 			c.error(element.Component.Span(), fmt.Sprintf("JSX component %s props must be a record", element.Name))
 			return nil, nil, false
@@ -4558,7 +4534,7 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type
 			c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", identifier.Name))
 			return nil, nil, false
 		}
-		fields, _, _, found := c.codecRecord(c.typeFromRef(method.Parameters[0].Type).Name)
+		fields, _, _, found := c.codecRecord(c.typeFromRef(method.Parameters[0].Type))
 		if !found {
 			c.error(method.Parameters[0].Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
 			return nil, nil, false
@@ -4580,7 +4556,7 @@ func (c *Checker) jsxComponentProps(element *ast.JSXElement, nodeType types.Type
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s must accept no parameters or one record parameter", identifier.Name))
 		return nil, nil, false
 	}
-	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Type.Name)
+	fields, _, _, found := c.codecRecord(binding.Export.Parameters[0].Type)
 	if !found {
 		c.error(identifier.Span(), fmt.Sprintf("JSX component %s props must be a record", identifier.Name))
 		return nil, nil, false
@@ -5673,6 +5649,9 @@ func (c *Checker) sameSignatureParameter(left, right callsignature.Parameter) bo
 
 func (c *Checker) localMember(receiver types.Type, memberName string, class bool, seen map[string]bool) (classMember, bool) {
 	receiver = c.canonicalType(receiver, c.activeTypeParameterSet())
+	if receiver.Declaration.Kind == identity.Record {
+		return classMember{}, false
+	}
 	if !receiver.Declaration.Empty() && receiver.Declaration.Module != c.result.Program.ModulePath {
 		return classMember{}, false
 	}
@@ -5770,29 +5749,20 @@ func (c *Checker) dataMember(receiver types.Type, name string) (types.Type, bool
 	if receiver.Kind != types.Named {
 		return types.Type{}, false, false, false
 	}
-	if record := c.records[receiver.Name]; record != nil {
-		if field := record.byName[name]; field != nil {
-			typ := substituteType(c.typeFromRef(field.Type), typeSubstitutions(record.typeParameters, receiver.Args))
-			return typ, true, false, true
+	if fields, _, binding, record := c.codecRecord(receiver); record {
+		parameters := []string{}
+		if local := c.localRecord(receiver); local != nil {
+			parameters = local.typeParameters
+		} else if binding != nil {
+			parameters = binding.Export.TypeParameters
 		}
-	}
-	if binding, imported := c.resolution.ImportedType(receiver.Name); imported && binding.Export != nil {
-		if binding.Export.Kind == resolver.RecordExport {
-			substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
-			for _, field := range binding.Export.Fields {
-				if field.Name == name {
-					return substituteType(field.Type, substitutions), true, false, true
-				}
-			}
-		}
-	}
-	if binding, inferred := c.resolution.InferredType(receiver.Name); inferred && binding.Export != nil && binding.Export.Kind == resolver.RecordExport {
-		substitutions := typeSubstitutions(binding.Export.TypeParameters, receiver.Args)
-		for _, field := range binding.Export.Fields {
+		substitutions := typeSubstitutions(parameters, receiver.Args)
+		for _, field := range fields {
 			if field.Name == name {
 				return substituteType(field.Type, substitutions), true, false, true
 			}
 		}
+		return types.Type{}, false, false, false
 	}
 	if member, found := c.localMember(receiver, name, false, map[string]bool{}); found && member.field != nil {
 		member = c.specializeLocalClassMember(receiver, member)
@@ -5928,7 +5898,7 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 		if _, exists := sc.lookup(node.Name); exists {
 			return false
 		}
-		if declared, exists := c.declaredTypes[node.Name]; exists {
+		if declared, exists := c.localTypeDeclaration(node.Name); exists {
 			if declared.kind == "type alias" {
 				_, enum := c.enumVariants(c.expandAlias(c.result.Expressions[node], map[string]bool{}))
 				return enum
@@ -5968,8 +5938,12 @@ func authoredOwnerAccess(expression ast.Expression, sc *scope) bool {
 	}
 }
 
-func (c *Checker) constructorType(name string) bool {
-	if declaration, exists := c.declaredTypes[name]; exists {
+func (c *Checker) constructorType(typ types.Type) bool {
+	if typ.Declaration.Kind == identity.Record {
+		return true
+	}
+	name := typ.Name
+	if declaration, exists := c.localTypeDeclaration(name); exists {
 		return declaration.kind == "class" || declaration.kind == "record" || declaration.kind == "newtype"
 	}
 	if c.declarationTypeVisible(name) {
@@ -6448,7 +6422,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if declaration := c.authoredModuleInScope(n.Name, sc); !declaration.Empty() {
 				typ.Declaration = declaration
 				c.result.ExpressionDeclarations[n] = declaration
-			} else if declaration := c.authoredTypeIdentities[n.Name]; !declaration.Empty() {
+			} else if declaration, found := c.authoredTypeIdentityInScope(n.Name, sc); found {
+				typ.Declaration = declaration
 				c.result.ExpressionDeclarations[n] = declaration
 			}
 			if c.declarationReferences == 0 && !c.declarationTypeVisible(n.Name) {
@@ -7149,7 +7124,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		if n.Name == "new" && !classAccess {
-			if c.constructorType(receiverType.Name) {
+			if c.constructorType(receiverType) {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, false)
 				break
 			}
@@ -7175,8 +7150,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			typ = c.checkInterfaceMember(n, receiverType, c.interfaceOwnerAccess(n.Receiver))
 			break
 		}
-		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
-			typ = substituteType(c.typeFromRef(record.byName[n.Name].Type), typeSubstitutions(record.typeParameters, receiverType.Args))
+		if record := c.localRecord(receiverType); record != nil && record.byName[n.Name] != nil {
+			typ = substituteType(c.recordFieldType(record, record.byName[n.Name]), typeSubstitutions(record.typeParameters, receiverType.Args))
 		} else if member, found := c.localMember(receiverType, n.Name, classAccess, map[string]bool{}); found {
 			member = c.specializeLocalEnumMember(receiverType, member)
 			member = c.specializeLocalClassMember(receiverType, member)
@@ -7228,7 +7203,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			} else if n.Name != "new" {
 				c.error(n.Span(), fmt.Sprintf("type %s has no member %s", receiverType.Name, n.Name))
 			}
-		} else if n.Name == "new" && classAccess && c.constructorType(receiverType.Name) {
+		} else if n.Name == "new" && classAccess && c.constructorType(receiverType) {
 			// Constructors are validated against their initialize method or record
 			// fields when the surrounding call expression is checked.
 		} else {
@@ -7238,6 +7213,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
 			} else if _, exists := c.declarationMember(receiverType.Name, n.Name, !classAccess, map[string]bool{}); exists {
 				c.memberKindMismatch(n.Span(), receiverType.Name, n.Name, classAccess)
+			} else if receiverType.Declaration.Kind == identity.Record {
+				c.error(n.Span(), fmt.Sprintf("record %s has no member %s", receiverType.Name, n.Name))
 			} else if c.enums[receiverType.Name] != nil {
 				c.error(n.Span(), fmt.Sprintf("enum %s has no member %s", receiverType.Name, n.Name))
 			} else if c.classes[receiverType.Name] != nil {
@@ -7560,8 +7537,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 						} else {
 							c.checkImportedArguments(n, binding, argumentTypes, sc)
 						}
-					} else if record := c.records[identifier.Name]; record != nil {
-						c.checkLocalRecordArguments(n, record, c.authoredTypeIdentities[identifier.Name])
+					} else if record := c.localRecord(constructorType); record != nil {
+						c.checkLocalRecordArguments(n, record)
 					} else if info := c.classes[identifier.Name]; info != nil {
 						c.checkArguments(n, info.methods["initialize"], argumentTypes)
 					}
@@ -7569,10 +7546,10 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					application := c.result.GenericApplications[receiver]
 					typ = application.ReturnType
 					substitutions := typeSubstitutions(application.TypeParameters, application.TypeArguments)
-					if record := c.records[application.Name]; record != nil {
-						fields := make([]resolver.RecordField, len(record.fields))
-						for index, field := range record.fields {
-							fields[index] = resolver.RecordField{Name: field.Name, Type: substituteType(c.typeFromRef(field.Type), substitutions), HasDefault: field.Default != nil}
+					if record := c.localRecord(constructorType); record != nil {
+						fields := c.localRecordFields(record)
+						for index := range fields {
+							fields[index].Type = substituteType(fields[index].Type, substitutions)
 						}
 						c.checkRecordArguments(n, record.name, fields, application.Declaration)
 					} else if info := c.classes[application.Name]; info != nil {
@@ -7619,9 +7596,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 							}
 						} else {
 							name, local := c.authoredTypeInScope(expressionTypeName(receiver), sc)
-							if record := c.records[name]; local && record != nil {
-								typ = types.FromName(name)
-								c.checkLocalRecordArguments(n, record, c.result.ExpressionDeclarations[receiver])
+							if record := c.localRecord(constructorType); record != nil {
+								typ = constructorType
+								c.checkLocalRecordArguments(n, record)
 							} else if info := c.classes[name]; local && info != nil {
 								typ = types.FromName(name)
 								c.checkArguments(n, info.methods["initialize"], argumentTypes)
@@ -7887,7 +7864,7 @@ func (c *Checker) declarationOwnerExpression(expression ast.Expression, sc *scop
 		if binding, exists := c.importedTypeAt(node.Name, node.Span()); exists {
 			return declarationExportOwnsMembers(binding)
 		}
-		if declared, exists := c.declaredTypes[node.Name]; exists {
+		if declared, exists := c.localTypeDeclaration(node.Name); exists {
 			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype" || declared.kind == "interface"
 		}
 		return c.declarationTypeVisible(node.Name)
@@ -8546,15 +8523,17 @@ func iterableElementType(typ types.Type) (types.Type, bool) {
 	return types.Type{}, false
 }
 
-func (c *Checker) checkLocalRecordArguments(call *ast.CallExpression, record *recordInfo, declaration identity.Declaration) {
-	fields := make([]resolver.RecordField, len(record.fields))
-	for index, field := range record.fields {
-		fields[index] = resolver.RecordField{Name: field.Name, Type: c.typeFromRef(field.Type), HasDefault: field.Default != nil}
+func (c *Checker) checkLocalRecordArguments(call *ast.CallExpression, record *recordInfo) {
+	if len(record.typeParameters) > 0 {
+		c.error(call.Span(), fmt.Sprintf("%s expects %d type argument(s), got 0", record.name, len(record.typeParameters)))
 	}
-	c.checkRecordArguments(call, record.name, fields, declaration)
+	c.checkRecordArguments(call, record.name, c.localRecordFields(record), record.declaration)
 }
 
 func (c *Checker) checkImportedRecordArguments(call *ast.CallExpression, binding resolver.Binding) {
+	if len(binding.Export.TypeParameters) > 0 {
+		c.error(call.Span(), fmt.Sprintf("%s expects %d type argument(s), got 0", binding.Export.Name, len(binding.Export.TypeParameters)))
+	}
 	c.checkRecordArguments(call, binding.Export.Name, binding.Export.Fields, binding.DeclarationIdentity())
 }
 
@@ -9153,27 +9132,31 @@ func (c *Checker) concurrencySafeType(typ types.Type, visiting map[string]bool) 
 	case types.Range:
 		return len(typ.Args) == 1 && c.concurrencySafeType(typ.Args[0], visiting)
 	case types.Named:
+		key := typ.Name
+		if !typ.Declaration.Empty() {
+			key = typ.Declaration.Key()
+		}
 		if target, binding, newtype := c.newtypeDefinitionForType(typ); newtype {
-			if visiting[typ.Name] {
+			if visiting[key] {
 				return false
 			}
-			visiting[typ.Name] = true
+			visiting[key] = true
 			parameters := c.declaredTypes[typ.Name].typeParameters
 			if binding != nil && binding.Export != nil {
 				parameters = binding.Export.TypeParameters
 			}
 			target = substituteType(target, typeSubstitutions(parameters, typ.Args))
 			safe := c.concurrencySafeType(target, visiting)
-			delete(visiting, typ.Name)
+			delete(visiting, key)
 			return safe
 		}
-		if visiting[typ.Name] {
+		if visiting[key] {
 			return false
 		}
-		if fields, _, binding, record := c.codecRecord(typ.Name); record {
-			visiting[typ.Name] = true
+		if fields, _, binding, record := c.codecRecord(typ); record {
+			visiting[key] = true
 			parameters := []string{}
-			if local := c.records[typ.Name]; local != nil {
+			if local := c.localRecord(typ); local != nil {
 				parameters = local.typeParameters
 			} else if binding != nil && binding.Export != nil {
 				parameters = binding.Export.TypeParameters
@@ -9181,24 +9164,24 @@ func (c *Checker) concurrencySafeType(typ types.Type, visiting map[string]bool) 
 			substitutions := typeSubstitutions(parameters, typ.Args)
 			for _, field := range fields {
 				if !c.concurrencySafeType(substituteType(field.Type, substitutions), visiting) {
-					delete(visiting, typ.Name)
+					delete(visiting, key)
 					return false
 				}
 			}
-			delete(visiting, typ.Name)
+			delete(visiting, key)
 			return true
 		}
 		if variants, enum := c.enumVariants(typ); enum {
-			visiting[typ.Name] = true
+			visiting[key] = true
 			for _, variant := range variants {
 				for _, field := range variant.Fields {
 					if !c.concurrencySafeType(field.Type, visiting) {
-						delete(visiting, typ.Name)
+						delete(visiting, key)
 						return false
 					}
 				}
 			}
-			delete(visiting, typ.Name)
+			delete(visiting, key)
 			return true
 		}
 	}
@@ -10007,7 +9990,19 @@ func (c *Checker) methodReturnType(method *ast.MethodStatement) types.Type {
 	if method == nil || method.ReturnType.Empty() {
 		return types.Type{Kind: types.Void, Name: "Void"}
 	}
-	return c.typeFromRef(method.ReturnType)
+	owner := c.result.MethodDispatches[method].Owner
+	popOwner := c.pushActiveTypeOwner(owner.Name)
+	defer popOwner()
+	parameters := map[string]bool{}
+	if declaration, found := c.localTypeDeclaration(owner.Name); found {
+		for _, name := range declaration.typeParameters {
+			parameters[name] = true
+		}
+	}
+	for _, parameter := range method.TypeParameters {
+		parameters[parameter.Name] = true
+	}
+	return c.typeFromRefWithParameters(method.ReturnType, parameters)
 }
 
 func (c *Checker) checkArguments(call *ast.CallExpression, method *ast.MethodStatement, actual []types.Type) {

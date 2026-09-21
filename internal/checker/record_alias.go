@@ -18,15 +18,9 @@ func (c *Checker) aliasRecordConstruction(typ types.Type) (RecordConstruction, b
 	var fields []resolver.RecordField
 	var parameters []string
 	var targetBinding *resolver.Binding
-	name := target.Name
-	if target.Declaration.Name != "" {
-		name = target.Declaration.LeafName()
-	}
-	if record := c.records[name]; record != nil && (target.Declaration.Empty() || target.Declaration == c.authoredTypeIdentities[name]) {
+	if record := c.localRecord(target); record != nil {
 		parameters = record.typeParameters
-		for _, field := range record.fields {
-			fields = append(fields, resolver.RecordField{Name: field.Name, Type: c.typeFromRef(field.Type), HasDefault: field.Default != nil})
-		}
+		fields = c.localRecordFields(record)
 	} else {
 		binding, found := c.resolution.ImportedTypeIdentity(target.Declaration)
 		if !found {
