@@ -77,7 +77,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		if alias == "" {
 			alias = "__trb_errors"
 		}
-		value := g.goType(types.FromName("NumberParseError")) + "{Kind: " + alias + "." + goConstantIdentifier("NumberParseErrorKind", kind) + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
+		_, _, errorType := filesystemResultType()
+		value := errorType + "{Kind: " + alias + "." + goConstantIdentifier("NumberParseErrorKind", kind) + ", Input: " + input + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	hexDecodeError := func(kind, input, index, message string) string {
@@ -108,15 +109,18 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return resultError(value)
 	}
 	indexLookupError := func(index, size, message string) string {
-		value := g.goType(types.FromName("IndexLookupError")) + "{Index: " + index + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
+		_, _, errorType := filesystemResultType()
+		value := errorType + "{Index: " + index + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	sliceRangeError := func(start, end, exclusive, size, message string) string {
-		value := g.goType(types.FromName("SliceRangeError")) + "{Start: " + start + ", Finish: " + end + ", Exclusive: " + exclusive + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
+		_, _, errorType := filesystemResultType()
+		value := errorType + "{Start: " + start + ", Finish: " + end + ", Exclusive: " + exclusive + ", Size: " + size + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 	keyLookupError := func(key, message string) string {
-		value := g.goType(types.FromName("KeyLookupError")) + "{Key: " + key + ", Message: " + strconv.Quote(message) + "}"
+		_, _, errorType := filesystemResultType()
+		value := errorType + "{Key: " + key + ", Message: " + strconv.Quote(message) + "}"
 		return resultError(value)
 	}
 
