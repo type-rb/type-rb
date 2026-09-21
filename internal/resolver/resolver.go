@@ -2316,6 +2316,9 @@ func qualifyNestedExport(exported Export, owner string, owned map[string]string)
 	exported.AliasTarget = qualifyOwnedType(exported.AliasTarget, owned)
 	exported.NewtypeTarget = qualifyOwnedType(exported.NewtypeTarget, owned)
 	exported.EnumRawType = qualifyOwnedType(exported.EnumRawType, owned)
+	if exported.Superclass != "" {
+		exported.Superclass = qualifyOwnedType(types.FromName(exported.Superclass), owned).Name
+	}
 	for index := range exported.Interfaces {
 		exported.Interfaces[index] = qualifyOwnedType(exported.Interfaces[index], owned)
 	}

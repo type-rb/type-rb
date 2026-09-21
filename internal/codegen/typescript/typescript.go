@@ -793,7 +793,11 @@ func (g *generator) statement(statement ir.Statement) {
 		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
 		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
-			header += " extends " + g.expr(n.Superclass)
+			superclass := g.expr(n.Superclass)
+			if typ := n.Superclass.ExprType(); typ.Declaration.Kind == identity.Class {
+				superclass = g.tsType(typ)
+			}
+			header += " extends " + superclass
 		}
 		if len(n.Implements) > 0 {
 			implemented := make([]string, len(n.Implements))
@@ -1837,7 +1841,7 @@ func (g *generator) identifierName(identifier *ir.Identifier) string {
 		if owned := g.moduleNames.constants[identity.Qualify(identifier.Owner, identifier.Name)]; owned != "" {
 			return owned
 		}
-		return strings.ReplaceAll(identifier.Owner, "::", ".") + "." + tsCallableName(identifier.Name)
+		return g.runtimeName(identifier.Owner) + "." + tsCallableName(identifier.Name)
 	}
 	if identifier.Reference != nil && identifier.Reference.ExportKind == "function" {
 		return tsCallableName(identifier.Name)

@@ -1223,7 +1223,9 @@ func (g *generator) class(class *ir.Class) {
 	g.indent++
 	if class.Superclass != nil {
 		superclass := g.expr(class.Superclass)
-		if identifier, ok := class.Superclass.(*ir.Identifier); ok {
+		if typ := class.Superclass.ExprType(); typ.Declaration.Kind == identity.Class {
+			superclass = strings.TrimPrefix(g.goType(typ), "*")
+		} else if identifier, ok := class.Superclass.(*ir.Identifier); ok {
 			superclass = goIdentifier(identifier.Name, true)
 			if alias := g.typeAliases[identifier.Name]; alias != "" {
 				superclass = alias + "." + goIdentifier(identifier.Name, true)

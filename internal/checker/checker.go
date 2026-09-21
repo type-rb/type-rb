@@ -5427,6 +5427,10 @@ func (c *Checker) checkSuperclass(class *ast.ClassStatement) {
 		c.error(class.Superclass.Span(), fmt.Sprintf("%s cannot be used as a superclass because it is nonconstructible", name))
 		return
 	}
+	if superclassType.Declaration.Kind == identity.Class {
+		c.result.Expressions[class.Superclass] = superclassType
+		c.result.ExpressionDeclarations[class.Superclass] = superclassType.Declaration
+	}
 	if c.classes[name] != nil {
 		return
 	}
