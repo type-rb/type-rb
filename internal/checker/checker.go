@@ -6206,7 +6206,7 @@ func (c *Checker) authoredTypeIdentityInScope(name string, sc *scope) (identity.
 			current = current[:separator]
 		}
 	}
-	if declaration := c.uniqueAuthoredTypes[name]; declaration.Kind == identity.Record {
+	if declaration := c.uniqueNestedRecord(name); !declaration.Empty() {
 		return declaration, true
 	}
 	return identity.Declaration{}, false
@@ -10236,7 +10236,7 @@ func (c *Checker) authoredTypeIdentity(name, owner string) identity.Declaration 
 			current = current[:separator]
 		}
 	}
-	if declaration := c.uniqueAuthoredTypes[name]; declaration.Kind == identity.Record {
+	if declaration := c.uniqueNestedRecord(name); !declaration.Empty() {
 		return declaration
 	}
 	return identity.Declaration{}

@@ -7,6 +7,17 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
+func (c *Checker) uniqueNestedRecord(name string) identity.Declaration {
+	// An explicitly imported name takes precedence over the nested shorthand.
+	if _, imported := c.resolution.Symbols[name]; imported {
+		return identity.Declaration{}
+	}
+	if declaration := c.uniqueAuthoredTypes[name]; declaration.Kind == identity.Record {
+		return declaration
+	}
+	return identity.Declaration{}
+}
+
 func (c *Checker) localRecord(typ types.Type) *recordInfo {
 	typ = c.canonicalType(typ, c.activeTypeParameterSet())
 	if typ.Declaration.Kind != identity.Record || typ.Declaration.Module != c.result.Program.ModulePath {
