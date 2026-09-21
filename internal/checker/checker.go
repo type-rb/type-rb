@@ -5752,6 +5752,22 @@ func (c *Checker) specializeLocalClassMember(receiver types.Type, member classMe
 	return member
 }
 
+// Union data-member lookup must preserve the same lexical visibility rules as
+// ordinary member lookup, even though it completes before method resolution.
+func (c *Checker) checkMemberVisibility(member *ast.MemberExpression, sc *scope) {
+	if !strings.HasPrefix(member.Name, "_") {
+		return
+	}
+	self, identifier := member.Receiver.(*ast.Identifier)
+	internalModule := false
+	if owner := c.result.ExpressionDeclarations[member.Receiver]; owner.Kind == identity.Module {
+		internalModule = owner.Module == c.result.Program.ModulePath && owner.Name == scopeConstantOwner(sc)
+	}
+	if !internalModule && (!identifier || self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
+		c.error(member.Span(), fmt.Sprintf("private member %s cannot be accessed externally", member.Name))
+	}
+}
+
 // dataMember resolves storage-backed fields without selecting methods. It is
 // used for safe common-member access across a union and for readonly
 // discriminant analysis.
@@ -6935,6 +6951,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			dataReceiverType.Nullable = false
 		}
 		if dataReceiverType.Kind == types.Union && scalarType(dataReceiverType).Kind == types.Union && !n.Namespace && !n.Safe {
+			c.checkMemberVisibility(n, sc)
 			memberType, alternatives, classField, found := c.unionDataMember(dataReceiverType, n.Name)
 			if !found {
 				c.error(n.Span(), fmt.Sprintf("union type %s has no common data member %s", receiverType, n.Name))
@@ -7073,16 +7090,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 			break
 		}
-		if strings.HasPrefix(n.Name, "_") {
-			self, ok := n.Receiver.(*ast.Identifier)
-			internalModule := false
-			if owner := c.result.ExpressionDeclarations[n.Receiver]; owner.Kind == identity.Module {
-				internalModule = owner.Module == c.result.Program.ModulePath && owner.Name == scopeConstantOwner(sc)
-			}
-			if !internalModule && (!ok || self.Name != "self" && !strings.HasPrefix(self.Name, "@")) {
-				c.error(n.Span(), fmt.Sprintf("private member %s cannot be accessed externally", n.Name))
-			}
-		}
+		c.checkMemberVisibility(n, sc)
 		if classAccess || authoredOwnerAccess(n.Receiver, sc) {
 			if method := c.authoredOwnedMethodInScope(expressionTypeName(n.Receiver), n.Name, sc); method != nil {
 				typ = c.methodReturnType(method)
