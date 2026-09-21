@@ -154,6 +154,31 @@ end
 `, "", "has no member hidden")
 }
 
+func TestImportedGenericRecordIgnoresUnrelatedLocalTypes(t *testing.T) {
+	for _, declaration := range []struct{ name, source string }{
+		{"class", "class Entry\nend\n"},
+		{"enum", "enum Entry\nReady\nend\n"},
+		{"alias", "alias Entry = String\n"},
+	} {
+		t.Run(declaration.name, func(t *testing.T) {
+			runPortableExecutionFiles(t, map[string]string{
+				"models.trb": `module Models
+record Entry<T>
+value: T
+copy: T = value
+end
+end
+`,
+				"main.trb": `import { Models } from models
+` + declaration.source + `def main()
+puts(Models::Entry<String>.new(value: "record").copy)
+end
+`,
+			}, "record\n", "")
+		})
+	}
+}
+
 func TestNamespacedRecordContractsSupportNestedValues(t *testing.T) {
 	runPortableExecutionCase(t, `import trb/std/json
 module Inner

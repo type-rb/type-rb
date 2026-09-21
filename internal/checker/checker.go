@@ -559,6 +559,7 @@ type Checker struct {
 	authoredTypes               map[string]string
 	authoredEnumOwners          map[string]string
 	authoredTypeIdentities      map[string]identity.Declaration
+	uniqueAuthoredTypes         map[string]identity.Declaration
 	authoredOwnerIdentities     map[string]identity.Declaration
 	authoredConstants           map[identity.Declaration]types.Type
 	authoredModuleScopes        map[string]*scope
@@ -952,6 +953,7 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 		authoredTypes:              map[string]string{},
 		authoredEnumOwners:         map[string]string{},
 		authoredTypeIdentities:     map[string]identity.Declaration{},
+		uniqueAuthoredTypes:        map[string]identity.Declaration{},
 		authoredOwnerIdentities:    map[string]identity.Declaration{},
 		authoredConstants:          map[identity.Declaration]types.Type{},
 		authoredModuleScopes:       map[string]*scope{},
@@ -1058,6 +1060,13 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 
 func (c *Checker) registerAuthoredType(statement ast.Statement, leaf, qualified string, kind identity.Kind) {
 	declaration := identity.Declaration{Module: c.result.Program.ModulePath, Name: qualified, Kind: kind}
+	// Preserve the existing unqualified shorthand for a unique nested record.
+	// Once multiple declarations share a leaf, only lexical lookup may select it.
+	if previous, exists := c.uniqueAuthoredTypes[leaf]; !exists {
+		c.uniqueAuthoredTypes[leaf] = declaration
+	} else if previous != declaration {
+		c.uniqueAuthoredTypes[leaf] = identity.Declaration{}
+	}
 	c.result.Declarations[statement] = declaration
 	c.authoredOwnerIdentities[qualified] = declaration
 	if previous, exists := c.authoredTypeIdentities[leaf]; !exists || previous.Name == qualified || leaf == qualified {
@@ -3921,6 +3930,7 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression, sc *sco
 			application.ReturnType = declared.Return
 		}
 	}
+	_, importedDeclaration := c.result.References[node.Receiver]
 	if application.Kind != "" {
 		// A generic member application has already been resolved from its
 		// receiver. Continue below to validate and substitute method arguments.
@@ -3930,13 +3940,13 @@ func (c *Checker) resolveGenericApplication(node *ast.GenericExpression, sc *sco
 	} else if info := c.classes[name]; info != nil && (c.result.ExpressionDeclarations[node.Receiver].Empty() || info.declaration == c.result.ExpressionDeclarations[node.Receiver]) {
 		application.Kind = "class"
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
-	} else if info := c.enums[name]; info != nil {
+	} else if info := c.enums[name]; info != nil && !importedDeclaration {
 		application.Kind = "enum"
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
-	} else if info := c.aliases[name]; info != nil {
+	} else if info := c.aliases[name]; info != nil && !importedDeclaration {
 		application.Kind = "type_alias"
 		application.TypeParameters = append([]string(nil), info.typeParameters...)
-	} else if method := c.functions[name]; method != nil {
+	} else if method := c.functions[name]; method != nil && !importedDeclaration {
 		application.Kind = "function"
 		application.Source = true
 		for _, parameter := range method.TypeParameters {
@@ -6196,6 +6206,9 @@ func (c *Checker) authoredTypeIdentityInScope(name string, sc *scope) (identity.
 			current = current[:separator]
 		}
 	}
+	if declaration := c.uniqueAuthoredTypes[name]; declaration.Kind == identity.Record {
+		return declaration, true
+	}
 	return identity.Declaration{}, false
 }
 
@@ -6425,6 +6438,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			} else if declaration, found := c.authoredTypeIdentityInScope(n.Name, sc); found {
 				typ.Declaration = declaration
 				c.result.ExpressionDeclarations[n] = declaration
+			} else if declaration, found := c.uniqueAuthoredTypes[n.Name]; found && declaration.Empty() {
+				c.error(n.Span(), fmt.Sprintf("type %s is ambiguous; use a namespace-qualified name", n.Name))
+				typ = invalidType()
 			}
 			if c.declarationReferences == 0 && !c.declarationTypeVisible(n.Name) {
 				if declared, exists := c.declarations().Type(n.Name); exists && declared.SourceModule != "" {
@@ -7552,7 +7568,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 							fields[index].Type = substituteType(fields[index].Type, substitutions)
 						}
 						c.checkRecordArguments(n, record.name, fields, application.Declaration)
-					} else if info := c.classes[application.Name]; info != nil {
+					} else if info := c.classes[application.Name]; info != nil && (constructorType.Declaration.Empty() || info.declaration == constructorType.Declaration) {
 						if initialize := info.methods["initialize"]; initialize != nil {
 							signature := c.signatureFromMethod(initialize)
 							for index := range signature.parameters {
@@ -10219,6 +10235,9 @@ func (c *Checker) authoredTypeIdentity(name, owner string) identity.Declaration 
 		} else {
 			current = current[:separator]
 		}
+	}
+	if declaration := c.uniqueAuthoredTypes[name]; declaration.Kind == identity.Record {
+		return declaration
 	}
 	return identity.Declaration{}
 }

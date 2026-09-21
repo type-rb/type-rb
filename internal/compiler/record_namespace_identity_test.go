@@ -27,6 +27,7 @@ end
 		{"non-generic record", "Second::Entry<Integer>.new(value: 2)", "not a generic declaration"},
 		{"readonly field", "mut value := Second::Entry.new(value: \"kept\")\nvalue.value = \"changed\"", "field value is readonly"},
 		{"nominal assignment", "value: Second::Entry := First::Entry<String>.new(value: \"kept\")\nputs(value.value)", "cannot assign"},
+		{"ambiguous constructor", "Entry.new(value: 2)", "ambiguous"},
 	} {
 		for _, mode := range []string{"go", "ruby", "typescript"} {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
