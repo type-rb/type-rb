@@ -481,6 +481,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 	case *ir.Return:
 		if g.inConstructor && n.Value == nil {
+			g.line("return self")
 			return
 		}
 		if n.Value == nil {
@@ -1592,6 +1593,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		child.recordSources = false
 		child.indent = g.indent + 1
 		child.returnType = n.ReturnType
+		child.inConstructor = false
 		child.statements(n.Body)
 		g.absorbRuntimeRequirements(&child)
 		return header + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}"

@@ -552,6 +552,7 @@ type Checker struct {
 	currentMethod               *ast.MethodStatement
 	currentMethodScopes         []*scope
 	currentFieldClass           string
+	constructorBlockBoundaries  map[*ast.CallExpression]bool
 	concurrentMapDepth          int
 	authoredMemberMethods       map[*ast.MemberExpression]*ast.MethodStatement
 	concurrentInterfaceMembers  map[*ast.MemberExpression]bool
@@ -6241,53 +6242,6 @@ func (c *Checker) authoredOwnedMethodInScope(owner, name string, sc *scope) *ast
 	return nil
 }
 
-func (c *Checker) checkFieldInitialization(class *ast.ClassStatement) {
-	if c.current == nil || len(c.current.fields) == 0 {
-		return
-	}
-	initialized := map[string]bool{}
-	for name, field := range c.current.fields {
-		initialized[name] = field.Value != nil
-	}
-	initialize := c.current.methods["initialize"]
-	if initialize != nil {
-		walkAssignments(initialize.Body, func(assignment *ast.AssignmentStatement) {
-			if identifier, ok := assignment.Target.(*ast.Identifier); ok && strings.HasPrefix(identifier.Name, "@") {
-				initialized[identifier.Name] = true
-			}
-		})
-	}
-	for name, ok := range initialized {
-		if !ok {
-			c.error(c.current.fields[name].Span(), fmt.Sprintf("field %s must be initialized in initialize() or at its declaration", name))
-		}
-	}
-}
-
-func walkAssignments(statements []ast.Statement, visit func(*ast.AssignmentStatement)) {
-	for _, statement := range statements {
-		switch n := statement.(type) {
-		case *ast.AssignmentStatement:
-			visit(n)
-		case *ast.IfStatement:
-			walkAssignments(n.Then, visit)
-			for _, branch := range n.ElseIf {
-				walkAssignments(branch.Body, visit)
-			}
-			walkAssignments(n.Else, visit)
-		case *ast.CaseStatement:
-			for _, branch := range n.Branches {
-				walkAssignments(branch.Body, visit)
-			}
-			walkAssignments(n.Else, visit)
-		case *ast.ExpressionStatement:
-			if iteration, ok := n.Expression.(*ast.IterationExpression); ok && iteration.Block != nil {
-				walkAssignments(iteration.Block.Body, visit)
-			}
-		}
-	}
-}
-
 func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Type {
 	if expression == nil {
 		return types.Type{Kind: types.Void, Name: "Void"}
@@ -9437,6 +9391,10 @@ func (c *Checker) checkDeclarationBlock(call *ast.CallExpression, member declara
 		c.error(call.Span(), fmt.Sprintf("%s() requires a block", member.Name))
 		return types.Type{}, false
 	}
+	if c.constructorBlockBoundaries == nil {
+		c.constructorBlockBoundaries = map[*ast.CallExpression]bool{}
+	}
+	c.constructorBlockBoundaries[call] = member.Block.ControlBoundary || member.Block.Return.Name != ""
 	if member.Block.Structured && len(c.returns) == 0 {
 		c.error(call.Span(), fmt.Sprintf("structured block %s() is only valid inside a function or method", member.Name))
 	}

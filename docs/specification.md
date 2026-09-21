@@ -692,6 +692,16 @@ receivers, failure order and examples.
 - Private instance variables use `@_name`.
 - Zero-value initialization is not adopted initially.
   - Therefore, initialization must be explicit (e.g., in `initialize`).
+  - Every normally completing constructor path, including an early `return`,
+    must initialize every declared field. Branches contribute only assignments
+    made on all continuing paths; a loop or iteration body alone does not prove
+    initialization because it may execute zero times.
+  - A field cannot be read before it is initialized. Compound assignment reads
+    its previous value and therefore cannot serve as the first initialization.
+    Declaration defaults are checked in field order before the initializer body.
+  - Before all fields are initialized, code may read an already initialized
+    field directly, but may not pass, alias, capture or call an instance method
+    on `self`. A deferred function body does not initialize the outer receiver.
 
 ### 3.5 Assignment Rules
 
