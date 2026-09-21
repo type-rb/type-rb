@@ -1865,6 +1865,24 @@ func (g *generator) expr(expression ir.Expression) string {
 		parts = g.sourceCallArguments(n.Arguments, n.CallSignature, parts)
 		parts = g.executionArguments(n, parts)
 		args = strings.Join(parts, ", ")
+		var dispatch identity.Dispatch
+		switch callee := n.Callee.(type) {
+		case *ir.Member:
+			dispatch = callee.Dispatch
+		case *ir.Identifier:
+			if !callee.Lexical {
+				dispatch = callee.Dispatch
+			}
+		}
+		if dispatch.Class && dispatch.Owner.Kind == identity.Class {
+			// Class methods are free functions in Go. Use the checked declaring
+			// owner, including when the receiver names an imported subclass.
+			name := goIdentifier(dispatch.Owner.Name, true) + goMethodName(dispatch.Name)
+			if alias := g.declarationAlias(dispatch.Owner); alias != "" {
+				name = alias + "." + name
+			}
+			return name + "(" + args + ")"
+		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if declaration := ir.ExpressionDeclaration(member.Receiver); declaration.Kind == identity.Class {
 				name := "New" + goIdentifier(declaration.Name, true)

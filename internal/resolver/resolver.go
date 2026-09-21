@@ -130,6 +130,8 @@ type EnumVariant struct {
 }
 
 type Member struct {
+	// DeclaringOwner survives copying a class method into an inherited contract.
+	DeclaringOwner    identity.Declaration
 	Name              string
 	Kind              ExportKind
 	Type              types.Type
@@ -217,8 +219,12 @@ func (b Binding) DispatchIdentity() identity.Dispatch {
 	if b.Member == nil {
 		return identity.Dispatch{}
 	}
+	owner := b.DeclarationIdentity()
+	if !b.Member.DeclaringOwner.Empty() {
+		owner = b.Member.DeclaringOwner
+	}
 	return identity.Dispatch{
-		Owner: b.DeclarationIdentity(),
+		Owner: owner,
 		Name:  b.Member.Name,
 		Class: b.Member.Class,
 	}
@@ -366,6 +372,14 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 	for _, modulePath := range modulePaths {
 		module := catalog.Modules[modulePath]
 		for name, exported := range flattenExports(module.Exports) {
+			if exported.Kind == ClassExport {
+				for memberName, member := range exported.Members {
+					if member.Class && member.Kind == FunctionExport {
+						member.DeclaringOwner = identity.Declaration{Module: module.Path, Name: name, Kind: identity.Class}
+						exported.Members[memberName] = member
+					}
+				}
+			}
 			if exported.Kind != ClassExport && exported.Kind != RecordExport && exported.Kind != EnumExport && exported.Kind != TypeAliasExport && exported.Kind != NewtypeExport && exported.Kind != InterfaceExport {
 				continue
 			}
