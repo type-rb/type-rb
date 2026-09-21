@@ -36,7 +36,7 @@ func (g *generator) jobsPerformLater(call *ir.Call, arguments []string) string {
 	if g.execution != nil && g.execution.Calls[call] {
 		arguments = append([]string{"__trbScope"}, arguments...)
 	}
-	return jobName + "." + tsMethodName(method) + "(" + strings.Join(arguments, ", ") + ")"
+	return jobName + "." + tsCallableName(method) + "(" + strings.Join(arguments, ", ") + ")"
 }
 
 func (g *generator) jobsAdapterEnqueue(name string, call *ir.Call, arguments []string) string {
@@ -90,7 +90,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		g.indent++
 		enqueueResult := types.Type{Kind: types.Named, Name: "Result", Args: []types.Type{types.FromName("JobReference"), types.FromName("EnqueueError")}}
 		emit := func(method string, methodParameters, methodArguments []string) {
-			g.line("export async function " + tsMethodName(method) + "(__trbScope: AbortSignal | undefined" + tsJobsParameters(methodParameters) + "): Promise<" + g.tsType(enqueueResult) + "> {")
+			g.line("export async function " + tsCallableName(method) + "(__trbScope: AbortSignal | undefined" + tsJobsParameters(methodParameters) + "): Promise<" + g.tsType(enqueueResult) + "> {")
 			g.indent++
 			methodArguments = append([]string{"__trbScope"}, methodArguments...)
 			g.line("return await " + jobs.EnqueueHelperName(job.Name, method) + "(" + strings.Join(methodArguments, ", ") + ");")
