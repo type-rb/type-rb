@@ -201,7 +201,7 @@ func (e *Evaluator) webParameterBinding(receiver Value, resultType types.Type, s
 		}
 	}
 
-	recordDefinition, ok := e.definitions[symbolKey(schema.Module, schema.Type.Name)].(*recordDefinition)
+	recordDefinition, ok := e.definitions[symbolKey(schema.Module, runtimeDefinitionName(schema.Type.Declaration, schema.Type.Name))].(*recordDefinition)
 	if !ok {
 		return Value{}, fmt.Errorf("record %s is not loaded", schema.Type.Name)
 	}

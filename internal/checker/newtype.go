@@ -168,7 +168,7 @@ func (c *Checker) closedInboundPath(typ types.Type, visiting map[string]bool) st
 func (c *Checker) closedRepresentationEdge(typ types.Type, inbound bool, visiting map[string]bool) string {
 	typ = c.expandAlias(typ, map[string]bool{})
 	typ.Nullable = false
-	key := fmt.Sprintf("%t:%s#%s", inbound, typ.Declaration.Module, typ.String())
+	key := fmt.Sprintf("%t:%s#%s", inbound, typ.Declaration.Key(), typ.String())
 	if visiting[key] {
 		return ""
 	}
@@ -225,14 +225,14 @@ func (c *Checker) newtypeRecordFields(typ types.Type) ([]resolver.RecordField, b
 		}
 		fields, parameters = binding.Export.Fields, binding.Export.TypeParameters
 	} else {
-		resolved, _, reference, ok := c.codecRecordResolved(typ.Name, true)
+		resolved, _, reference, ok := c.codecRecordResolved(typ, true)
 		if !ok {
 			return nil, false
 		}
 		fields = resolved
 		if reference != nil {
 			parameters = reference.Export.TypeParameters
-		} else if record := c.records[typ.Name]; record != nil {
+		} else if record := c.localRecord(typ); record != nil {
 			parameters = record.typeParameters
 		}
 	}

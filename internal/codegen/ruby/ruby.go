@@ -1696,11 +1696,11 @@ func rubyJSONStringify(argument string) string {
 	return "->(value) { begin; require \"json\"; " + convert + "; outcome = catch(:__trb_json_error) { [:ok, convert.call(value, \"\")] }; if outcome[0] == :error; Result::Err.new(outcome[1]); else; Result::Ok.new(JSON.generate(outcome[1])); end; rescue StandardError => error; Result::Err.new(" + encodeError + "); end }.call(" + argument + ")"
 }
 
-func rubyJSONDecode(call *ir.Call, argument string) string {
+func (g *generator) rubyJSONDecode(call *ir.Call, argument string) string {
 	if call.Codec == nil {
 		return "nil"
 	}
-	builder := &rubyJSONCodecBuilder{}
+	builder := &rubyJSONCodecBuilder{generator: g}
 	decoder := builder.decoder(call.Codec)
 	parsed := rubyJSONParse(argument, false)
 	errorValue := "JSON::Error.new(kind: JSON::ErrorKind::Decode, message: message, path: path, line: nil, column: nil)"
@@ -1717,8 +1717,9 @@ func rubyJSONEncode(call *ir.Call, argument string) string {
 }
 
 type rubyJSONCodecBuilder struct {
-	source strings.Builder
-	next   int
+	generator *generator
+	source    strings.Builder
+	next      int
 }
 
 func (b *rubyJSONCodecBuilder) name(prefix string) string {
@@ -1784,7 +1785,12 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 			}
 			parts = append(parts, field.Name+": "+variable)
 		}
-		fields.WriteString(schema.Type.Name + ".new(" + strings.Join(parts, ", ") + ")")
+		owner := schema.Type.Name
+		if !schema.Type.Declaration.Empty() {
+			owner = "::" + schema.Type.Declaration.Name
+		}
+		owner = b.generator.declarationName(owner, schema.Type.Declaration)
+		fields.WriteString(owner + ".new(" + strings.Join(parts, ", ") + ")")
 		body = fields.String()
 	}
 	b.source.WriteString(name + " = ->(value, path) { " + body + " }; ")

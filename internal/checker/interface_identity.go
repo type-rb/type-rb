@@ -50,6 +50,9 @@ func (c *Checker) localTypeDeclaration(name string) (typeDeclaration, bool) {
 		if local, ok := c.declaredTypes[declaration.Name]; ok && local.identity == declaration {
 			return local, true
 		}
+		if local, ok := c.declaredTypes[declaration.LeafName()]; ok && local.identity == declaration {
+			return local, true
+		}
 	}
 	local, ok := c.declaredTypes[name]
 	return local, ok && (declaration.Empty() || local.identity == declaration)

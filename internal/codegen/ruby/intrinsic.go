@@ -135,11 +135,11 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.internal.json.stringify":
 		return rubyJSONStringify(arguments[0])
 	case "trb.internal.json.decode":
-		return rubyJSONDecode(call, arguments[0])
+		return g.rubyJSONDecode(call, arguments[0])
 	case "trb.internal.json.encode":
 		return rubyJSONEncode(call, arguments[0])
 	case "trb.web.request_json":
-		return rubyWebRequestJSON(call, arguments[0])
+		return g.rubyWebRequestJSON(call, arguments[0])
 	case "trb.web.request_query":
 		return rubyWebParameterBinding(call, arguments[0], "query")
 	case "trb.web.context_params":
@@ -480,8 +480,8 @@ func rubyWebGzip(value string) string {
 	return "->(value) { require \"zlib\"; Zlib.gzip(value) }.call(" + value + ")"
 }
 
-func rubyWebRequestJSON(call *ir.Call, request string) string {
-	decoded := rubyJSONDecode(call, "source")
+func (g *generator) rubyWebRequestJSON(call *ir.Call, request string) string {
+	decoded := g.rubyJSONDecode(call, "source")
 	return "-> { request_value = " + request + "; content_types = request_value.__trb_field_headers.entries.each_with_object([]) { |header, result| result << header.value if header.name.downcase == \"content-type\" }; if content_types.empty?; Result::Err.new(RequestError::MissingContentType); elsif content_types.length != 1; Result::Err.new(RequestError::DuplicateContentType); else; media_type = content_types.first.split(\";\", 2).first.strip.downcase; if media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\")); Result::Err.new(RequestError::UnsupportedContentType.new(content_types.first)); else; source = request_value.__trb_field_body.bytes.dup.force_encoding(Encoding::UTF_8); if !source.valid_encoding?; Result::Err.new(RequestError::InvalidUtf8); else; decoded = " + decoded + "; if decoded.is_a?(Result::Err); Result::Err.new(RequestError::InvalidJson.new(decoded.error)); else; decoded; end; end; end; end }.call"
 }
 

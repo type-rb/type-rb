@@ -2944,7 +2944,7 @@ func (e *Evaluator) decodeJSONCodecValue(schema *ir.CodecSchema, value Value, pa
 		if variant.Name != "Object" {
 			return mismatch(schema.Type.Name)
 		}
-		definition, ok := e.definitions[symbolKey(schema.Module, schema.Type.Name)].(*recordDefinition)
+		definition, ok := e.definitions[symbolKey(schema.Module, runtimeDefinitionName(schema.Type.Declaration, schema.Type.Name))].(*recordDefinition)
 		if !ok {
 			return Value{}, &jsonConversionError{path: path, message: "record " + schema.Type.Name + " is not loaded"}
 		}

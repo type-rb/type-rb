@@ -5,6 +5,43 @@ import (
 	"testing"
 )
 
+func TestStandaloneRawEnumConversionChecksStandardErrorFields(t *testing.T) {
+	const source = `import trb/std/result
+record EnumValueError
+flag: Boolean
+end
+enum Status
+Ready = "ready"
+end
+def main()
+case Status.from_raw("missing")
+when Result::Ok(status)
+puts(status.raw_value())
+when Result::Err(error)
+%s
+end
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, tc := range []struct{ name, body, message string }{
+			{"message", "value: String := error.message\nputs(value)", ""},
+			{"wrong field type", "value: Boolean := error.message\nputs(value)", "cannot assign"},
+			{"shadow field", "puts(error.flag)", "has no member flag"},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				_, err := Compile("raw_enum.trb", []byte(strings.Replace(source, "%s", tc.body, 1)), mode)
+				if tc.message == "" {
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), tc.message) {
+					t.Fatalf("got %v, want %q", err, tc.message)
+				}
+			})
+		}
+	}
+}
+
 func TestRawEnumConversionKeepsStandardErrorIdentity(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		for _, tc := range []struct {
