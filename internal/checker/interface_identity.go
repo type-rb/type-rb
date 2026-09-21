@@ -24,8 +24,24 @@ func (c *Checker) checkInterfaceMember(expression *ast.MemberExpression, receive
 		c.recordReference(expression, binding)
 		return c.resolvedBindingType(binding)
 	}
+	if binding, found := c.resolvedInterface(receiver); found {
+		if binding.Export.UnsupportedFields[expression.Name] != "" {
+			c.error(expression.Span(), fmt.Sprintf("member %s from native type %s cannot be represented safely: %s; use a TypeRB provider for this package", expression.Name, receiver.Name, binding.Export.UnsupportedFields[expression.Name]))
+		} else {
+			c.error(expression.Span(), fmt.Sprintf("type %s imported from %s has no member %s", receiver.Name, binding.Import.Path, expression.Name))
+		}
+		return invalidType()
+	}
 	c.error(expression.Span(), fmt.Sprintf("interface %s has no member %s", receiver, expression.Name))
 	return invalidType()
+}
+
+func (c *Checker) interfaceOwnerAccess(expression ast.Expression) bool {
+	if generic, ok := expression.(*ast.GenericExpression); ok {
+		return c.interfaceOwnerAccess(generic.Receiver)
+	}
+	declaration := c.result.ExpressionDeclarations[expression]
+	return declaration.Kind == identity.Interface || declaration.Kind == identity.TypeAlias
 }
 
 func (c *Checker) localTypeDeclaration(name string) (typeDeclaration, bool) {

@@ -1051,14 +1051,14 @@ func (r Result) ImportedTypeIdentity(declaration identity.Declaration) (Binding,
 			}
 		}
 	}
-	// Inferred aliases can belong to a native package contract without being
+	// Inferred types can belong to a native package contract without being
 	// selected by name. Match the exact import, never another alias's spelling.
-	if declaration.Kind == identity.TypeAlias {
+	if declaration.Kind == identity.TypeAlias || declaration.Kind == identity.Interface {
 		for _, imported := range r.Imports {
 			if imported == nil || imported.RuntimePath() != declaration.Module {
 				continue
 			}
-			if exported, ok := exportNamed(imported.Exports, declaration.Name); ok && exported.Kind == TypeAliasExport {
+			if exported, ok := exportNamed(imported.Exports, declaration.Name); ok && identityKind(exported.Kind) == declaration.Kind {
 				return Binding{Import: imported, Name: exported.Name, Export: &exported}, true
 			}
 		}

@@ -5560,6 +5560,21 @@ func (c *Checker) classMethodSignature(className, memberName string, seen map[st
 }
 
 func (c *Checker) signatureFromMethod(method *ast.MethodStatement) methodSignature {
+	owner := c.result.MethodDispatches[method].Owner
+	popOwner := c.pushActiveTypeOwner(owner.Name)
+	defer popOwner()
+	if declaration, found := c.localTypeDeclaration(owner.LeafName()); found {
+		for _, parameter := range declaration.typeParameters {
+			c.activeTypeParameters[parameter]++
+		}
+		defer func() {
+			for _, parameter := range declaration.typeParameters {
+				c.activeTypeParameters[parameter]--
+			}
+		}()
+	}
+	popParameters := c.pushActiveTypeParameters(method.TypeParameters)
+	defer popParameters()
 	result := methodSignature{returnType: c.methodReturnType(method)}
 	for _, parameter := range method.Parameters {
 		kind := callsignature.Positional
@@ -7153,7 +7168,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			receiverType = dataReceiverType
 		}
 		if c.isInterface(receiverType) {
-			typ = c.checkInterfaceMember(n, receiverType, classAccess || authoredOwnerAccess(n.Receiver, sc))
+			typ = c.checkInterfaceMember(n, receiverType, c.interfaceOwnerAccess(n.Receiver))
 			break
 		}
 		if record := c.records[receiverType.Name]; record != nil && record.byName[n.Name] != nil {
