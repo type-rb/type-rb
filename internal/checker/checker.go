@@ -2401,6 +2401,18 @@ func (c *Checker) checkStatementSequence(statements []ast.Statement, sc *scope) 
 			if leftType.Kind != types.Any && !accepted {
 				c.error(n.Value.Span(), fmt.Sprintf("cannot assign %s to %s", assignedType, leftType))
 			}
+			if member, ok := n.Target.(*ast.MemberExpression); ok {
+				alternatives := c.result.UnionMemberAccesses[member]
+				if len(alternatives) > 0 {
+					fieldType := alternatives[0].Member
+					for _, alternative := range alternatives[1:] {
+						if !types.Equivalent(fieldType, alternative.Member) {
+							c.error(member.Span(), fmt.Sprintf("union field %s has different types in its alternatives; narrow the receiver before assignment", member.Name))
+							break
+						}
+					}
+				}
+			}
 			if identifier, ok := n.Target.(*ast.Identifier); ok {
 				if n.Operator == "=" {
 					if binding, _, exists := sc.lookupOwner(identifier.Name); exists &&
@@ -5795,6 +5807,10 @@ func (c *Checker) dataMember(receiver types.Type, name string) (types.Type, bool
 		member = c.specializeLocalClassMember(receiver, member)
 		return member.typ, member.field.ReadOnly, true, true
 	}
+	if binding, found := c.resolution.TypeMemberIdentity(receiver.Declaration, name); found && binding.Member != nil && !binding.Member.Class && binding.Member.Kind == resolver.ValueExport {
+		binding = specializeResolvedClassMember(receiver, binding)
+		return binding.Member.Type, binding.Member.Readonly, true, true
+	}
 	if binding, found := c.importedAncestorMember(receiver.Name, name, false, map[string]bool{}); found && binding.Member != nil && binding.Member.Kind == resolver.ValueExport {
 		binding = specializeResolvedClassMember(receiver, binding)
 		return binding.Member.Type, binding.Member.Readonly, true, true
@@ -5896,6 +5912,14 @@ func (c *Checker) readonlyAssignmentField(member *ast.MemberExpression, sc *scop
 	receiverType := c.result.Expressions[member.Receiver]
 	if receiverType.Kind == types.Invalid || receiverType.Name == "" {
 		receiverType = c.checkExpression(member.Receiver, sc)
+	}
+	if union := c.expandAlias(receiverType, map[string]bool{}); union.Kind == types.Union {
+		for _, alternative := range union.Args {
+			_, readonly, _, found := c.dataMember(alternative, member.Name)
+			if found && readonly {
+				return true
+			}
+		}
 	}
 	// Record field stability is already shared by narrowing and member lookup.
 	// A mutable receiver binding does not make that field writable.
