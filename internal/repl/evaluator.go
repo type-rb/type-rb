@@ -572,6 +572,38 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 		sc.values[node.Name] = Value{Type: node.Type}
 		return flowResult{}, nil
 	case *ir.Assignment:
+		if member, ok := node.Target.(*ir.Member); ok && len(member.UnionAlternatives) > 0 {
+			receiver, err := e.expression(member.Receiver, module, sc)
+			if err != nil {
+				return flowResult{}, err
+			}
+			object, ok := receiver.Data.(*objectInstance)
+			if !ok {
+				return flowResult{}, fmt.Errorf("cannot assign %s on %s", member.Name, receiver.Type)
+			}
+			current := Value{}
+			if node.Operator != "=" {
+				current, err = e.member(receiver, member.Name, module)
+				if err != nil {
+					return flowResult{}, err
+				}
+				if node.Operator == "&&=" && !truthy(current) || node.Operator == "||=" && truthy(current) {
+					return flowResult{Result: Result{Value: current, Display: true}}, nil
+				}
+			}
+			value, err := e.expression(node.Value, module, sc)
+			if err != nil {
+				return flowResult{}, err
+			}
+			if node.Operator != "=" {
+				value, err = e.binary(current, strings.TrimSuffix(node.Operator, "="), value, current.Type)
+				if err != nil {
+					return flowResult{}, err
+				}
+			}
+			object.Fields["@"+member.Name] = value
+			return flowResult{Result: Result{Value: value, Display: true}}, nil
+		}
 		value, err := e.expression(node.Value, module, sc)
 		if err != nil {
 			return flowResult{}, err

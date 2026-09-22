@@ -428,6 +428,14 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   alternatives. A union is assignable to another union only when every source
   alternative is accepted by the target. A union does not implicitly narrow
   to one alternative.
+- A common instance data field may be read through a union when every
+  alternative exposes that field with the same storage kind. Assignment to
+  that field requires a mutable receiver binding and a writable class field
+  with an equivalent type in every alternative. A readonly field in any
+  alternative, or differing field types, requires narrowing the receiver
+  before assignment. These rules also apply to compound assignment. The
+  receiver is selected once before evaluating the right-hand side, so a
+  right-hand-side effect that rebinds the union cannot redirect the store.
 - Direct operators and receiver methods are not selected from a union. Code
   must first narrow the value with an exhaustive type case. The initial
   portable type patterns are non-nullable Boolean, Integer, Float, and String:

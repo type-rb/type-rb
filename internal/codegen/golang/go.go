@@ -466,6 +466,10 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Temporary:
 		g.line("var " + n.Name + " " + g.goType(n.Type))
 	case *ir.Assignment:
+		if member, ok := n.Target.(*ir.Member); ok && len(member.UnionAlternatives) > 0 {
+			g.unionMemberAssignment(n, member)
+			break
+		}
 		target := g.assignmentTarget(n.Target)
 		switch n.Operator {
 		case "&&=":
@@ -2752,6 +2756,38 @@ func (g *generator) unionMemberExpression(member *ir.Member) string {
 	child.indent--
 	child.line("}")
 	return "func(value any) " + resultType + " {\n" + child.b.String() + strings.Repeat("\t", g.indent) + "}(" + g.expr(member.Receiver) + ")"
+}
+
+func (g *generator) unionMemberAssignment(assignment *ir.Assignment, member *ir.Member) {
+	field := goFieldName(member.Name)
+	g.line("switch value := (" + g.expr(member.Receiver) + ").(type) {")
+	g.indent++
+	for _, alternative := range member.UnionAlternatives {
+		g.line("case " + g.goType(alternative.Type) + ":")
+		g.indent++
+		target := "value." + field
+		switch assignment.Operator {
+		case "=":
+			g.line(target + " = " + g.exprExpected(assignment.Value, alternative.MemberType))
+		case "&&=":
+			g.line(target + " = " + target + " && " + g.expr(assignment.Value))
+		case "||=":
+			g.line(target + " = " + target + " || " + g.expr(assignment.Value))
+		default:
+			if alternative.MemberType.Kind == types.Int && isCheckedIntegerAssignment(assignment.Operator) {
+				g.line(target + " = " + g.checkedIntegerBinary(strings.TrimSuffix(assignment.Operator, "="), target, g.expr(assignment.Value)))
+			} else {
+				g.line(target + " " + assignment.Operator + " " + g.expr(assignment.Value))
+			}
+		}
+		g.indent--
+	}
+	g.line("default:")
+	g.indent++
+	g.line("panic(\"unreachable discriminated union member assignment\")")
+	g.indent--
+	g.indent--
+	g.line("}")
 }
 
 func (g *generator) caseNarrowings(narrowings []ir.CaseBinding) {
