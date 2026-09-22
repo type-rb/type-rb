@@ -18,7 +18,10 @@ func (g *generator) variableName(variable *ir.Variable) string {
 			return target
 		}
 	}
-	return variable.Name
+	if variable.Generated || variable.Constant || variable.Owner != "" {
+		return variable.Name
+	}
+	return rubyBindingName(variable.Name)
 }
 
 // Ruby output shares root method and constant namespaces. Preserve TypeRB

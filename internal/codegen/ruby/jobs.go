@@ -63,7 +63,7 @@ func (g *generator) jobsClassEnqueueMethods(manifest *jobs.Manifest) {
 		}
 		parameters := make([]string, len(job.Parameters))
 		for index, parameter := range job.Parameters {
-			parameters[index] = parameter.Name
+			parameters[index] = rubyBindingName(parameter.Name)
 		}
 		g.line("class "+g.rubyClassName(job.Name, nil), "")
 		g.indent++

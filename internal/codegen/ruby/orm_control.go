@@ -27,7 +27,7 @@ func (g *generator) ormStructuredBlock(block *ir.StructuredBlock) {
 	g.line("-> do", "")
 	g.indent++
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
-		g.line(block.Bindings[0].Name+" = "+transaction, "")
+		g.line(rubyBindingName(block.Bindings[0].Name)+" = "+transaction, "")
 	}
 	g.statements(block.Body)
 	g.line("Result::Ok.new("+g.expr(block.Value)+")", "")
@@ -76,7 +76,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 		g.indent++
 		g.line(processed+" += 1", "")
 		if len(iteration.Bindings) > 0 && iteration.Bindings[0].Name != "_" {
-			g.line(iteration.Bindings[0].Name+" = "+item, "")
+			g.line(rubyBindingName(iteration.Bindings[0].Name)+" = "+item, "")
 		}
 		previous := g.breakTarget
 		g.breakTarget = breakTarget
@@ -87,7 +87,7 @@ func (g *generator) ormBatchIterate(iteration *ir.Iterate) {
 	} else {
 		g.line(processed+" += "+batch+".length", "")
 		if len(iteration.Bindings) > 0 && iteration.Bindings[0].Name != "_" {
-			g.line(iteration.Bindings[0].Name+" = "+batch, "")
+			g.line(rubyBindingName(iteration.Bindings[0].Name)+" = "+batch, "")
 		}
 		previous := g.breakTarget
 		g.breakTarget = breakTarget

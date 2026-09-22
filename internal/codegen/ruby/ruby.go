@@ -318,6 +318,7 @@ func (g *generator) statement(statement ir.Statement) {
 		for _, method := range n.Methods {
 			g.line("def "+method.Name+"("+g.methodParameters(method)+")", method.TrailingComment)
 			g.indent++
+			g.parameterAliases(method.Parameters)
 			g.line("raise NotImplementedError", "")
 			g.indent--
 			g.line("end", "")
@@ -407,7 +408,7 @@ func (g *generator) statement(statement ir.Statement) {
 				if binding.Name == "_" {
 					continue
 				}
-				g.line(binding.Name+" = "+value+"."+binding.Field, "")
+				g.line(rubyBindingName(binding.Name)+" = "+value+"."+binding.Field, "")
 			}
 			g.statements(branch.Body)
 			g.indent--
@@ -457,7 +458,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		parameters := make([]string, 0, len(n.Bindings))
 		for _, binding := range n.Bindings {
-			parameters = append(parameters, binding.Name)
+			parameters = append(parameters, rubyBindingName(binding.Name))
 		}
 		g.line(header+" do |"+strings.Join(parameters, ", ")+"|", n.TrailingComment)
 		g.indent++
@@ -494,7 +495,11 @@ func (g *generator) callBlock(call *ir.Call, trailingComment string) {
 	}
 	header += " do"
 	if len(call.Block.Parameters) > 0 {
-		header += " |" + strings.Join(call.Block.Parameters, ", ") + "|"
+		parameters := make([]string, len(call.Block.Parameters))
+		for index, name := range call.Block.Parameters {
+			parameters[index] = rubyBindingName(name)
+		}
+		header += " |" + strings.Join(parameters, ", ") + "|"
 	}
 	g.line(header, trailingComment)
 	g.indent++
@@ -514,7 +519,7 @@ func (g *generator) typeUnionCase(node *ir.Case) {
 		g.indent++
 		for _, binding := range branch.Bindings {
 			if binding.Name != "_" {
-				g.line(binding.Name+" = "+value, "")
+				g.line(rubyBindingName(binding.Name)+" = "+value, "")
 			}
 		}
 		g.statements(branch.Body)
@@ -608,9 +613,10 @@ func (g *generator) payloadEnum(enum *ir.Enum) {
 				g.line("alias __trb_data_new new", "")
 				g.line("def new("+g.parameters(member.Fields)+")", "")
 				g.indent++
+				g.parameterAliases(member.Fields)
 				values := make([]string, len(member.Fields))
 				for index, field := range member.Fields {
-					values[index] = field.Name
+					values[index] = rubyBindingName(field.Name)
 				}
 				g.line("__trb_data_new("+strings.Join(values, ", ")+")", "")
 				g.indent--
@@ -668,6 +674,7 @@ func (g *generator) emitMethod(method *ir.Method, fields []*ir.Field, execution 
 	g.indent++
 	previousExecution := g.executionActive
 	g.executionActive = execution
+	g.parameterAliases(method.Parameters)
 	if method.Name == "initialize" {
 		g.fieldDefaults(fields)
 	}
@@ -752,8 +759,17 @@ func (g *generator) executionScopeArgument() string {
 
 func (g *generator) parameters(parameters []ir.Parameter) string {
 	parts := make([]string, 0, len(parameters))
+	previousLexicalNames := g.lexicalNames
+	g.lexicalNames = make(map[string]string, len(previousLexicalNames)+len(parameters))
+	for name, target := range previousLexicalNames {
+		g.lexicalNames[name] = target
+	}
+	defer func() { g.lexicalNames = previousLexicalNames }()
 	for _, parameter := range parameters {
-		name := parameter.Name
+		name := rubyBindingName(parameter.Name)
+		if parameter.Keyword || parameter.NamedOnly {
+			name = parameter.Name
+		}
 		if parameter.KeywordRest {
 			name = "**" + name
 		} else if parameter.Rest {
@@ -770,6 +786,9 @@ func (g *generator) parameters(parameters []ir.Parameter) string {
 			}
 		}
 		parts = append(parts, name)
+		if (parameter.Keyword || parameter.NamedOnly) && rubyBindingName(parameter.Name) != parameter.Name {
+			g.lexicalNames[parameter.Name] = "::Kernel.binding.local_variable_get(:" + parameter.Name + ")"
+		}
 	}
 	return strings.Join(parts, ", ")
 }
@@ -784,16 +803,14 @@ func (g *generator) expr(expression ir.Expression) string {
 	case *ir.Case:
 		return g.caseExpression(n)
 	case *ir.Lambda:
-		parts := make([]string, len(n.Parameters))
-		for index, parameter := range n.Parameters {
-			parts[index] = parameter.Name
-		}
+		parameters := g.parameters(n.Parameters)
 		child := *g
 		child.b = strings.Builder{}
 		child.sourceRecorder = nil
 		child.indent = g.indent + 1
+		child.parameterAliases(n.Parameters)
 		child.statements(n.Body)
-		return "->(" + strings.Join(parts, ", ") + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
+		return "->(" + parameters + ") do\n" + child.b.String() + strings.Repeat("  ", g.indent) + "end"
 	case *ir.Identifier:
 		if n.Lexical && n.Declaration.Kind == identity.Value {
 			return "$" + naming.GlobalBindingIdentifier(n.Declaration.Key())
@@ -812,6 +829,9 @@ func (g *generator) expr(expression ir.Expression) string {
 		if n.Lexical {
 			if name := g.lexicalNames[n.Name]; name != "" {
 				return name
+			}
+			if !n.Generated && n.Name != "self" {
+				return rubyBindingName(n.Name)
 			}
 		}
 		if !n.Lexical && n.ExprType().Kind == types.Function {
@@ -1387,7 +1407,7 @@ func (g *generator) caseExpression(node *ir.Case) string {
 			if branch.PayloadEnum {
 				bindingValue += "." + binding.Field
 			}
-			child.line(binding.Name+" = "+bindingValue, "")
+			child.line(rubyBindingName(binding.Name)+" = "+bindingValue, "")
 		}
 		child.statements(branch.Body)
 		if branch.Result != nil {

@@ -36,6 +36,7 @@ func (g *generator) newtypeMethods(value *ir.Newtype) {
 		g.indent++
 		previousExecution := g.executionActive
 		g.executionActive = g.methodUsesExecutionScope(method)
+		g.parameterAliases(method.Parameters)
 		g.statements(method.Body)
 		g.executionActive = previousExecution
 		g.indent--
