@@ -1601,6 +1601,10 @@ end
 - A `readonly` field may be assigned while its declaring object is being
   initialized, but external assignment is a compile-time error. This rule is
   retained across project imports.
+- Constructor parameter defaults are evaluated before the new instance is
+  available. They cannot access `self`, an `@field`, or an implicit instance
+  method. Field defaults and the initializer body run with a receiver; ordinary
+  instance-method parameter defaults also have their receiver.
 - Class constants are runtime-initialized immutable bindings and are available
   to both instance and class methods.
 - A class value is assignable to an interface only when the class explicitly

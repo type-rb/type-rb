@@ -550,6 +550,7 @@ type Checker struct {
 	concurrentConstructors      map[*ast.MethodStatement]bool
 	concurrentClasses           map[string]bool
 	currentMethod               *ast.MethodStatement
+	constructorParameterDefault bool
 	currentMethodScopes         []*scope
 	currentFieldClass           string
 	constructorBlockBoundaries  map[*ast.CallExpression]bool
@@ -5177,7 +5178,10 @@ func (c *Checker) checkMethod(method *ast.MethodStatement, parent *scope) {
 			c.error(parameter.Span(), "interface parameters cannot be declared with mut")
 		}
 		if parameter.Default != nil {
+			previousConstructorDefault := c.constructorParameterDefault
+			c.constructorParameterDefault = method.Name == "initialize" && c.current != nil
 			actual := c.checkExpression(parameter.Default, methodScope)
+			c.constructorParameterDefault = previousConstructorDefault
 			actual = c.requireValueExpression(parameter.Default, actual, "be used as a parameter default")
 			actual = c.contextualizeCollectionLiteral(parameter.Default, typ, actual)
 			if !c.assignable(parameter.Default, typ, actual) {
@@ -6361,6 +6365,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.resultBoundaries = c.resultBoundaries[:len(c.resultBoundaries)-1]
 		typ = types.FunctionOf(parameterTypes, returnType)
 	case *ast.Identifier:
+		if c.constructorParameterDefault && (n.Name == "self" || strings.HasPrefix(n.Name, "@")) {
+			c.error(n.Span(), "constructor parameter default cannot access self before instance initialization")
+			typ = invalidType()
+			break
+		}
 		if n.Name == "_" {
 			c.error(n.Span(), "blank binding _ cannot be used as a value")
 			typ = invalidType()
@@ -6412,6 +6421,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ = invalidType()
 			}
 		} else if member, ok := c.currentDeclarationMember(n.Name); ok {
+			if c.constructorParameterDefault {
+				c.error(n.Span(), "constructor parameter default cannot access self before instance initialization")
+			}
 			typ = member.Return
 			c.external[n] = member
 			c.result.ExternalMembers[n] = member
@@ -7665,6 +7677,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				if method.Class != c.classMethod {
 					c.memberKindMismatch(identifier.Span(), c.current.name, identifier.Name, c.classMethod)
 				} else {
+					if c.constructorParameterDefault && !method.Class {
+						c.error(identifier.Span(), "constructor parameter default cannot access self before instance initialization")
+					}
 					typ = c.methodReturnType(method)
 					c.checkArguments(n, method, argumentTypes)
 					if dispatch := c.result.MethodDispatches[method]; !dispatch.Empty() {
