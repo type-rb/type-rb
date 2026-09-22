@@ -118,7 +118,7 @@ func (g *generator) filesystemStructuredBlock(block *ir.StructuredBlock) {
 	g.indent--
 	g.line("end", "")
 	if len(block.Bindings) > 0 && block.Bindings[0].Name != "_" {
-		g.line(block.Bindings[0].Name+" = "+handle, "")
+		g.line(rubyBindingName(block.Bindings[0].Name)+" = "+handle, "")
 	}
 	g.statements(block.Body)
 	g.line(result+" = Result::Ok.new("+g.expr(block.Value)+")", "")

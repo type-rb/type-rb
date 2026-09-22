@@ -75,7 +75,7 @@ func (g *generator) ormRegisterModel(model ormintegration.Model) {
 		scope := "nil"
 		if association.Scope != nil && len(association.Scope.Parameters) == 1 && len(association.Scope.Body) == 1 {
 			if expression, ok := association.Scope.Body[0].(*ir.ExpressionStatement); ok {
-				scope = "->(" + association.Scope.Parameters[0] + ") { " + g.expr(expression.Expression) + " }"
+				scope = "->(" + rubyBindingName(association.Scope.Parameters[0]) + ") { " + g.expr(expression.Expression) + " }"
 			}
 		}
 		associations = append(associations, "{"+
