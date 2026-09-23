@@ -16,6 +16,15 @@ func TestStringEscapeDiagnosticsAcrossModes(t *testing.T) {
 				}
 			})
 		}
+		for _, literal := range []string{`'\q'`, `'\uZZZZ'`} {
+			t.Run(mode+"/symbol/"+literal, func(t *testing.T) {
+				source := "def main()\n puts(:" + literal + ")\nend\n"
+				_, err := Compile("escape.trb", []byte(source), mode)
+				if err == nil || !strings.Contains(err.Error(), "invalid quoted Symbol escape or literal") {
+					t.Fatalf("expected frontend Symbol escape error, got %v", err)
+				}
+			})
+		}
 	}
 }
 

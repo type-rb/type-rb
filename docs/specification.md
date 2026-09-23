@@ -289,11 +289,12 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   including `\{` and `\q`, are compile-time errors in every mode, both in plain
   Strings and in literal segments surrounding interpolation. REPL evaluation
   follows the same rule.
-- Portable Symbol spellings such as `:ready` and `:"a b"` produce `String`
+- Portable Symbol spellings such as `:ready`, `:"a b"`, and `:'a b'` produce `String`
   values. Keyword names stay literal: `:if` is the String `"if"` and does not
   open a conditional or extend REPL input. A double-quoted Symbol uses the same
-  validated escapes as a String, but `#{...}` is literal text and is never evaluated. Ruby-native syntax keeps
-  its explicit target-language Symbol representation.
+  validated escapes as a String; a single-quoted Symbol uses the validated
+  single-quoted String escapes. Neither spelling evaluates `#{...}`. Ruby-native
+  syntax keeps its explicit target-language Symbol representation.
 
 #### Aliases and nominal newtypes
 

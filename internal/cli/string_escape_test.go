@@ -92,8 +92,15 @@ puts('"')
 puts("[" + '\n' + "]")
 puts("#{'a'}#{'日'}")
 puts(['a', 'b'].join('!'))
+puts('')
+puts('#{missing}')
+puts(:'')
+puts(:'hello')
+puts(:'a\nb')
+puts(:'it\'s')
+puts(:'#{missing}')
 `
-	const want = "a\n日\nhello\nこんにちは\na\"b\nit's\na\nb\n日\n😀\n\\\n'\n\"\n[\n]\na日\na!b\n"
+	const want = "a\n日\nhello\nこんにちは\na\"b\nit's\na\nb\n日\n😀\n\\\n'\n\"\n[\n]\na日\na!b\n\n#{missing}\n\nhello\na\nb\nit's\n#{missing}\n"
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			tool := map[string]string{"go": "go", "ruby": "ruby", "typescript": "node"}[mode]
@@ -105,7 +112,7 @@ puts(['a', 'b'].join('!'))
 			if len(diagnostics) != 0 {
 				t.Fatal(diagnostics)
 			}
-			if !bytes.Contains(formatted, []byte("'日'")) || !bytes.Contains(formatted, []byte("'a'")) {
+			if !bytes.Contains(formatted, []byte("'日'")) || !bytes.Contains(formatted, []byte("'hello'")) || !bytes.Contains(formatted, []byte(":'hello'")) {
 				t.Fatalf("formatter changed single quotes:\n%s", formatted)
 			}
 			if err := os.WriteFile(path, formatted, 0o600); err != nil {
