@@ -7793,6 +7793,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 					typ = receiver.Args[index]
 				}
 			}
+		} else if receiver.Kind == types.Union {
+			c.error(n.Receiver.Span(), fmt.Sprintf("union type %s cannot be indexed without narrowing", receiver))
+			typ = invalidType()
 		} else if member, ok := c.declarationMember(receiver.Name, "[]", false, map[string]bool{}); ok {
 			typ = c.checkDeclarationArguments(n.Span(), member, []ast.CallArgument{{Value: n.Index}}, []types.Type{indexType})
 		}
