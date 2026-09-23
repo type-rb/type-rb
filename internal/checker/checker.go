@@ -1055,7 +1055,9 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 		case *ast.TypeAliasStatement:
 			qualified := nestedAuthoredOwner(owner, node.Name)
 			c.registerAuthoredType(node, node.Name, qualified, identity.TypeAlias)
-			c.authoredTypes[qualified] = node.Name
+			if owner != "" {
+				c.authoredTypes[qualified] = node.Name
+			}
 		case *ast.NewtypeStatement:
 			qualified := nestedAuthoredOwner(owner, node.Name)
 			c.registerAuthoredType(node, node.Name, qualified, identity.Newtype)
@@ -5981,7 +5983,7 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
 				return true
 			case resolver.TypeAliasExport:
-				return c.aliasClassMemberAccess(c.result.Expressions[node])
+				return binding.Export.AliasEnum || c.aliasClassMemberAccess(c.result.Expressions[node])
 			}
 		}
 	case *ast.MemberExpression:
@@ -7048,7 +7050,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
-		if classAccess && authoredOwnerAccess(n.Receiver, sc) {
+		if classAccess && authoredOwnerAccess(n.Receiver, sc) && c.authoredOwnedMethodInScope(expressionTypeName(n.Receiver), n.Name, sc) == nil {
 			if construction, alias := c.aliasClassConstruction(receiverType); alias {
 				c.result.ClassAliasMembers[n] = construction
 				receiverType = construction.ResolvedType
