@@ -28,6 +28,20 @@ func TestStringEscapeDiagnosticsAcrossModes(t *testing.T) {
 	}
 }
 
+func TestUnterminatedSingleQuotedLiteralAcrossModes(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, literal := range []string{"'unfinished", ":'unfinished"} {
+			t.Run(mode+"/"+literal, func(t *testing.T) {
+				source := "def main()\n puts(" + literal + "\nend\n"
+				_, err := Compile("escape.trb", []byte(source), mode)
+				if err == nil || !strings.Contains(err.Error(), "unterminated string literal") {
+					t.Fatalf("expected unterminated literal error, got %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestStringEscapesInLiteralTypes(t *testing.T) {
 	const source = `alias Marker = "\#tag"
 def marker(): Marker
