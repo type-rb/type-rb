@@ -6487,10 +6487,8 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 	case *ast.Literal:
 		switch n.Kind {
 		case ast.StringLiteral:
-			if strings.HasPrefix(n.Raw, `"`) {
-				if _, err := stringliteral.Unquote(n.Raw); err != nil {
-					c.error(n.Span(), "invalid String escape or literal")
-				}
+			if _, err := stringliteral.Unquote(n.Raw); err != nil {
+				c.error(n.Span(), "invalid String escape or literal")
 			}
 			typ = types.FromName("String")
 		case ast.IntegerLiteral:

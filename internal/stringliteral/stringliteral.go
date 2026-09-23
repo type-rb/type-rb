@@ -11,6 +11,31 @@ import (
 // Strings. Pairwise scanning preserves backslash parity and never interprets
 // decoded text as interpolation source.
 func Unquote(raw string) (string, error) {
+	if len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'' {
+		var normalized strings.Builder
+		normalized.WriteByte('"')
+		for i := 1; i < len(raw)-1; i++ {
+			switch raw[i] {
+			case '\\':
+				if i+1 < len(raw)-1 && raw[i+1] == '\'' {
+					normalized.WriteByte('\'')
+					i++
+				} else if i+1 < len(raw)-1 {
+					normalized.WriteByte('\\')
+					normalized.WriteByte(raw[i+1])
+					i++
+				} else {
+					normalized.WriteByte('\\')
+				}
+			case '"':
+				normalized.WriteString(`\"`)
+			default:
+				normalized.WriteByte(raw[i])
+			}
+		}
+		normalized.WriteByte('"')
+		return strconv.Unquote(normalized.String())
+	}
 	if len(raw) < 2 || raw[0] != '"' {
 		return strconv.Unquote(raw)
 	}

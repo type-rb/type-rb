@@ -277,6 +277,10 @@ and typed IR signatures, and must not create mode-dependent source semantics.
   enums, newtypes, and other user-defined values are rejected rather than
   inheriting a target runtime's implicit String conversion. Convert a value
   explicitly, for example with `value.to_s()`, before interpolation.
+- A single-quoted String is also a String of any length, including the empty
+  String. It does not interpolate. It validates character escapes such as `\n`
+  and `\u65e5`, and `\'` represents a literal apostrophe. Its value
+  is identical in Go, Ruby, and TypeScript modes.
 - In a double-quoted String, `\#` produces a literal `#` and prevents it from
   starting interpolation. For example, `"\#{name}"` contains the text
   `#{name}` without evaluating `name`. Escapes are consumed left to right:

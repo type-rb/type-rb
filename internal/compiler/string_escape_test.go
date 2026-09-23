@@ -7,7 +7,7 @@ import (
 
 func TestStringEscapeDiagnosticsAcrossModes(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
-		for _, literal := range []string{`"aaa#\{s}"`, `"\q"`, `"\q #{"ok"}"`, `"#{"ok"}\q"`, `"#{"\q"}"`, `"\xGG"`, `"\uZZZZ"`} {
+		for _, literal := range []string{`"aaa#\{s}"`, `"\q"`, `"\q #{"ok"}"`, `"#{"ok"}\q"`, `"#{"\q"}"`, `"\xGG"`, `"\uZZZZ"`, `'\q'`, `'\uZZZZ'`} {
 			t.Run(mode+"/"+literal, func(t *testing.T) {
 				source := "def main()\n puts(" + literal + ")\nend\n"
 				_, err := Compile("escape.trb", []byte(source), mode)

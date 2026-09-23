@@ -79,6 +79,11 @@ end
 `
 	const body = `puts(letter())
 puts(letter('日'))
+puts('hello')
+puts('こんにちは')
+puts('a"b')
+puts('it\'s')
+puts('a\nb')
 puts('\u65e5')
 puts('😀')
 puts('\\')
@@ -88,7 +93,7 @@ puts("[" + '\n' + "]")
 puts("#{'a'}#{'日'}")
 puts(['a', 'b'].join('!'))
 `
-	const want = "a\n日\n日\n😀\n\\\n'\n\"\n[\n]\na日\na!b\n"
+	const want = "a\n日\nhello\nこんにちは\na\"b\nit's\na\nb\n日\n😀\n\\\n'\n\"\n[\n]\na日\na!b\n"
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			tool := map[string]string{"go": "go", "ruby": "ruby", "typescript": "node"}[mode]
