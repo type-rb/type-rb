@@ -738,6 +738,10 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 				target := &types
 				switch n.SymbolKinds[symbol] {
+				case "class":
+					if containsString(n.UsedSymbols, symbol) {
+						target = &values
+					}
 				case "record":
 					if n.RecordDefaults[symbol] {
 						values = append(values, tsRecordConstructorName(symbol))
@@ -1824,6 +1828,9 @@ func (g *generator) awaitRecordConstruct(construction *ir.RecordConstruct, value
 func (g *generator) identifierName(identifier *ir.Identifier) string {
 	if identifier == nil {
 		return ""
+	}
+	if identifier.Declaration.Kind == identity.Class && !identifier.Lexical {
+		return g.declarationName(identifier.Declaration)
 	}
 	if identifier.Lexical && identifier.Declaration.Kind == identity.Value {
 		return naming.GlobalBindingIdentifier(identifier.Declaration.Key())
