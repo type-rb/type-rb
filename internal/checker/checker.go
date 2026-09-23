@@ -52,6 +52,8 @@ type Result struct {
 	GenericApplications        map[*ast.GenericExpression]GenericApplication
 	CodecApplications          map[*ast.CallExpression]CodecApplication
 	RecordConstructions        map[*ast.CallExpression]RecordConstruction
+	ClassConstructions         map[*ast.CallExpression]ClassConstruction
+	ClassAliasMembers          map[*ast.MemberExpression]ClassConstruction
 	CallSpecializationRequests map[*ast.CallExpression]CallSpecializationRequest
 	CallSpecializations        map[*ast.CallExpression]CallSpecialization
 	CallSignatures             map[*ast.CallExpression][]callsignature.Parameter
@@ -87,6 +89,11 @@ type RecordConstruction struct {
 	Fields        []resolver.RecordField
 	Target        ast.Expression
 	Declaration   identity.Declaration
+}
+
+type ClassConstruction struct {
+	ResolvedType  types.Type
+	TargetBinding *resolver.Binding
 }
 
 type CallSpecializationRequest struct {
@@ -904,6 +911,8 @@ func newChecker(program *ast.Program, resolution resolver.Result, options Option
 			GenericApplications:        map[*ast.GenericExpression]GenericApplication{},
 			CodecApplications:          map[*ast.CallExpression]CodecApplication{},
 			RecordConstructions:        map[*ast.CallExpression]RecordConstruction{},
+			ClassConstructions:         map[*ast.CallExpression]ClassConstruction{},
+			ClassAliasMembers:          map[*ast.MemberExpression]ClassConstruction{},
 			CallSpecializationRequests: map[*ast.CallExpression]CallSpecializationRequest{},
 			CallSpecializations:        map[*ast.CallExpression]CallSpecialization{},
 			CallSignatures:             map[*ast.CallExpression][]callsignature.Parameter{},
@@ -1044,7 +1053,11 @@ func (c *Checker) indexAuthoredMethods(statements []ast.Statement, owner string)
 				c.result.MethodDispatches[method] = dispatch
 			}
 		case *ast.TypeAliasStatement:
-			c.registerAuthoredType(node, node.Name, nestedAuthoredOwner(owner, node.Name), identity.TypeAlias)
+			qualified := nestedAuthoredOwner(owner, node.Name)
+			c.registerAuthoredType(node, node.Name, qualified, identity.TypeAlias)
+			if owner != "" {
+				c.authoredTypes[qualified] = node.Name
+			}
 		case *ast.NewtypeStatement:
 			qualified := nestedAuthoredOwner(owner, node.Name)
 			c.registerAuthoredType(node, node.Name, qualified, identity.Newtype)
@@ -5945,6 +5958,9 @@ func (c *Checker) readonlyAssignmentField(member *ast.MemberExpression, sc *scop
 func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 	switch node := expression.(type) {
 	case *ast.GenericExpression:
+		if authoredOwnerAccess(node, sc) && c.aliasClassMemberAccess(c.result.Expressions[node]) {
+			return true
+		}
 		return c.classMemberAccess(node.Receiver, sc)
 	case *ast.Identifier:
 		if node.Name == "self" {
@@ -5955,8 +5971,7 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 		}
 		if declared, exists := c.localTypeDeclaration(node.Name); exists {
 			if declared.kind == "type alias" {
-				_, enum := c.enumVariants(c.expandAlias(c.result.Expressions[node], map[string]bool{}))
-				return enum
+				return c.aliasClassMemberAccess(c.result.Expressions[node])
 			}
 			return declared.kind == "class" || declared.kind == "record" || declared.kind == "module" || declared.kind == "enum" || declared.kind == "newtype"
 		}
@@ -5968,13 +5983,24 @@ func (c *Checker) classMemberAccess(expression ast.Expression, sc *scope) bool {
 			case resolver.ClassExport, resolver.RecordExport, resolver.ModuleExport, resolver.EnumExport, resolver.NewtypeExport:
 				return true
 			case resolver.TypeAliasExport:
-				return binding.Export.AliasEnum
+				return binding.Export.AliasEnum || c.aliasClassMemberAccess(c.result.Expressions[node])
 			}
 		}
 	case *ast.MemberExpression:
 		return c.declarationOwnerExpression(node, sc)
 	}
 	return false
+}
+
+func (c *Checker) aliasClassMemberAccess(typ types.Type) bool {
+	target := c.expandAlias(typ, map[string]bool{})
+	if c.isInterface(target) {
+		return false
+	}
+	if _, enum := c.enumVariants(target); enum {
+		return true
+	}
+	return c.constructorType(target)
 }
 
 func authoredOwnerAccess(expression ast.Expression, sc *scope) bool {
@@ -5994,7 +6020,7 @@ func authoredOwnerAccess(expression ast.Expression, sc *scope) bool {
 }
 
 func (c *Checker) constructorType(typ types.Type) bool {
-	if typ.Declaration.Kind == identity.Record {
+	if typ.Declaration.Kind == identity.Record || typ.Declaration.Kind == identity.Class {
 		return true
 	}
 	name := typ.Name
@@ -7024,6 +7050,12 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			}
 		}
 		classAccess := c.classMemberAccess(n.Receiver, sc)
+		if classAccess && authoredOwnerAccess(n.Receiver, sc) && c.authoredOwnedMethodInScope(expressionTypeName(n.Receiver), n.Name, sc) == nil {
+			if construction, alias := c.aliasClassConstruction(receiverType); alias {
+				c.result.ClassAliasMembers[n] = construction
+				receiverType = construction.ResolvedType
+			}
+		}
 		if n.Name == "new" && authoredOwnerAccess(n.Receiver, sc) && methodReceiverType.Declaration.Kind == identity.Interface {
 			c.error(n.Span(), fmt.Sprintf("cannot construct interface %s; construct a class that implements it", receiverType))
 			typ = invalidType()
@@ -7533,7 +7565,11 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ = invalidType()
 				break
 			}
-			if construction, alias := c.aliasRecordConstruction(constructorType); alias && authoredOwnerAccess(member.Receiver, sc) {
+			if construction, alias := c.aliasClassConstruction(constructorType); alias && authoredOwnerAccess(member.Receiver, sc) {
+				typ = construction.ResolvedType
+				c.checkAliasClassArguments(n, construction, argumentTypes, sc)
+				c.result.ClassConstructions[n] = construction
+			} else if construction, alias := c.aliasRecordConstruction(constructorType); alias && authoredOwnerAccess(member.Receiver, sc) {
 				typ = construction.ResolvedType
 				c.checkRecordArguments(n, typ.Name, construction.Fields, construction.Declaration)
 				checked := c.result.RecordConstructions[n]
@@ -7773,7 +7809,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 		c.rejectOpaqueNativeSyntaxWithScopedResource(n.Span(), sc)
 	}
 	if call, ok := expression.(*ast.CallExpression); ok {
-		if construction, found := c.result.RecordConstructions[call]; found && typ.Kind == types.Named {
+		if construction, found := c.result.ClassConstructions[call]; found {
+			typ = construction.ResolvedType
+		} else if construction, found := c.result.RecordConstructions[call]; found && typ.Kind == types.Named {
 			typ.Declaration = construction.Declaration
 		} else if variant, found := c.result.EnumConstructors[call]; found && typ.Kind == types.Named {
 			typ.Declaration = variant.Declaration

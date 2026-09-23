@@ -20,10 +20,11 @@ import (
 )
 
 type lowerer struct {
-	checked        checker.Result
-	temporary      int
-	generatedTypes map[string]map[string]resolver.Export
-	usesJSX        bool
+	checked               checker.Result
+	temporary             int
+	generatedTypes        map[string]map[string]resolver.Export
+	generatedValueSymbols map[string]map[string]bool
+	usesJSX               bool
 }
 
 // resultBoundary describes the explicit Result returned by a try expression.
@@ -34,7 +35,7 @@ type resultBoundary struct {
 }
 
 func Program(checked checker.Result) *ir.Program {
-	l := &lowerer{checked: checked, generatedTypes: map[string]map[string]resolver.Export{}}
+	l := &lowerer{checked: checked, generatedTypes: map[string]map[string]resolver.Export{}, generatedValueSymbols: map[string]map[string]bool{}}
 	statements := l.statements(checked.Program.Statements)
 	statements = l.generatedTypeImports(statements)
 	statements = append(l.runtimeImports(statements), statements...)
@@ -156,6 +157,9 @@ func (l *lowerer) generatedTypeImports(statements []ir.Statement) []ir.Statement
 			imported.SymbolKinds[name] = kind
 			imported.SymbolTypes[name] = exported.Type
 			imported.SymbolTypeParameters[name] = append([]string(nil), exported.TypeParameters...)
+			if l.generatedValueSymbols[modulePath][name] && !contains(imported.UsedSymbols, name) {
+				imported.UsedSymbols = append(imported.UsedSymbols, name)
+			}
 		}
 	}
 	return append(generated, statements...)
@@ -1268,8 +1272,12 @@ func (l *lowerer) expressionWithoutConversion(node ast.Expression) ir.Expression
 				name = association.Name
 			}
 		}
+		loweredReceiver := l.expression(receiver)
+		if construction, ok := l.checked.ClassAliasMembers[n]; ok {
+			loweredReceiver = l.classAliasReceiver(construction, n.Receiver.Span())
+		}
 		member := &ir.Member{
-			ExprBase: base, Receiver: l.expression(receiver), Name: name,
+			ExprBase: base, Receiver: loweredReceiver, Name: name,
 			Declaration: l.checked.ExpressionDeclarations[n], Dispatch: l.checked.ExpressionDispatches[n],
 			Safe: n.Safe, Namespace: n.Namespace, ClassField: l.checked.ClassFieldAccesses[n], Reference: reference,
 			PresentType: l.checked.SafeNavigationPresentTypes[n],
