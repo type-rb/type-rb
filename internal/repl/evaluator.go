@@ -604,13 +604,32 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 			object.Fields["@"+member.Name] = value
 			return flowResult{Result: Result{Value: value, Display: true}}, nil
 		}
+		logical := node.Operator == "&&=" || node.Operator == "||="
+		var current Value
+		var write func(Value) error
+		var err error
+		if logical {
+			current, write, err = e.logicalAssignmentTarget(node.Target, module, sc)
+			if err != nil {
+				return flowResult{}, err
+			}
+			if node.Operator == "&&=" && !truthy(current) || node.Operator == "||=" && truthy(current) {
+				mutableBinding := false
+				if target, ok := node.Target.(*ir.Identifier); ok && !strings.HasPrefix(target.Name, "@") {
+					mutableBinding = sc.mutableBinding(target.Name)
+				}
+				return flowResult{Result: Result{Value: current, Display: true, MutableBinding: mutableBinding}}, nil
+			}
+		}
 		value, err := e.expression(node.Value, module, sc)
 		if err != nil {
 			return flowResult{}, err
 		}
-		current, err := e.expression(node.Target, module, sc)
-		if err != nil && node.Operator != "=" {
-			return flowResult{}, err
+		if !logical {
+			current, err = e.expression(node.Target, module, sc)
+			if err != nil && node.Operator != "=" {
+				return flowResult{}, err
+			}
 		}
 		if node.Operator != "=" {
 			value, err = e.binary(current, strings.TrimSuffix(node.Operator, "="), value, current.Type)
@@ -618,7 +637,12 @@ func (e *Evaluator) statement(statement ir.Statement, module string, sc *scope) 
 				return flowResult{}, err
 			}
 		}
-		if err := e.assign(node.Target, value, module, sc); err != nil {
+		if logical {
+			err = write(value)
+		} else {
+			err = e.assign(node.Target, value, module, sc)
+		}
+		if err != nil {
 			return flowResult{}, err
 		}
 		mutableBinding := false
@@ -2141,6 +2165,65 @@ func (e *Evaluator) declareVariable(variable *ir.Variable, value Value, module s
 	}
 	if sc.persistent {
 		e.moduleValue[symbolKey(module, ownedName(variable.Owner, variable.Name))] = value
+	}
+}
+
+// Resolve a logical assignment's location before its conditional right-hand
+// side. In particular, a receiver or index expression must run only once.
+func (e *Evaluator) logicalAssignmentTarget(target ir.Expression, module string, sc *scope) (Value, func(Value) error, error) {
+	switch node := target.(type) {
+	case *ir.Member:
+		receiver, err := e.expression(node.Receiver, module, sc)
+		if err != nil {
+			return Value{}, nil, err
+		}
+		current, err := e.member(receiver, node.Name, module)
+		if err != nil {
+			return Value{}, nil, err
+		}
+		write := func(value Value) error {
+			switch item := receiver.Data.(type) {
+			case *recordInstance:
+				item.Fields[node.Name] = value
+				return nil
+			case *objectInstance:
+				item.Fields["@"+node.Name] = value
+				return nil
+			}
+			return fmt.Errorf("cannot assign to %T", target)
+		}
+		return current, write, nil
+	case *ir.Index:
+		receiver, err := e.expression(node.Receiver, module, sc)
+		if err != nil {
+			return Value{}, nil, err
+		}
+		index, err := e.expression(node.Index, module, sc)
+		if err != nil {
+			return Value{}, nil, err
+		}
+		if array, ok := receiver.Data.(*arrayValue); ok {
+			raw, valid := index.Data.(int64)
+			if !valid {
+				return Value{}, nil, errors.New("array index is out of bounds")
+			}
+			position, valid := normalizedPosition(raw, int64(len(array.Items)))
+			if !valid {
+				return Value{}, nil, errors.New("array index is out of bounds")
+			}
+			index.Data = position
+		}
+		current, err := indexValue(receiver, index, node.ExprType())
+		if err != nil {
+			return Value{}, nil, err
+		}
+		return current, func(value Value) error { return assignIndex(receiver, index, value) }, nil
+	default:
+		current, err := e.expression(target, module, sc)
+		if err != nil {
+			return Value{}, nil, err
+		}
+		return current, func(value Value) error { return e.assign(target, value, module, sc) }, nil
 	}
 }
 
