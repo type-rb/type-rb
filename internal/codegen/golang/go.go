@@ -588,7 +588,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.caseNarrowings(n.ElseNarrowings)
 			g.statements(n.Else)
 			g.indent--
-		} else {
+		} else if !n.MayFallthrough {
 			g.line("} else {")
 			g.indent++
 			g.line("panic(\"unreachable exhaustive case\")")

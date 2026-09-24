@@ -888,6 +888,9 @@ func (e *Evaluator) selectCaseBranch(node *ir.Case, module string, sc *scope) ([
 	if node.HasElse {
 		return node.Else, node.ElseResult, &scope{parent: sc, values: map[string]Value{}}, nil
 	}
+	if node.MayFallthrough {
+		return nil, nil, &scope{parent: sc, values: map[string]Value{}}, nil
+	}
 	return nil, nil, nil, fmt.Errorf("unreachable exhaustive case")
 }
 

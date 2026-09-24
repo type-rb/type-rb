@@ -1073,7 +1073,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.caseNarrowings(n.ElseNarrowings, narrowingName, narrowingTemp)
 			g.statements(n.Else)
 			g.indent--
-		} else {
+		} else if !n.MayFallthrough {
 			g.line("} else {")
 			g.indent++
 			g.line("throw new Error(\"unreachable exhaustive case\");")

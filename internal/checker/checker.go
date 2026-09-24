@@ -3379,6 +3379,8 @@ func (c *Checker) checkLiteralCase(node *ast.CaseStatement, sc *scope, selectorT
 		}
 		sort.Strings(missing)
 		c.error(node.Span(), fmt.Sprintf("case for %s is not exhaustive; missing %s", selectorType, strings.Join(missing, ", ")))
+	} else if expression && !exhaustive {
+		c.error(node.Span(), "case expression requires an else branch")
 	}
 	if narrows {
 		c.result.CaseNarrowings[node] = narrowing.CaseNarrowing
