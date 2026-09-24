@@ -11,7 +11,7 @@ import (
 	"github.com/type-rb/type-rb/internal/project"
 )
 
-func TestRunGoAvoidsLexicalCollisionsWithGeneratedImports(t *testing.T) {
+func TestRunGoAvoidsLexicalCollisionsWithGeneratedNames(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go is not installed")
 	}
@@ -30,6 +30,15 @@ func TestRunGoAvoidsLexicalCollisionsWithGeneratedImports(t *testing.T) {
 	strings := "TypeRB"
 	puts(strings.include?("RB"))
 	puts(strings)
+	string := "key"
+	mut values: Hash<String, Integer> := {}
+	append := 7
+	values[string] = append
+	len := 2
+	mut numbers := [1, 2]
+	numbers.push(3)
+	puts(numbers[len])
+	puts(values[string])
 	return
 end
 `
@@ -42,7 +51,7 @@ end
 	if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "true\nTypeRB\n" || stderr.Len() != 0 {
+	if stdout.String() != "true\nTypeRB\n3\n7\n" || stderr.Len() != 0 {
 		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

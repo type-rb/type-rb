@@ -2,6 +2,7 @@ package golang
 
 import (
 	"encoding/hex"
+	gotypes "go/types"
 	pathpkg "path"
 	"sort"
 	"strings"
@@ -180,11 +181,9 @@ func goFunctionFallback(declaration goFunctionDeclaration) string {
 	return prefix + hex.EncodeToString([]byte(identity))
 }
 
-// analyzeGoBindingNames reserves the package identifiers required by one
-// generated file. Go imports live in the file block and can otherwise be
-// shadowed by a source-visible local in any generated function. Only actual
-// collisions receive a compiler-owned target name, so ordinary output remains
-// stable.
+// analyzeGoBindingNames reserves the identifiers required by generated Go.
+// Imports and predeclared types/functions can otherwise be shadowed by a
+// source-visible local. Only actual collisions receive a compiler-owned name.
 func analyzeGoBindingNames(sourceNames map[string]bool, imports map[string]string) map[string]string {
 	importNames := map[string]bool{}
 	for importPath, alias := range imports {
@@ -196,10 +195,6 @@ func analyzeGoBindingNames(sourceNames map[string]bool, imports map[string]strin
 		}
 		importNames[goImportAlias(alias)] = true
 	}
-	if len(importNames) == 0 {
-		return nil
-	}
-
 	occupied := map[string]bool{}
 	for sourceName := range sourceNames {
 		occupied[goBindingIdentifier(sourceName)] = true
@@ -212,11 +207,12 @@ func analyzeGoBindingNames(sourceNames map[string]bool, imports map[string]strin
 	sort.Strings(ordered)
 	result := map[string]string{}
 	for _, sourceName := range ordered {
-		if !importNames[goBindingIdentifier(sourceName)] {
+		identifier := goBindingIdentifier(sourceName)
+		if !importNames[identifier] && gotypes.Universe.Lookup(identifier) == nil {
 			continue
 		}
 		target := "__trbBinding_" + hex.EncodeToString([]byte(sourceName))
-		for occupied[target] || importNames[target] {
+		for occupied[target] || importNames[target] || gotypes.Universe.Lookup(target) != nil {
 			target += "_"
 		}
 		occupied[target] = true
