@@ -1597,6 +1597,17 @@ func (c *Checker) validateTypeReference(ref ast.TypeRef, typeParameters map[stri
 	} else if binding, imported := c.importedTypeAt(ref.Name, ref.Span()); imported && len(binding.Export.TypeParameters) == 0 && len(ref.Arguments) > 0 {
 		c.error(ref.Span(), fmt.Sprintf("%s is not generic", ref.Name))
 	}
+	if types.FromName(ref.Name).Kind == types.Range {
+		if len(ref.Arguments) != 1 {
+			c.error(ref.Span(), fmt.Sprintf("Range expects one type argument, got %d", len(ref.Arguments)))
+			return
+		}
+		element := c.typeFromRefWithParameters(ref.Arguments[0], typeParameters)
+		if !types.Equivalent(element, types.FromName("Integer")) {
+			c.error(ref.Arguments[0].Span(), fmt.Sprintf("Range element type must be Integer, got %s", element))
+		}
+		return
+	}
 	if types.FromName(ref.Name).Kind != types.Hash {
 		return
 	}

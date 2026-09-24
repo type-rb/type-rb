@@ -50,8 +50,8 @@ end
 		for _, test := range cases {
 			t.Run(mode+"/"+test.name, func(t *testing.T) {
 				_, err := Compile("range_types.trb", []byte(test.source), mode)
-				if err == nil || !strings.Contains(err.Error(), "Range<String>") || !strings.Contains(err.Error(), "Range<Integer>") {
-					t.Fatalf("expected incompatible Range element diagnostic, got %v", err)
+				if err == nil || !strings.Contains(err.Error(), "Range element type must be Integer, got String") {
+					t.Fatalf("expected unsupported Range element diagnostic, got %v", err)
 				}
 			})
 		}
@@ -59,12 +59,18 @@ end
 }
 
 func TestMatchingRangeElementsCompileAcrossModes(t *testing.T) {
-	source := []byte(`def retained(span: Range<Integer>): Range<Integer>
+	source := []byte(`alias Count = Integer
+
+def aliased(span: Range<Count>): Range<Count>
+	return span
+end
+
+def retained(span: Range<Integer>): Range<Integer>
 	return span
 end
 
 def main()
-	mut span: Range<Integer> := retained(-1..1)
+	mut span: Range<Integer> := retained(aliased(-1..1))
 	span = 2...4
 	span.each { |value| puts(value) }
 end
@@ -75,5 +81,52 @@ end
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestRangeAnnotationsRejectUnsupportedElementsBeforeCodegen(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "unused parameter",
+			source: `def first(span: Range<String>): String
+	span.each { |value| return value }
+	return "empty"
+end
+
+def main()
+	puts("ok")
+end
+`,
+			want: "Range element type must be Integer, got String",
+		},
+		{
+			name:   "missing argument",
+			source: "def ignored(span: Range): Integer\n\treturn 0\nend\n",
+			want:   "Range expects one type argument, got 0",
+		},
+		{
+			name:   "nested annotation",
+			source: "record Bounds\n\tspans: Array<Range<Float>>\nend\n",
+			want:   "Range element type must be Integer, got Float",
+		},
+		{
+			name:   "generic parameter",
+			source: "def ignored<T>(span: Range<T>): Integer\n\treturn 0\nend\n",
+			want:   "Range element type must be Integer, got T",
+		},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, test := range cases {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				_, err := Compile("range_annotations.trb", []byte(test.source), mode)
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("expected %q before code generation, got %v", test.want, err)
+				}
+			})
+		}
 	}
 }

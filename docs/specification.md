@@ -628,6 +628,8 @@ switches.
   Array after those effects.
 - A Range literal evaluates its start and then its end exactly once, retaining
   each endpoint value before evaluating the next expression.
+- An authored Range type must be `Range<Integer>` (or use an alias resolving to
+  `Integer`); a bare `Range` or another element type is rejected during checking.
 - Range values retain their bounds and inclusivity through variables and
   function boundaries. Converting `Range<Integer>` to `Iterable<Integer>`
   retains the bounds without enumerating or copying the sequence. Each iteration
