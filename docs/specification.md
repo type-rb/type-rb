@@ -555,7 +555,8 @@ declared-type and flow-type split.
   array, and generic modifiers are not accepted on a literal type.
 - `case` accepts explicit Integer and String values. A case over an ordinary
   scalar may be open and normally uses `else`; a case over a literal union is
-  exhaustive and may omit `else` after handling every alternative.
+  exhaustive and may omit `else` after handling every alternative. An open
+  statement with no matching branch and no `else` continues after the `case`.
 - One literal branch may list multiple comma-separated values, such as
   `when "index", "show"`. The values share one body. Enum and union patterns,
   including payload bindings, use separate `when` branches.
@@ -1550,7 +1551,8 @@ renamed := Token::Renamed(7, after: "new", before: "old")
   form.
 - An `if` expression must contain an `else`, even when it has one or more
   `elsif` branches. A `case` expression must be exhaustive under the ordinary
-  enum or union rules; an `else` may cover the remaining alternatives.
+  enum or union rules; an `else` may cover the remaining alternatives. A case
+  expression over an ordinary Integer or String therefore requires `else`.
 - A branch must end in a result expression or transfer control with `return`,
   `break`, or `next`. Blank lines and comments after the final expression or
   transfer do not change the branch. Earlier statements execute within the

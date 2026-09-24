@@ -443,6 +443,8 @@ type Case struct {
 	ElseResult     Expression
 	ElseDiverges   bool
 	ElseNarrowings []CaseBinding
+	// Only an open Integer/String statement may continue after an unmatched case.
+	MayFallthrough bool
 }
 
 func (*Case) irStatement()  {}

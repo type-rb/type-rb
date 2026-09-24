@@ -2716,6 +2716,76 @@ end
 	}
 }
 
+func TestOpenScalarCaseStatementFallsThroughAcrossModes(t *testing.T) {
+	for _, selector := range []struct {
+		name, typeName, matched string
+	}{
+		{"integer", "Integer", "1"},
+		{"string", "String", `"one"`},
+	} {
+		source := []byte("def classify(value: " + selector.typeName + "): Integer\n" +
+			"\tcase value\n\twhen " + selector.matched + "\n\t\treturn 10\n\tend\n\treturn 20\nend\n")
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			artifact, err := Compile("open_case.trb", source, mode)
+			if err != nil {
+				t.Fatalf("%s %s case rejected: %v", mode, selector.name, err)
+			}
+			if strings.Contains(string(artifact.Output), "unreachable exhaustive case") {
+				t.Fatalf("%s %s open case still traps on an unmatched value:\n%s", mode, selector.name, artifact.Output)
+			}
+			if mode == "go" {
+				fileSet := token.NewFileSet()
+				parsed, err := parser.ParseFile(fileSet, "open_case.go", artifact.Output, parser.AllErrors)
+				if err != nil {
+					t.Fatalf("invalid generated Go: %v\n%s", err, artifact.Output)
+				}
+				if _, err := (&gotypes.Config{Importer: importer.Default()}).Check("main", fileSet, []*goast.File{parsed}, nil); err != nil {
+					t.Fatalf("generated Go did not type-check: %v\n%s", err, artifact.Output)
+				}
+			}
+		}
+		caseExpression := []byte("def classify(value: " + selector.typeName + "): Integer\n" +
+			"\treturn case value\n\twhen " + selector.matched + "\n\t\t10\n\tend\nend\n")
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			if _, err := Compile("open_case_expression.trb", caseExpression, mode); err == nil ||
+				!strings.Contains(err.Error(), "case expression requires an else branch") {
+				t.Fatalf("%s %s open case expression: expected missing-else diagnostic, got %v", mode, selector.name, err)
+			}
+		}
+	}
+}
+
+func TestOpenScalarCaseStatementRunsAcrossModes(t *testing.T) {
+	source := []byte(`def classify(value: Integer): Integer
+	case value
+	when 1
+		return 10
+	end
+	return 20
+end
+
+def label(value: String): Integer
+	case value
+	when "one"
+		return 30
+	end
+	return 40
+end
+
+def main()
+	puts(classify(2))
+	puts(classify(1))
+	puts(label("two"))
+	puts(label("one"))
+end
+`)
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			runEffectSource(t, mode, "open_scalar_case.trb", source, "20\n10\n40\n30")
+		})
+	}
+}
+
 func TestCaseExpressionAcrossModes(t *testing.T) {
 	source := []byte(`enum Outcome
 	Text(value: String)

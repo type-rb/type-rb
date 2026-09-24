@@ -1342,6 +1342,7 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 	if expression {
 		typ = l.checked.Expressions[node]
 	}
+	selectorType := l.checked.Expressions[node.Value]
 	exprBase := ir.NewExprBase(node.Span(), typ)
 	exprBase.TrailingComment = node.TrailingComment
 	result := &ir.Case{
@@ -1349,6 +1350,8 @@ func (l *lowerer) caseNode(node *ast.CaseStatement, expression bool) *ir.Case {
 		Value:    l.expression(node.Value),
 		Leading:  l.statements(node.Leading),
 		HasElse:  node.HasElse,
+		MayFallthrough: !expression && !node.HasElse &&
+			(selectorType.Kind == types.Int || selectorType.Kind == types.String),
 	}
 	result.Else, result.ElseResult, result.ElseDiverges = l.controlFlowBranch(node.Else, expression)
 	narrowing, narrows := l.checked.CaseNarrowings[node]

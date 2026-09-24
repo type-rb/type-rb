@@ -418,7 +418,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.indent++
 			g.statements(n.Else)
 			g.indent--
-		} else {
+		} else if !n.MayFallthrough {
 			g.line("else", "")
 			g.indent++
 			g.line(`raise "unreachable exhaustive case"`, "")

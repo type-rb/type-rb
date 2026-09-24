@@ -602,6 +602,31 @@ func TestEvaluateLiteralCaseAlternatives(t *testing.T) {
 	}
 }
 
+func TestEvaluateOpenCaseStatementFallsThrough(t *testing.T) {
+	integerType := types.FromName("Integer")
+	stringType := types.FromName("String")
+	integer := func(raw string) *ir.Literal {
+		return &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, integerType), Kind: "integer", Raw: raw}
+	}
+	message := &ir.Literal{ExprBase: ir.NewExprBase(token.Span{}, stringType), Kind: "string", Raw: `"after"`}
+	openCase := &ir.Case{
+		Value:          integer("2"),
+		MayFallthrough: true,
+		Branches:       []ir.CaseBranch{{Value: integer("1")}},
+	}
+	evaluator := NewEvaluator(&bytes.Buffer{}, "go")
+	result, err := evaluator.Evaluate([]ir.Statement{
+		openCase,
+		&ir.ExpressionStatement{Expression: message},
+	}, "repl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Display || Inspect(result.Value) != `"after"` {
+		t.Fatalf("open case did not fall through: %#v", result)
+	}
+}
+
 func TestEvaluateIfExpression(t *testing.T) {
 	booleanType := types.FromName("Boolean")
 	stringType := types.FromName("String")
