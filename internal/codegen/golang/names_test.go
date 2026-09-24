@@ -37,6 +37,21 @@ func TestAnalyzeGoBindingNamesUsesExplicitImportAliases(t *testing.T) {
 	}
 }
 
+func TestAnalyzeGoBindingNamesReservesPredeclaredGoIdentifiers(t *testing.T) {
+	names := analyzeGoBindingNames(
+		map[string]bool{"string": true, "len": true, "append": true, "message": true},
+		nil,
+	)
+	for _, source := range []string{"string", "len", "append"} {
+		if target := names[source]; !strings.HasPrefix(target, "__trbBinding_") {
+			t.Errorf("binding %q has target %q", source, target)
+		}
+	}
+	if names["message"] != "" {
+		t.Fatalf("ordinary binding was renamed to %q", names["message"])
+	}
+}
+
 func TestRequireSourceImportSeparatesEqualPackageBasenames(t *testing.T) {
 	g := &generator{imports: map[string]string{}}
 	first := g.requireSourceImport("example.com/application/jobs", "jobs")
