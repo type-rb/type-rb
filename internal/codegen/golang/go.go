@@ -32,6 +32,7 @@ type generator struct {
 	indent            int
 	functionDepth     int
 	receiver          string
+	classOwner        string
 	returnType        types.Type
 	inConstructor     bool
 	methods           map[string]bool
@@ -1310,6 +1311,12 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 	g.parameterDefaults(method.Parameters)
 	previous := g.receiver
 	g.receiver = "self"
+	previousClassOwner := g.classOwner
+	if method.Class {
+		g.classOwner = className
+	} else {
+		g.classOwner = ""
+	}
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
 	g.functionDepth++
@@ -1318,6 +1325,7 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 	g.functionDepth--
 	g.returnType = previousReturnType
 	g.receiver = previous
+	g.classOwner = previousClassOwner
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')
@@ -1921,6 +1929,9 @@ func (g *generator) expr(expression ir.Expression) string {
 				}
 			}
 			if identifier, ok := member.Receiver.(*ir.Identifier); ok {
+				if identifier.Name == "self" && g.classOwner != "" {
+					return "New" + g.classOwner + "(" + args + ")"
+				}
 				owner := identifier.Name
 				if identifier.Declaration.Name != "" {
 					owner = identifier.Declaration.Name

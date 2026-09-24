@@ -7579,6 +7579,13 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				case *ast.Identifier:
 					identifier := receiver
 					typ = types.FromName(identifier.Name)
+					if identifier.Name == "self" {
+						if info := c.classes[constructorType.Name]; info != nil {
+							typ = constructorType
+							c.checkArguments(n, info.methods["initialize"], argumentTypes)
+							break
+						}
+					}
 					if binding, imported := c.result.References[identifier]; imported && binding.Export != nil {
 						if binding.Export.Kind == resolver.RecordExport {
 							c.checkImportedRecordArguments(n, binding)
