@@ -25,3 +25,19 @@ func TestTRBModeAnalyzesWithoutGeneratingSource(t *testing.T) {
 		t.Fatalf("unknown mode error = %v", err)
 	}
 }
+
+func TestTRBModeIncrementalAnalysisSkipsMissingBackendValidation(t *testing.T) {
+	analyzer := NewAnalyzer()
+	first := []SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: []byte("def main()\n\tputs(\"first\")\nend\n")}}
+	if _, err := analyzer.AnalyzeProject(first, Options{Mode: "trb"}); err != nil {
+		t.Fatalf("initial analysis: %v", err)
+	}
+	changed := []SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: []byte("def main()\n\tputs(\"changed\")\nend\n")}}
+	artifacts, err := analyzer.AnalyzeProject(changed, Options{Mode: "trb"})
+	if err != nil {
+		t.Fatalf("incremental analysis of a valid edit: %v", err)
+	}
+	if len(artifacts) == 0 || artifacts[0].IR == nil {
+		t.Fatalf("incremental analysis returned no artifacts: %#v", artifacts)
+	}
+}

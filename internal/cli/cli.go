@@ -163,7 +163,7 @@ func (c *CLI) runCheck(args []string) error {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	format := flags.String("diagnostic-format", "human", "diagnostic output: human or json")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, typescript, or trb")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -233,7 +233,7 @@ func (c *CLI) runLint(args []string) error {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	format := flags.String("diagnostic-format", "human", "diagnostic output: human or json")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, typescript, or trb")
 	fix := flags.Bool("fix", false, "apply safe lint fixes")
 	denyWarnings := flags.Bool("deny-warnings", false, "treat lint warnings as command failures")
 	if err := flags.Parse(args); err != nil {
@@ -1204,7 +1204,7 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
 	keepGenerated := flags.Bool("keep-generated", false, "retain generated target source below .trb/generated")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, or typescript")
 	typeScriptRuntime := flags.String("runtime", "", "standalone TypeScript runtime: node or bun")
 	flagArgs := args
 	var programArgs []string
@@ -1371,8 +1371,8 @@ func loadCommandConfig(command, explicit, start, filename, mode, runtimeName str
 	if mode == "" {
 		mode = "go"
 	}
-	if mode != "ruby" && mode != "go" && mode != "typescript" {
-		return nil, false, fmt.Errorf("standalone mode must be ruby, go, or typescript; got %q", mode)
+	if !target.IsDeclared(mode) {
+		return nil, false, fmt.Errorf("standalone mode must be %s; got %q", target.DeclaredList(), mode)
 	}
 	if runtimeName != "" && mode != "typescript" {
 		return nil, false, errors.New("--runtime requires --mode typescript")
@@ -1928,8 +1928,8 @@ func playgroundMode(requested string) (string, error) {
 }
 
 func loadReplConfig(explicit, requestedMode string) (*project.Config, bool, error) {
-	if requestedMode != "" && requestedMode != "ruby" && requestedMode != "go" && requestedMode != "typescript" {
-		return nil, false, fmt.Errorf("repl --mode must be ruby, go, or typescript; got %q", requestedMode)
+	if requestedMode != "" && !target.IsDeclared(requestedMode) {
+		return nil, false, fmt.Errorf("repl --mode must be %s; got %q", target.DeclaredList(), requestedMode)
 	}
 	config, err := loadConfig(explicit, ".")
 	if err == nil {

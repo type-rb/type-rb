@@ -71,7 +71,7 @@ func TestRunStandaloneValidatesEntrypointAndOptions(t *testing.T) {
 		want string
 	}{
 		{name: "main", args: []string{"run", filename}, want: "standalone file has no top-level main()"},
-		{name: "mode", args: []string{"run", "--mode", "python", filename}, want: "standalone mode must be ruby, go, or typescript"},
+		{name: "mode", args: []string{"run", "--mode", "python", filename}, want: "standalone mode must be go, ruby, typescript, or trb"},
 		{name: "runtime-mode", args: []string{"run", "--runtime", "bun", filename}, want: "--runtime requires --mode typescript"},
 		{name: "runtime-name", args: []string{"run", "--mode", "typescript", "--runtime", "deno", filename}, want: "standalone TypeScript runtime must be node or bun"},
 	}

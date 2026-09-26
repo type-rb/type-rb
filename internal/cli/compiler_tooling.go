@@ -115,7 +115,7 @@ func (c *CLI) runCompilerInspect(args []string) error {
 	flags := flag.NewFlagSet("compiler inspect", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, typescript, or trb")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}

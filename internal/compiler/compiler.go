@@ -475,9 +475,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	if diagnostics := effectplan.ValidateResources(loweredPrograms); len(diagnostics) > 0 {
 		return nil, NewCompileError("", diagnostic.TypeError, diagnostics)
 	}
-	// A declared mode without a backend in this implementation has no
-	// backend-owned validation here; the implementation that builds it owns it.
-	if validateBackend && target.IsBuilt(options.Mode) {
+	if validateBackend {
 		if err := codegen.ValidateProject(loweredPrograms); err != nil {
 			return nil, err
 		}

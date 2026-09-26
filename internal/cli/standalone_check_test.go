@@ -158,7 +158,7 @@ func TestCheckStandaloneOptionsRequireAConfigFreeTRBFile(t *testing.T) {
 		want string
 	}{
 		{name: "missing-file", args: []string{"check", "--mode", "ruby"}, want: "check requires FILE.trb when trbconfig.jsonc is unavailable"},
-		{name: "invalid-mode", args: []string{"check", "--mode", "python", entry}, want: "standalone mode must be ruby, go, or typescript"},
+		{name: "invalid-mode", args: []string{"check", "--mode", "python", entry}, want: "standalone mode must be go, ruby, typescript, or trb"},
 		{name: "extension", args: []string{"check", filepath.Join(root, "library.rb")}, want: "standalone check source must be a .trb file"},
 		{name: "multiple", args: []string{"check", entry, entry}, want: "check accepts at most one standalone .trb file"},
 	}

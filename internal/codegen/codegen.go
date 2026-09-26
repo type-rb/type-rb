@@ -60,8 +60,11 @@ func ValidateProject(programs []*ir.Program) error {
 	case "typescript":
 		return typescript.ValidateProject(normalizeProjectDivergingControlFlow(programs))
 	default:
+		// A declared mode without a backend in this implementation has no
+		// backend-owned validation here; the implementation that builds it
+		// owns that validation.
 		if target.IsDeclared(programs[0].Mode) {
-			return target.Unavailable("backend validation", programs[0].Mode)
+			return nil
 		}
 		return fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", programs[0].Mode)
 	}

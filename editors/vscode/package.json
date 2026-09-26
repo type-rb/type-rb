@@ -213,7 +213,8 @@
 					"enum": [
 						"go",
 						"ruby",
-						"typescript"
+						"typescript",
+						"trb"
 					],
 					"default": "go",
 					"description": "Target mode for TypeRB files that are not owned by trbconfig.jsonc."

@@ -134,3 +134,25 @@ func TestInitTRBModeWritesOnlyTheConfiguration(t *testing.T) {
 		t.Fatalf("unexpected init output %q", stdout)
 	}
 }
+
+func TestStandaloneTRBModeSupportsAnalysisOnly(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	writeTRBModeFile(t, filepath.Join(directory, "main.trb"), "def main()\n\tputs(\"ok\")\nend\n")
+	for _, args := range [][]string{{"check", "--mode", "trb", "main.trb"}, {"lint", "--mode", "trb", "main.trb"}} {
+		if status, stdout, stderr := runTRBModeCommand(args...); status != 0 {
+			t.Fatalf("%v status=%d stdout=%s stderr=%s", args, status, stdout, stderr)
+		}
+	}
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"run", "--mode", "trb", "main.trb"}, want: "run is not available for mode trb in this implementation"},
+		{args: []string{"repl", "--mode", "trb"}, want: "repl is not available for mode trb in this implementation"},
+	} {
+		if status, stdout, stderr := runTRBModeCommand(test.args...); status == 0 || !strings.Contains(stderr, test.want) {
+			t.Fatalf("%v status=%d stdout=%s stderr=%s", test.args, status, stdout, stderr)
+		}
+	}
+}
