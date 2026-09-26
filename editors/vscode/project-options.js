@@ -77,8 +77,14 @@ function projectPaths(configPath, source) {
 		root,
 		sourceRoot: path.resolve(root, sourceDir),
 		outputRoot: path.resolve(root, outDir),
-		runnable: config.mode !== "typescript" || config.typescript?.runtime !== "browser"
+		runnable: modeRunnable(config.mode, config.typescript?.runtime)
 	};
+}
+
+// This implementation builds go, ruby, and typescript. A trb project is
+// analyzed but not run here, and browser TypeScript has no process runtime.
+function modeRunnable(mode, typeScriptRuntime) {
+	return mode !== "trb" && (mode !== "typescript" || typeScriptRuntime !== "browser");
 }
 
 function containsPath(root, filename) {
@@ -110,4 +116,4 @@ function excludeGeneratedProjects(projects) {
 	));
 }
 
-module.exports = { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths, stripJSONCComments };
+module.exports = { containsPath, excludeGeneratedProjects, literalGlobPattern, modeRunnable, projectForPath, projectPaths, stripJSONCComments };

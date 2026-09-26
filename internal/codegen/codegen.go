@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/typescript"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/sourcemap"
+	"github.com/type-rb/type-rb/internal/target"
 )
 
 type Generated struct {
@@ -18,6 +19,9 @@ type Generated struct {
 }
 
 func Generate(program *ir.Program) (Generated, error) {
+	if declaredWithoutBackend(program.Mode) {
+		return Generated{}, target.Unavailable("code generation", program.Mode)
+	}
 	if err := validateAnchoredDirectories([]*ir.Program{program}); err != nil {
 		return Generated{}, err
 	}
@@ -44,6 +48,12 @@ func Generate(program *ir.Program) (Generated, error) {
 // target source. Backends without generation-time validation return directly;
 // TypeScript receives the same normalized lowered IR as GenerateProject.
 func ValidateProject(programs []*ir.Program) error {
+	// A declared mode without a backend in this implementation has no
+	// backend-owned validation here, including backend adapter restrictions;
+	// the implementation that builds it owns that validation.
+	if len(programs) > 0 && declaredWithoutBackend(programs[0].Mode) {
+		return nil
+	}
 	if err := validateAnchoredDirectories(programs); err != nil {
 		return err
 	}
@@ -65,6 +75,9 @@ func ValidateProject(programs []*ir.Program) error {
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([]Generated, error) {
+	if len(programs) > 0 && declaredWithoutBackend(programs[0].Mode) {
+		return nil, target.Unavailable("code generation", programs[0].Mode)
+	}
 	if err := validateAnchoredDirectories(programs); err != nil {
 		return nil, err
 	}
@@ -109,6 +122,10 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs[index] = output
 	}
 	return outputs, nil
+}
+
+func declaredWithoutBackend(mode string) bool {
+	return target.IsDeclared(mode) && !target.IsBuilt(mode)
 }
 
 func normalizeProjectDivergingControlFlow(programs []*ir.Program) []*ir.Program {

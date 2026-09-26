@@ -4414,7 +4414,7 @@ func TestReplRejectsInvalidMode(t *testing.T) {
 	if status := command.Run([]string{"repl", "--mode", "python"}); status != 1 {
 		t.Fatalf("status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "repl --mode must be ruby, go, or typescript") {
+	if !strings.Contains(stderr.String(), "repl --mode must be go, ruby, typescript, or trb") {
 		t.Fatalf("unexpected error: %s", stderr.String())
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/type-rb/type-rb/internal/compiler"
 	"github.com/type-rb/type-rb/internal/compilerservice"
 	"github.com/type-rb/type-rb/internal/diagnostic"
+	"github.com/type-rb/type-rb/internal/target"
 	"github.com/type-rb/type-rb/internal/toolingprotocol"
 )
 
@@ -115,7 +116,7 @@ func (c *CLI) runCompilerInspect(args []string) error {
 	flags := flag.NewFlagSet("compiler inspect", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, typescript, or trb")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -178,7 +179,7 @@ func (c *CLI) runCompilerInspect(args []string) error {
 }
 
 func (c *CLI) reportCompilerInspectionError(mode string, fallback diagnostic.Code, err error) error {
-	if mode != "go" && mode != "ruby" && mode != "typescript" {
+	if !target.IsDeclared(mode) {
 		mode = ""
 	}
 	var items []diagnostic.Diagnostic

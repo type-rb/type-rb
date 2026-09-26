@@ -407,3 +407,22 @@ func TestDatabaseConfigRejectsEscapingPathsAndUnknownAdapters(t *testing.T) {
 		})
 	}
 }
+
+func TestTRBModeHasNoHostToolchainDefaults(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, ConfigName)
+	if err := os.WriteFile(path, []byte(`{"name": "native-app", "mode": "trb"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Mode != "trb" || config.Go != nil || config.Ruby != nil || config.TypeScript != nil {
+		t.Fatalf("unexpected trb configuration: %#v", config)
+	}
+	config.Mode = "native"
+	if err := config.Validate(); err == nil || err.Error() != `mode must be go, ruby, typescript, or trb; got "native"` {
+		t.Fatalf("unexpected mode validation error: %v", err)
+	}
+}

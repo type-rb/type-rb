@@ -25,6 +25,7 @@ import (
 	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/target"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
 	"github.com/type-rb/type-rb/internal/types"
@@ -155,7 +156,7 @@ func compileSourceUnit(unit SourceUnit, options Options) (*Artifact, error) {
 			Message:  "project mode is missing from trbconfig.jsonc",
 			Span:     token.Span{Start: token.Position{Line: 1, Column: 1}, End: token.Position{Line: 1, Column: 1}},
 		})
-	} else if options.Mode != "ruby" && options.Mode != "typescript" && options.Mode != "go" {
+	} else if !target.IsDeclared(options.Mode) {
 		parseDiagnostics = append(parseDiagnostics, diagnostic.Diagnostic{
 			Code:     diagnostic.ProjectError,
 			Severity: diagnostic.Error,
@@ -698,7 +699,7 @@ func modeDiagnostics(program *ast.Program, mode string) []diagnostic.Diagnostic 
 			Span:     token.Span{Start: token.Position{Line: 1, Column: 1}, End: token.Position{Line: 1, Column: 1}},
 		}}
 	}
-	if mode != "ruby" && mode != "typescript" && mode != "go" {
+	if !target.IsDeclared(mode) {
 		return []diagnostic.Diagnostic{{Code: diagnostic.ProjectError, Severity: diagnostic.Error, Message: fmt.Sprintf("unsupported mode %q", mode), Span: program.Span()}}
 	}
 	return nil

@@ -25,6 +25,7 @@ import (
 	"github.com/type-rb/type-rb/internal/lexer"
 	"github.com/type-rb/type-rb/internal/parser"
 	"github.com/type-rb/type-rb/internal/resolver"
+	"github.com/type-rb/type-rb/internal/target"
 	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -124,7 +125,7 @@ func New(options Options) *Server {
 		resolveWorkspace: options.ResolveWorkspace, packageAliases: cloneStringMap(options.CompilerOptions.PackageAliases),
 		sourceRoot: sourceRoot, excludedRoots: excludedRoots, includedFiles: includedFiles,
 		documents: map[string]document{}, base: base, fileRootFiles: initialFileRootFiles(base, options.ResolveWorkspace != nil), published: map[string]bool{},
-		runSupported:       options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser",
+		runSupported:       target.IsBuilt(options.Mode) && (options.Mode != "typescript" || options.CompilerOptions.TypeScriptRuntime != "browser"),
 		standardCandidates: languageservice.StandardImportCandidates(options.Mode),
 	}
 	if options.BackgroundDiagnostics {

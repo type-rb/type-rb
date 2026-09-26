@@ -11,6 +11,8 @@ trb init --mode go --module example.com/acme/app .
 trb init --mode ruby .
 trb init --mode typescript .
 trb init --mode typescript --runtime bun .
+# A trb project has no host manifest; this implementation does not build it.
+trb init --mode trb .
 
 # Generate a portable JSON API project for any target.
 trb init --mode go --module example.com/acme/api --template web .

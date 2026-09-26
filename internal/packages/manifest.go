@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/project"
+	"github.com/type-rb/type-rb/internal/target"
 )
 
 func Sync(config *project.Config) (string, error) {
@@ -52,6 +53,9 @@ func SyncWithDependencies(config *project.Config, packageDependencies map[string
 			return "", err
 		}
 	default:
+		if target.IsDeclared(config.Mode) {
+			return "", target.Unavailable("native package management", config.Mode)
+		}
 		return "", fmt.Errorf("unsupported mode %q", config.Mode)
 	}
 	path := filepath.Join(config.Root, name)

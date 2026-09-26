@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/type-rb/type-rb/internal/target"
 	"golang.org/x/mod/semver"
 )
 
@@ -274,10 +275,8 @@ func New(root, mode string) *Config {
 }
 
 func (c *Config) Validate() error {
-	switch c.Mode {
-	case "ruby", "go", "typescript":
-	default:
-		return fmt.Errorf("mode must be ruby, go, or typescript; got %q", c.Mode)
+	if !target.IsDeclared(c.Mode) {
+		return fmt.Errorf("mode must be %s; got %q", target.DeclaredList(), c.Mode)
 	}
 	if strings.TrimSpace(c.Name) == "" {
 		return errors.New("name is required")

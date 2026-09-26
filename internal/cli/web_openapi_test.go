@@ -15,7 +15,7 @@ import (
 
 func TestWebOpenAPIGeneratesTheSameDocumentAcrossModes(t *testing.T) {
 	var baseline webintegration.OpenAPIDocument
-	for _, mode := range []string{"go", "ruby", "typescript"} {
+	for _, mode := range []string{"go", "ruby", "typescript", "trb"} {
 		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			config := project.New(root, mode)

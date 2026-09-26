@@ -109,10 +109,10 @@ A repository publishes `trbpackage.json` at its root:
 ```
 
 `formatVersion`, `name`, and a semantic `version` are required. `sourceDir`
-defaults to `src`, and omitted `modes` support all three backends. Dependency
-aliases are local to the declaring package. Native dependencies are selected
-only for the application's active mode and merge into its generated target
-manifest.
+defaults to `src`, and omitted `modes` support every declared mode, including
+`trb`. Dependency aliases are local to the declaring package. Native
+dependencies are selected only for the application's active mode and merge
+into its generated target manifest.
 
 ### Fixed declaration providers
 

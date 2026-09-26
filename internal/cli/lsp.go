@@ -14,7 +14,7 @@ func (c *CLI) runLSP(args []string) error {
 	flags := flag.NewFlagSet("lsp", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
-	mode := flags.String("mode", "", "standalone mode: ruby, go, or typescript")
+	mode := flags.String("mode", "", "standalone mode: go, ruby, typescript, or trb")
 	typeScriptRuntime := flags.String("runtime", "", "standalone TypeScript runtime: node or bun")
 	if err := flags.Parse(args); err != nil {
 		return err
