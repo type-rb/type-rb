@@ -578,7 +578,7 @@ func TestFormatPortableCollectionTransformations(t *testing.T) {
 	if len(diagnostics) > 0 {
 		t.Fatal(diagnostics)
 	}
-	want := "def values(): Array<Integer>\n\tmapped := [1, 2].map do |value| # map\n\t\tvalue * 2 # result\n\tend\n\tconcurrent := mapped.concurrent_map do |value|\n\t\tvalue + 1\n\tend\n\tbounded := concurrent.concurrent_map(limit: 2) do |value|\n\t\tvalue + 1\n\tend\n\tordered := bounded.sort_by() { |value| - value }\n\tall_positive := ordered.all?() { |value| value > 0 }\n\tfound := ordered.find() { |value| value > 1 }\n\tputs(all_positive)\n\tputs(found)\n\treturn ordered.select.with_index { |value, index| value > index }\nend\n"
+	want := "def values(): Array<Integer>\n\tmapped := [1, 2].map do |value| # map\n\t\tvalue * 2 # result\n\tend\n\tconcurrent := mapped.concurrent_map do |value|\n\t\tvalue + 1\n\tend\n\tbounded := concurrent.concurrent_map(limit: 2) do |value|\n\t\tvalue + 1\n\tend\n\tordered := bounded.sort_by() { |value| -value }\n\tall_positive := ordered.all?() { |value| value > 0 }\n\tfound := ordered.find() { |value| value > 1 }\n\tputs(all_positive)\n\tputs(found)\n\treturn ordered.select.with_index { |value, index| value > index }\nend\n"
 	if string(formatted) != want {
 		t.Fatalf("unexpected collection-transformation formatting:\n%s", formatted)
 	}

@@ -825,6 +825,11 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 	if previous.Lexeme == "!" || previous.Lexeme == "~" {
 		return false
 	}
+	if isUnarySign(beforePrevious, previous) {
+		// Keep consecutive signs separate so a nested unary expression is
+		// distinguishable from a single operator at a glance.
+		return current.Lexeme == "+" || current.Lexeme == "-"
+	}
 	if current.Lexeme == "?" {
 		return true
 	}
@@ -894,9 +899,6 @@ func needsSpace(beforePrevious *token.Token, previous, current token.Token, next
 			return false
 		}
 		return true
-	}
-	if isUnary(previous.Lexeme, current.Lexeme) {
-		return false
 	}
 	if isOperator(previous.Lexeme) || isOperator(current.Lexeme) {
 		return true
@@ -1005,11 +1007,18 @@ func ternaryPrefixColon(tokens []token.Token, index int) bool {
 	return isOperator(tokens[index-1].Lexeme)
 }
 
-func isUnary(previous, current string) bool {
-	if current != "!" && current != "~" && current != "+" && current != "-" {
+func isUnarySign(before *token.Token, sign token.Token) bool {
+	if sign.Lexeme != "+" && sign.Lexeme != "-" {
 		return false
 	}
-	return previous == "(" || previous == "[" || previous == "{" || previous == "," || previous == "=" || previous == ":="
+	if before == nil {
+		return true
+	}
+	switch before.Lexeme {
+	case "(", "[", "{", ",", ":", "?", "return", "break", "next", "if", "unless", "while", "until", "when", "case":
+		return true
+	}
+	return isOperator(before.Lexeme)
 }
 
 func isDedent(first string) bool {
