@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/project"
+	"github.com/type-rb/type-rb/internal/target"
 	"golang.org/x/mod/semver"
 )
 
@@ -72,7 +73,7 @@ func (m *TypeRBManifest) applyDefaults() {
 		m.SourceDir = "src"
 	}
 	if len(m.Modes) == 0 {
-		m.Modes = []string{"go", "ruby", "typescript"}
+		m.Modes = target.Declared()
 	}
 	if m.Packages == nil {
 		m.Packages = map[string]project.PackageRequirement{}
@@ -117,7 +118,7 @@ func (m *TypeRBManifest) Validate(root string) error {
 	}
 	seenModes := map[string]bool{}
 	for _, mode := range m.Modes {
-		if mode != "go" && mode != "ruby" && mode != "typescript" {
+		if !target.IsDeclared(mode) {
 			return fmt.Errorf("unsupported mode %q", mode)
 		}
 		if seenModes[mode] {
@@ -134,7 +135,7 @@ func (m *TypeRBManifest) Validate(root string) error {
 		}
 	}
 	for mode, dependencies := range m.NativeDependencies {
-		if mode != "go" && mode != "ruby" && mode != "typescript" {
+		if !target.IsBuilt(mode) {
 			return fmt.Errorf("nativeDependencies has unsupported mode %q", mode)
 		}
 		for name, version := range dependencies {
@@ -189,7 +190,7 @@ func (m *TypeRBManifest) Validate(root string) error {
 		}
 	}
 	for mode, adapter := range m.DeclarationAdapters {
-		if mode != "go" && mode != "ruby" && mode != "typescript" {
+		if !target.IsBuilt(mode) {
 			return fmt.Errorf("declarationAdapters has unsupported mode %q", mode)
 		}
 		if filepath.IsAbs(adapter) || escapesDirectory(adapter) || strings.TrimSpace(adapter) == "" {
@@ -204,7 +205,7 @@ func (m *TypeRBManifest) Validate(root string) error {
 		}
 	}
 	for mode, adapter := range m.RuntimeAdapters {
-		if mode != "go" && mode != "ruby" && mode != "typescript" {
+		if !target.IsBuilt(mode) {
 			return fmt.Errorf("runtimeAdapters has unsupported mode %q", mode)
 		}
 		if m.DeclarationAdapterFor(mode) == "" {

@@ -8,6 +8,7 @@ import (
 	"github.com/type-rb/type-rb/internal/codegen/typescript"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/sourcemap"
+	"github.com/type-rb/type-rb/internal/target"
 )
 
 type Generated struct {
@@ -36,6 +37,9 @@ func Generate(program *ir.Program) (Generated, error) {
 		files, dependencies := nativeSupport([]*ir.Program{program})
 		return Generated{Output: []byte(generated.Output), SourceMap: generated.Map, SupportFiles: files, NativeDependencies: dependencies}, nil
 	default:
+		if target.IsDeclared(program.Mode) {
+			return Generated{}, target.Unavailable("code generation", program.Mode)
+		}
 		return Generated{}, fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", program.Mode)
 	}
 }
@@ -56,6 +60,9 @@ func ValidateProject(programs []*ir.Program) error {
 	case "typescript":
 		return typescript.ValidateProject(normalizeProjectDivergingControlFlow(programs))
 	default:
+		if target.IsDeclared(programs[0].Mode) {
+			return target.Unavailable("backend validation", programs[0].Mode)
+		}
 		return fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", programs[0].Mode)
 	}
 }

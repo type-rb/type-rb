@@ -41,10 +41,17 @@ trb init --mode typescript .
 
 ## Modes
 
-A project declares one mode: `go`, `ruby`, or `typescript`. The mode selects
-the backend, target toolchain, and package ecosystem. It does not select a
-grammar variant or loosen portable type checking. Target-specific capabilities
-require an explicit `trb/platform/<mode>/*` import.
+A project declares one mode: `go`, `ruby`, `typescript`, or `trb`. The mode
+selects the backend, target toolchain, and package ecosystem. It does not
+select a grammar variant or loosen portable type checking. Target-specific
+capabilities require an explicit `trb/platform/<mode>/*` import.
+
+The `trb` mode produces machine-code executables with the TypeRB runtime. This
+implementation does not build it. In a `trb` project, `check`, `fmt`, `lint`,
+`lsp`, `install`, `update`, and `web` work. `build`, `run`, `test`, `repl`, the
+`jobs` commands, and native package management report that the mode is not
+available. A `trb` project has no host package manifest, and
+`trb init --mode trb` writes only `trbconfig.jsonc`.
 
 Go mode owns `go.mod`, Ruby mode owns `Gemfile` and `.ruby-version`, and
 TypeScript mode owns `package.json`. These files are deterministic views of

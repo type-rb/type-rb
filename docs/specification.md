@@ -19,14 +19,18 @@ Design principles:
 ## 2. Project Target Modes
 
 A project declares exactly one output mode in `trbconfig.jsonc`: `go`, `ruby`,
-or `typescript`. Source files do not contain mode declarations. A standalone
+`typescript`, or `trb`. The `trb` mode produces machine-code executables with
+the TypeRB runtime. Source files do not contain mode declarations. A standalone
 CLI or editor session without a discoverable project configuration may select
-the same mode as session metadata; Go is the default. This selection does not
-create a fourth configuration source or change the source language.
+a mode as session metadata; Go is the default. This selection does not create
+another configuration source or change the source language.
 
-Mode selection controls transpilation output and target package/toolchain
+Mode selection controls the output, target package ecosystem, and toolchain
 integration. The concrete manifest and toolchain settings belong to the
-[project configuration reference](configuration.md).
+[project configuration reference](configuration.md). An implementation may
+build only some declared modes. It still loads, analyzes, formats, and lints a
+project in any declared mode, and a command that needs a missing backend fails
+explicitly. This implementation builds `go`, `ruby`, and `typescript`.
 
 Mode never changes TypeRB grammar or relaxes its portable type rules. The same
 source syntax has the same meaning in every mode. Target-specific APIs,

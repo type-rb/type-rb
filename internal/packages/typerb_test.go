@@ -592,3 +592,36 @@ func commitAndTagUpdate(t *testing.T, root, tag string) {
 		}
 	}
 }
+
+func TestTypeRBManifestModesDefaultToEveryDeclaredMode(t *testing.T) {
+	write := func(t *testing.T, data string) string {
+		t.Helper()
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, TypeRBManifestName), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	manifest, err := ReadTypeRBManifest(write(t, `{"formatVersion":1,"name":"github.com/acme/portable","version":"1.0.0"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"go", "ruby", "typescript", "trb"} {
+		if !manifest.Supports(mode) {
+			t.Fatalf("portable package does not support mode %s", mode)
+		}
+	}
+	restricted, err := ReadTypeRBManifest(write(t, `{"formatVersion":1,"name":"github.com/acme/native","version":"1.0.0","modes":["go","trb"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !restricted.Supports("trb") || restricted.Supports("ruby") {
+		t.Fatalf("explicit modes were not preserved: %v", restricted.Modes)
+	}
+	if _, err := ReadTypeRBManifest(write(t, `{"formatVersion":1,"name":"github.com/acme/native","version":"1.0.0","nativeDependencies":{"trb":{"libexample":"1.0"}}}`)); err == nil || !strings.Contains(err.Error(), `nativeDependencies has unsupported mode "trb"`) {
+		t.Fatalf("native dependencies for a mode without a backend were accepted: %v", err)
+	}
+}

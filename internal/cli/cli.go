@@ -42,6 +42,7 @@ import (
 	"github.com/type-rb/type-rb/internal/runtimeadapterhost"
 	"github.com/type-rb/type-rb/internal/sourcemap"
 	"github.com/type-rb/type-rb/internal/stdlib"
+	"github.com/type-rb/type-rb/internal/target"
 	"github.com/type-rb/type-rb/internal/testsuite"
 	"github.com/type-rb/type-rb/internal/token"
 )
@@ -459,6 +460,9 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	config, err := loadConfig(*configPath, ".")
 	if err != nil {
 		return err
+	}
+	if !target.IsBuilt(config.Mode) {
+		return target.Unavailable("test", config.Mode)
 	}
 	if *compile && config.Mode != "go" {
 		return fmt.Errorf("test --compile is supported only for mode go; project mode is %s", config.Mode)
@@ -952,6 +956,9 @@ func (c *CLI) runBuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	if !target.IsBuilt(config.Mode) {
+		return target.Unavailable("build", config.Mode)
+	}
 	if kind == buildArtifactExecutable {
 		if config.Mode != "go" {
 			return fmt.Errorf("--compile is supported only for mode go; selected mode is %s", config.Mode)
@@ -1230,6 +1237,9 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	if err != nil {
 		return err
 	}
+	if !target.IsBuilt(config.Mode) {
+		return target.Unavailable("run", config.Mode)
+	}
 	files := []string{filename}
 	var sourceGraph *fileRootSourceGraph
 	if !standalone {
@@ -1431,6 +1441,9 @@ func (c *CLI) runRepl(args []string) error {
 	config, projectAware, err := loadReplConfig(*configPath, *mode)
 	if err != nil {
 		return err
+	}
+	if !target.IsBuilt(config.Mode) {
+		return target.Unavailable("repl", config.Mode)
 	}
 	var files []string
 	if projectAware {
@@ -2005,7 +2018,7 @@ func (c *CLI) applySqldef(config *project.Config) error {
 func (c *CLI) runInit(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
-	mode := flags.String("mode", "", "ruby, go, or typescript")
+	mode := flags.String("mode", "", "go, ruby, typescript, or trb")
 	module := flags.String("module", "", "Go module path")
 	typeScriptRuntime := flags.String("runtime", "", "TypeScript runtime: browser, bun, or node")
 	template := flags.String("template", "", "project template (web)")
@@ -2020,7 +2033,7 @@ func (c *CLI) runInit(args []string) error {
 		root = flags.Arg(0)
 	}
 	if *mode == "" {
-		return errors.New("init requires --mode ruby, --mode go, or --mode typescript")
+		return errors.New("init requires --mode go, --mode ruby, --mode typescript, or --mode trb")
 	}
 	if *typeScriptRuntime != "" && *mode != "typescript" {
 		return errors.New("init --runtime is supported only for mode typescript")
@@ -2059,15 +2072,21 @@ func (c *CLI) runInit(args []string) error {
 	if err := config.Save(); err != nil {
 		return err
 	}
-	manifest, err := packageManager.Sync(config)
-	if err != nil {
-		return err
+	manifest := ""
+	if target.IsBuilt(config.Mode) {
+		var err error
+		manifest, err = packageManager.Sync(config)
+		if err != nil {
+			return err
+		}
 	}
 	if err := writeInitTemplate(templateFiles); err != nil {
 		return err
 	}
 	fmt.Fprintln(c.Stdout, config.Path)
-	fmt.Fprintln(c.Stdout, manifest)
+	if manifest != "" {
+		fmt.Fprintln(c.Stdout, manifest)
+	}
 	for _, file := range templateFiles {
 		fmt.Fprintln(c.Stdout, file.Path)
 	}
@@ -2147,7 +2166,7 @@ func (c *CLI) runAdd(args []string) error {
 	if err := config.Save(); err != nil {
 		return err
 	}
-	if config.ManagesPackages() {
+	if managesHostPackages(config) {
 		files, collectErr := collectDependencyTRB(config)
 		if collectErr != nil {
 			return collectErr
@@ -2163,6 +2182,9 @@ func (c *CLI) runAdd(args []string) error {
 }
 
 func (c *CLI) addNativeDependency(config *project.Config, arguments []string, dev bool) error {
+	if !target.IsBuilt(config.Mode) {
+		return target.Unavailable("native package management", config.Mode)
+	}
 	if !config.ManagesPackages() {
 		return errors.New("native package management is external; edit dependencies in the host project")
 	}
@@ -2210,6 +2232,9 @@ func (c *CLI) runRemove(args []string) error {
 	}
 	name := flags.Arg(0)
 	if *native {
+		if !target.IsBuilt(config.Mode) {
+			return target.Unavailable("native package management", config.Mode)
+		}
 		if !config.ManagesPackages() {
 			return errors.New("native package management is external; edit dependencies in the host project")
 		}
@@ -2224,7 +2249,7 @@ func (c *CLI) runRemove(args []string) error {
 	if err := config.Save(); err != nil {
 		return err
 	}
-	if config.ManagesPackages() {
+	if managesHostPackages(config) {
 		files, collectErr := collectDependencyTRB(config)
 		if collectErr != nil {
 			return collectErr
@@ -2259,6 +2284,9 @@ func (c *CLI) runInstall(args []string) error {
 	}
 	if resolved.Lock != nil {
 		fmt.Fprintf(c.Stdout, "resolved %d TypeRB package(s) -> %s\n", len(resolved.Packages), packageManager.TypeRBLockPath(config))
+	}
+	if !target.IsBuilt(config.Mode) {
+		return nil
 	}
 	if !config.ManagesPackages() {
 		fmt.Fprintln(c.Stdout, "native package management is external")
@@ -2415,7 +2443,7 @@ func (c *CLI) runUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
-	if config.ManagesPackages() {
+	if managesHostPackages(config) {
 		files, err := collectDependencyTRB(config)
 		if err != nil {
 			return err
@@ -2433,6 +2461,13 @@ func (c *CLI) runUpdate(args []string) error {
 		fmt.Fprintf(c.Stdout, "updated selected package graph(s): %s -> %s\n", strings.Join(selected, ", "), packageManager.TypeRBLockPath(config))
 	}
 	return nil
+}
+
+// managesHostPackages reports whether this implementation writes and installs
+// a host package manifest for the project. Declared modes without a backend
+// here have TypeRB packages but no host package manager.
+func managesHostPackages(config *project.Config) bool {
+	return config.ManagesPackages() && target.IsBuilt(config.Mode)
 }
 
 func syncProjectPackages(config *project.Config, files []string) (string, error) {
