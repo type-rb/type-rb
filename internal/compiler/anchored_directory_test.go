@@ -109,7 +109,7 @@ def leak(_root: Dir): Array<Integer>
 end`,
 	}
 	for name, source := range cases {
-		for _, mode := range []string{"go", "ruby", "typescript"} {
+		for _, mode := range []string{"go", "ruby", "typescript", "trb"} {
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				_, err := CompileProject([]SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: []byte(imports + source)}}, Options{Mode: mode})
 				if err == nil || !strings.Contains(err.Error(), "scoped resource") {

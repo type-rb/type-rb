@@ -156,3 +156,10 @@ func TestStandaloneTRBModeSupportsAnalysisOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestCompilerInspectKeepsTRBModeInErrorReports(t *testing.T) {
+	report, _ := runCompilerInspection(t, []string{"compiler", "inspect", "--mode", "trb", filepath.Join(t.TempDir(), "missing.trb")}, 1)
+	if report.Mode != "trb" || report.Summary.Errors == 0 {
+		t.Fatalf("unexpected trb inspection error report: %#v", report)
+	}
+}

@@ -41,3 +41,16 @@ func TestTRBModeIncrementalAnalysisSkipsMissingBackendValidation(t *testing.T) {
 		t.Fatalf("incremental analysis returned no artifacts: %#v", artifacts)
 	}
 }
+
+func TestTRBModeLeavesBackendAdapterRestrictionsToItsBackend(t *testing.T) {
+	units := []SourceUnit{{Filename: "main.trb", ModulePath: "main", Source: []byte(anchoredDirectorySource)}}
+	if _, err := AnalyzeProject(units, Options{Mode: "trb"}); err != nil {
+		t.Fatalf("mode trb analysis rejected a portable anchored Dir program: %v", err)
+	}
+	if _, err := AnalyzeProject(units, Options{Mode: "ruby"}); err == nil || !strings.Contains(err.Error(), "anchored Dir operations require") {
+		t.Fatalf("ruby analysis must keep its backend adapter restriction: %v", err)
+	}
+	if _, err := CompileProject(units, Options{Mode: "trb"}); err == nil || !strings.Contains(err.Error(), "code generation is not available for mode trb in this implementation") {
+		t.Fatalf("mode trb generation error = %v", err)
+	}
+}

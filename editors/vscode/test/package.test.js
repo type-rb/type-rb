@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { readFile } = require("node:fs/promises");
 const path = require("node:path");
 const test = require("node:test");
-const { excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("../project-options");
+const { excludeGeneratedProjects, literalGlobPattern, modeRunnable, projectForPath, projectPaths } = require("../project-options");
 const { resolveRunOptions, resolveServerOptions, resolveStandaloneDebugBuildOptions, runCodeLensTitle } = require("../server-options");
 const { transitionStandaloneClient } = require("../standalone-client-state");
 
@@ -192,6 +192,16 @@ test("derives independent project roots from JSONC configuration", () => {
 	assert.equal(projectForPath([api, web], "/workspace/apps/api/src/models/todo.trb"), api);
 	assert.equal(projectForPath([api, web], "/workspace/apps/web/src/models/todo.trb"), web);
 	assert.equal(projectForPath([api, web], "/workspace/shared/todo.trb"), undefined);
+});
+
+test("marks trb projects as non-runnable in this implementation", () => {
+	const project = projectPaths("/workspace/apps/native/trbconfig.jsonc", '{"mode":"trb"}');
+	assert.equal(project.runnable, false);
+	assert.equal(project.mode, "trb");
+	assert.equal(modeRunnable("trb", "node"), false);
+	assert.equal(modeRunnable("go"), true);
+	assert.equal(modeRunnable("typescript", "browser"), false);
+	assert.equal(modeRunnable("typescript", "bun"), true);
 });
 
 test("marks TypeScript browser projects as non-runnable", () => {

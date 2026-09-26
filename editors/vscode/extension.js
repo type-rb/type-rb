@@ -8,7 +8,7 @@ const vscode = require("vscode");
 const { LanguageClient, State } = require("vscode-languageclient/node");
 const { TypeRBDebugSession, TypeRBProcess } = require("./debug-session");
 const { DlvDAPProcess } = require("./go-debug-adapter");
-const { containsPath, excludeGeneratedProjects, literalGlobPattern, projectForPath, projectPaths } = require("./project-options");
+const { containsPath, excludeGeneratedProjects, literalGlobPattern, modeRunnable, projectForPath, projectPaths } = require("./project-options");
 const { DebugArtifactSessions, DebugArtifactStore, reserveDebugArtifact } = require("./debug-artifacts");
 const { resolveRunOptions, resolveServerOptions, resolveStandaloneDebugBuildOptions, runCodeLensTitle } = require("./server-options");
 const { transitionStandaloneClient } = require("./standalone-client-state");
@@ -197,7 +197,7 @@ class ProjectManager {
 			label: path.basename(filename),
 			mode,
 			runtime,
-			runnable: true,
+			runnable: modeRunnable(mode, runtime),
 			files: new Set([filename]),
 			forwardedDocuments: new Set(),
 			diagnostics: new Map(),

@@ -19,6 +19,9 @@ type Generated struct {
 }
 
 func Generate(program *ir.Program) (Generated, error) {
+	if declaredWithoutBackend(program.Mode) {
+		return Generated{}, target.Unavailable("code generation", program.Mode)
+	}
 	if err := validateAnchoredDirectories([]*ir.Program{program}); err != nil {
 		return Generated{}, err
 	}
@@ -37,9 +40,6 @@ func Generate(program *ir.Program) (Generated, error) {
 		files, dependencies := nativeSupport([]*ir.Program{program})
 		return Generated{Output: []byte(generated.Output), SourceMap: generated.Map, SupportFiles: files, NativeDependencies: dependencies}, nil
 	default:
-		if target.IsDeclared(program.Mode) {
-			return Generated{}, target.Unavailable("code generation", program.Mode)
-		}
 		return Generated{}, fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", program.Mode)
 	}
 }
@@ -48,6 +48,12 @@ func Generate(program *ir.Program) (Generated, error) {
 // target source. Backends without generation-time validation return directly;
 // TypeScript receives the same normalized lowered IR as GenerateProject.
 func ValidateProject(programs []*ir.Program) error {
+	// A declared mode without a backend in this implementation has no
+	// backend-owned validation here, including backend adapter restrictions;
+	// the implementation that builds it owns that validation.
+	if len(programs) > 0 && declaredWithoutBackend(programs[0].Mode) {
+		return nil
+	}
 	if err := validateAnchoredDirectories(programs); err != nil {
 		return err
 	}
@@ -60,12 +66,6 @@ func ValidateProject(programs []*ir.Program) error {
 	case "typescript":
 		return typescript.ValidateProject(normalizeProjectDivergingControlFlow(programs))
 	default:
-		// A declared mode without a backend in this implementation has no
-		// backend-owned validation here; the implementation that builds it
-		// owns that validation.
-		if target.IsDeclared(programs[0].Mode) {
-			return nil
-		}
 		return fmt.Errorf("unsupported mode %q (want ruby, typescript, or go)", programs[0].Mode)
 	}
 }
@@ -75,6 +75,9 @@ func ValidateProject(programs []*ir.Program) error {
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([]Generated, error) {
+	if len(programs) > 0 && declaredWithoutBackend(programs[0].Mode) {
+		return nil, target.Unavailable("code generation", programs[0].Mode)
+	}
 	if err := validateAnchoredDirectories(programs); err != nil {
 		return nil, err
 	}
@@ -119,6 +122,10 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs[index] = output
 	}
 	return outputs, nil
+}
+
+func declaredWithoutBackend(mode string) bool {
+	return target.IsDeclared(mode) && !target.IsBuilt(mode)
 }
 
 func normalizeProjectDivergingControlFlow(programs []*ir.Program) []*ir.Program {
