@@ -157,7 +157,7 @@ func TestGeneratedTypeScriptResultFunctionValuesRunAcrossNamedLambdaAndHOFBounda
   if (path === "/failed") throw new Error("offline");
   return new Response("body" + path, { status: 200, headers: { "content-type": "text/plain" } });
 };
-await import("./main.ts");
+await (await import("./main.ts")).__trb_start();
 `
 	if err := os.WriteFile(filepath.Join(root, "runner.ts"), []byte(harness), 0o644); err != nil {
 		t.Fatal(err)

@@ -61,7 +61,7 @@ func TestGeneratedNativeRuntimeAdapterCallsPackageShimAcrossBackends(t *testing.
 				t.Fatalf("generated %s runtime adapter imported unselected symbol %q:\n%s", mode, unexpected, generated)
 			}
 			root := t.TempDir()
-			output := runNativeRuntimeArtifact(t, mode, root, artifacts[0].Output)
+			output := runNativeRuntimeArtifact(t, mode, root, artifacts)
 			if strings.TrimSpace(output) != "wire:payload" {
 				t.Fatalf("unexpected %s runtime output: %q", mode, output)
 			}
@@ -156,15 +156,15 @@ func nativeRuntimeUnusedMarker(mode string) string {
 	}
 }
 
-func runNativeRuntimeArtifact(t *testing.T, mode, root string, source []byte) string {
+func runNativeRuntimeArtifact(t *testing.T, mode, root string, artifacts []*Artifact) string {
 	t.Helper()
+	writeProjectRuntimeArtifacts(t, root, artifacts)
 	switch mode {
 	case "go":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.go"), source)
 		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/runtime-app\n\ngo 1.27\n\nrequire example.com/runtime-wire v0.0.0\n\nreplace example.com/runtime-wire => ./runtime-wire\n"))
 		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "go.mod"), []byte("module example.com/runtime-wire\n\ngo 1.27\n"))
 		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "wire.go"), []byte("package runtimewire\n\nimport \"context\"\n\nfunc Invoke(scope context.Context, input string) string {\n\tif scope == nil { panic(\"missing scope\") }\n\treturn \"wire:\" + input\n}\n"))
-		command := exec.Command("go", "run", ".")
+		command := exec.Command("go", "run", "./"+filepath.Dir(artifacts[0].EntryPath))
 		command.Dir = root
 		command.Env = append(os.Environ(), "GOCACHE="+filepath.Join(root, "go-cache"))
 		output, err := command.CombinedOutput()
@@ -173,10 +173,9 @@ func runNativeRuntimeArtifact(t *testing.T, mode, root string, source []byte) st
 		}
 		return string(output)
 	case "ruby":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.rb"), source)
 		nativeRoot := filepath.Join(root, "native")
 		writeCompilerRuntimeFile(t, filepath.Join(nativeRoot, "acme", "runtime_wire.rb"), []byte("module Acme\n  module RuntimeWire\n    def self.invoke(scope, input)\n      scope.check!\n      \"wire:\" + input\n    end\n  end\nend\n"))
-		command := exec.Command("ruby", "-I", nativeRoot, "main.rb")
+		command := exec.Command("ruby", "-I", nativeRoot, artifacts[0].EntryPath)
 		command.Dir = root
 		output, err := command.CombinedOutput()
 		if err != nil {
@@ -184,11 +183,10 @@ func runNativeRuntimeArtifact(t *testing.T, mode, root string, source []byte) st
 		}
 		return string(output)
 	default:
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.ts"), source)
 		moduleRoot := filepath.Join(root, "node_modules", "@acme", "runtime-wire")
 		writeCompilerRuntimeFile(t, filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"@acme/runtime-wire","type":"module","exports":"./index.ts"}`))
 		writeCompilerRuntimeFile(t, filepath.Join(moduleRoot, "index.ts"), []byte("export async function invoke(scope: AbortSignal | undefined, input: string): Promise<string> {\n  if (scope?.aborted) throw new Error(\"cancelled\");\n  return \"wire:\" + input;\n}\n"))
-		command := exec.Command("bun", "run", "main.ts")
+		command := exec.Command("bun", "run", artifacts[0].EntryPath)
 		command.Dir = root
 		output, err := command.CombinedOutput()
 		if err != nil {
@@ -205,5 +203,36 @@ func writeCompilerRuntimeFile(t *testing.T, path string, contents []byte) {
 	}
 	if err := os.WriteFile(path, contents, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGoUnreachableModulesDoNotLoadNativeImports(t *testing.T) {
+	for _, reachable := range []bool{false, true} {
+		main := "def main()\nputs(\"main\")\nend\n"
+		want := "main\n"
+		if reachable {
+			main = "import { value } from unused\ndef main()\nputs(value())\nputs(\"main\")\nend\n"
+			want = "native\nwire:payload\nmain\n"
+		}
+		options := Options{Mode: "go", GoModule: "example.com/runtime-app", NativePackages: nativeRuntimeCompilerCatalog("go")}
+		artifacts, err := CompileProject([]SourceUnit{
+			{Filename: "main.trb", ModulePath: "main", Source: []byte(main)},
+			{Filename: "unused.trb", ModulePath: "unused", Source: []byte("import { invoke } from github.com/acme/runtime/native\ndef value(): String\nreturn invoke(\"payload\")\nend\n")},
+		}, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := t.TempDir()
+		writeProjectRuntimeArtifacts(t, root, artifacts)
+		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/runtime-app\n\ngo 1.27\n\nrequire example.com/runtime-wire v0.0.0\nreplace example.com/runtime-wire => ./runtime-wire\n"))
+		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "go.mod"), []byte("module example.com/runtime-wire\n\ngo 1.27\n"))
+		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "wire.go"), []byte("package runtimewire\nimport (\"context\"; \"fmt\")\nfunc init() { fmt.Println(\"native\") }\nfunc Invoke(scope context.Context, input string) string { return \"wire:\"+input }\n"))
+		command := exec.Command("go", "run", "./"+filepath.Dir(artifactForModule(artifacts, "main").EntryPath))
+		command.Dir = root
+		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
+		output, err := command.CombinedOutput()
+		if err != nil || string(output) != want {
+			t.Fatalf("reachable=%v error=%v output=%q want=%q", reachable, err, output, want)
+		}
 	}
 }

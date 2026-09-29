@@ -280,7 +280,7 @@ func (g *generator) cliTypeName(modulePath, name string) string {
 }
 
 func (g *generator) cliQualifier(modulePath string) string {
-	if modulePath == "" || g.currentDirectory() == moduleDirectory(modulePath) {
+	if modulePath == "" || g.currentDirectory() == g.sourceDirectory(modulePath) {
 		return ""
 	}
 	reference := &ir.Reference{Package: modulePath, Symbol: "__trb_cli_schema"}

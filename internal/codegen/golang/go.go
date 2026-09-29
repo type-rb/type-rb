@@ -28,6 +28,9 @@ import (
 )
 
 type generator struct {
+	initializers           []string
+	explicitInitialization bool
+
 	b                 strings.Builder
 	indent            int
 	functionDepth     int
@@ -122,6 +125,8 @@ func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goO
 func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
 	ormPackageKey := goORMPackageKey(program)
 	g := &generator{
+		explicitInitialization: program.CompilationUnit != "",
+
 		topMethods:       map[string]bool{},
 		staticMethods:    map[string]map[string]bool{},
 		records:          map[string]bool{},
@@ -192,6 +197,15 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		g.testRuntimeSupport()
 	}
 	g.integrations(program.Extensions)
+	if g.explicitInitialization {
+		g.line("func " + moduleInitializer(program.ModulePath) + "() {")
+		g.indent++
+		for _, initializer := range g.initializers {
+			g.line(initializer)
+		}
+		g.indent--
+		g.line("}")
+	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}
@@ -217,11 +231,14 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 		g.cliApplicationFailureBoundarySupport()
 	}
 	g.imports = pruneUnusedImports(g.b.String(), g.imports)
-	packageName := program.Package
+	packageName := emissionGroup(program).name
 	if packageName == "" {
 		packageName = "main"
 	}
 	var output strings.Builder
+	if program.RuntimeInactive {
+		output.WriteString("//go:build trb_inactive\n\n")
+	}
 	output.WriteString("package " + goIdentifier(packageName, false) + "\n\n")
 	paths := make([]string, 0, len(g.imports))
 	for importPath := range g.imports {
@@ -291,10 +308,7 @@ func (g *generator) importStatement(imported *ir.Import) {
 	if (imported.Standard || imported.Official) && (!imported.Runtime || !imported.RuntimeRequired) {
 		return
 	}
-	directory := pathpkg.Dir(imported.Path)
-	if directory == "." {
-		directory = ""
-	}
+	directory := g.sourceDirectory(imported.Path)
 	if directory == g.currentDirectory() {
 		return
 	}
@@ -347,11 +361,7 @@ func (g *generator) importStatement(imported *ir.Import) {
 }
 
 func (g *generator) currentDirectory() string {
-	directory := pathpkg.Dir(g.modulePath)
-	if directory == "." {
-		return ""
-	}
-	return directory
+	return g.sourceDirectory(g.modulePath)
 }
 
 func (g *generator) requireImport(importPath, alias string) {
@@ -413,7 +423,7 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.TypeAlias:
 		g.typeAlias(n)
 	case *ir.Newtype:
-		g.line("type " + goDeclaredTypeName(n.Declaration.Name, n.Name) + " = " + g.goType(n.Target) + goTrailingComment(n.TrailingComment))
+		g.line("type " + g.namedDeclaration(n.Declaration, n.Name) + " = " + g.goType(n.Target) + goTrailingComment(n.TrailingComment))
 		g.b.WriteByte('\n')
 		g.newtypeMethods(n)
 	case *ir.Module:
@@ -451,7 +461,12 @@ func (g *generator) statement(statement ir.Statement) {
 				g.cliBoundary = true
 				value = "func() " + g.goType(n.Type) + " { defer " + g.cliApplicationFailureBoundaryName() + "(); return " + value + " }()"
 			}
-			g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
+			if g.explicitInitialization {
+				g.line("var " + name + " " + g.goType(n.Type))
+				g.initializers = append(g.initializers, name+" = "+value)
+			} else {
+				g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
+			}
 		} else {
 			name := g.variableIdentifier(n)
 			if n.Type.Kind == types.Union {
@@ -775,7 +790,7 @@ func (g *generator) nonNullableToNullableExpr(conversion *ir.Conversion, target 
 }
 
 func (g *generator) record(record *ir.Record) {
-	name := goDeclaredTypeName(record.Declaration.Name, record.Name)
+	name := g.namedDeclaration(record.Declaration, record.Name)
 	g.line("type " + name + goTypeParameterDeclarations(record.TypeParameters) + " struct {")
 	g.indent++
 	for _, member := range record.Body {
@@ -900,7 +915,7 @@ func goRecordConstructorName(name string) string {
 }
 
 func (g *generator) enum(enum *ir.Enum) {
-	name := goDeclaredTypeName(enum.Declaration.Name, enum.Name)
+	name := g.namedDeclaration(enum.Declaration, enum.Name)
 	if enumHasPayload(enum) {
 		g.payloadEnum(enum, name)
 		g.enumMethods(enum, name)
@@ -920,11 +935,8 @@ func (g *generator) enum(enum *ir.Enum) {
 		case *ir.Comment:
 			g.statement(member)
 		case *ir.EnumMember:
-			owner := enum.Name
-			if enum.Declaration.Name != "" {
-				owner = enum.Declaration.Name
-			}
-			line := goConstantIdentifier(owner, member.Name)
+			owner := name
+			line := goNominalConstantIdentifier(owner, member.Name)
 			if member.RawValue != nil {
 				line += " " + name + " = " + g.expr(member.RawValue)
 			} else if first {
@@ -941,10 +953,7 @@ func (g *generator) enum(enum *ir.Enum) {
 }
 
 func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
-	owner := enum.Name
-	if enum.Declaration.Name != "" {
-		owner = enum.Declaration.Name
-	}
+	owner := g.namedDeclaration(enum.Declaration, enum.Name)
 	for _, statement := range enum.Body {
 		method, ok := statement.(*ir.Method)
 		if !ok || method.External {
@@ -978,7 +987,7 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 	if _, erased := g.identityAliases[alias.Declaration]; erased {
 		return
 	}
-	name := goDeclaredTypeName(alias.Declaration.Name, alias.Name)
+	name := g.namedDeclaration(alias.Declaration, alias.Name)
 	g.line("type " + name + goTypeParameterDeclarations(alias.TypeParameters) + " = " + g.typeAliasTarget(alias) + goTrailingComment(alias.TrailingComment))
 	if len(alias.Variants) == 0 {
 		g.b.WriteByte('\n')
@@ -988,14 +997,14 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 	if target.Kind == "" {
 		target = alias.Target
 	}
-	targetName := goDeclaredTypeName(target.Declaration.Name, target.Name)
+	targetName := g.namedDeclaration(target.Declaration, target.Name)
 	targetPrefix := ""
 	if imported := g.typeAliases[target.Name]; alias.AuthoredTargetReference != nil && imported != "" {
 		targetPrefix = imported + "."
 	}
 	for _, variant := range alias.Variants {
-		aliasConstant := goConstantIdentifier(name, variant.Name)
-		targetConstant := targetPrefix + goConstantIdentifier(targetName, variant.Name)
+		aliasConstant := goNominalConstantIdentifier(name, variant.Name)
+		targetConstant := targetPrefix + goNominalConstantIdentifier(targetName, variant.Name)
 		if len(variant.Fields) == 0 {
 			g.line("var " + aliasConstant + " = " + targetConstant)
 			continue
@@ -1023,10 +1032,7 @@ func (g *generator) typeAlias(alias *ir.TypeAlias) {
 }
 
 func (g *generator) payloadEnum(enum *ir.Enum, name string) {
-	owner := enum.Name
-	if enum.Declaration.Name != "" {
-		owner = enum.Declaration.Name
-	}
+	owner := g.namedDeclaration(enum.Declaration, enum.Name)
 	tagType := name + "Tag"
 	g.line("type " + tagType + " int" + goTrailingComment(enum.TrailingComment))
 	g.b.WriteByte('\n')
@@ -1038,7 +1044,7 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		case *ir.Comment:
 			g.statement(member)
 		case *ir.EnumMember:
-			line := goConstantIdentifier(owner, member.Name) + "Tag"
+			line := goNominalConstantIdentifier(owner, member.Name) + "Tag"
 			if first {
 				line += " " + tagType + " = iota"
 				first = false
@@ -1076,12 +1082,12 @@ func (g *generator) payloadEnum(enum *ir.Enum, name string) {
 		if !ok {
 			continue
 		}
-		constant := goConstantIdentifier(owner, member.Name)
+		constant := goNominalConstantIdentifier(owner, member.Name)
 		if len(member.Fields) == 0 {
 			g.line("var " + constant + " = " + name + "{Kind: " + constant + "Tag}")
 			continue
 		}
-		constructor := "New" + goIdentifier(owner, true) + goIdentifier(member.Name, true)
+		constructor := "New" + owner + goIdentifier(member.Name, true)
 		genericDeclarations := goTypeParameterDeclarations(enum.TypeParameters)
 		genericArguments := goTypeParameterArguments(enum.TypeParameters)
 		g.line("func " + constructor + genericDeclarations + "(" + g.parameters(member.Fields) + ") " + name + genericArguments + " {")
@@ -1156,13 +1162,13 @@ func (g *generator) enumTag(branch ir.CaseBranch) string {
 	if member, ok := branch.Value.(*ir.Member); ok {
 		declaration := ir.ExpressionDeclaration(member)
 		if declaration.Kind.IsType() && declaration.Name != "" {
-			owner = declaration.Name
+			owner = g.namedDeclaration(declaration, declaration.Name)
 		} else if member.Reference != nil && member.Reference.Declaration.Kind.IsType() && member.Reference.Declaration.Name != "" {
-			owner = member.Reference.Declaration.Name
+			owner = g.namedDeclaration(member.Reference.Declaration, member.Reference.Declaration.Name)
 		} else if declaration := member.ExprType().Declaration; declaration.Kind.IsType() && declaration.Name != "" {
-			owner = declaration.Name
+			owner = g.namedDeclaration(declaration, declaration.Name)
 		}
-		name := goConstantIdentifier(owner, branch.Member) + "Tag"
+		name := goNominalConstantIdentifier(owner, branch.Member) + "Tag"
 		if alias := g.referenceAlias(member.Reference); alias != "" {
 			return alias + "." + name
 		}
@@ -1171,7 +1177,7 @@ func (g *generator) enumTag(branch ir.CaseBranch) string {
 		}
 		return name
 	}
-	return goConstantIdentifier(owner, branch.Member) + "Tag"
+	return goNominalConstantIdentifier(owner, branch.Member) + "Tag"
 }
 
 func (g *generator) statements(statements []ir.Statement) {
@@ -1201,7 +1207,7 @@ func (g *generator) typeAliasTarget(alias *ir.TypeAlias) string {
 }
 
 func (g *generator) class(class *ir.Class) {
-	name := goDeclaredTypeName(class.Declaration.Name, class.Name)
+	name := g.namedDeclaration(class.Declaration, class.Name)
 	typeDeclarations := goTypeParameterDeclarations(class.TypeParameters)
 	typeArguments := goTypeParameterArguments(class.TypeParameters)
 	fields := []*ir.Field{}
@@ -1334,6 +1340,9 @@ func (g *generator) classMethod(className string, classTypeParameters []string, 
 func (g *generator) topLevelMethod(method *ir.Method) {
 	sourceName := goMethodSourceName(method)
 	name := g.projectFunctionName(g.modulePath, sourceName)
+	if sourceName == "main" && !g.explicitInitialization {
+		name = "main"
+	}
 	parameters := g.methodParameters(method)
 	if sourceName == "main" {
 		parameters = g.parameters(method.Parameters)
@@ -1801,9 +1810,13 @@ func (g *generator) expr(expression ir.Expression) string {
 			return g.memberReceiver(n.Receiver) + "." + goORMColumnGetter(n.Name) + "()"
 		}
 		if n.Namespace && isUpper(n.Name) {
+			module := g.modulePath
 			owner := n.Receiver.ExprType().Name
 			if declaration := ir.ExpressionDeclaration(n.Receiver); !declaration.Empty() {
 				owner = declaration.Name
+				if declaration.Module != "" {
+					module = declaration.Module
+				}
 			} else if n.Declaration.Name != "" {
 				owner = n.Declaration.Name
 			} else if canonical := g.typeNames[owner]; canonical != "" {
@@ -1812,7 +1825,6 @@ func (g *generator) expr(expression ir.Expression) string {
 			if owner == "" {
 				owner = irExpressionName(n.Receiver)
 			}
-			module := g.modulePath
 			if n.Reference != nil && n.Reference.Package != "" {
 				module = n.Reference.Package
 			}
@@ -1893,7 +1905,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		if dispatch.Class && dispatch.Owner.Kind == identity.Class {
 			// Class methods are free functions in Go. Use the checked declaring
 			// owner, including when the receiver names an imported subclass.
-			name := goIdentifier(dispatch.Owner.Name, true) + goMethodName(dispatch.Name)
+			name := g.namedDeclaration(dispatch.Owner, dispatch.Owner.Name) + goMethodName(dispatch.Name)
 			if alias := g.declarationAlias(dispatch.Owner); alias != "" {
 				name = alias + "." + name
 			}
@@ -1901,7 +1913,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		}
 		if member, ok := n.Callee.(*ir.Member); ok && member.Name == "new" {
 			if declaration := ir.ExpressionDeclaration(member.Receiver); declaration.Kind == identity.Class {
-				name := "New" + goIdentifier(declaration.Name, true)
+				name := "New" + g.namedDeclaration(declaration, declaration.Name)
 				if alias := g.declarationAlias(declaration); alias != "" {
 					name = alias + "." + name
 				}
@@ -2005,7 +2017,7 @@ func (g *generator) expr(expression ir.Expression) string {
 			} else if n.Owner != "" {
 				owner = n.Owner
 			}
-			name := enumMethodName(owner, n.Method)
+			name := enumMethodName(g.namedDeclaration(n.OwnerIdentity, owner), n.Method)
 			if alias := g.referenceAlias(n.Reference); alias != "" {
 				name = alias + "." + name
 			}
@@ -2023,7 +2035,7 @@ func (g *generator) expr(expression ir.Expression) string {
 		} else if canonical := g.typeNames[owner]; canonical != "" {
 			owner = canonical
 		}
-		name := "New" + goIdentifier(owner, true) + goIdentifier(n.Member, true)
+		name := "New" + g.namedDeclaration(n.Declaration, owner) + goIdentifier(n.Member, true)
 		if alias := g.referenceAlias(n.Reference); alias != "" {
 			name = alias + "." + name
 		}
@@ -2178,6 +2190,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 		owner = call.OwnerIdentity.Name
 		enumType.Name = owner
 	}
+	owner = g.namedDeclaration(call.OwnerIdentity, owner)
 	valueType := g.goType(enumType)
 	errorType := g.goType(call.ExprType().Args[1])
 	resultType := g.goType(call.ExprType())
@@ -2189,7 +2202,7 @@ func (g *generator) rawEnumFromValue(call *ir.EnumCall, argument string) string 
 	}
 	lines := []string{"func() " + resultType + " { value := " + argument + "; switch value {"}
 	for _, item := range call.RawValues {
-		constant := prefix + goConstantIdentifier(owner, item.Member)
+		constant := prefix + goNominalConstantIdentifier(owner, item.Member)
 		lines = append(lines, "case "+item.Raw+": return "+resultAlias+".NewResultOk["+valueType+", "+errorType+"]("+constant+");")
 	}
 	message := strconv.Quote("unknown raw value for " + call.EnumName)
@@ -2626,7 +2639,7 @@ func (g *generator) recordLiteral(record *ir.Identifier, arguments []ir.CallArgu
 	} else if canonical := g.typeNames[name]; canonical != "" {
 		name = canonical
 	}
-	name = goIdentifier(name, true)
+	name = g.namedDeclaration(record.ExprType().Declaration, name)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
 		name = alias + "." + name
 	}
@@ -2667,7 +2680,7 @@ func (g *generator) recordLiteralApplied(record *ir.Identifier, typeArguments []
 	} else if canonical := g.typeNames[name]; canonical != "" {
 		name = canonical
 	}
-	name = goIdentifier(name, true)
+	name = g.namedDeclaration(record.ExprType().Declaration, name)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
 		name = alias + "." + name
 	}
@@ -2692,8 +2705,8 @@ func (g *generator) recordDefaultCall(construction *ir.RecordConstruct, record *
 	} else if canonical := g.typeNames[owner]; canonical != "" {
 		owner = canonical
 	}
-	typeName := goIdentifier(owner, true)
-	helper := goRecordConstructorName(owner)
+	typeName := g.namedDeclaration(record.Declaration, owner)
+	helper := goRecordConstructorName(typeName)
 	if alias := g.referenceAlias(record.Reference); alias != "" {
 		typeName = alias + "." + typeName
 		helper = alias + "." + helper
@@ -3062,16 +3075,12 @@ func (b *goJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 			jsonTag = "JSONValueIntegerTag"
 		}
 		prefix := ""
-		if schema.Reference != nil && schema.Reference.Package != "" && schema.Reference.Package != b.generator.modulePath {
-			alias := schema.Reference.Alias
-			if alias == "" {
-				alias = pathpkg.Base(pathpkg.Dir(schema.Reference.Package))
-			}
-			prefix = goImportAlias(alias) + "."
+		if alias := b.generator.referenceAlias(schema.Reference); alias != "" {
+			prefix = alias + "."
 		}
 		branches := make([]string, 0, len(schema.RawValues))
 		for _, item := range schema.RawValues {
-			branches = append(branches, "case "+item.Raw+": return "+prefix+goConstantIdentifier(schema.Type.Name, item.Member)+", nil")
+			branches = append(branches, "case "+item.Raw+": return "+prefix+goNominalConstantIdentifier(b.generator.namedDeclaration(schema.Type.Declaration, schema.Type.Name), item.Member)+", nil")
 		}
 		body = "if value.Kind != " + b.jsonAlias + "." + jsonTag + " { " + expected(expectedKind) + " }; switch " + raw + " { " + strings.Join(branches, "; ") + " }; message := " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "; " + zero
 	case "array":
@@ -3240,10 +3249,7 @@ func (g *generator) referenceAlias(reference *ir.Reference) string {
 	if strings.TrimSuffix(reference.Package, "/index") == "trb/http" {
 		return "__trb_http"
 	}
-	directory := pathpkg.Dir(reference.Package)
-	if directory == "." {
-		directory = ""
-	}
+	directory := g.sourceDirectory(reference.Package)
 	if directory == g.currentDirectory() {
 		return ""
 	}
@@ -3269,10 +3275,7 @@ func (g *generator) declarationAlias(declaration identity.Declaration) string {
 	if declaration.Empty() || declaration.Module == "" {
 		return ""
 	}
-	directory := pathpkg.Dir(declaration.Module)
-	if directory == "." {
-		directory = ""
-	}
+	directory := g.sourceDirectory(declaration.Module)
 	if directory == g.currentDirectory() {
 		return ""
 	}
@@ -3316,7 +3319,7 @@ func (g *generator) goImportedName(name string, reference *ir.Reference) string 
 		return g.projectConstantName(reference.Package, reference.Owner, reference.Symbol)
 	}
 	if reference != nil && reference.Declaration.Kind.IsType() && reference.Declaration.Name != "" {
-		return goIdentifier(reference.Declaration.Name, true)
+		return g.namedDeclaration(reference.Declaration, reference.Symbol)
 	}
 	return goIdentifier(name, true)
 }
@@ -3406,7 +3409,7 @@ func (g *generator) goType(t types.Type) string {
 				result = alias + "." + result
 			}
 		} else if alias := g.filesystemDeclarationAlias(t); alias != "" {
-			result = alias + "." + goIdentifier(t.Declaration.Name, true)
+			result = alias + "." + g.namedDeclaration(t.Declaration, t.Name)
 			if t.Declaration.Kind == identity.Class {
 				result = "*" + result
 			}
@@ -3518,6 +3521,13 @@ func (g *generator) projectConstantName(modulePath, owner, sourceName string) st
 	if g.projectNames != nil {
 		if name := g.projectNames.constants[modulePath][identity.Qualify(owner, sourceName)]; name != "" {
 			return name
+		}
+	}
+	if g.projectNames != nil {
+		for declaration, name := range g.projectNames.types {
+			if declaration.Module == modulePath && declaration.Name == owner {
+				return goNominalConstantIdentifier(name, sourceName)
+			}
 		}
 	}
 	return goConstantIdentifier(owner, sourceName)
@@ -3636,6 +3646,10 @@ func localGoTypeNames(statements []ir.Statement) map[string]string {
 	}
 	collect(statements, "")
 	return result
+}
+
+func goNominalConstantIdentifier(owner, name string) string {
+	return owner + goIdentifier(strings.ToLower(name), true)
 }
 
 func goConstantIdentifier(owner, name string) string {

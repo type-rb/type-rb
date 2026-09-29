@@ -120,7 +120,7 @@ func TestOidcBearerAuthenticationAcrossAvailableBackends(t *testing.T) {
 func oidcBearerServerCommand(t *testing.T, mode, buildDirectory string) *exec.Cmd {
 	t.Helper()
 	if mode == "typescript" {
-		command := exec.Command("bun", "main.ts")
+		command := exec.Command("bun", generatedEntrypoint(t, buildDirectory, mode))
 		command.Dir = buildDirectory
 		return command
 	}

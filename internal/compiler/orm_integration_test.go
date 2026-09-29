@@ -1388,9 +1388,9 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[*[]*models.Product]",
-		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
-		"models.TrbOrmInsertAllProduct(trbArrayValues_",
+		"TrbOrmProductWhere", "TrbOrmLoadProduct", "orm.DbResult[*[]*Product]",
+		"TrbOrmPluckProductName", "TrbOrmPickProductName", "TrbOrmPluckProductId",
+		"TrbOrmInsertAllProduct(trbArrayValues_",
 	} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)
@@ -1531,12 +1531,20 @@ end
 			}
 			switch mode {
 			case "go":
-				if !strings.Contains(string(entrypoint.Output), `import "example.com/orm/models"`) {
-					t.Fatalf("Go entrypoint did not retain its model-group import:\n%s", entrypoint.Output)
+				if entrypoint.OutputPath == "" || filepath.Dir(entrypoint.OutputPath) != filepath.Dir(artifactForModule(artifacts, "models/product").OutputPath) {
+					t.Fatal("Go model modules and entrypoint must share the application emission group")
 				}
 			case "ruby":
-				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {
-					t.Fatalf("Ruby entrypoint did not retain ORM bootstrap requires:\n%s", entrypoint.Output)
+				var startup string
+				for _, file := range entrypoint.SupportFiles {
+					if file.Path == entrypoint.EntryPath {
+						startup = string(file.Output)
+					}
+				}
+				for _, module := range []string{"models/category", "models/product", "models/profile"} {
+					if !strings.Contains(startup, module+".rb") {
+						t.Fatalf("Ruby startup did not retain ORM bootstrap for %s:\n%s", module, startup)
+					}
 				}
 			case "typescript":
 				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {

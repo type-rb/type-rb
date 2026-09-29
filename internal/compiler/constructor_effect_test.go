@@ -253,8 +253,8 @@ end
 	}
 	wants := map[string][]string{
 		"go": {
-			"func MakeBox(__trbScope trbcontext.Context) *models.Box",
-			"return models.NewBox(__trbScope)",
+			"func MakeBox(__trbScope trbcontext.Context) *Box",
+			"return NewBox(__trbScope)",
 		},
 		"ruby": {
 			"def make_box(__trb_scope)",

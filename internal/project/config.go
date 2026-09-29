@@ -183,7 +183,6 @@ type RubyConfig struct {
 type GoConfig struct {
 	Module               string            `json:"module,omitempty"`
 	Version              string            `json:"version,omitempty"`
-	RootPackage          string            `json:"rootPackage,omitempty"`
 	IndirectDependencies map[string]string `json:"indirectDependencies,omitempty"`
 	Sqldef               *SqldefConfig     `json:"sqldef,omitempty"`
 }
@@ -494,9 +493,6 @@ func (c *Config) applyDefaults() {
 		}
 		if c.Go.Version == "" {
 			c.Go.Version = DefaultGoVersion
-		}
-		if c.Go.RootPackage == "" {
-			c.Go.RootPackage = "main"
 		}
 		if c.Go.IndirectDependencies == nil {
 			c.Go.IndirectDependencies = map[string]string{}

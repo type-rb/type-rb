@@ -507,6 +507,12 @@ and editing continues. Other ordinary characters cancel the selection and edit
 the original input. Completion inside a larger expression keeps the expression
 and prepends its import.
 
+Project checking does not execute unrelated initializers. The REPL initializes
+the session's explicit and hidden auto-import closures in dependency-first
+import order, once per session. Consequently a public declaration made available
+by a hidden import can activate its module. `:reload` rebuilds that state and
+replays the initialization plan.
+
 Each submission passes through the ordinary parser, resolver, type checker,
 typed IR lowering, and evaluator. Platform packages are accepted or rejected
 according to the active mode.

@@ -106,7 +106,7 @@ func TestAdapterTestRejectsConformanceModeMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.Mode = "go"
-	config.Go = &project.GoConfig{Module: "example.com/conformance", Version: project.DefaultGoVersion, RootPackage: "main"}
+	config.Go = &project.GoConfig{Module: "example.com/conformance", Version: project.DefaultGoVersion}
 	if err := config.Save(); err != nil {
 		t.Fatal(err)
 	}

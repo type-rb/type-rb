@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/type-rb/type-rb/internal/codegen"
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/packageextension"
 	packageManager "github.com/type-rb/type-rb/internal/packages"
@@ -112,7 +111,7 @@ end
 			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			packageOutput := filepath.Join(appRoot, "build", "github.com", "acme", "aws-s3", "index"+codegen.Extension(mode))
+			packageOutput := generatedModulePath(filepath.Join(appRoot, "build"), mode, "github.com/acme/aws-s3/index", "github.com/acme/aws-s3")
 			generated, err := os.ReadFile(packageOutput)
 			if err != nil {
 				t.Fatal(err)
@@ -271,7 +270,7 @@ end
 	if err := os.WriteFile(filepath.Join(fakeLibrary, "pagy.rb"), []byte(fakePagy), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	run := exec.Command("ruby", "-I", fakeLibrary, filepath.Join(appRoot, "build", "main.rb"))
+	run := exec.Command("ruby", "-I", fakeLibrary, generatedEntrypoint(t, filepath.Join(appRoot, "build"), "ruby"))
 	run.Dir = appRoot
 	generatedOutput, err := run.CombinedOutput()
 	if err != nil {
@@ -357,15 +356,15 @@ end
 			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			packageOutput := filepath.Join(appRoot, "build", "github.com", "acme", "contracts", "index"+codegen.Extension(mode))
+			packageOutput := generatedModulePath(filepath.Join(appRoot, "build"), mode, "github.com/acme/contracts/index", "github.com/acme/contracts")
 			if _, err := os.Stat(packageOutput); err != nil {
 				t.Fatalf("external package output is missing: %v", err)
 			}
-			sharedOutput := filepath.Join(appRoot, "build", "github.com", "acme", "shared", "index"+codegen.Extension(mode))
+			sharedOutput := generatedModulePath(filepath.Join(appRoot, "build"), mode, "github.com/acme/shared/index", "github.com/acme/shared")
 			if _, err := os.Stat(sharedOutput); err != nil {
 				t.Fatalf("transitive package output is missing: %v", err)
 			}
-			mainOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "main"+codegen.Extension(mode)))
+			mainOutput, err := os.ReadFile(generatedModulePath(filepath.Join(appRoot, "build"), mode, "main", "trb/application"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -622,7 +621,7 @@ func TestRunLockedGitTypeRBPackagesAcrossBackends(t *testing.T) {
 			if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
 				t.Fatalf("build status=%d stderr=%s", status, stderr.String())
 			}
-			packageOutput := filepath.Join(config.OutputPath(), "github.com", "acme", "contracts", "index"+codegen.Extension(mode))
+			packageOutput := generatedModulePath(config.OutputPath(), mode, "github.com/acme/contracts/index", "github.com/acme/contracts")
 			if _, err := os.Stat(packageOutput); err != nil {
 				t.Fatalf("remote package output is missing: %v", err)
 			}

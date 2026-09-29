@@ -32,6 +32,8 @@ import (
 )
 
 type Artifact struct {
+	OutputPath         string
+	EntryPath          string
 	Filename           string
 	Mode               string
 	AST                *ast.Program
@@ -51,6 +53,7 @@ type Artifact struct {
 }
 
 type SourceUnit struct {
+	CompilationUnit string
 	Filename        string
 	Source          []byte
 	ModulePath      string
@@ -237,6 +240,8 @@ func CompileProject(sources []SourceUnit, options Options) ([]*Artifact, error) 
 		return nil, err
 	}
 	for index, output := range outputs {
+		artifacts[index].OutputPath = output.OutputPath
+		artifacts[index].EntryPath = output.EntryPath
 		artifacts[index].Output = output.Output
 		artifacts[index].SupportFiles = output.SupportFiles
 		artifacts[index].NativeDependencies = output.NativeDependencies
@@ -460,15 +465,16 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 	if generated {
 		return analyzeProjectFull(analyzer, generatedUnits, options, validateBackend, requestedUnits)
 	}
-	if err := validateGoRunnableEntrypointImports(units, programs, resolutions, ownerModule, options); err != nil {
-		return nil, err
-	}
 
 	loweredPrograms := make([]*ir.Program, 0, len(units))
 	for _, source := range units {
 		checked := checkedPrograms[source.ModulePath]
 		lowered := lower.Program(checked)
 		lowered.SourcePath = source.Filename
+		lowered.CompilationUnit = source.CompilationUnit
+		if lowered.CompilationUnit == "" {
+			lowered.CompilationUnit = "$application"
+		}
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
 	}
@@ -631,11 +637,12 @@ func officialPackageSourceUnits(definitions map[string]*official.Package, option
 	for _, modulePath := range modulePaths {
 		bundled := definitions[modulePath]
 		result = append(result, SourceUnit{
-			Filename:   filepath.Join(root, ".trb", "packages", filepath.FromSlash(modulePath)+".trb"),
-			Source:     []byte(bundled.Definition.Source),
-			ModulePath: modulePath,
-			Package:    filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
-			Official:   true,
+			Filename:        filepath.Join(root, ".trb", "packages", filepath.FromSlash(modulePath)+".trb"),
+			CompilationUnit: filepath.ToSlash(filepath.Dir(filepath.FromSlash(modulePath))),
+			Source:          []byte(bundled.Definition.Source),
+			ModulePath:      modulePath,
+			Package:         filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
+			Official:        true,
 		})
 	}
 	return result
@@ -671,11 +678,12 @@ func compilerOwnedPackageSourceUnits(definitions map[string]*stdlib.Package, opt
 	for _, modulePath := range modulePaths {
 		definition := definitions[modulePath]
 		result = append(result, SourceUnit{
-			Filename:      filepath.Join(root, ".trb", "stdlib", filepath.FromSlash(modulePath)+".trb"),
-			Source:        []byte(definition.Source),
-			ModulePath:    modulePath,
-			Package:       filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
-			CompilerOwned: true,
+			Filename:        filepath.Join(root, ".trb", "stdlib", filepath.FromSlash(modulePath)+".trb"),
+			CompilationUnit: filepath.ToSlash(filepath.Dir(filepath.FromSlash(modulePath))),
+			Source:          []byte(definition.Source),
+			ModulePath:      modulePath,
+			Package:         filepath.Base(filepath.Dir(filepath.FromSlash(modulePath))),
+			CompilerOwned:   true,
 		})
 	}
 	return result

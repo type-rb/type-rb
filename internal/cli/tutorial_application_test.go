@@ -64,7 +64,7 @@ func configureTutorialMode(t *testing.T, root, mode string) {
 	config.TypeScript = nil
 	switch mode {
 	case "go":
-		config.Go = &project.GoConfig{Module: "example.com/report-api", Version: project.DefaultGoVersion, RootPackage: "main"}
+		config.Go = &project.GoConfig{Module: "example.com/report-api", Version: project.DefaultGoVersion}
 	case "ruby":
 		config.Ruby = &project.RubyConfig{Source: "https://rubygems.org", Version: project.DefaultRubyVersion, Loader: "require_relative"}
 	case "typescript":

@@ -238,7 +238,7 @@ func TestRunKeepGeneratedRetainsExactTargetTree(t *testing.T) {
 	if err != nil || len(retained) != 1 {
 		t.Fatalf("retained entries=%v err=%v", retained, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".trb", "generated", retained[0].Name(), "main.go")); err != nil {
+	if _, err := os.Stat(generatedEntrypoint(t, filepath.Join(root, ".trb", "generated", retained[0].Name()), "go")); err != nil {
 		t.Fatalf("generated Go entrypoint is unavailable: %v", err)
 	}
 	runEntries, err := os.ReadDir(filepath.Join(root, ".trb", "run"))

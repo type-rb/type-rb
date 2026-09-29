@@ -167,7 +167,8 @@ func checkNativeNullishCalls(t *testing.T, root string, catalog *nativepackage.C
 		if _, err := exec.LookPath("bun"); err != nil {
 			t.Skip("bun is not installed")
 		}
-		command := exec.Command("bun", "main.ts")
+		writeProjectRuntimeArtifacts(t, root, artifacts)
+		command := exec.Command("bun", artifactForModule(artifacts, "main").EntryPath)
 		command.Dir = root
 		output, err := command.CombinedOutput()
 		if err != nil {

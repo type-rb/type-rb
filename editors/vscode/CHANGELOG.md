@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-09-29
+
+- Require TypeRB 0.4.9 for directory-independent Go builds and deterministic
+  module initialization when running, debugging, and testing projects.
+
 ## 0.4.0 - 2026-08-29
 
 - Require TypeRB 0.4.0 and support its declaration-root imports, exact named

@@ -20,6 +20,7 @@ import (
 )
 
 type generator struct {
+	separateStartup  bool
 	b                strings.Builder
 	indent           int
 	loader           string
@@ -72,7 +73,8 @@ func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 
 func generate(program *ir.Program, projectNames *rubyProjectNames, execution *effectplan.Plan) sourcemap.Generated {
 	g := &generator{
-		loader: program.RubyLoader, modulePath: program.ModulePath,
+		separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program),
+		loader:          program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{}, topMethodTargets: map[*ir.Method]string{},
 		projectNames: projectNames,
 		lexicalNames: map[string]string{},
@@ -97,6 +99,7 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 	if g.programUsesExecutionScope(program.Statements) || webintegration.ManifestFrom(program.Extensions) != nil || g.jobs != nil {
 		g.executionScopeRuntime()
 	}
+
 	g.statements(program.Statements)
 	g.integrations(program.Extensions)
 	if g.checkedInteger || strings.Contains(g.b.String(), "__trb_integer_") {
@@ -118,6 +121,10 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
+		if program.CompilationUnit != "" {
+			g.line("def __trb_start()", "")
+			g.indent++
+		}
 		main := topLevelRubyMethod(program.Statements, "main")
 		mainName := g.projectFunctionName(g.modulePath, "main")
 		call := mainName + "()"
@@ -128,6 +135,10 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 			g.line(call+" unless trb_jobs_run_worker_or_command", "")
 		} else {
 			g.line(call, "")
+		}
+		if program.CompilationUnit != "" {
+			g.indent--
+			g.line("end", "")
 		}
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
@@ -168,6 +179,9 @@ func (g *generator) statement(statement ir.Statement) {
 	case *ir.Comment:
 		g.line(n.Text, "")
 	case *ir.Import:
+		if g.separateStartup && n.Implicit && !n.Native && !n.Standard && !n.Official {
+			return
+		}
 		if n.Native && len(n.RuntimeSymbols) > 0 {
 			modules := map[string]bool{}
 			for _, binding := range n.RuntimeSymbols {

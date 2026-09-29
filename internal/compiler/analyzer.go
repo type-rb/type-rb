@@ -145,7 +145,7 @@ func (a *Analyzer) parseUnit(unit SourceUnit, options Options, initial bool) (*a
 }
 
 func equalParsedUnit(left, right SourceUnit) bool {
-	return left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
+	return left.CompilationUnit == right.CompilationUnit && left.Filename == right.Filename && left.ModulePath == right.ModulePath && left.Package == right.Package &&
 		left.CompilerOwned == right.CompilerOwned && left.Official == right.Official && left.ExternalPackage == right.ExternalPackage &&
 		left.TestRegistration == right.TestRegistration && left.MainReplacement == right.MainReplacement && bytes.Equal(left.Source, right.Source) &&
 		equalCompilerGeneratedSources(left.CompilerGeneratedSources, right.CompilerGeneratedSources)

@@ -1,8 +1,6 @@
 package golang
 
 import (
-	pathpkg "path"
-
 	"github.com/type-rb/type-rb/internal/ir"
 	ormintegration "github.com/type-rb/type-rb/internal/orm"
 )
@@ -40,13 +38,6 @@ func analyzeGoORMRuntime(programs []*ir.Program) *goORMRuntimePlan {
 }
 
 func goORMPackageKey(program *ir.Program) string {
-	directory := pathpkg.Dir(program.ModulePath)
-	if directory == "." {
-		directory = ""
-	}
-	packageName := program.Package
-	if packageName == "" {
-		packageName = "main"
-	}
-	return directory + "\x00" + packageName
+	group := emissionGroup(program)
+	return group.directory + "\x00" + group.name
 }

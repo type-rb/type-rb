@@ -53,7 +53,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 
 	directories := map[string]string{}
 	for _, route := range routes {
-		directory := pathpkg.Dir(route.ModulePath)
+		directory := g.sourceDirectory(route.ModulePath)
 		if directory == "." || directory == g.currentDirectory() {
 			continue
 		}
@@ -62,7 +62,7 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 		}
 	}
 	for _, middleware := range manifest.Middlewares {
-		directory := pathpkg.Dir(middleware.ModulePath)
+		directory := g.sourceDirectory(middleware.ModulePath)
 		if directory == "." || directory == g.currentDirectory() {
 			continue
 		}
@@ -441,7 +441,7 @@ func (g *generator) webProtocolResponses() {
 
 func (g *generator) webCallee(modulePath, target string, directories map[string]string) string {
 	callee := g.projectFunctionName(modulePath, target)
-	if alias := directories[pathpkg.Dir(modulePath)]; alias != "" {
+	if alias := directories[g.sourceDirectory(modulePath)]; alias != "" {
 		callee = goImportAlias(alias) + "." + callee
 	}
 	return callee

@@ -40,8 +40,7 @@ cat > "$project/trbconfig.jsonc" <<'JSON'
   "packageManagement": "external",
   "go": {
     "module": "example.com/brew-smoke-test",
-    "version": "1.27",
-    "rootPackage": "main"
+    "version": "1.27"
   }
 }
 JSON
@@ -49,4 +48,4 @@ JSON
 GOCACHE="$temporary/go-cache" go build -o "$temporary/trb" "$root_dir/cmd/trb"
 "$temporary/trb" fmt "$project/src/main.trb"
 "$temporary/trb" build --config "$project/trbconfig.jsonc"
-grep -Fq 'fmt.Println("installed with Homebrew")' "$project/build/main.go"
+grep -Fq 'fmt.Println("installed with Homebrew")' "$project/build/trb/application/"*.go

@@ -762,6 +762,9 @@ receivers, failure order and examples.
   `class`, never inside a method or control-flow block.
 - Constant initializers are ordinary runtime expressions; a constant is not
   restricted to a target language's compile-time constant subset.
+- Startup evaluates module and class constants according to the source-module
+  initialization plan in §3.8, independently of target-language file or package
+  ordering.
 - Constants are always immutable and cannot be declared with `mut`, rebound,
   or passed to destructive APIs. For example,
   `DEFAULT_TAGS.push("work")` is a compile-time error.
@@ -1099,11 +1102,37 @@ receivers, failure order and examples.
 - Project and standalone entrypoints have the same signature and
   startup rules. Selecting a file never turns top-level statements into a
   second script execution model or makes a function named `main` ordinary.
-- In Go mode, a module generated in another source directory cannot import the
-  runnable entrypoint module. The entrypoint becomes the generated program
-  package and is not importable from another Go package. Modules in the same
-  source directory continue to share one generated package. Declarations
-  needed by nested packages belong in a separate non-entrypoint module.
+- The application and each manifest-owned TypeRB package are compilation units.
+  Dependencies between units and imports between source modules remain acyclic.
+  Directories do not add another acyclicity requirement. Moving a source module
+  and updating its imports preserves validity, declaration identity, visibility
+  and meaning, except for the explicitly layout-dependent features below.
+- Startup checks the project's production sources but initializes only runtime
+  roots and their transitive source imports. A configured application starts
+  with its entry module; a standalone invocation starts with its selected file.
+  A library module is activated when reached through those imports. Unreferenced
+  production modules are checked without executing their initializers.
+- For each ordered root, visit imports in authored declaration order, initialize
+  dependencies first, then initialize the module's values in declaration order.
+  Shared modules initialize exactly once. Only after initialization does startup
+  invoke `main`. Class/module constants use their position in this declaration
+  order; class field defaults still execute on construction. This rule does not
+  introduce forward value references or permit cyclic source imports.
+- Package integrations may contribute explicitly discovered roots. The entry's
+  import closure comes first, followed by discovered modules in canonical module
+  path order. Compiler-injected imports for entry-owned provider glue belong to
+  discovery, rather than changing authored import order. Existing provider
+  activation rules still apply. Discovered roots may import the entry's declarations without invoking
+  its `main`.
+- Layout-dependent exceptions are `sourceDir` membership and file selection,
+  file-based web routes and middleware, ORM model-group discovery, job discovery,
+  and canonical-path ordering of selected tests and discovered integration roots.
+  These explicit features retain their existing configuration and grouping rules.
+- Generated target paths and identifiers are compiler-owned implementation
+  details, not a public Go library API. Go emission initially groups a compilation
+  unit into one package with a separate small program entry. This grouping does
+  not determine source-module initialization order. Native Go package imports
+  from TypeRB continue to use their declared adapter contracts.
 - `main` is a language convention and is not configurable in
   `trbconfig.jsonc`.
 - Projects intended only as libraries may omit `main`.
@@ -1840,6 +1869,9 @@ end
   A focused run compiles all production files and only the selected test files.
   `-t` and `--test-name-pattern` apply a Go regular expression to full test
   names after path selection. The command creates a temporary entrypoint,
-  invokes each selected test module in deterministic module order, and returns
-  a nonzero status when a case fails. It suppresses application `main()`
-  entrypoints for this compilation only.
+  orders selected test roots by ascending canonical module path, and initializes
+  their dependency closures exactly once before any test body executes. All
+  production files remain checked; production modules outside those closures do
+  not execute merely because they were checked. Name-pattern filtering selects
+  test bodies after module initialization. A failure returns a nonzero status.
+  Application `main()` entrypoints are suppressed for this compilation only.

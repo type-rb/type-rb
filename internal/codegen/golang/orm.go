@@ -2683,7 +2683,7 @@ func goORMColumnGetter(column string) string {
 }
 
 func (g *generator) ormModelQualifier(model ormintegration.Model) string {
-	directory := pathpkg.Dir(model.ModulePath)
+	directory := g.sourceDirectory(model.ModulePath)
 	if directory == "." {
 		directory = ""
 	}

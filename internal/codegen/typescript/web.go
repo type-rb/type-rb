@@ -65,7 +65,15 @@ func (g *generator) webRouteImports(manifest *webintegration.Manifest) {
 	for _, modulePath := range modulePaths {
 		names := symbols[modulePath]
 		sort.Strings(names)
-		g.line("import { " + strings.Join(names, ", ") + " } from " + strconv.Quote(tsImportPath(g.modulePath, modulePath)) + ";")
+		if g.separateStartup {
+			source := strconv.Quote(tsImportPath(g.modulePath, modulePath))
+			for _, name := range names {
+				g.line("let " + name + ": typeof import(" + source + ")." + name + ";")
+				g.deferredStartupImports = append(g.deferredStartupImports, name+" = (await import("+source+"))."+name+";")
+			}
+		} else {
+			g.line("import { " + strings.Join(names, ", ") + " } from " + strconv.Quote(tsImportPath(g.modulePath, modulePath)) + ";")
+		}
 	}
 }
 

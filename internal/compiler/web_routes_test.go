@@ -336,9 +336,9 @@ end
 	}
 	output := string(route.Output)
 	for _, expected := range []string{
-		`import "example.com/web-routes/presentation/http"`,
+
 		`import __trb_http "example.com/web-routes/trb/http"`,
-		`http.Render(`,
+		`Render(`,
 		`__trb_http.NewHeaders`,
 	} {
 		if !strings.Contains(output, expected) {

@@ -515,7 +515,7 @@ func (c *CLI) runTest(args []string) (resultErr error) {
 	runnerModule := "trb_test_main"
 	runnerPackage := ""
 	if config.Go != nil {
-		runnerPackage = config.Go.RootPackage
+		runnerPackage = "main"
 	}
 	var runner strings.Builder
 	runner.WriteString("import { finish } from trb/std/test\n")
@@ -1457,7 +1457,7 @@ func (c *CLI) runRepl(args []string) error {
 	sessionModule := "__trb_repl__"
 	sessionPackage := ""
 	if config.Go != nil {
-		sessionPackage = config.Go.RootPackage
+		sessionPackage = "main"
 	}
 	analyzer := compiler.NewAnalyzer()
 	compileSource := func(source string, flowResets []int) (*repl.Compilation, error) {
@@ -1519,6 +1519,10 @@ func (c *CLI) runRepl(args []string) error {
 		historyFile = filepath.Join(config.Root, ".trb", "repl_history")
 	} else if cacheRoot, cacheErr := os.UserCacheDir(); cacheErr == nil {
 		historyFile = filepath.Join(cacheRoot, "trb", "repl_history_"+config.Mode)
+	}
+	initial, err = compile("", nil)
+	if err != nil {
+		return err
 	}
 	return repl.Run(repl.Options{
 		Mode:        config.Mode,
@@ -1977,7 +1981,7 @@ func replConfigForMode(base *project.Config, mode string) *project.Config {
 			config.Ruby = &clone
 		}
 	case "go":
-		config.Go = &project.GoConfig{Module: "trb.local/repl", Version: project.DefaultGoVersion, RootPackage: "main", IndirectDependencies: map[string]string{}}
+		config.Go = &project.GoConfig{Module: "trb.local/repl", Version: project.DefaultGoVersion, IndirectDependencies: map[string]string{}}
 		if base.Go != nil {
 			clone := *base.Go
 			config.Go = &clone
@@ -2707,10 +2711,13 @@ func localSourceUnit(config *project.Config, packageName, packageRoot, filename 
 		directory := filepath.ToSlash(filepath.Dir(modulePath))
 		goPackage = filepath.Base(directory)
 	}
-	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: goPackage, ExternalPackage: true}, nil
+	return compiler.SourceUnit{Filename: absolute, Source: source, ModulePath: modulePath, Package: goPackage, CompilationUnit: packageName, ExternalPackage: true}, nil
 }
 
 func generatedRelative(config *project.Config, filename string, artifact *compiler.Artifact) (string, bool) {
+	if artifact.OutputPath != "" {
+		return filepath.FromSlash(artifact.OutputPath), artifact.CompilerOwned || artifact.Official || artifact.ExternalPackage
+	}
 	extension := generatedExtension(config, artifact)
 	if artifact.CompilerOwned || artifact.Official {
 		return filepath.FromSlash(artifact.IR.ModulePath) + extension, true
@@ -2729,6 +2736,9 @@ func generatedRelative(config *project.Config, filename string, artifact *compil
 }
 
 func generatedSourceRelativeForArtifact(config *project.Config, relative string, artifact *compiler.Artifact) string {
+	if artifact != nil && artifact.OutputPath != "" {
+		return filepath.FromSlash(artifact.OutputPath)
+	}
 	if config.Mode != "typescript" || artifact == nil || artifact.IR == nil || !artifact.IR.UsesJSX {
 		return generatedSourceRelative(config, relative)
 	}
@@ -2807,7 +2817,7 @@ func sourceUnit(config *project.Config, filename string, source []byte) (compile
 	if config.Go != nil {
 		directory := filepath.ToSlash(filepath.Dir(modulePath))
 		if directory == "." || directory == "" {
-			packageName = config.Go.RootPackage
+			packageName = "main"
 		} else {
 			packageName = filepath.Base(directory)
 		}
@@ -2917,6 +2927,9 @@ func writeCompiledTree(config *project.Config, compiled map[string]*compiler.Art
 			return nil, err
 		}
 		generated[sourceName] = output
+		if artifact.EntryPath != "" {
+			generated[sourceName] = filepath.Join(root, filepath.FromSlash(artifact.EntryPath))
+		}
 	}
 	for _, file := range support {
 		output := filepath.Join(root, filepath.FromSlash(file.Path))

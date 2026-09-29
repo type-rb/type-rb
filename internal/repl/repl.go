@@ -153,6 +153,10 @@ func Run(options Options) error {
 			continue
 		}
 		evaluator.LoadDefinitions(next.Session.IR)
+		if err := evaluator.initializeProjectImports(next.Programs, next.Session.IR.ModulePath); err != nil {
+			printReplError(options.Stderr, options.Interactive, err.Error())
+			continue
+		}
 		authored := authoredStatements(next.Session)
 		result, runtimeErr := evaluateInterruptibly(evaluator, authored[statementCount:], next.Session.IR.ModulePath)
 		if runtimeErr != nil {

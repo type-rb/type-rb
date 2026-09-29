@@ -421,9 +421,9 @@ end
 			"go": {
 				"contracts/capability": {"TrbQuestion_" + encoded("ready?") + "() bool", "TrbBang_" + encoded("save!") + "() string"},
 				"helpers/functions":    {"func TrbQuestion_" + encoded("imported_ready?") + "() bool", "func TrbBang_" + encoded("imported_save!") + "() string", "func TrbQuestion_" + encoded("imported_label?") + "() string"},
-				"models/base":          {"var _ contracts.Capability = (*Base)(nil)", "func (self *Base) TrbQuestion_" + encoded("ready?") + "() bool", "func (self *Base) TrbBang_" + encoded("save!") + "() string", "func BaseTrbQuestion_" + encoded("available?") + "() bool"},
+				"models/base":          {"var _ Capability = (*Base)(nil)", "func (self *Base) TrbQuestion_" + encoded("ready?") + "() bool", "func (self *Base) TrbBang_" + encoded("save!") + "() string", "func BaseTrbQuestion_" + encoded("available?") + "() bool"},
 				"models/child":         {"func (self *Child) TrbQuestion_" + encoded("ready?") + "() bool", "func (self *Child) TrbQuestion_" + encoded("child_ready?") + "() bool", "self.TrbQuestion_" + encoded("ready?") + "()", "TrbQuestion_" + encoded("base_available?") + "()"},
-				"app/main":             {"helpers.TrbQuestion_" + encoded("imported_ready?") + "()", "helpers.TrbQuestion_" + encoded("imported_label?") + "()", "models.TrbQuestion_" + encoded("base_available?") + "()", "child.TrbBang_" + encoded("save!") + "()"},
+				"app/main":             {"TrbQuestion_" + encoded("imported_ready?") + "()", "TrbQuestion_" + encoded("imported_label?") + "()", "TrbQuestion_" + encoded("base_available?") + "()", "child.TrbBang_" + encoded("save!") + "()"},
 			},
 			"ruby": {
 				"contracts/capability": {"def ready?()", "def save!()"},
@@ -1063,11 +1063,11 @@ end
 		t.Fatal("consumer artifact is missing")
 	}
 	output := string(consumer.Output)
-	if !strings.Contains(output, `[]contracts.Item{}`) {
-		t.Fatalf("generated Go is missing the transitive type import for an inferred empty array:\n%s", output)
+	if !strings.Contains(output, `[]Item{}`) {
+		t.Fatalf("generated Go is missing the resolved type for an inferred empty array:\n%s", output)
 	}
-	if !strings.Contains(output, `map[string]contracts.Item{}`) {
-		t.Fatalf("generated Go is missing the transitive type import for an inferred empty hash:\n%s", output)
+	if !strings.Contains(output, `map[string]Item{}`) {
+		t.Fatalf("generated Go is missing the resolved type for an inferred empty hash:\n%s", output)
 	}
 	var generated *ir.Import
 	for _, statement := range consumer.IR.Statements {
@@ -2236,7 +2236,7 @@ end
 			}
 		}
 		runtimeWants := map[string][]string{
-			"go":         {`var UnicodeDataVersion string = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges *[]*[]int) bool`},
+			"go":         {`var UnicodeDataVersion string`, `UnicodeDataVersion = "17.0.0"`, `func UnicodeLetter(value int) bool`, `func inRanges(value int, ranges *[]*[]int) bool`},
 			"ruby":       {`class Unicode`, `UNICODE_DATA_VERSION = "17.0.0"`, `def self.letter(value)`, `def __trb_private_`},
 			"typescript": {`export class Unicode`, `export const UNICODE_DATA_VERSION: string = "17.0.0";`, `static letter(value: number): boolean`, `export function _in_ranges(value: number, ranges: Array<Array<number>>): boolean`},
 		}[mode]
@@ -3404,7 +3404,7 @@ end
 			t.Fatalf("%s did not lower the narrowed nullable alias receiver through Integer.to_s():\n%s", mode, output)
 		}
 		if mode == "go" {
-			if !strings.Contains(output, "func(value contracts.MemberResult) *contracts.MemberResult") || strings.Contains(output, "func(value Result[") {
+			if !strings.Contains(output, "func(value __trb_result.Result[MemberRef, string]) *__trb_result.Result[MemberRef, string]") || strings.Contains(output, "func(value Result[") {
 				t.Fatalf("Go nullable conversion did not preserve the imported transparent alias:\n%s", output)
 			}
 		}
@@ -3724,7 +3724,7 @@ end
 	if !strings.Contains(modelOutput, "type TodoResponse struct") || !strings.Contains(modelOutput, "func TrbFunction_") {
 		t.Fatalf("generated model did not disambiguate the type and function:\n%s", modelOutput)
 	}
-	if !strings.Contains(mainOutput, "models.TrbFunction_") {
+	if !strings.Contains(mainOutput, "TrbFunction_") {
 		t.Fatalf("generated importer did not use the disambiguated function name:\n%s", mainOutput)
 	}
 }
@@ -3771,14 +3771,14 @@ end
 	for _, artifact := range artifacts {
 		output := string(artifact.Output)
 		if artifact.Filename == constants.Filename {
-			for _, expected := range []string{"var AppName string", "var LimitsMaxItems int", "var ConfigDefaultLimit int"} {
+			for _, expected := range []string{"var TrbConstant_", "var LimitsMaxItems int", "var ConfigDefaultLimit int"} {
 				if !strings.Contains(output, expected) {
 					t.Fatalf("constant module is missing %q:\n%s", expected, output)
 				}
 			}
 		}
 		if artifact.Filename == main.Filename {
-			for _, expected := range []string{"config.AppName", "config.LimitsMaxItems", "config.ConfigDefaultLimit"} {
+			for _, expected := range []string{"TrbConstant_", "LimitsMaxItems", "ConfigDefaultLimit"} {
 				if !strings.Contains(output, expected) {
 					t.Fatalf("constant consumer is missing %q:\n%s", expected, output)
 				}
@@ -3821,7 +3821,7 @@ end
 	for _, artifact := range artifacts {
 		if artifact.Filename == consumer.Filename {
 			output := string(artifact.Output)
-			for _, want := range []string{"contracts.State", "contracts.StateOpen", "contracts.StateClosed"} {
+			for _, want := range []string{"State", "StateOpen", "StateClosed"} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("enum consumer is missing %q:\n%s", want, output)
 				}
@@ -3842,7 +3842,7 @@ end
 		t.Fatal(err)
 	}
 	for _, artifact := range aliasedArtifacts {
-		if artifact.Filename == aliased.Filename && !strings.Contains(string(artifact.Output), "contracts.StateOpen") {
+		if artifact.Filename == aliased.Filename && !strings.Contains(string(artifact.Output), "StateOpen") {
 			t.Fatalf("aliased enum member was not qualified correctly:\n%s", artifact.Output)
 		}
 	}
@@ -3893,7 +3893,7 @@ end
 			}
 			output := string(artifact.Output)
 			wants := map[string][]string{
-				"go":         {"case contracts.CreatedResponse:", "response := response.(contracts.CreatedResponse)"},
+				"go":         {"case CreatedResponse:", "response := response.(CreatedResponse)"},
 				"ruby":       {"case response.status", "return response.body"},
 				"typescript": {"import type { CreateResponse, CreatedResponse, InvalidResponse }", "as CreatedResponse"},
 			}[mode]
@@ -3952,7 +3952,7 @@ end
 			}
 			output := string(artifact.Output)
 			wants := map[string][]string{
-				"go":         {"contracts.NewTokenText(\"hello\")", "__trbCase1.Kind == contracts.TokenTextTag", "text := __trbCase1.TextValue"},
+				"go":         {"NewTokenText(\"hello\")", "__trbCase1.Kind == TokenTextTag", "text := __trbCase1.TextValue"},
 				"ruby":       {"Token::Text.new(\"hello\")", "text = __trb_case1.value"},
 				"typescript": {"Token.Text(\"hello\")", `__trbCase1.kind === "Text"`, "const text = __trbCase1.value;"},
 			}[mode]
@@ -4013,7 +4013,7 @@ end
 			}
 			output := string(artifact.Output)
 			wants := map[string][]string{
-				"go":         {"func Sample() contracts.Result[int, string]", "contracts.Identity[int](1)", "contracts.NewResultOk[int, string](value)", "value := __trbCase1.OkValue"},
+				"go":         {"func Sample() Result[int, string]", "Identity[int](1)", "NewResultOk[int, string](value)", "value := __trbCase1.OkValue"},
 				"ruby":       {"value = identity(1)", "Result::Ok.new(value)", "value = __trb_case1.value"},
 				"typescript": {"function sample(): Result<number, string>", "identity<number>(1)", "Result.Ok<number, string>(value)", "const value = __trbCase1.value;"},
 			}[mode]

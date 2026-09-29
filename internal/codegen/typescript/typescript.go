@@ -25,6 +25,9 @@ import (
 )
 
 type generator struct {
+	deferredStartupImports []string
+	separateStartup        bool
+
 	b                strings.Builder
 	indent           int
 	inClass          int
@@ -181,7 +184,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program), moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -194,6 +197,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 			g.records[record.Name] = true
 		}
 	}
+
 	g.integrationImports(program.Extensions)
 	statements := mergeTypeScriptImports(program.Statements)
 	g.namespaceValues = map[string]bool{}
@@ -236,6 +240,13 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		if len(program.Statements) > 0 {
 			g.b.WriteByte('\n')
 		}
+		if program.CompilationUnit != "" {
+			g.line("export async function __trb_start(): Promise<void> {")
+			g.indent++
+			for _, assignment := range g.deferredStartupImports {
+				g.line(assignment)
+			}
+		}
 		method := topLevelMethod(program.Statements, "main")
 		call := "main()"
 		if g.methodUsesExecutionScope(method) {
@@ -248,6 +259,10 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 			g.line("if (!(await trbJobsRunWorkerOrCommand())) { " + call + "; }")
 		} else {
 			g.line(call + ";")
+		}
+		if program.CompilationUnit != "" {
+			g.indent--
+			g.line("}")
 		}
 	}
 	output := strings.TrimRight(g.b.String(), "\n") + "\n"
@@ -773,13 +788,27 @@ func (g *generator) statement(statement ir.Statement) {
 			if n.RuntimeRequired && n.QualifiedRoot != "" && !intrinsicRuntime && !qualifiedRootDeclaration {
 				g.line("import * as __trb_" + pathpkg.Base(pathpkg.Dir(n.Path)) + " from " + strconv.Quote(importPath) + ";")
 			}
-			if len(values) > 0 {
+			deferred := g.separateStartup && n.Implicit && !n.Native && !n.Standard && !n.Official
+			if deferred {
+				for _, specifier := range values {
+					parts := strings.Split(specifier, " as ")
+					exported, local := parts[0], parts[len(parts)-1]
+					source := strconv.Quote(importPath)
+					g.line("let " + local + ": typeof import(" + source + ")." + exported + ";")
+					g.deferredStartupImports = append(g.deferredStartupImports, local+" = (await import("+source+"))."+exported+";")
+					switch n.SymbolKinds[exported] {
+					case "class", "enum", "enum_alias", "newtype":
+						parameters := tsTypeParameterDeclarations(n.SymbolTypeParameters[exported])
+						g.line("type " + local + parameters + " = import(" + source + ")." + exported + parameters + ";")
+					}
+				}
+			} else if len(values) > 0 {
 				g.line("import { " + strings.Join(values, ", ") + " } from " + strconv.Quote(importPath) + ";")
 			}
 			if len(types) > 0 {
 				g.line("import type { " + strings.Join(types, ", ") + " } from " + strconv.Quote(importPath) + ";")
 			}
-			if n.RuntimeRequired && !n.Standard && !n.Official && len(values) == 0 && !intrinsicRuntime {
+			if n.RuntimeRequired && !n.Standard && !n.Official && len(values) == 0 && !intrinsicRuntime && !deferred {
 				// A project type-only import does not execute its module. Keep the
 				// compiler-owned runtime load when that module also registers ORM
 				// models or provides another project integration side effect.

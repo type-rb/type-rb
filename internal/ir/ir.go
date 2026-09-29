@@ -19,6 +19,16 @@ type Base struct {
 func (b Base) SourceSpan() token.Span { return b.Span }
 
 type Program struct {
+	// CompilationUnit identifies an application or manifest-owned package.
+	// It is independent of source directories and declaration identities.
+	CompilationUnit string
+	// InitializationOrder is the explicit dependency-first execution plan for
+	// this entrypoint. Other checked modules are not execution roots.
+	InitializationOrder []string
+	// RuntimeInactive keeps checked but unreachable modules out of executable
+	// target packages, including their host-native import side effects.
+	RuntimeInactive bool
+
 	Mode              string
 	SourcePath        string
 	Package           string

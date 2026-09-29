@@ -102,11 +102,11 @@ end
 	if manifest == nil || len(manifest.Jobs) != 1 || manifest.Jobs[0].Name != "SendReceiptJob" || manifest.Jobs[0].Queue != "mail" || manifest.Jobs[0].Priority != 10 || manifest.Jobs[0].MaximumAttempts != 3 {
 		t.Fatalf("unexpected jobs manifest: %#v", manifest)
 	}
-	if !strings.Contains(string(main.Output), `jobs.SendReceiptJobPerformLater(__trbScope, 42, "ada@example.test")`) {
+	if !strings.Contains(string(main.Output), `SendReceiptJobPerformLater(__trbScope, 42, "ada@example.test")`) {
 		t.Fatalf("main does not call the typed job enqueue wrapper:\n%s", main.Output)
 	}
 	job := artifactForModule(artifacts, "jobs/send_receipt_job")
-	if job == nil || !strings.Contains(string(job.Output), "func trbJobsSendReceiptJobRequest(") || !strings.Contains(string(job.Output), "return config.JobsAdapter.Enqueue(__trbScope, request)") || !strings.Contains(string(job.Output), "return trbJobsSendReceiptJobPerformLater(__trbScope") || strings.Contains(string(job.Output), ".TrbJobsEnqueue(") {
+	if job == nil || !strings.Contains(string(job.Output), "func trbJobsSendReceiptJobRequest(") || !strings.Contains(string(job.Output), "return JobsAdapter.Enqueue(__trbScope, request)") || !strings.Contains(string(job.Output), "return trbJobsSendReceiptJobPerformLater(__trbScope") || strings.Contains(string(job.Output), ".TrbJobsEnqueue(") {
 		t.Fatalf("job module does not enqueue through the portable generated helper:\n%s", job.Output)
 	}
 	configuration := artifactForModule(artifacts, "config/jobs")

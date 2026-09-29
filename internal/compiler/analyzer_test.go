@@ -372,7 +372,7 @@ func TestAnalyzerRechecksChangedProjectDependencies(t *testing.T) {
 	}
 }
 
-func TestAnalyzerRevalidatesGoRunnableEntrypointImportsAfterAnEdit(t *testing.T) {
+func TestAnalyzerAcceptsGoEntrypointImportsAfterAnEdit(t *testing.T) {
 	analyzer := NewAnalyzer()
 	sources := []SourceUnit{
 		{
@@ -390,12 +390,8 @@ func TestAnalyzerRevalidatesGoRunnableEntrypointImportsAfterAnEdit(t *testing.T)
 		t.Fatal(err)
 	}
 	sources[1].Source = []byte("import { OIDC_ISSUER } from main\n\ndef issuer(): String\n\treturn OIDC_ISSUER\nend\n")
-	diagnostics := compileErrorDiagnostics(t, func() error {
-		_, err := analyzer.AnalyzeProject(sources, options)
-		return err
-	})
-	if len(diagnostics) != 1 || diagnostics[0].Code != diagnostic.BackendError {
-		t.Fatalf("incremental runnable import diagnostics=%#v", diagnostics)
+	if _, err := analyzer.AnalyzeProject(sources, options); err != nil {
+		t.Fatalf("valid entrypoint import rejected: %v", err)
 	}
 
 	sources[1].Source = []byte("def issuer(): String\n\treturn \"restored\"\nend\n")
