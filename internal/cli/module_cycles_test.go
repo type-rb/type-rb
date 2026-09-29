@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,6 +78,11 @@ func TestCyclicModuleNamespaceValues(t *testing.T) {
 func TestSelectedTestRootsShareOneCyclicInitialization(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
+			if mode == "typescript" {
+				if _, err := exec.LookPath("bun"); err != nil {
+					t.Skip("Bun is required for generated TypeScript test execution")
+				}
+			}
 			config := moduleTestProject(t, mode, map[string]string{
 				"main.trb":         "def mark(): Integer\nputs(\"application\")\nreturn 1\nend\nAPP := mark()\ndef main()\nputs(APP)\nend\n",
 				"value.trb":        "import { BASE } from helper\nVALUE := BASE + 1\ndef later(): Integer\nreturn VALUE\nend\n",

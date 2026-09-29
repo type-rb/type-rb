@@ -35,6 +35,8 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
 
+      - uses: oven-sh/setup-bun@v2
+
       - name: Verify compiler
         run: go test ./...
 
