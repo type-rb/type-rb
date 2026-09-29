@@ -36,7 +36,8 @@ def main()
 end
 ```
 
-Create `index.html` for Vite:
+Create `index.html` for Vite. Load the generated startup driver so dependency
+initializers run before `main`:
 
 ```html
 <!doctype html>
@@ -48,7 +49,7 @@ Create `index.html` for Vite:
 	</head>
 	<body>
 		<div id="root"></div>
-		<script type="module" src="/build/main.tsx"></script>
+		<script type="module" src="/build/trb/entry/application/main.ts"></script>
 	</body>
 </html>
 ```

@@ -278,7 +278,10 @@ are compiler-owned and have no `rootPackage` setting.
 
 All production files are checked. Startup initializes only the entry's import
 closure and explicitly discovered integration roots, in the order specified by
-[Program Entry](specification.md#38-program-entry).
+[Program Entry](specification.md#38-program-entry). Ruby and TypeScript builds
+write their startup driver to `trb/entry/application/main.rb` or
+`trb/entry/application/main.ts` under `outDir`. Browser applications load that
+driver as their module entry; source-module output contains declarations.
 
 ## Local packages
 

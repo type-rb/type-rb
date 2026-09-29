@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -18,8 +17,7 @@ func attachScriptEntrypoint(output *Generated, program *ir.Program, programs []*
 		return
 	}
 	extension := Extension(program.Mode)
-	sum := sha256.Sum256([]byte(program.ModulePath))
-	output.EntryPath = fmt.Sprintf("trb/entry/%x/main%s", sum[:16], extension)
+	output.EntryPath = "trb/entry/application/main" + extension
 	extensions := map[string]string{}
 	for _, module := range programs {
 		extensions[module.ModulePath] = extension
