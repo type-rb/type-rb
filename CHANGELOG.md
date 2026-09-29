@@ -2,6 +2,20 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.10 - 2026-09-29
+
+### Modules and initialization
+
+- Source files within one application or TypeRB package may import each other.
+  Mutually recursive functions and types can live in separate files, while
+  dependencies between compilation units remain acyclic.
+- Cyclic groups initialize values in a deterministic order based on checked
+  dependencies and declaration order. Class preparation precedes values;
+  initialization cycles, unresolved type inference and unverified calls produce
+  source diagnostics across modes. Existing acyclic initialization order and
+  runtime-root selection are preserved.
+  ([#835](https://github.com/type-rb/type-rb/pull/835))
+
 ## 0.4.9 - 2026-09-29
 
 ### Project layout and startup
