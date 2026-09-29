@@ -1103,7 +1103,9 @@ receivers, failure order and examples.
   startup rules. Selecting a file never turns top-level statements into a
   second script execution model or makes a function named `main` ordinary.
 - The application and each manifest-owned TypeRB package are compilation units.
-  Dependencies between units and imports between source modules remain acyclic.
+  Dependencies between units remain acyclic. Source modules within one unit may
+  import each other, including self imports. Declarations and signatures are
+  collected across the unit before function bodies are checked.
   Directories do not add another acyclicity requirement. Moving a source module
   and updating its imports preserves validity, declaration identity, visibility
   and meaning, except for the explicitly layout-dependent features below.
@@ -1116,8 +1118,34 @@ receivers, failure order and examples.
   dependencies first, then initialize the module's values in declaration order.
   Shared modules initialize exactly once. Only after initialization does startup
   invoke `main`. Class/module constants use their position in this declaration
-  order; class field defaults still execute on construction. This rule does not
-  introduce forward value references or permit cyclic source imports.
+  order; class field defaults still execute on construction. This rule applies
+  unchanged to acyclic source imports and does not introduce forward value
+  references within a source module.
+- A cyclic strongly connected component initializes as one group after its
+  dependencies. Module discovery follows the ordered roots and authored import
+  order. Inside the group, initializers of top-level values and module/class
+  constants are ordered by their checked value dependencies and by declaration
+  order within each module. Remaining ties use module discovery order and then
+  declaration position. Shared values initialize exactly once.
+- Initializer dependencies include reads in transitively called source methods,
+  constructors and evaluated defaults. Creating a function value does not
+  execute its body. An initialization dependency cycle is a TypeRB error with
+  source locations; a cycle that prevents constant type inference is diagnosed
+  separately and may require a type annotation.
+- Classes in a cyclic group are prepared before its values, with superclasses
+  before subclasses. Instance defaults still run at construction time. An
+  unverified native superclass hook cannot be moved into preparation.
+- Calls reached from a cyclic group's initializers must have checked source
+  targets or compiler-known implementations that cannot reenter TypeRB through
+  an opaque edge. Unresolved indirect calls and unverified native calls are
+  errors in those initializers, including when reached through source helpers.
+  A missing callback argument does not establish this property; external
+  declarations do not grant it. These extra restrictions do not apply to
+  acyclic modules or to ordinary function execution after initialization.
+  Native-library loading side effects remain outside this initialization-order
+  guarantee.
+- Inheritance cycles, non-terminating type aliases and infinitely sized value
+  layouts remain errors; allowing cyclic imports does not relax those rules.
 - Package integrations may contribute explicitly discovered roots. The entry's
   import closure comes first, followed by discovered modules in canonical module
   path order. Compiler-injected imports for entry-owned provider glue belong to

@@ -38,13 +38,13 @@ func TestAnalyzerInvalidatesImportedInferredConstants(t *testing.T) {
 	}
 }
 
-func TestImportedInferredConstantsPreserveCycleRejection(t *testing.T) {
+func TestImportedInferredConstantsDiagnoseInferenceCycles(t *testing.T) {
 	sources := []SourceUnit{
 		{Filename: "/project/first.trb", ModulePath: "first", Source: []byte("import { SECOND } from second\nFIRST := SECOND\n")},
 		{Filename: "/project/second.trb", ModulePath: "second", Source: []byte("import { FIRST } from first\nSECOND := FIRST\n")},
 	}
 	_, err := AnalyzeProject(sources, Options{Mode: "go", GoModule: "example.com/constants", ProjectRoot: "/project", SourceRoot: "/project"})
-	if err == nil || !strings.Contains(err.Error(), "import cycle") {
+	if err == nil || !strings.Contains(err.Error(), "type inference cycle") {
 		t.Fatalf("cycle error=%v", err)
 	}
 }

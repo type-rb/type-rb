@@ -13,6 +13,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/initialization"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
 	"github.com/type-rb/type-rb/internal/official"
@@ -71,7 +72,7 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 			aliases = source.PackageAliases
 		}
 		modules = append(modules, resolver.Module{
-			Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
+			CompilationUnit: source.CompilationUnit, Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
 			PackageAliases: aliases,
 			CompilerOwned:  source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
 		})
@@ -136,6 +137,14 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 	}
 	if hasErrors(graphErrors) {
 		return nil, true, NewCompileError("", diagnostic.ResolutionError, graphErrors)
+	}
+
+	// Cyclic components share inferred values and transitive initializer effects.
+	// Recheck their complete graph rather than reuse a partial checked snapshot.
+	for _, component := range resolver.ImportComponents(catalog, resolutions) {
+		if component.Cyclic {
+			return nil, false, nil
+		}
 	}
 
 	ownerModule, ownerErr := projectMainOwner(units, programs)
@@ -249,6 +258,11 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		}
 		loweringIntegrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
+	}
+	var initializationDiagnostics []diagnostic.Diagnostic
+	loweredPrograms, initializationDiagnostics = initialization.Analyze(loweredPrograms)
+	if len(initializationDiagnostics) > 0 {
+		return nil, true, NewCompileError("", diagnostic.TypeError, initializationDiagnostics)
 	}
 	if diagnostics := effectplan.ValidateResources(loweredPrograms); len(diagnostics) > 0 {
 		return nil, true, NewCompileError("", diagnostic.TypeError, diagnostics)

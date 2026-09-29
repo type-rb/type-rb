@@ -4079,11 +4079,11 @@ end
 	}
 }
 
-func TestProjectCompilerRejectsImportCycles(t *testing.T) {
-	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import b\n\nclass A\nend\n")}
-	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import a\n\nclass B\nend\n")}
-	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript"}); err == nil || !strings.Contains(err.Error(), "import cycle: a -> b -> a") {
-		t.Fatalf("expected deterministic import cycle diagnostic, got %v", err)
+func TestProjectCompilerAllowsImportCycles(t *testing.T) {
+	a := SourceUnit{Filename: "/project/a.trb", ModulePath: "a", Source: []byte("import { b } from b\ndef a(value: Integer): Integer\nif value == 0\nreturn 0\nend\nreturn b(value-1)\nend\n")}
+	b := SourceUnit{Filename: "/project/b.trb", ModulePath: "b", Source: []byte("import { a } from a\ndef b(value: Integer): Integer\nreturn a(value)\nend\n")}
+	if _, err := CompileProject([]SourceUnit{a, b}, Options{Mode: "typescript"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -273,7 +273,8 @@ entrypoint field. A library project may omit `main`.
 The generated Go tree groups source modules by compilation unit, independently
 of their source directories, with a separate program entry. Modules in nested
 directories may import declarations from the module containing `main`, provided
-the source import graph remains acyclic. Generated Go package names and paths
+source imports may form cycles within a compilation unit; dependencies between
+units remain acyclic. Generated Go package names and paths
 are compiler-owned and have no `rootPackage` setting.
 
 All production files are checked. Startup initializes only the entry's import

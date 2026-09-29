@@ -34,11 +34,30 @@ func attachScriptEntrypoint(output *Generated, program *ir.Program, programs []*
 		return strconv.Quote(name)
 	}
 	var body strings.Builder
-	for _, module := range program.InitializationOrder {
+	load := func(module string) {
 		if program.Mode == "ruby" {
 			fmt.Fprintf(&body, "require_relative %s\n", relative(module))
 		} else {
 			fmt.Fprintf(&body, "await import(%s);\n", relative(module))
+		}
+	}
+	for _, component := range ir.InitializationComponents(programs, []string{program.ModulePath}) {
+		members := map[string]bool{}
+		for _, module := range component.Modules {
+			load(module)
+			members[module] = true
+		}
+		if component.Cyclic {
+			for _, step := range program.InitializationSteps {
+				if !members[step.Module] || step.Action == "" {
+					continue
+				}
+				if program.Mode == "ruby" {
+					fmt.Fprintf(&body, "$__trb_initializers[%s].call\n", strconv.Quote(step.Module+"#"+step.Action))
+				} else {
+					fmt.Fprintf(&body, "await (await import(%s)).__trb_%s();\n", relative(step.Module), step.Action)
+				}
+			}
 		}
 	}
 	if program.Mode == "ruby" {

@@ -16,6 +16,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/diagnostic"
 	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/modulegraph"
 	"github.com/type-rb/type-rb/internal/nativepackage"
 	"github.com/type-rb/type-rb/internal/official"
 	"github.com/type-rb/type-rb/internal/parser"
@@ -130,7 +131,7 @@ type EnumVariant struct {
 }
 
 type Member struct {
-	// DeclaringOwner survives copying a class method into an inherited contract.
+	// DeclaringOwner survives copying a class member into an inherited contract.
 	DeclaringOwner    identity.Declaration
 	Name              string
 	Kind              ExportKind
@@ -292,6 +293,8 @@ type Options struct {
 }
 
 type Module struct {
+	sourcePath          string
+	CompilationUnit     string
 	Path                string
 	Filename            string
 	PackageAliases      map[string]string
@@ -320,6 +323,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 	for i := range modules {
 		module := &modules[i]
 		clean := pathpkg.Clean(strings.TrimSuffix(module.Path, ".trb"))
+		module.sourcePath = module.Path
 		module.Path = clean
 		module.Exports = CollectExports(module.Program.Statements)
 		if previous := catalog.Modules[clean]; previous != nil {
@@ -374,7 +378,7 @@ func NewCatalog(modules []Module) (*Catalog, map[string][]diagnostic.Diagnostic)
 		for name, exported := range flattenExports(module.Exports) {
 			if exported.Kind == ClassExport {
 				for memberName, member := range exported.Members {
-					if member.Class && member.Kind == FunctionExport {
+					if member.Class && (member.Kind == FunctionExport || member.Kind == ValueExport) {
 						member.DeclaringOwner = identity.Declaration{Module: module.Path, Name: name, Kind: identity.Class}
 						exported.Members[memberName] = member
 					}
@@ -1241,59 +1245,115 @@ func (r Result) InferredTypeMember(typeName, memberName string) (Binding, bool) 
 	return binding, true
 }
 
-// ValidateImportGraph rejects project import cycles with a deterministic path.
-// A single cross-mode rule keeps initialization order independent of Ruby,
-// TypeScript, or Go runtime loader behavior.
+// ValidateImportGraph permits source cycles inside a compilation unit while
+// retaining an acyclic dependency graph between independently owned units.
 func ValidateImportGraph(catalog *Catalog, results map[string]Result) map[string][]diagnostic.Diagnostic {
 	diagnostics := map[string][]diagnostic.Diagnostic{}
 	if catalog == nil {
 		return diagnostics
 	}
-	state := map[string]int{}
-	var stack []string
-	var visit func(string)
-	visit = func(modulePath string) {
-		state[modulePath] = 1
-		stack = append(stack, modulePath)
-		result := results[modulePath]
-		imports := make([]*Import, 0, len(result.Imports))
-		for _, imported := range result.Imports {
-			if imported.Kind == ProjectImport && catalog.Modules[imported.Path] != nil {
-				imports = append(imports, imported)
-			}
+	unit := func(module *Module) string {
+		if module.CompilationUnit == "" {
+			return "$application"
 		}
-		sort.Slice(imports, func(i, j int) bool { return imports[i].Path < imports[j].Path })
-		for _, imported := range imports {
-			switch state[imported.Path] {
-			case 0:
-				visit(imported.Path)
-			case 1:
-				start := 0
-				for start < len(stack) && stack[start] != imported.Path {
-					start++
-				}
-				cycle := append(append([]string(nil), stack[start:]...), imported.Path)
-				module := catalog.Modules[modulePath]
-				diagnostics[module.Filename] = append(diagnostics[module.Filename], errorAt(imported.Node, "import cycle: "+strings.Join(cycle, " -> ")))
-			}
-		}
-		stack = stack[:len(stack)-1]
-		state[modulePath] = 2
+		return module.CompilationUnit
 	}
+	edges := map[string][]string{}
 	paths := make([]string, 0, len(catalog.Modules))
-	for modulePath := range catalog.Modules {
-		paths = append(paths, modulePath)
+	for name := range catalog.Modules {
+		paths = append(paths, name)
 	}
 	sort.Strings(paths)
-	for _, modulePath := range paths {
-		if state[modulePath] == 0 {
-			visit(modulePath)
+	for _, name := range paths {
+		owner := unit(catalog.Modules[name])
+		for _, dependency := range ModuleDependencies(catalog.Modules[name], results[catalog.Modules[name].sourcePath]) {
+			target := catalog.Modules[dependency]
+			if target != nil && unit(target) != owner {
+				edges[owner] = append(edges[owner], unit(target))
+			}
+		}
+	}
+	units := []string{}
+	seen := map[string]bool{}
+	for _, name := range paths {
+		owner := unit(catalog.Modules[name])
+		if !seen[owner] {
+			units = append(units, owner)
+			seen[owner] = true
+		}
+	}
+	for _, component := range modulegraph.Components(units, func(name string) []string { return edges[name] }) {
+		if !component.Cyclic {
+			continue
+		}
+		members := map[string]bool{}
+		for _, name := range component.Modules {
+			members[name] = true
+		}
+		for _, name := range paths {
+			module := catalog.Modules[name]
+			if !members[unit(module)] {
+				continue
+			}
+			for _, statement := range module.Program.Statements {
+				node, ok := statement.(*ast.ImportStatement)
+				if !ok {
+					continue
+				}
+				imported := results[catalog.Modules[name].sourcePath].Imports[node]
+				if imported == nil {
+					continue
+				}
+				target := catalog.Modules[imported.RuntimePath()]
+				if target != nil && unit(target) != unit(module) && members[unit(target)] {
+					diagnostics[module.Filename] = append(diagnostics[module.Filename], errorAt(node, "compilation unit dependency cycle: "+strings.Join(component.Modules, " -> ")))
+				}
+			}
 		}
 	}
 	for filename, items := range diagnostics {
 		diagnostics[filename] = diagnostic.Normalize(items, filename, diagnostic.ResolutionError)
 	}
 	return diagnostics
+}
+
+// ModuleDependencies retains authored import order and canonical identities.
+func ModuleDependencies(module *Module, resolved Result) []string {
+	var result []string
+	for _, statement := range module.Program.Statements {
+		node, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		imported := resolved.Imports[node]
+		if imported != nil {
+			result = append(result, imported.RuntimePath())
+		}
+	}
+	return result
+}
+
+func ImportComponents(catalog *Catalog, results map[string]Result) []modulegraph.Component {
+	var paths []string
+	for name := range catalog.Modules {
+		paths = append(paths, name)
+	}
+	sort.Strings(paths)
+	components := modulegraph.Components(paths, func(name string) []string {
+		var dependencies []string
+		for _, target := range ModuleDependencies(catalog.Modules[name], results[catalog.Modules[name].sourcePath]) {
+			if catalog.Modules[target] != nil {
+				dependencies = append(dependencies, target)
+			}
+		}
+		return dependencies
+	})
+	for index := range components {
+		for position, module := range components[index].Modules {
+			components[index].Modules[position] = catalog.Modules[module].sourcePath
+		}
+	}
+	return components
 }
 
 func resolveImport(node *ast.ImportStatement, options Options) (*Import, []diagnostic.Diagnostic) {

@@ -245,3 +245,16 @@ var resourceSyncIntrinsics = func() map[string]bool {
 	}
 	return result
 }()
+
+// InitializationSafety proves the closed set of compiler-owned synchronous
+// operations and checked source bodies cannot call back into an uninitialized
+// TypeRB value through an opaque edge. It is not a purity guarantee.
+func InitializationSafety(programs []*ir.Program) *Plan {
+	return Analyze(programs, Options{
+		ResourceSafety:       true,
+		InitializationSafety: true,
+		Intrinsic:            func(name string) bool { return name != "" && !resourceSyncIntrinsics[name] },
+		Runtime:              func(*ir.RuntimeBinding) bool { return true },
+		Transform:            func(node *ir.Transform) bool { return node.Operation == "concurrent_map" },
+	})
+}
