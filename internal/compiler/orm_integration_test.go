@@ -1535,8 +1535,16 @@ end
 					t.Fatal("Go model modules and entrypoint must share the application emission group")
 				}
 			case "ruby":
-				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {
-					t.Fatalf("Ruby entrypoint did not retain ORM bootstrap requires:\n%s", entrypoint.Output)
+				var startup string
+				for _, file := range entrypoint.SupportFiles {
+					if file.Path == entrypoint.EntryPath {
+						startup = string(file.Output)
+					}
+				}
+				for _, module := range []string{"models/category", "models/product", "models/profile"} {
+					if !strings.Contains(startup, module+".rb") {
+						t.Fatalf("Ruby startup did not retain ORM bootstrap for %s:\n%s", module, startup)
+					}
 				}
 			case "typescript":
 				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {
