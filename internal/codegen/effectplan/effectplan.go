@@ -140,6 +140,7 @@ type analyzer struct {
 	aliases              []aliasContext
 	classes              []*classContext
 	lambdaBindings       map[functionBindingKey]*ir.Lambda
+	defaultEffects       map[ir.Expression]bool
 }
 
 type declarationIdentity struct {
@@ -164,6 +165,9 @@ type functionBindingKey struct {
 
 // Options chooses effect roots while retaining one call-graph model.
 type Options struct {
+	// Expression selects a checked read as an effect root, including reads in
+	// transitively called methods, defaults and constructors.
+	Expression      func(ir.Expression, string) bool
 	Intrinsic       func(string) bool
 	Runtime         func(*ir.RuntimeBinding) bool
 	Conversion      func(ir.ConversionKind) bool
@@ -174,6 +178,9 @@ type Options struct {
 	// ResourceSafety closes unknown/native call edges instead of assuming that
 	// an unclassified operation has no effect. It is mode-independent.
 	ResourceSafety bool
+	// InitializationSafety also closes unknown calls, but can analyze a directly
+	// invoked lambda without treating creation of its body as execution.
+	InitializationSafety bool
 }
 
 func Analyze(programs []*ir.Program, options Options) *Plan {
@@ -210,6 +217,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 		typeDeclarations:     map[declarationIdentity]bool{},
 		moduleDeclarations:   map[declarationIdentity]bool{},
 		lambdaBindings:       map[functionBindingKey]*ir.Lambda{},
+		defaultEffects:       map[ir.Expression]bool{},
 	}
 	for _, program := range programs {
 		analyzer.collect(program.ModulePath, "", declarationIdentity{}, program.Statements)
@@ -226,6 +234,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 
 	for changed := true; changed; {
 		changed = false
+		previousDefaults := len(analyzer.defaultEffects)
 		for _, method := range analyzer.methods {
 			defaultsReach := analyzer.parameterDefaultsReach(method, false)
 			if defaultsReach && !plan.ParameterDefaults[method.method] {
@@ -234,7 +243,7 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 			}
 			bodyReaches := analyzer.statementsReach(method.method.Body, method, false)
 			bodyReaches = bodyReaches || options.ResourceSafety && (method.method.External || method.owner.kind == identity.Interface)
-			if !plan.Methods[method.method] && (defaultsReach || bodyReaches) {
+			if !plan.Methods[method.method] && (bodyReaches || defaultsReach && !analyzer.preciseDefaults()) {
 				plan.Methods[method.method] = true
 				changed = true
 			}
@@ -262,6 +271,9 @@ func Analyze(programs []*ir.Program, options Options) *Plan {
 				plan.ClassConstructors[class.class] = true
 				changed = true
 			}
+		}
+		if len(analyzer.defaultEffects) != previousDefaults {
+			changed = true
 		}
 		if analyzer.propagateDispatchEffects() {
 			changed = true
@@ -670,7 +682,7 @@ func (a *analyzer) propagateMethodEffects(methods []*ir.Method) bool {
 	}
 	changed := false
 	for _, method := range methods {
-		if !a.plan.Methods[method] {
+		if !a.plan.Methods[method] && (methodReaches || !a.preciseDefaults()) {
 			a.plan.Methods[method] = true
 			changed = true
 		}
@@ -904,7 +916,11 @@ func (a *analyzer) recordDefaultsReach(context recordContext, record bool) (bool
 func (a *analyzer) parameterDefaultsReach(context methodContext, record bool) bool {
 	reaches := false
 	for _, parameter := range context.method.Parameters {
-		reaches = a.expressionReaches(parameter.Default, context, record) || reaches
+		effect := a.expressionReaches(parameter.Default, context, record)
+		if effect {
+			a.defaultEffects[parameter.Default] = true
+		}
+		reaches = effect || reaches
 	}
 	return reaches
 }
@@ -1088,6 +1104,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if record && callSuspends {
 			a.plan.Calls[node] = true
 		}
+		if a.preciseDefaults() {
+			suspends = a.callParameterTargets(node.Callee, context, func(methods []*ir.Method) bool { return a.omittedDefaultsReach(methods, node.Arguments) }) || suspends
+		}
 		suspends = callSuspends || suspends
 	case *ir.EnumConstruct:
 		for _, argument := range node.Arguments {
@@ -1138,6 +1157,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		if record && targetSuspends {
 			a.plan.EnumCalls[node] = true
 		}
+		if a.preciseDefaults() {
+			suspends = a.omittedDefaultsReach(targets, node.Arguments) || suspends
+		}
 		suspends = targetSuspends || suspends
 	case *ir.TypeApply:
 		suspends = a.expressionReaches(node.Receiver, context, record)
@@ -1157,6 +1179,9 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 		suspends = a.statementsReach([]ir.Statement{node}, context, record)
 	}
 	suspends = suspends || a.options.ResourceSafety && resourceOpaqueNode(expression)
+	if a.options.Expression != nil && a.options.Expression(expression, context.module) {
+		suspends = true
+	}
 	if record && suspends {
 		a.plan.Expressions[expression] = true
 	}
@@ -1164,12 +1189,22 @@ func (a *analyzer) expressionReaches(expression ir.Expression, context methodCon
 }
 
 func (a *analyzer) callTargetReaches(call *ir.Call, callee ir.Expression, context methodContext, record bool) bool {
+	if a.options.InitializationSafety {
+		if lambda, ok := callee.(*ir.Lambda); ok {
+			return a.plan.Lambdas[lambda]
+		}
+	}
 	if a.options.ResourceSafety {
 		return a.resourceCallReaches(call, callee, context, record)
 	}
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		if class := a.classDefinitions[identity]; class != nil {
 			return a.plan.ClassConstructors[class.class]
+		}
+	}
+	if a.options.Expression != nil {
+		if lambda, ok := callee.(*ir.Lambda); ok {
+			return a.plan.Lambdas[lambda]
 		}
 	}
 	if a.options.PassToFunctions && callee != nil && callee.ExprType().Kind == types.Function {
@@ -1271,43 +1306,81 @@ func (a *analyzer) recordConstructReaches(construction *ir.RecordConstruct, cont
 	return omittedDefaultsReach
 }
 
+func (a *analyzer) preciseDefaults() bool {
+	return a.options.InitializationSafety || a.options.Expression != nil
+}
+
+func (a *analyzer) omittedDefaultsReach(methods []*ir.Method, arguments []ir.CallArgument) bool {
+	positional := 0
+	named := map[string]bool{}
+	splat := false
+	for _, argument := range arguments {
+		if argument.Splat != "" {
+			splat = true
+		}
+		if argument.Name == "" {
+			positional++
+		} else {
+			named[argument.Name] = true
+		}
+	}
+	for _, method := range methods {
+		index := 0
+		for _, parameter := range method.Parameters {
+			provided := named[parameter.Name]
+			if !parameter.NamedOnly {
+				provided = index < positional && !splat
+				index++
+			}
+			if !provided && a.defaultEffects[parameter.Default] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (a *analyzer) callTargetParameterDefaults(callee ir.Expression, context methodContext) bool {
+	return a.callParameterTargets(callee, context, func(methods []*ir.Method) bool { return anyReached(a.plan.ParameterDefaults, methods) })
+}
+
+func (a *analyzer) callParameterTargets(callee ir.Expression, context methodContext, reaches func([]*ir.Method) bool) bool {
 	if identity, ok := a.constructorIdentity(callee, context); ok {
 		class := a.classDefinitions[identity]
-		return class != nil && class.initialize != nil && a.plan.ParameterDefaults[class.initialize]
+		return class != nil && class.initialize != nil && reaches([]*ir.Method{class.initialize})
 	}
 	switch node := callee.(type) {
 	case *ir.TypeApply:
-		return a.callTargetParameterDefaults(node.Receiver, context)
+		return a.callParameterTargets(node.Receiver, context, reaches)
 	case *ir.Identifier:
 		if !node.Dispatch.Empty() {
 			owner := effectDeclarationIdentity(node.Dispatch.Owner, context.module, "")
-			return anyReached(a.plan.ParameterDefaults, a.memberMethodsFor(owner, node.Dispatch.Name, node.Dispatch.Class))
+			return reaches(a.memberMethodsFor(owner, node.Dispatch.Name, node.Dispatch.Class))
 		}
 		if !node.Declaration.Empty() && node.Declaration.Kind == identity.Function {
-			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Declaration.Module, node.Declaration.Name)])
+			return reaches(a.topMethods[callableKey(node.Declaration.Module, node.Declaration.Name)])
 		}
 		if node.Reference != nil && !node.Reference.Declaration.Empty() && node.Reference.Declaration.Kind == identity.Function {
 			declaration := node.Reference.Declaration
-			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(declaration.Module, declaration.Name)])
+			return reaches(a.topMethods[callableKey(declaration.Module, declaration.Name)])
 		}
 		if node.Reference != nil && node.Reference.Package != "" {
-			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
+			return reaches(a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
 		classMember := context.method != nil && context.method.Class
-		if !context.owner.empty() && anyReached(a.plan.ParameterDefaults, a.memberMethodsFor(context.owner, node.Name, classMember)) {
+		if !context.owner.empty() && reaches(a.memberMethodsFor(context.owner, node.Name, classMember)) {
 			return true
 		}
-		return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(context.module, node.Name)])
+		return reaches(a.topMethods[callableKey(context.module, node.Name)])
 	case *ir.Member:
 		if owner, classMember, ok := a.memberTargetIdentity(node, context); ok {
 			candidates := a.memberMethodsFor(owner, node.Name, classMember)
 			if len(candidates) > 0 {
-				return anyReached(a.plan.ParameterDefaults, candidates)
+				return reaches(candidates)
 			}
 		}
 		if node.Reference != nil && node.Reference.Package != "" && node.Reference.Owner == "" && node.Reference.ExportKind == "function" {
-			return anyReached(a.plan.ParameterDefaults, a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
+			return reaches(a.topMethods[callableKey(node.Reference.Package, node.Reference.Symbol)])
 		}
 		return false
 	}

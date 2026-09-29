@@ -25,8 +25,10 @@ import (
 )
 
 type generator struct {
-	deferredStartupImports []string
-	separateStartup        bool
+	deferredStartupImports  []string
+	initializationActions   map[string]bool
+	initializationFunctions []string
+	separateStartup         bool
 
 	b                strings.Builder
 	indent           int
@@ -185,6 +187,12 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		webDispatchOnly = true
 	}
 	g := &generator{separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program), moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g.initializationActions = map[string]bool{}
+	if program.CyclicInitialization {
+		for _, action := range program.InitializationActions {
+			g.initializationActions[action.Name] = true
+		}
+	}
 	for _, statement := range program.Statements {
 		if method, ok := statement.(*ir.Method); ok {
 			g.topFunctions[method.Name] = true
@@ -222,6 +230,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 			g.b.WriteByte('\n')
 		}
 		g.statement(statement)
+	}
+	for _, function := range g.initializationFunctions {
+		g.line(function)
 	}
 	g.integrations(program.Extensions)
 	if g.modulePath == "trb/std/test/index" {
@@ -824,7 +835,15 @@ func (g *generator) statement(statement ir.Statement) {
 			return
 		}
 		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
-		header := "export class " + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
+		action := ir.InitializationActionName(n)
+		deferred := g.initializationActions[action]
+		prefix := "export class "
+		if deferred {
+			g.line("function __trb_create_" + action + "() {")
+			g.indent++
+			prefix = "return class "
+		}
+		header := prefix + n.Name + tsTypeParameterDeclarations(n.TypeParameters)
 		if n.Superclass != nil {
 			superclass := g.expr(n.Superclass)
 			if typ := n.Superclass.ExprType(); typ.Declaration.Kind == identity.Class {
@@ -851,6 +870,18 @@ func (g *generator) statement(statement ir.Statement) {
 		g.inClass--
 		g.indent--
 		g.line("}")
+		if deferred {
+			g.indent--
+			g.line("}")
+			parameters := tsTypeParameterDeclarations(n.TypeParameters)
+			arguments := ""
+			if len(n.TypeParameters) > 0 {
+				arguments = "<" + strings.Join(n.TypeParameters, ", ") + ">"
+			}
+			g.line("export type " + n.Name + parameters + " = InstanceType<typeof " + n.Name + arguments + ">;")
+			g.line("export let " + n.Name + ": ReturnType<typeof __trb_create_" + action + ">;")
+			g.line("export function __trb_" + action + "() { " + n.Name + " = __trb_create_" + action + "(); }")
+		}
 		popTypeParameters()
 	case *ir.Record:
 		popTypeParameters := g.pushTypeParameters(n.TypeParameters)
@@ -912,7 +943,12 @@ func (g *generator) statement(statement ir.Statement) {
 			if !n.Target.Declaration.Empty() {
 				target = g.declarationName(n.Target.Declaration)
 			}
-			g.line("export const " + n.Name + " = " + target + ";")
+			if action := ir.InitializationActionName(n); g.initializationActions[action] {
+				g.line("export let " + n.Name + ": typeof " + target + ";")
+				g.line("export function __trb_" + action + "() { " + n.Name + " = " + target + "; }")
+			} else {
+				g.line("export const " + n.Name + " = " + target + ";")
+			}
 		}
 		popTypeParameters()
 	case *ir.Newtype:
@@ -969,6 +1005,23 @@ func (g *generator) statement(statement ir.Statement) {
 		variableType := g.tsTypeWithIdentity(n.Type, typeIdentity)
 		if lambda, ok := n.Value.(*ir.Lambda); ok && g.suspension.Lambdas[lambda] {
 			variableType = g.tsSuspendingFunctionType(n.Type)
+		}
+		action := ir.InitializationActionName(n)
+		if g.functionDepth == 0 && g.initializationActions[action] {
+			target := g.variableName(n)
+			if g.inClass > 0 && n.Constant {
+				g.line("static " + n.Name + ": " + variableType + ";")
+				target = g.declarationName(identity.Declaration{Module: g.modulePath, Name: n.Owner, Kind: identity.Class}) + "." + n.Name
+			} else {
+				prefix := ""
+				if n.Constant {
+					prefix = "export "
+				}
+				g.line(prefix + "let " + target + ": " + variableType + ";")
+			}
+			g.initializationFunctions = append(g.initializationFunctions, "export function __trb_"+action+"() { "+target+" = "+g.expr(n.Value)+"; }")
+			g.exactTypes[n.Name] = cloneTypeScriptTypeIdentity(typeIdentity)
+			break
 		}
 		if g.inClass > 0 && g.functionDepth == 0 && n.Constant {
 			g.line("static readonly " + n.Name + ": " + variableType + " = " + g.expr(n.Value) + ";")

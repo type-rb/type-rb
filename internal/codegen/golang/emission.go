@@ -84,8 +84,12 @@ func ProjectEntrypoint(program *ir.Program, programs []*ir.Program) string {
 		fmt.Fprintf(&imports, "\t%s %s\n", alias, strconv.Quote(path.Join(program.GoModule, directory)))
 		return alias
 	}
-	for _, module := range program.InitializationOrder {
-		fmt.Fprintf(&calls, "\t%s.%s()\n", qualifier(module), moduleInitializer(module))
+	for _, step := range program.InitializationSteps {
+		name := moduleInitializer(step.Module)
+		if step.Action != "" {
+			name += "_" + step.Action
+		}
+		fmt.Fprintf(&calls, "\t%s.%s()\n", qualifier(step.Module), name)
 	}
 	fmt.Fprintf(&calls, "\t%s.%s()\n", qualifier(program.ModulePath), names.functions[program.ModulePath]["main"])
 	return "package main\n\nimport (\n" + imports.String() + ")\n\nfunc main() {\n" + calls.String() + "}\n"

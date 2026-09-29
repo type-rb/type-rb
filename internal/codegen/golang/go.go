@@ -29,6 +29,7 @@ import (
 
 type generator struct {
 	initializers           []string
+	initializerNames       []string
 	explicitInitialization bool
 
 	b                 strings.Builder
@@ -198,14 +199,29 @@ func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime 
 	}
 	g.integrations(program.Extensions)
 	if g.explicitInitialization {
-		g.line("func " + moduleInitializer(program.ModulePath) + "() {")
-		g.indent++
-		for _, initializer := range g.initializers {
-			g.line(initializer)
+		if program.CyclicInitialization {
+			for _, action := range program.InitializationActions {
+				g.line("func " + moduleInitializer(program.ModulePath) + "_" + action.Name + "() {")
+				g.indent++
+				for index, name := range g.initializerNames {
+					if name == action.Name {
+						g.line(g.initializers[index])
+					}
+				}
+				g.indent--
+				g.line("}")
+			}
+		} else {
+			g.line("func " + moduleInitializer(program.ModulePath) + "() {")
+			g.indent++
+			for _, initializer := range g.initializers {
+				g.line(initializer)
+			}
+			g.indent--
+			g.line("}")
 		}
-		g.indent--
-		g.line("}")
 	}
+
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
 	}
@@ -464,6 +480,7 @@ func (g *generator) statement(statement ir.Statement) {
 			if g.explicitInitialization {
 				g.line("var " + name + " " + g.goType(n.Type))
 				g.initializers = append(g.initializers, name+" = "+value)
+				g.initializerNames = append(g.initializerNames, ir.InitializationActionName(n))
 			} else {
 				g.line("var " + name + " " + g.goType(n.Type) + " = " + value)
 			}
@@ -1827,6 +1844,14 @@ func (g *generator) expr(expression ir.Expression) string {
 			}
 			if n.Reference != nil && n.Reference.Package != "" {
 				module = n.Reference.Package
+			}
+			if n.Reference != nil && n.Reference.ExportKind == "value" && n.Reference.ClassMember && !n.Reference.Dispatch.Owner.Empty() {
+				declaration := n.Reference.Dispatch.Owner
+				name := g.projectConstantName(declaration.Module, declaration.Name, n.Name)
+				if alias := g.declarationAlias(declaration); alias != "" {
+					return alias + "." + name
+				}
+				return name
 			}
 			name := g.projectConstantName(module, owner, n.Name)
 			if alias := g.referenceAlias(n.Reference); alias != "" {

@@ -25,6 +25,10 @@ type Program struct {
 	// InitializationOrder is the explicit dependency-first execution plan for
 	// this entrypoint. Other checked modules are not execution roots.
 	InitializationOrder []string
+	// CyclicInitialization separates declarations from initialization actions.
+	CyclicInitialization  bool
+	InitializationActions []InitializationAction
+	InitializationSteps   []InitializationStep
 	// RuntimeInactive keeps checked but unreachable modules out of executable
 	// target packages, including their host-native import side effects.
 	RuntimeInactive bool

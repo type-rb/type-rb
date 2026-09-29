@@ -7226,7 +7226,7 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			binding = specializeResolvedEnumMember(receiverType, binding)
 			binding = specializeResolvedClassMember(receiverType, binding)
 			typ = c.resolvedBindingType(binding)
-			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
+			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport && !binding.Member.Class
 			c.markImportedDeclarationUsed(receiverType.Declaration)
 			c.recordReference(n, binding)
 		} else if binding, exists := c.importedAncestorMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
@@ -7237,14 +7237,14 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 			if imported, found := c.resolution.ImportedType(receiverType.Name); found && imported.Export != nil {
 				classType = classType || imported.Export.Kind == resolver.ClassExport
 			}
-			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport
+			c.result.ClassFieldAccesses[n] = classType && binding.Member != nil && binding.Member.Kind == resolver.ValueExport && !binding.Member.Class
 			c.markImportedSymbolUsed(receiverType.Name, c.generatedSpan(n.Span()))
 			c.recordReference(n, binding)
 		} else if binding, exists := c.resolution.InferredTypeMember(dataReceiverType.Name, n.Name); exists && binding.Member != nil && binding.Member.Class == classAccess {
 			binding = specializeResolvedEnumMember(dataReceiverType, binding)
 			binding = specializeResolvedClassMember(dataReceiverType, binding)
 			typ = c.resolvedBindingType(binding)
-			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport
+			c.result.ClassFieldAccesses[n] = binding.Export != nil && binding.Export.Kind == resolver.ClassExport && binding.Member.Kind == resolver.ValueExport && !binding.Member.Class
 			c.recordReference(n, binding)
 		} else if member, exists := c.declarationMember(receiverType.Name, n.Name, classAccess, map[string]bool{}); exists {
 			member = c.specializeDeclarationMember(receiverType, member)

@@ -240,12 +240,12 @@ func TestRunConfigFreeReportsStableGraphDiagnostics(t *testing.T) {
 			want: "cannot resolve project import missing",
 		},
 		{
-			name: "import cycle",
+			name: "initialization cycle",
 			files: map[string]string{
-				"main.trb": "import { value } from a\n\ndef start(): Integer\n\treturn value()\nend\n\ndef main()\n\tputs(start())\n\treturn\nend\n",
-				"a.trb":    "import { start } from main\n\ndef value(): Integer\n\treturn start()\nend\n",
+				"main.trb": "import { VALUE } from a\nSTART: Integer := VALUE\ndef main()\nputs(START)\nend\n",
+				"a.trb":    "import { START } from main\nVALUE: Integer := START\n",
 			},
-			want: "import cycle:",
+			want: "value initialization cycle",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

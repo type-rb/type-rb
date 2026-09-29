@@ -87,10 +87,11 @@ type recordDefinition struct {
 }
 
 type enumDefinition struct {
-	Module  string
-	Node    *ir.Enum
-	Members map[string]*ir.EnumMember
-	Methods map[string]*ir.Method
+	AliasTarget identity.Declaration
+	Module      string
+	Node        *ir.Enum
+	Members     map[string]*ir.EnumMember
+	Methods     map[string]*ir.Method
 }
 
 type enumValue struct {
@@ -202,6 +203,7 @@ func (s *scope) mutableBinding(name string) bool {
 
 type Evaluator struct {
 	initializedModules map[string]bool
+	initializedActions map[ir.InitializationStep]bool
 
 	stdout           io.Writer
 	mode             string
@@ -216,6 +218,7 @@ type Evaluator struct {
 func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 	return &Evaluator{
 		initializedModules: map[string]bool{},
+		initializedActions: map[ir.InitializationStep]bool{},
 
 		stdout:           stdout,
 		mode:             mode,
@@ -247,14 +250,59 @@ func (e *Evaluator) initializeProjectImports(programs []*ir.Program, sessionModu
 	for _, program := range programs {
 		byModule[program.ModulePath] = program
 	}
-	for _, module := range ir.InitializationOrder(programs, []string{sessionModule}) {
-		if module == sessionModule || e.initializedModules[module] {
+	steps, valid := ir.OrderedInitializationSteps(programs, []string{sessionModule})
+	if !valid {
+		return fmt.Errorf("invalid cyclic initialization plan")
+	}
+	scopes := map[string]*scope{}
+	for _, step := range steps {
+		module := step.Module
+		if module == sessionModule || e.initializedModules[module] || e.initializedActions[step] {
 			continue
 		}
-		if err := e.loadProjectValues(byModule[module].Statements, module); err != nil {
-			return fmt.Errorf("load %s: %w", module, err)
+		if step.Action == "" {
+			if err := e.loadProjectValues(byModule[module].Statements, module); err != nil {
+				return fmt.Errorf("load %s: %w", module, err)
+			}
+		} else {
+			if scopes[module] == nil {
+				scopes[module] = &scope{parent: e.global, values: map[string]Value{}, persistent: true}
+			}
+			var evaluate func([]ir.Statement) error
+			evaluate = func(statements []ir.Statement) error {
+				for _, statement := range statements {
+					switch node := statement.(type) {
+					case *ir.Variable:
+						if ir.InitializationActionName(node) == step.Action {
+							_, err := e.statement(node, module, scopes[module])
+							return err
+						}
+					case *ir.Class:
+						if err := evaluate(node.Body); err != nil {
+							return err
+						}
+					case *ir.Module:
+						if err := evaluate(node.Body); err != nil {
+							return err
+						}
+					}
+				}
+				return nil
+			}
+			if err := evaluate(byModule[module].Statements); err != nil {
+				return fmt.Errorf("load %s: %w", module, err)
+			}
 		}
-		e.initializedModules[module] = true
+		if step.Action == "" {
+			e.initializedModules[module] = true
+		} else {
+			e.initializedActions[step] = true
+		}
+	}
+	for _, module := range ir.InitializationOrder(programs, []string{sessionModule}) {
+		if module != sessionModule {
+			e.initializedModules[module] = true
+		}
 	}
 	return nil
 }
@@ -391,7 +439,7 @@ func (e *Evaluator) loadDefinitions(statements []ir.Statement, module string) bo
 			}
 			changed = true
 			enumNode := &ir.Enum{Declaration: node.Declaration, Name: node.Name, TypeParameters: append([]string(nil), node.TypeParameters...)}
-			definition := &enumDefinition{Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
+			definition := &enumDefinition{AliasTarget: node.Target.Declaration, Module: module, Node: enumNode, Members: map[string]*ir.EnumMember{}, Methods: map[string]*ir.Method{}}
 			for index := range node.Variants {
 				member := node.Variants[index]
 				enumNode.Body = append(enumNode.Body, &member)
@@ -1209,6 +1257,9 @@ func (e *Evaluator) expression(expression ir.Expression, module string, sc *scop
 		}
 		if node.Namespace {
 			owner := ir.ExpressionDeclaration(node.Receiver)
+			if node.Reference != nil && node.Reference.ClassMember && node.Reference.ExportKind == "value" && !node.Reference.Dispatch.Owner.Empty() {
+				owner = node.Reference.Dispatch.Owner
+			}
 			if !owner.Empty() {
 				if value, ok := e.symbol(owner.Module, ownedName(owner.Name, node.Name)); ok {
 					return collectionValueAtType(value, node.ExprType()), nil
@@ -1815,6 +1866,7 @@ func (e *Evaluator) symbol(module, name string) (Value, bool) {
 	case *classDefinition:
 		return Value{Type: types.FromName("Class"), Data: &typeValue{Class: item}}, true
 	case *enumDefinition:
+		item = e.canonicalEnumDefinition(item)
 		return Value{Type: types.FromName(item.Node.Name), Data: &typeValue{Enum: item}}, true
 	case *functionDefinition:
 		return Value{Type: item.Method.ReturnType, Data: &callable{Function: item, Module: item.Module}}, true
@@ -2006,11 +2058,24 @@ func (e *Evaluator) enumCallDefinition(node *ir.EnumCall, module string) *enumDe
 	return e.enumDefinitionForIdentity(node.OwnerIdentity, module, node.EnumName)
 }
 
+func (e *Evaluator) canonicalEnumDefinition(definition *enumDefinition) *enumDefinition {
+	seen := map[*enumDefinition]bool{}
+	for definition != nil && !definition.AliasTarget.Empty() && !seen[definition] {
+		seen[definition] = true
+		target, ok := e.definitions[symbolKey(definition.AliasTarget.Module, definition.AliasTarget.Name)].(*enumDefinition)
+		if !ok {
+			break
+		}
+		definition = target
+	}
+	return definition
+}
+
 func (e *Evaluator) enumDefinitionForIdentity(declaration identity.Declaration, module, name string) *enumDefinition {
 	if !declaration.Empty() {
 		key := symbolKey(declaration.Module, declaration.Name)
 		if definition, ok := e.definitions[key].(*enumDefinition); ok && definition.Node.Declaration == declaration {
-			return definition
+			return e.canonicalEnumDefinition(definition)
 		}
 	}
 	if symbol, ok := e.symbol(module, name); ok {
@@ -3779,6 +3844,11 @@ func Inspect(value Value) string {
 		}
 	case *enumValue:
 		name := runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name)
+		// Transparent aliases share runtime identity while retaining the checked
+		// source type's spelling in interactive output.
+		if value.Type.Declaration.Kind == identity.TypeAlias {
+			name = runtimeDefinitionName(value.Type.Declaration, value.Type.Name)
+		}
 		if len(item.Payload) == 0 {
 			return name + "::" + item.Name
 		}

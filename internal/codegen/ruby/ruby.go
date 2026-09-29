@@ -20,28 +20,29 @@ import (
 )
 
 type generator struct {
-	separateStartup  bool
-	b                strings.Builder
-	indent           int
-	loader           string
-	modulePath       string
-	topFunctions     map[string]bool
-	topTargets       map[string]string
-	topMethodTargets map[*ir.Method]string
-	projectNames     *rubyProjectNames
-	nativeSyntax     bool
-	temporary        int
-	jobs             *jobsintegration.Manifest
-	jobsSQL          *jobssql.Manifest
-	orm              *ormintegration.Manifest
-	breakTarget      string
-	execution        *effectplan.Plan
-	executionActive  bool
-	lexicalNames     map[string]string
-	oidcRuntime      bool
-	sourceRecorder   *sourcemap.Recorder
-	sourcePath       string
-	checkedInteger   bool
+	separateStartup       bool
+	initializationActions map[string]bool
+	b                     strings.Builder
+	indent                int
+	loader                string
+	modulePath            string
+	topFunctions          map[string]bool
+	topTargets            map[string]string
+	topMethodTargets      map[*ir.Method]string
+	projectNames          *rubyProjectNames
+	nativeSyntax          bool
+	temporary             int
+	jobs                  *jobsintegration.Manifest
+	jobsSQL               *jobssql.Manifest
+	orm                   *ormintegration.Manifest
+	breakTarget           string
+	execution             *effectplan.Plan
+	executionActive       bool
+	lexicalNames          map[string]string
+	oidcRuntime           bool
+	sourceRecorder        *sourcemap.Recorder
+	sourcePath            string
+	checkedInteger        bool
 }
 
 func Generate(program *ir.Program) string {
@@ -82,6 +83,13 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 		jobsSQL:      jobssql.ManifestFrom(program.Extensions),
 		orm:          ormintegration.ManifestFrom(program.Extensions), execution: execution,
 		sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath,
+	}
+	g.initializationActions = map[string]bool{}
+	if program.CyclicInitialization {
+		for _, action := range program.InitializationActions {
+			g.initializationActions[action.Name] = true
+		}
+		g.line("$__trb_initializers ||= {}", "")
 	}
 	g.nativeSyntax = program.NativeSyntax
 	for _, statement := range program.Statements {
@@ -175,6 +183,19 @@ func (g *generator) statement(statement ir.Statement) {
 			g.sourceRecorder.Record(start, g.b.Len(), statement.SourceSpan())
 		}
 	}()
+	action := ir.InitializationActionName(statement)
+	deferred := false
+	switch statement.(type) {
+	case *ir.Variable, *ir.Class, *ir.TypeAlias:
+		deferred = g.initializationActions[action]
+	}
+	if deferred {
+		// A block retains the declaration's lexical constant namespace, unlike a
+		// method wrapper, and executes only when selected by the shared plan.
+		g.line("$__trb_initializers["+strconv.Quote(g.modulePath+"#"+action)+"] = -> do", "")
+		g.indent++
+		defer func() { g.indent--; g.line("end", "") }()
+	}
 	switch n := statement.(type) {
 	case *ir.Comment:
 		g.line(n.Text, "")

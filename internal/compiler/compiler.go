@@ -15,7 +15,7 @@ import (
 	"github.com/type-rb/type-rb/internal/declaration"
 	"github.com/type-rb/type-rb/internal/declarationproviderhost"
 	"github.com/type-rb/type-rb/internal/diagnostic"
-	"github.com/type-rb/type-rb/internal/identity"
+	"github.com/type-rb/type-rb/internal/initialization"
 	"github.com/type-rb/type-rb/internal/ir"
 	"github.com/type-rb/type-rb/internal/lower"
 	"github.com/type-rb/type-rb/internal/nativepackage"
@@ -28,7 +28,6 @@ import (
 	"github.com/type-rb/type-rb/internal/target"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/typeprovider"
-	"github.com/type-rb/type-rb/internal/types"
 )
 
 type Artifact struct {
@@ -313,7 +312,7 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 			aliases = source.PackageAliases
 		}
 		modules = append(modules, resolver.Module{
-			Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
+			CompilationUnit: source.CompilationUnit, Path: source.ModulePath, Filename: source.Filename, Program: programs[source.ModulePath],
 			PackageAliases: aliases,
 			CompilerOwned:  source.CompilerOwned, Official: source.Official, DeclarationProvider: source.DeclarationProvider,
 		})
@@ -399,21 +398,8 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 
 	checkedPrograms := make(map[string]checker.Result, len(units))
 	checkDiagnostics := make(map[string][]diagnostic.Diagnostic, len(units))
-	constantTypes := map[identity.Declaration]types.Type{}
-	for _, source := range checkedModuleOrder(units, resolutions) {
-		program := programs[source.ModulePath]
-		resolutions[source.ModulePath] = resolutions[source.ModulePath].WithCheckedValues(constantTypes)
-		checked, diagnostics := analyzer.checkProgram(program, resolutions[source.ModulePath], checker.Options{
-			AllowUnusedImports:     options.AllowUnusedImports,
-			InteractiveTopLevel:    options.InteractiveModule != "" && options.InteractiveModule == source.ModulePath,
-			InteractiveFlowResets:  options.InteractiveFlowResets,
-			RunnableMain:           topLevelMethod(program, MainFunction),
-			CompilerGeneratedStart: compilerGeneratedStart(source),
-		})
-		checkedPrograms[source.ModulePath] = checked
-		checkDiagnostics[source.ModulePath] = diagnostics
-		collectCheckedConstants(checked, constantTypes)
-	}
+	checkProjectComponents(analyzer, units, programs, catalog, resolutions, options, checkedPrograms, checkDiagnostics)
+
 	if runtimeUnits := compilerOwnedRuntimeSourceUnits(checkedPrograms, programs, options); len(runtimeUnits) > 0 {
 		return analyzeProjectFull(analyzer, append(units, runtimeUnits...), options, validateBackend, requestedUnits)
 	}
@@ -477,6 +463,11 @@ func analyzeProjectFull(analyzer *Analyzer, sources []SourceUnit, options Option
 		}
 		integrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
+	}
+	var initializationDiagnostics []diagnostic.Diagnostic
+	loweredPrograms, initializationDiagnostics = initialization.Analyze(loweredPrograms)
+	if len(initializationDiagnostics) > 0 {
+		return nil, NewCompileError("", diagnostic.TypeError, initializationDiagnostics)
 	}
 	if diagnostics := effectplan.ValidateResources(loweredPrograms); len(diagnostics) > 0 {
 		return nil, NewCompileError("", diagnostic.TypeError, diagnostics)
