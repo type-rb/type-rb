@@ -3846,8 +3846,8 @@ func Inspect(value Value) string {
 		name := runtimeDefinitionName(item.Definition.Node.Declaration, item.Definition.Node.Name)
 		// Transparent aliases share runtime identity while retaining the checked
 		// source type's spelling in interactive output.
-		if value.Type.Kind == types.Named && value.Type.Name != "" {
-			name = value.Type.Name
+		if value.Type.Declaration.Kind == identity.TypeAlias {
+			name = runtimeDefinitionName(value.Type.Declaration, value.Type.Name)
 		}
 		if len(item.Payload) == 0 {
 			return name + "::" + item.Name
