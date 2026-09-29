@@ -2,6 +2,128 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.9 - 2026-09-29
+
+### Project layout and startup
+
+- Go output no longer makes source directories into dependency boundaries.
+  Acyclic source imports can cross directories in either direction, and nested
+  modules can import declarations from the application entry. Compilation units
+  become generated Go packages with separate startup code; generated Go paths
+  and names are internal, and `go.rootPackage` is removed.
+  ([#832](https://github.com/type-rb/type-rb/pull/832))
+- Initialization follows authored import order, dependencies first, and then
+  declaration order. All production files are checked, while only the entry,
+  selected tests, integration discovery roots and their dependencies initialize.
+  Shared modules run once, and test roots use canonical path order before test
+  bodies execute. Ruby and TypeScript builds provide an explicit startup driver;
+  browser applications load `trb/entry/application/main.ts` under their output
+  directory. REPL sessions initialize their explicit and hidden import closures.
+  ([#832](https://github.com/type-rb/type-rb/pull/832))
+
+### Types, declarations and calls
+
+- Module, constant, record, class, interface, enum and newtype references retain
+  their declaration owners through imports, aliases, generics and the REPL.
+  Reopened namespaces share their members and mutable storage without merging
+  unrelated declarations. Imported inferred constants keep their checked types.
+  ([#753](https://github.com/type-rb/type-rb/pull/753),
+  [#760](https://github.com/type-rb/type-rb/pull/760),
+  [#762](https://github.com/type-rb/type-rb/pull/762),
+  [#793](https://github.com/type-rb/type-rb/pull/793),
+  [#809](https://github.com/type-rb/type-rb/pull/809),
+  [#811](https://github.com/type-rb/type-rb/pull/811),
+  [#812](https://github.com/type-rb/type-rb/pull/812))
+- Transparent record and class aliases construct their underlying types with
+  the correct generic fields, defaults and methods. Enum methods and raw-value
+  conversions preserve alias and standard-error identities. Class factories
+  can use `self.new`, and inherited methods retain their declaring receiver.
+  ([#761](https://github.com/type-rb/type-rb/pull/761),
+  [#767](https://github.com/type-rb/type-rb/pull/767),
+  [#771](https://github.com/type-rb/type-rb/pull/771),
+  [#777](https://github.com/type-rb/type-rb/pull/777),
+  [#803](https://github.com/type-rb/type-rb/pull/803),
+  [#820](https://github.com/type-rb/type-rb/pull/820),
+  [#825](https://github.com/type-rb/type-rb/pull/825))
+- Function values preserve their signatures and selected targets when stored,
+  passed, returned or invoked through library and interface methods. Nested
+  function literals work in arguments and collection values. Calls select the
+  receiver or function before evaluating arguments, including when those
+  arguments replace the original variable.
+  ([#738](https://github.com/type-rb/type-rb/pull/738),
+  [#743](https://github.com/type-rb/type-rb/pull/743),
+  [#745](https://github.com/type-rb/type-rb/pull/745),
+  [#784](https://github.com/type-rb/type-rb/pull/784),
+  [#807](https://github.com/type-rb/type-rb/pull/807),
+  [#808](https://github.com/type-rb/type-rb/pull/808))
+
+### Evaluation and checking
+
+- Array lookup, search and mutation operations retain the original receiver
+  while observing argument-side mutations. Hash literals evaluate keys and
+  values in source order and keep the last value for duplicate keys. Safe
+  collection navigation skips absent receivers and lazy arguments consistently.
+  ([#736](https://github.com/type-rb/type-rb/pull/736),
+  [#737](https://github.com/type-rb/type-rb/pull/737),
+  [#740](https://github.com/type-rb/type-rb/pull/740),
+  [#746](https://github.com/type-rb/type-rb/pull/746),
+  [#775](https://github.com/type-rb/type-rb/pull/775))
+- Union and nullable values preserve storage, literal constraints and numeric
+  conversions through assignment, calls and generic substitution. Mutable
+  global and namespace values invalidate stale narrowing after calls that can
+  replace them. Common class-union fields are writable when their alternative
+  types agree; other writes require narrowing.
+  ([#763](https://github.com/type-rb/type-rb/pull/763),
+  [#779](https://github.com/type-rb/type-rb/pull/779),
+  [#780](https://github.com/type-rb/type-rb/pull/780),
+  [#782](https://github.com/type-rb/type-rb/pull/782),
+  [#786](https://github.com/type-rb/type-rb/pull/786),
+  [#817](https://github.com/type-rb/type-rb/pull/817))
+- Checking rejects incomplete constructors, receiver access in constructor
+  parameter defaults, external private-field access through unions, interface
+  construction, unguarded nullable calls, direct union indexing and invalid
+  Range element annotations before target compilation.
+  ([#744](https://github.com/type-rb/type-rb/pull/744),
+  [#794](https://github.com/type-rb/type-rb/pull/794),
+  [#813](https://github.com/type-rb/type-rb/pull/813),
+  [#816](https://github.com/type-rb/type-rb/pull/816),
+  [#818](https://github.com/type-rb/type-rb/pull/818),
+  [#822](https://github.com/type-rb/type-rb/pull/822),
+  [#829](https://github.com/type-rb/type-rb/pull/829))
+- An unmatched Integer or String `case` statement without `else` continues
+  normally. Value-producing `case` expressions require an exhaustive selector
+  or an `else` branch.
+  ([#826](https://github.com/type-rb/type-rb/pull/826))
+
+### Literals, REPL and editor tooling
+
+- Single-quoted Strings and quoted Symbols preserve their contents across
+  targets; invalid escapes and unsupported Unicode source characters produce
+  diagnostics. Keyword-shaped Symbols remain values. Go output keeps distinct
+  Unicode identifier spellings and avoids target keyword and builtin collisions;
+  Ruby output also supports reserved binding names.
+  ([#747](https://github.com/type-rb/type-rb/pull/747),
+  [#751](https://github.com/type-rb/type-rb/pull/751),
+  [#788](https://github.com/type-rb/type-rb/pull/788),
+  [#789](https://github.com/type-rb/type-rb/pull/789),
+  [#819](https://github.com/type-rb/type-rb/pull/819),
+  [#821](https://github.com/type-rb/type-rb/pull/821),
+  [#827](https://github.com/type-rb/type-rb/pull/827))
+- Float negation preserves negative zero. REPL descending sorts keep NaNs last,
+  and Boolean logical assignment short-circuits while evaluating indexed
+  targets once. Formatting keeps unary signs next to their operands.
+  ([#741](https://github.com/type-rb/type-rb/pull/741),
+  [#773](https://github.com/type-rb/type-rb/pull/773),
+  [#824](https://github.com/type-rb/type-rb/pull/824),
+  [#831](https://github.com/type-rb/type-rb/pull/831))
+- `mode: trb` is accepted for checking, formatting, linting, editor services and
+  TypeRB package installation. This compiler reports that executable operations
+  are unavailable for that mode. Package manifests that omit `modes` include it.
+  ([#830](https://github.com/type-rb/type-rb/pull/830))
+- VS Code extension 0.4.1 targets TypeRB 0.4.9 for the updated project startup
+  behavior. The extension uses the installed compiler and is published separately.
+  ([#832](https://github.com/type-rb/type-rb/pull/832))
+
 ## 0.4.8 - 2026-09-19
 
 ### Collections and expressions
