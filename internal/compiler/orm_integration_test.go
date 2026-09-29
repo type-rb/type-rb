@@ -1388,9 +1388,9 @@ func TestPortableORMCompilesModelImportedFromAnotherModule(t *testing.T) {
 		}
 	}
 	for _, expected := range []string{
-		"models.TrbOrmProductWhere", "models.TrbOrmLoadProduct", "orm.DbResult[*[]*models.Product]",
-		"models.TrbOrmPluckProductName", "models.TrbOrmPickProductName", "models.TrbOrmPluckProductId",
-		"models.TrbOrmInsertAllProduct(trbArrayValues_",
+		"TrbOrmProductWhere", "TrbOrmLoadProduct", "orm.DbResult[*[]*Product]",
+		"TrbOrmPluckProductName", "TrbOrmPickProductName", "TrbOrmPluckProductId",
+		"TrbOrmInsertAllProduct(trbArrayValues_",
 	} {
 		if !strings.Contains(mainOutput, expected) {
 			t.Fatalf("generated main module is missing %q:\n%s", expected, mainOutput)
@@ -1531,8 +1531,8 @@ end
 			}
 			switch mode {
 			case "go":
-				if !strings.Contains(string(entrypoint.Output), `import "example.com/orm/models"`) {
-					t.Fatalf("Go entrypoint did not retain its model-group import:\n%s", entrypoint.Output)
+				if entrypoint.OutputPath == "" || filepath.Dir(entrypoint.OutputPath) != filepath.Dir(artifactForModule(artifacts, "models/product").OutputPath) {
+					t.Fatal("Go model modules and entrypoint must share the application emission group")
 				}
 			case "ruby":
 				if !strings.Contains(string(entrypoint.Output), "models/category") || !strings.Contains(string(entrypoint.Output), "models/product") {

@@ -220,9 +220,6 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		// until fragment-level incremental invalidation is characterized.
 		return nil, false, nil
 	}
-	if err := validateGoRunnableEntrypointImports(units, programs, resolutions, ownerModule, options); err != nil {
-		return nil, true, err
-	}
 
 	reuseLoweredPrograms := ownerModule == previous.entrypointModule && integrations.CanReuseLoweredPrograms(previous.integrations, affected)
 	loweringIntegrations := integrations
@@ -246,6 +243,10 @@ func analyzeChangedProject(analyzer *Analyzer, previous *projectAnalysis, source
 		}
 		lowered := lower.Program(checkedPrograms[source.ModulePath])
 		lowered.SourcePath = source.Filename
+		lowered.CompilationUnit = source.CompilationUnit
+		if lowered.CompilationUnit == "" {
+			lowered.CompilationUnit = "$application"
+		}
 		loweringIntegrations.Apply(lowered, source.ModulePath == ownerModule)
 		loweredPrograms = append(loweredPrograms, lowered)
 	}

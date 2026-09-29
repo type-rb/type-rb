@@ -12,6 +12,8 @@ import (
 )
 
 type Generated struct {
+	OutputPath         string
+	EntryPath          string
 	Output             []byte
 	SourceMap          sourcemap.Map
 	SupportFiles       []SupportFile
@@ -75,6 +77,7 @@ func ValidateProject(programs []*ir.Program) error {
 // analysis without leaking backend-specific concerns into parsing, checking,
 // or the shared IR.
 func GenerateProject(programs []*ir.Program) ([]Generated, error) {
+	programs = ir.PlanInitialization(programs)
 	if len(programs) > 0 && declaredWithoutBackend(programs[0].Mode) {
 		return nil, target.Unavailable("code generation", programs[0].Mode)
 	}
@@ -90,6 +93,7 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs := make([]Generated, len(generated))
 		for index, output := range generated {
 			outputs[index] = Generated{Output: []byte(output.Output), SourceMap: output.Map}
+			attachScriptEntrypoint(&outputs[index], programs[index], programs)
 		}
 		return outputs, nil
 	}
@@ -98,10 +102,16 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		generated := golang.GenerateProjectMapped(normalized)
 		outputs := make([]Generated, len(generated))
 		for index, output := range generated {
-			outputs[index] = Generated{Output: []byte(output.Output), SourceMap: output.Map}
+			outputs[index] = Generated{Output: []byte(output.Output), SourceMap: output.Map, OutputPath: golang.ProjectOutputPath(normalized[index])}
 		}
 		if len(outputs) > 0 {
 			outputs[0].SupportFiles, outputs[0].NativeDependencies = nativeSupport(programs)
+		}
+		for index, program := range normalized {
+			if entry := golang.ProjectEntrypoint(program, normalized); entry != "" {
+				outputs[index].EntryPath = golang.ProjectEntryPath(program)
+				outputs[index].SupportFiles = append(outputs[index].SupportFiles, SupportFile{Path: outputs[index].EntryPath, Output: []byte(entry)})
+			}
 		}
 		return outputs, nil
 	}
@@ -110,6 +120,7 @@ func GenerateProject(programs []*ir.Program) ([]Generated, error) {
 		outputs := make([]Generated, len(generated))
 		for index, output := range generated {
 			outputs[index] = Generated{Output: []byte(output.Output), SourceMap: output.Map}
+			attachScriptEntrypoint(&outputs[index], programs[index], programs)
 		}
 		return outputs, nil
 	}

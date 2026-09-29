@@ -178,7 +178,7 @@ end
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.TrimSpace(runConcurrentProbeArtifact(t, mode, artifacts[0].Output)); got != "1\n2" {
+			if got := strings.TrimSpace(runConcurrentProbeArtifact(t, mode, artifacts[0].Output, artifacts...)); got != "1\n2" {
 				t.Fatalf("class field default escaped the caller's %s concurrency group: got %q, want %q", mode, got, "1\n2")
 			}
 		})
@@ -229,7 +229,7 @@ func TestConcurrentMapEnforcesExplicitAndDefaultCapacity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				output := runConcurrentProbeArtifact(t, mode, artifacts[0].Output)
+				output := runConcurrentProbeArtifact(t, mode, artifacts[0].Output, artifacts...)
 				lines := strings.Split(strings.TrimSpace(output), "\n")
 				if len(lines) != 3 || lines[0] != "1" || lines[2] != test.wantMax {
 					t.Fatalf("unexpected %s concurrent capacity output: %q", mode, output)
@@ -273,15 +273,25 @@ func concurrencyProbeCatalog(mode string) *nativepackage.Catalog {
 	}
 }
 
-func runConcurrentProbeArtifact(t *testing.T, mode string, source []byte) string {
+func runConcurrentProbeArtifact(t *testing.T, mode string, source []byte, artifacts ...*Artifact) string {
 	t.Helper()
 	root := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var command *exec.Cmd
+	scriptEntry := "main" + map[string]string{"ruby": ".rb", "typescript": ".ts"}[mode]
+	if len(artifacts) > 0 {
+		writeProjectRuntimeArtifacts(t, root, artifacts)
+		scriptEntry = artifacts[0].EntryPath
+	}
 	switch mode {
 	case "go":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.go"), source)
+		entry := "."
+		if len(artifacts) > 0 {
+			entry = "./" + filepath.Dir(artifacts[0].EntryPath)
+		} else {
+			writeCompilerRuntimeFile(t, filepath.Join(root, "main.go"), source)
+		}
 		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/concurrent-map-app\n\ngo 1.27\n\nrequire example.com/concurrency-probe v0.0.0\n\nreplace example.com/concurrency-probe => ./concurrency-probe\n"))
 		writeCompilerRuntimeFile(t, filepath.Join(root, "concurrency-probe", "go.mod"), []byte("module example.com/concurrency-probe\n\ngo 1.27\n"))
 		writeCompilerRuntimeFile(t, filepath.Join(root, "concurrency-probe", "probe.go"), []byte(`package concurrencyprobe
@@ -309,10 +319,12 @@ func Probe(scope context.Context, value int) int {
 
 func Maximum() int { return int(maximum.Load()) }
 `))
-		command = exec.CommandContext(ctx, "go", "run", ".")
+		command = exec.CommandContext(ctx, "go", "run", entry)
 		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 	case "ruby":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.rb"), source)
+		if len(artifacts) == 0 {
+			writeCompilerRuntimeFile(t, filepath.Join(root, "main.rb"), source)
+		}
 		nativeRoot := filepath.Join(root, "native")
 		writeCompilerRuntimeFile(t, filepath.Join(nativeRoot, "acme", "concurrency_probe.rb"), []byte(`module Acme
   module ConcurrencyProbe
@@ -339,9 +351,11 @@ func Maximum() int { return int(maximum.Load()) }
   end
 end
 `))
-		command = exec.CommandContext(ctx, "ruby", "-I", nativeRoot, "main.rb")
+		command = exec.CommandContext(ctx, "ruby", "-I", nativeRoot, scriptEntry)
 	case "typescript":
-		writeCompilerRuntimeFile(t, filepath.Join(root, "main.ts"), source)
+		if len(artifacts) == 0 {
+			writeCompilerRuntimeFile(t, filepath.Join(root, "main.ts"), source)
+		}
 		moduleRoot := filepath.Join(root, "node_modules", "@acme", "concurrency-probe")
 		writeCompilerRuntimeFile(t, filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"@acme/concurrency-probe","type":"module","exports":"./index.ts"}`))
 		writeCompilerRuntimeFile(t, filepath.Join(moduleRoot, "index.ts"), []byte(`let current = 0;
@@ -360,7 +374,7 @@ export async function probe(scope: AbortSignal | undefined, value: number): Prom
 }
 export function maximum(): number { return observedMaximum; }
 `))
-		command = exec.CommandContext(ctx, "bun", "run", "main.ts")
+		command = exec.CommandContext(ctx, "bun", "run", scriptEntry)
 	}
 	command.Dir = root
 	output, err := command.CombinedOutput()

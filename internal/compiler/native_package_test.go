@@ -1211,7 +1211,8 @@ end
 	if err := os.WriteFile(filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"@tanstack/react-query","type":"module","exports":"./index.ts"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("bun", "run", "main.ts")
+	writeProjectRuntimeArtifacts(t, root, artifacts)
+	command := exec.Command("bun", "run", artifactForModule(artifacts, "main").EntryPath)
 	command.Dir = root
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -1341,7 +1342,8 @@ export async function resolveVoid(): Promise<void> {}
 	if err := os.WriteFile(filepath.Join(moduleRoot, "package.json"), []byte(`{"name":"promise-library","type":"module","exports":"./index.ts"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("bun", "run", "main.ts")
+	writeProjectRuntimeArtifacts(t, root, artifacts)
+	command := exec.Command("bun", "run", artifactForModule(artifacts, "main").EntryPath)
 	command.Dir = root
 	output, err := command.CombinedOutput()
 	if err != nil {

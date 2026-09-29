@@ -8,15 +8,18 @@ import (
 	"github.com/type-rb/type-rb/internal/ir"
 )
 
-// Interfaces imported from another source file can share a Go package with a
-// same-named class. Rename the contract by declaration identity at every use.
-func analyzeGoInterfaceNames(programs []*ir.Program) map[identity.Declaration]string {
+// Emission groups combine independent TypeRB namespaces. Disambiguate nominal
+// declarations by identity without changing their checked source names.
+func analyzeGoTypeNames(programs []*ir.Program) map[identity.Declaration]string {
+	layout := emissionLayout(programs)
 	counts := map[string]map[string]int{}
-	interfaces := []identity.Declaration{}
+	declarations := []identity.Declaration{}
+	concrete := map[string]map[string]int{}
 	for _, program := range programs {
-		group := goPackageGroup(program.ModulePath)
+		group := layout.directory(program.ModulePath)
 		if counts[group] == nil {
 			counts[group] = map[string]int{}
+			concrete[group] = map[string]int{}
 		}
 		var collect func([]ir.Statement)
 		collect = func(statements []ir.Statement) {
@@ -26,7 +29,6 @@ func analyzeGoInterfaceNames(programs []*ir.Program) map[identity.Declaration]st
 				switch node := statement.(type) {
 				case *ir.Interface:
 					declaration, name = node.Declaration, node.Name
-					interfaces = append(interfaces, declaration)
 				case *ir.Class:
 					declaration, name = node.Declaration, node.Name
 				case *ir.Record:
@@ -41,22 +43,36 @@ func analyzeGoInterfaceNames(programs []*ir.Program) map[identity.Declaration]st
 					collect(node.Body)
 				}
 				if name != "" {
-					counts[group][goDeclaredTypeName(declaration.Name, name)]++
+					candidate := goDeclaredTypeName(declaration.Name, name)
+					counts[group][candidate]++
+					declarations = append(declarations, declaration)
+					if declaration.Kind != identity.Interface {
+						concrete[group][candidate]++
+					}
 				}
 			}
 		}
 		collect(program.Statements)
 	}
-	sort.Slice(interfaces, func(i, j int) bool { return interfaces[i].Key() < interfaces[j].Key() })
+	sort.Slice(declarations, func(i, j int) bool { return declarations[i].Key() < declarations[j].Key() })
 	result := map[identity.Declaration]string{}
-	for _, declaration := range interfaces {
-		occupied := counts[goPackageGroup(declaration.Module)]
-		if declaration.Empty() || occupied[goDeclaredTypeName(declaration.Name, "")] < 2 {
+	for _, declaration := range declarations {
+		occupied := counts[layout.directory(declaration.Module)]
+		candidate := goDeclaredTypeName(declaration.Name, "")
+		if declaration.Empty() {
 			continue
 		}
-		target := "TrbInterface_" + naming.PrivateSuffix(declaration.Key())
+		result[declaration] = candidate
+		if occupied[candidate] < 2 || declaration.Kind != identity.Interface && concrete[layout.directory(declaration.Module)][candidate] < 2 {
+			continue
+		}
+		prefix := "TrbType"
+		if declaration.Kind == identity.Interface {
+			prefix = "TrbInterface_"
+		}
+		target := prefix + naming.PrivateSuffix(declaration.Key())
 		for occupied[target] > 0 {
-			target += "_"
+			target += "X"
 		}
 		occupied[target]++
 		result[declaration] = target
@@ -66,7 +82,7 @@ func analyzeGoInterfaceNames(programs []*ir.Program) map[identity.Declaration]st
 
 func (g *generator) namedDeclaration(declaration identity.Declaration, fallback string) string {
 	if g.projectNames != nil {
-		if name := g.projectNames.interfaces[declaration]; name != "" {
+		if name := g.projectNames.types[declaration]; name != "" {
 			return name
 		}
 	}

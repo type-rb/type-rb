@@ -163,7 +163,7 @@ end
 `),
 	}
 	expected := map[string][]string{
-		"go":         {"models.Trb__RecordNew__Config("},
+		"go":         {"Trb__RecordNew__Config("},
 		"ruby":       {"Config.__trb_record_new("},
 		"typescript": {`import { __trbRecordNewConfig } from "./models/config.ts";`, `return __trbRecordNewConfig({ host: "localhost" });`},
 	}

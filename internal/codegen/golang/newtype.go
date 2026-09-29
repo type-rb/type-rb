@@ -23,7 +23,7 @@ func (g *generator) newtypeMethods(value *ir.Newtype) {
 			if parameters != "" {
 				parameters = ", " + parameters
 			}
-			parameters = "self " + goDeclaredTypeName(value.Declaration.Name, value.Name) + parameters
+			parameters = "self " + g.namedDeclaration(value.Declaration, value.Name) + parameters
 		}
 		g.line("func " + newtypeMethodName(method.Dispatch) + goTypeParameterDeclarations(method.TypeParameters) + "(" + parameters + ")" + g.goReturn(method.ReturnType) + " {")
 		g.indent++

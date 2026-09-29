@@ -45,8 +45,9 @@ sibling files are not compiled, and Go is the default target mode.
 
 Use Visual Studio Code 1.130 or newer.
 
-Use TypeRB 0.4.0 or newer. Earlier compilers do not provide declaration-root
-imports and the language-service contracts expected by this extension release.
+Use TypeRB 0.4.9 or newer for directory-independent Go builds and deterministic
+module initialization when running, debugging, and testing projects. The extension
+uses the installed compiler; it does not bundle a TypeRB executable.
 
 Install the TypeRB compiler and make `trb` available on `PATH`:
 

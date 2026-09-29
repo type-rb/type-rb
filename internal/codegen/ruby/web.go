@@ -44,7 +44,9 @@ func (g *generator) webDispatcher(manifest *webintegration.Manifest) {
 	}
 	sort.Strings(modulePaths)
 	for _, modulePath := range modulePaths {
-		g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, modulePath)), "")
+		if !g.separateStartup {
+			g.line("require_relative "+strconv.Quote(rubyImportPath(g.modulePath, modulePath)), "")
+		}
 	}
 	if len(modulePaths) > 0 {
 		g.b.WriteByte('\n')

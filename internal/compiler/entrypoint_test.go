@@ -1,11 +1,8 @@
 package compiler
 
 import (
-	"errors"
 	"strings"
 	"testing"
-
-	"github.com/type-rb/type-rb/internal/diagnostic"
 )
 
 func TestRunnableMainRequiresExactSignatureAcrossBackends(t *testing.T) {
@@ -87,7 +84,7 @@ end
 	}
 }
 
-func TestGoRejectsCrossPackageImportsOfRunnableEntrypointDuringAnalysis(t *testing.T) {
+func TestGoAcceptsCrossDirectoryImportsOfRunnableEntrypointDuringAnalysis(t *testing.T) {
 	sources := []SourceUnit{
 		{
 			Filename: "/project/src/main.trb", ModulePath: "main", Package: "main",
@@ -121,20 +118,8 @@ end
 	}
 	for name, operation := range operations {
 		t.Run(name, func(t *testing.T) {
-			err := operation()
-			var compilation *CompileError
-			if !errors.As(err, &compilation) || len(compilation.Diagnostics) != 1 {
-				t.Fatalf("expected one compile diagnostic, got %v", err)
-			}
-			item := compilation.Diagnostics[0]
-			if item.Code != diagnostic.BackendError || item.Path != sources[1].Filename || item.Span.Start.Offset != 0 {
-				t.Fatalf("unexpected runnable import diagnostic: %#v", item)
-			}
-			if !strings.Contains(item.Message, "cannot import runnable entrypoint module main in Go mode") || !strings.Contains(item.Message, "move shared declarations into a separate module") {
-				t.Fatalf("runnable import diagnostic does not explain the correction: %q", item.Message)
-			}
-			if len(item.Related) != 1 || item.Related[0].Location.Path != sources[0].Filename || item.Related[0].Message != "runnable entrypoint declared here" {
-				t.Fatalf("runnable import diagnostic lost its entrypoint location: %#v", item.Related)
+			if err := operation(); err != nil {
+				t.Fatalf("valid entrypoint import rejected: %v", err)
 			}
 		})
 	}

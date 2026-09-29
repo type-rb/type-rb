@@ -107,7 +107,7 @@ func TestAnchoredLockBuildTreeIncludesNativeSupport(t *testing.T) {
 	if status := cli.Run([]string{"build", "--config", filepath.Join(root, project.ConfigName)}); status != 0 {
 		t.Fatalf("build: %d\n%s\n%s", status, &stdout, &stderr)
 	}
-	command := exec.Command("go", "run", "-mod=mod", ".")
+	command := exec.Command("go", "run", "-mod=mod", generatedEntrypoint(t, config.OutputPath(), "go"))
 	command.Dir = config.OutputPath()
 	data, err := command.CombinedOutput()
 	if err != nil || string(data) != "busy:busy\n" {

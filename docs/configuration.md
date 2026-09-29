@@ -25,8 +25,7 @@ accepts line and block comments. Trailing commas are not allowed.
   "devDependencies": {},
   "go": {
     "module": "example.com/my-app",
-    "version": "1.27",
-    "rootPackage": "main"
+    "version": "1.27"
   }
 }
 ```
@@ -271,11 +270,15 @@ A runnable project defines exactly one top-level `def main()`. `main` is a
 language convention rather than a configurable entrypoint, so the config has no
 entrypoint field. A library project may omit `main`.
 
-In Go mode, source modules generated in another directory cannot import the
-module that owns `main()`. The runnable module becomes the generated program
-package, which Go does not allow another package to import. `trb check` and
-`trb build` report this at the authored import. Move declarations shared with a
-nested package into a separate module without `main()`.
+The generated Go tree groups source modules by compilation unit, independently
+of their source directories, with a separate program entry. Modules in nested
+directories may import declarations from the module containing `main`, provided
+the source import graph remains acyclic. Generated Go package names and paths
+are compiler-owned and have no `rootPackage` setting.
+
+All production files are checked. Startup initializes only the entry's import
+closure and explicitly discovered integration roots, in the order specified by
+[Program Entry](specification.md#38-program-entry).
 
 ## Local packages
 

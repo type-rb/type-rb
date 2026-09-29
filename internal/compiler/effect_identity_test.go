@@ -1229,7 +1229,11 @@ func runEffectProject(t *testing.T, mode string, artifacts []*Artifact, goModule
 	root := t.TempDir()
 	extension := map[string]string{"go": ".go", "ruby": ".rb", "typescript": ".ts"}[mode]
 	for _, artifact := range artifacts {
-		path := filepath.Join(root, filepath.FromSlash(artifact.IR.ModulePath)+extension)
+		relative := artifact.IR.ModulePath + extension
+		if artifact.OutputPath != "" {
+			relative = artifact.OutputPath
+		}
+		path := filepath.Join(root, filepath.FromSlash(relative))
 		writeCompilerRuntimeFile(t, path, artifact.Output)
 		for _, file := range artifact.SupportFiles {
 			writeCompilerRuntimeFile(t, filepath.Join(root, filepath.FromSlash(file.Path)), file.Output)
@@ -1247,12 +1251,12 @@ func runEffectProject(t *testing.T, mode string, artifacts []*Artifact, goModule
 			}
 		}
 		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte(manifest))
-		command = exec.CommandContext(ctx, "go", "run", "-mod=mod", ".")
+		command = exec.CommandContext(ctx, "go", "run", "-mod=mod", "./"+filepath.Dir(artifactForModule(artifacts, "main").EntryPath))
 		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 	case "ruby":
-		command = exec.CommandContext(ctx, "ruby", "main.rb")
+		command = exec.CommandContext(ctx, "ruby", artifactForModule(artifacts, "main").EntryPath)
 	case "typescript":
-		command = exec.CommandContext(ctx, "bun", "run", "main.ts")
+		command = exec.CommandContext(ctx, "bun", "run", artifactForModule(artifacts, "main").EntryPath)
 	}
 	command.Dir = root
 	output, err := command.CombinedOutput()
@@ -1285,5 +1289,19 @@ func assertPureEffectIdentityModule(t *testing.T, units []SourceUnit, module str
 				}
 			}
 		})
+	}
+}
+
+func writeProjectRuntimeArtifacts(t *testing.T, root string, artifacts []*Artifact) {
+	t.Helper()
+	for _, artifact := range artifacts {
+		relative := artifact.OutputPath
+		if relative == "" {
+			relative = artifact.IR.ModulePath + map[string]string{"ruby": ".rb", "typescript": ".ts", "go": ".go"}[artifact.Mode]
+		}
+		writeCompilerRuntimeFile(t, filepath.Join(root, filepath.FromSlash(relative)), artifact.Output)
+		for _, file := range artifact.SupportFiles {
+			writeCompilerRuntimeFile(t, filepath.Join(root, filepath.FromSlash(file.Path)), file.Output)
+		}
 	}
 }

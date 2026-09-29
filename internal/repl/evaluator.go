@@ -201,6 +201,8 @@ func (s *scope) mutableBinding(name string) bool {
 }
 
 type Evaluator struct {
+	initializedModules map[string]bool
+
 	stdout           io.Writer
 	mode             string
 	context          context.Context
@@ -213,6 +215,8 @@ type Evaluator struct {
 
 func NewEvaluator(stdout io.Writer, mode string) *Evaluator {
 	return &Evaluator{
+		initializedModules: map[string]bool{},
+
 		stdout:           stdout,
 		mode:             mode,
 		context:          context.Background(),
@@ -235,37 +239,22 @@ func (e *Evaluator) LoadProject(programs []*ir.Program, sessionModule string) er
 		}
 	}
 	e.loadProgramDefinitions(projectPrograms)
-	byModule := make(map[string]*ir.Program, len(projectPrograms))
-	for _, program := range projectPrograms {
+	return e.initializeProjectImports(programs, sessionModule)
+}
+
+func (e *Evaluator) initializeProjectImports(programs []*ir.Program, sessionModule string) error {
+	byModule := map[string]*ir.Program{}
+	for _, program := range programs {
 		byModule[program.ModulePath] = program
 	}
-	visited := make(map[string]bool, len(projectPrograms))
-	var initialize func(*ir.Program) error
-	initialize = func(program *ir.Program) error {
-		if visited[program.ModulePath] {
-			return nil
+	for _, module := range ir.InitializationOrder(programs, []string{sessionModule}) {
+		if module == sessionModule || e.initializedModules[module] {
+			continue
 		}
-		// The source loader already rejects import cycles. Preserve its
-		// dependency order even when the checked program list is path-sorted.
-		visited[program.ModulePath] = true
-		for _, statement := range program.Statements {
-			if dependency, ok := statement.(*ir.Import); ok {
-				if imported := byModule[dependency.Path]; imported != nil {
-					if err := initialize(imported); err != nil {
-						return err
-					}
-				}
-			}
+		if err := e.loadProjectValues(byModule[module].Statements, module); err != nil {
+			return fmt.Errorf("load %s: %w", module, err)
 		}
-		if err := e.loadProjectValues(program.Statements, program.ModulePath); err != nil {
-			return fmt.Errorf("load %s: %w", program.ModulePath, err)
-		}
-		return nil
-	}
-	for _, program := range projectPrograms {
-		if err := initialize(program); err != nil {
-			return err
-		}
+		e.initializedModules[module] = true
 	}
 	return nil
 }

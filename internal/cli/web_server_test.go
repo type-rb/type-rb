@@ -239,16 +239,16 @@ func webServerCommand(t *testing.T, mode, buildDirectory string) *exec.Cmd {
 	switch mode {
 	case "go":
 		output := filepath.Join(t.TempDir(), "server")
-		build := exec.Command("go", "build", "-o", output, ".")
+		build := exec.Command("go", "build", "-o", output, generatedEntrypoint(t, buildDirectory, mode))
 		build.Dir = buildDirectory
 		if result, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("go build failed: %v\n%s", err, result)
 		}
 		return exec.Command(output)
 	case "ruby":
-		return exec.Command("ruby", filepath.Join(buildDirectory, "main.rb"))
+		return exec.Command("ruby", generatedEntrypoint(t, buildDirectory, mode))
 	case "typescript":
-		return exec.Command("node", "--experimental-strip-types", filepath.Join(buildDirectory, "main.ts"))
+		return exec.Command("node", "--experimental-strip-types", generatedEntrypoint(t, buildDirectory, mode))
 	default:
 		t.Fatalf("unknown mode %q", mode)
 		return nil

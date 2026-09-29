@@ -42,8 +42,7 @@ class Trb < Formula
         "packageManagement": "external",
         "go": {
           "module": "example.com/brew-smoke-test",
-          "version": "1.27",
-          "rootPackage": "main"
+          "version": "1.27"
         }
       }
     JSON
@@ -59,7 +58,9 @@ class Trb < Formula
 
     system bin/"trb", "fmt", testpath/"src/main.trb"
     system bin/"trb", "build", "--config", testpath/"trbconfig.jsonc"
-    assert_path_exists testpath/"build/main.go"
-    assert_match "fmt.Println(\"installed with Homebrew\")", (testpath/"build/main.go").read
+    entries = Dir[testpath/"build/trb/entry/*/main.go"]
+    assert_equal 1, entries.length
+    sources = Dir[testpath/"build/trb/application/*.go"].map { |path| File.read(path) }.join("\n")
+    assert_match "fmt.Println(\"installed with Homebrew\")", sources
   end
 end

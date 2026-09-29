@@ -30,9 +30,10 @@ func (g *generator) variableIdentifier(variable *ir.Variable) string {
 // namespace and normalizes snake_case identifiers. Only colliding values
 // receive a compiler-owned fallback, keeping ordinary generated names stable.
 type goProjectNames struct {
-	interfaces map[identity.Declaration]string
-	functions  map[string]map[string]string
-	constants  map[string]map[string]string
+	layout    goEmissionLayout
+	types     map[identity.Declaration]string
+	functions map[string]map[string]string
+	constants map[string]map[string]string
 }
 
 type goFunctionDeclaration struct {
@@ -43,12 +44,12 @@ type goFunctionDeclaration struct {
 }
 
 func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
-	result := &goProjectNames{interfaces: analyzeGoInterfaceNames(programs), functions: map[string]map[string]string{}, constants: map[string]map[string]string{}}
+	result := &goProjectNames{layout: emissionLayout(programs), types: analyzeGoTypeNames(programs), functions: map[string]map[string]string{}, constants: map[string]map[string]string{}}
 	occupied := map[string]map[string]bool{}
 	functions := map[string]map[string][]goFunctionDeclaration{}
 
 	for _, program := range programs {
-		group := goPackageGroup(program.ModulePath)
+		group := result.layout.directory(program.ModulePath)
 		if occupied[group] == nil {
 			occupied[group] = map[string]bool{}
 		}
@@ -58,8 +59,8 @@ func analyzeGoProjectNames(programs []*ir.Program) *goProjectNames {
 		collectGoProjectDeclarations(program.ModulePath, program.Statements, occupied[group], functions[group])
 	}
 
-	for declaration, name := range result.interfaces {
-		occupied[goPackageGroup(declaration.Module)][name] = true
+	for declaration, name := range result.types {
+		occupied[result.layout.directory(declaration.Module)][name] = true
 	}
 	groups := make([]string, 0, len(functions))
 	for group := range functions {
@@ -141,7 +142,7 @@ func collectGoProjectDeclarations(modulePath string, statements []ir.Statement, 
 			}
 			candidate := goMethodName(target)
 			if source == "main" {
-				candidate = "main"
+				candidate = "TrbMain"
 			}
 			functions[candidate] = append(functions[candidate], goFunctionDeclaration{
 				modulePath: modulePath,

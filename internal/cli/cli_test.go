@@ -1217,7 +1217,7 @@ func TestReplStandardCandidatesIncludeDateAndClassMembers(t *testing.T) {
 	config := project.New(root, "go")
 	config.SourceDir = "src"
 	config.Go.Module = "example.com/type-rb/repl-standard-candidates"
-	candidates, err := replStandardCandidates(config, config.Go.RootPackage)
+	candidates, err := replStandardCandidates(config, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1244,7 +1244,7 @@ func TestReplStandardCandidatesIncludeDistinctDeclarationRoots(t *testing.T) {
 			sessionPackage := ""
 			if config.Go != nil {
 				config.Go.Module = "example.com/type-rb/repl-standard-import-candidates"
-				sessionPackage = config.Go.RootPackage
+				sessionPackage = "main"
 			}
 			candidates, err := replStandardCandidates(config, sessionPackage)
 			if err != nil {
@@ -1301,7 +1301,7 @@ func TestReplCompletionCandidatesIncludeProjectDeclarationsAtStartup(t *testing.
 			const sessionModule = "__trb_repl__"
 			sessionPackage := ""
 			if config.Go != nil {
-				sessionPackage = config.Go.RootPackage
+				sessionPackage = "main"
 			}
 			options.AllowUnusedImports = true
 			options.InteractiveModule = sessionModule
@@ -9017,11 +9017,11 @@ func TestBuildCompilesLocalRecordPackageIntoGoTargetTree(t *testing.T) {
 	if status := command.Run([]string{"build", "--config", config.Path}); status != 0 {
 		t.Fatalf("status=%d stderr=%s", status, stderr.String())
 	}
-	contractOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "acme", "contracts", "index.go"))
+	contractOutput, err := os.ReadFile(generatedModulePath(filepath.Join(appRoot, "build"), "go", "acme/contracts/index", "acme/contracts"))
 	if err != nil || !strings.Contains(string(contractOutput), "type Message struct") {
 		t.Fatalf("local contract was not generated: err=%v\n%s", err, contractOutput)
 	}
-	mainOutput, err := os.ReadFile(filepath.Join(appRoot, "build", "main.go"))
+	mainOutput, err := os.ReadFile(generatedModulePath(filepath.Join(appRoot, "build"), "go", "main", "trb/application"))
 	if err != nil || !strings.Contains(string(mainOutput), `contracts.Message{Text: "shared"}`) {
 		t.Fatalf("application did not consume local record: err=%v\n%s", err, mainOutput)
 	}
