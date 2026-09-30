@@ -366,16 +366,32 @@ end
 		{Filename: "/project/src/config/jobs.trb", ModulePath: "config/jobs", Package: "config", Source: []byte(jobsSQLConfigurationSource)},
 		{Filename: "/project/src/main.trb", ModulePath: "main", Package: "main", Source: []byte("def main()\n\treturn\nend\n")},
 	}
-	artifacts, err := CompileProject(sources, Options{Mode: "go", GoModule: "example.com/jobs", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	contracts := artifactForModule(artifacts, "contracts/index")
-	if contracts == nil {
-		t.Fatal("contracts artifact was not generated")
-	}
-	if strings.Contains(string(contracts.Output), "trb/jobs/sql") {
-		t.Fatalf("unrelated module imports the jobs runtime:\n%s", contracts.Output)
+	for _, test := range []struct{ name, module, sourceImport string }{
+		{"named", "contracts/index", "import { OrderId } from contracts"},
+		{"bare", "contracts/order_id", "import contracts/order_id"},
+		{"directory root", "contracts/order_id/index", "import contracts/order_id"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			units := append([]SourceUnit(nil), sources...)
+			units[0].ModulePath = test.module
+			units[0].Filename = "/project/src/" + test.module + ".trb"
+			units[1].Source = []byte(strings.Replace(string(sources[1].Source), "import { OrderId } from contracts", test.sourceImport, 1))
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				t.Run(mode, func(t *testing.T) {
+					artifacts, err := CompileProject(units, Options{Mode: mode, GoModule: "example.com/jobs", RubyLoader: "require_relative", TypeScriptRuntime: "bun", SourceRoot: "/project/src", ProjectRoot: "/project", JobsConfiguration: "config/jobs"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					contracts := artifactForModule(artifacts, test.module)
+					if contracts == nil {
+						t.Fatal("contracts artifact was not generated")
+					}
+					if strings.Contains(string(contracts.Output), "trb/jobs/sql") {
+						t.Fatalf("unrelated module imports the jobs runtime:\n%s", contracts.Output)
+					}
+				})
+			}
+		})
 	}
 }
 

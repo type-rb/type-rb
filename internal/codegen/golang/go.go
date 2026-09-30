@@ -2980,7 +2980,7 @@ func (g *generator) goCodecType(schema *ir.CodecSchema) string {
 	if schema == nil {
 		return "any"
 	}
-	if isTimeCodec(schema.Kind) || schema.Kind == "record" && !schema.Type.Declaration.Empty() {
+	if isTimeCodec(schema.Kind) || (schema.Kind == "record" || schema.Kind == "raw_enum") && !schema.Type.Declaration.Empty() {
 		return g.goType(schema.Type)
 	}
 	base := schema.Type

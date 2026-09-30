@@ -4245,6 +4245,9 @@ func (c *Checker) callSpecializationDefinition(typ types.Type) *packageextension
 	if binding, ok := c.resolution.InferredType(name); ok {
 		return callSpecializationDefinition(binding.Import.RuntimePath(), &binding)
 	}
+	if binding, ok := c.resolution.ContractType(name); ok {
+		return callSpecializationDefinition(binding.Import.RuntimePath(), &binding)
+	}
 	return nil
 }
 

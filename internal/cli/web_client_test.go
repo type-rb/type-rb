@@ -100,19 +100,24 @@ func TestWebClientWritesBelowTheProjectRootAndCompilesForBrowser(t *testing.T) {
 }
 
 func TestWebClientGeneratesFromContractTypesInLocalPackage(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		t.Run(mode, func(t *testing.T) {
-			workspace := t.TempDir()
-			packageRoot := filepath.Join(workspace, "contracts")
-			if err := os.MkdirAll(filepath.Join(packageRoot, "src"), 0o755); err != nil {
-				t.Fatal(err)
+	for _, split := range []bool{false, true} {
+		for _, mode := range []string{"go", "ruby", "typescript"} {
+			layout := "index"
+			if split {
+				layout = "declaration_roots"
 			}
-			manifest := `{"formatVersion":1,"name":"github.com/acme/contracts","version":"0.1.0","sourceDir":"src"}
+			t.Run(mode+"/"+layout, func(t *testing.T) {
+				workspace := t.TempDir()
+				packageRoot := filepath.Join(workspace, "contracts")
+				if err := os.MkdirAll(filepath.Join(packageRoot, "src"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				manifest := `{"formatVersion":1,"name":"github.com/acme/contracts","version":"0.1.0","sourceDir":"src"}
 `
-			if err := os.WriteFile(filepath.Join(packageRoot, "trbpackage.json"), []byte(manifest), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			contracts := `newtype ReportID = Integer
+				if err := os.WriteFile(filepath.Join(packageRoot, "trbpackage.json"), []byte(manifest), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				contracts := `newtype ReportID = Integer
 
 record ReportParams
 	id: ReportID
@@ -126,32 +131,43 @@ record ReportResponse
 	id: ReportID
 end
 `
-			if err := os.WriteFile(filepath.Join(packageRoot, "src", "index.trb"), []byte(contracts), 0o644); err != nil {
-				t.Fatal(err)
-			}
+				contractFiles := map[string]string{"index.trb": contracts}
+				if split {
+					contractFiles = map[string]string{
+						"report_id.trb":        "newtype ReportID = Integer\n",
+						"report_params.trb":    "import github.com/acme/contracts/report_id\n\nrecord ReportParams\n\tid: ReportID\nend\n",
+						"get_report_input.trb": "import github.com/acme/contracts/report_params\n\nrecord GetReportInput\n\tparams: ReportParams\nend\n",
+						"report_response.trb":  "import github.com/acme/contracts/report_id\n\nrecord ReportResponse\n\tid: ReportID\nend\n",
+					}
+				}
+				for relative, source := range contractFiles {
+					if err := os.WriteFile(filepath.Join(packageRoot, "src", relative), []byte(source), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
 
-			root := filepath.Join(workspace, "app")
-			config := project.New(root, mode)
-			config.SourceDir = "src"
-			if config.Go != nil {
-				config.Go.Module = "example.com/type-rb/web-client-package-test"
-			}
-			config.Packages["acme/contracts"] = project.PackageRequirement{Path: "../contracts"}
-			if err := config.Save(); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{}); err != nil {
-				t.Fatal(err)
-			}
-			files := map[string]string{
-				"src/main.trb": `import trb/web
+				root := filepath.Join(workspace, "app")
+				config := project.New(root, mode)
+				config.SourceDir = "src"
+				if config.Go != nil {
+					config.Go.Module = "example.com/type-rb/web-client-package-test"
+				}
+				config.Packages["acme/contracts"] = project.PackageRequirement{Path: "../contracts"}
+				if err := config.Save(); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := packageManager.ResolveTypeRBPackages(config, packageManager.TypeRBResolveOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				files := map[string]string{
+					"src/main.trb": `import trb/web
 
 def main()
 	Web.serve()
 	return
 end
 `,
-				"src/routes/reports/[id].trb": `import { GetReportInput, ReportResponse } from acme/contracts
+					"src/routes/reports/[id].trb": `import { GetReportInput, ReportResponse } from acme/contracts
 import { Context, Endpoint, Response, handles, input, response } from trb/web
 
 def get(_context: Context): Response
@@ -164,31 +180,34 @@ class GetReportEndpoint < Endpoint
 	response<ReportResponse>(status: 200)
 end
 `,
-			}
-			for relative, source := range files {
-				path := filepath.Join(root, filepath.FromSlash(relative))
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
 				}
-				if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
-					t.Fatal(err)
+				if split {
+					files["src/routes/reports/[id].trb"] = strings.Replace(files["src/routes/reports/[id].trb"], "import { GetReportInput, ReportResponse } from acme/contracts", "import acme/contracts/get_report_input\nimport acme/contracts/report_response", 1)
 				}
-			}
-			var stdout, stderr bytes.Buffer
-			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
-			if status := command.Run([]string{"web", "client", "--config", config.Path}); status != 0 {
-				t.Fatalf("status=%d stderr=%s", status, stderr.String())
-			}
-			for _, fragment := range []string{
-				"import { GetReportInput, ReportResponse } from acme/contracts",
-				"def get_report(input: GetReportInput",
-				"encode_component(input.params.id.value().to_s())",
-			} {
-				if !strings.Contains(stdout.String(), fragment) {
-					t.Fatalf("generated source does not contain %q:\n%s", fragment, stdout.String())
+				for relative, source := range files {
+					path := filepath.Join(root, filepath.FromSlash(relative))
+					if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-		})
+				var stdout, stderr bytes.Buffer
+				command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+				if status := command.Run([]string{"web", "client", "--config", config.Path}); status != 0 {
+					t.Fatalf("status=%d stderr=%s", status, stderr.String())
+				}
+				for _, fragment := range []string{
+					"def get_report(input: GetReportInput",
+					"encode_component(input.params.id.value().to_s())",
+				} {
+					if !strings.Contains(stdout.String(), fragment) {
+						t.Fatalf("generated source does not contain %q:\n%s", fragment, stdout.String())
+					}
+				}
+			})
+		}
 	}
 }
 

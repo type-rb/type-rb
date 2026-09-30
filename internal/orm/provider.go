@@ -978,6 +978,20 @@ func resolveORMEnum(program *ast.Program, name string, enums map[string]map[stri
 		if !ok {
 			continue
 		}
+		if len(imported.Symbols) == 0 {
+			modulePath := resolver.CanonicalPackageImport(imported.Path, packageAliasesByModule[program.ModulePath])
+			definitions := enums[modulePath]
+			if definitions == nil {
+				definitions = enums[path.Join(modulePath, "index")]
+			}
+			for exported, definition := range definitions {
+				if resolver.MatchesDeclarationRoot(imported.Path, exported) &&
+					(imported.Alias == name || imported.Alias == "" && exported == name) {
+					return definition
+				}
+			}
+			continue
+		}
 		for _, symbol := range imported.Symbols {
 			if symbol == name {
 				modulePath := resolver.CanonicalPackageImport(imported.Path, packageAliasesByModule[program.ModulePath])
