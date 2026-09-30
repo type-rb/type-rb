@@ -46,6 +46,11 @@ Keep these application invariants:
 
 ## Use the compiler feedback loop
 
+Colocate a module's unit tests: `some.trb` uses `some_test.trb` in the same
+directory. Classify tests by the contract they verify, not their import count
+or setup machinery. Feature/system tests may use dedicated directories below
+`sourceDir`; follow `docs/guides/testing.md` for placement and shared helpers.
+
 For source changes, format the affected files and run
 `trb check --diagnostic-format json`. Use diagnostic codes, spans, related
 locations, and fixes rather than parsing message text alone. Run the narrowest application
