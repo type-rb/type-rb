@@ -48,6 +48,10 @@ For new APIs or compiler integration, choose the narrowest sufficient
 
 Test intended behavior rather than incidental representation:
 
+- Colocate TypeRB unit tests as `<filename>_test.trb` beside `<filename>.trb`.
+  Keep module-contract tests there even when their setup uses several components;
+  group feature/system contracts separately when that makes their owner clear.
+  Follow `docs/guides/testing.md` and move unit tests with their source.
 - Prefer compiler and CLI integration tests for portable semantics and diagnostics across modes.
 - Add focused package unit tests when a boundary needs faster or more precise feedback.
 - For a behavior-preserving refactor, retain existing coverage and add

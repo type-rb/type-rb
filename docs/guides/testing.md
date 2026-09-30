@@ -3,13 +3,38 @@
 TypeRB provides a portable test API in `trb/std/test`. The same test source
 runs through the Go, Ruby, and TypeScript backends.
 
-Place tests beside the source they exercise below the configured `sourceDir`
-and name them `*_test.trb`:
+Colocate unit tests with the source they exercise below the configured
+`sourceDir`. For `calculator.trb`, use `calculator_test.trb` in the same directory:
 
 ```text
 calculator.trb
 calculator_test.trb
 ```
+
+The matching filename is the default: `<filename>.trb` and
+`<filename>_test.trb`. A large unit suite may use additional concern-specific
+files beside the same source, such as `calculator_overflow_test.trb`.
+
+Choose placement by the behavior the test guarantees. A test of one module's
+contract stays beside that module even if constructing its input uses several
+other modules or an external process. Tests of a complete feature across several
+components may live in a feature directory such as
+`src/tests/orders/checkout_test.trb`. System tests belong with the subsystem
+whose end-to-end contract they verify. Every TypeRB test file still uses the
+`_test.trb` suffix, and `trb test` discovers it recursively below `sourceDir`.
+
+Extract reused fixtures and execution helpers into ordinary helper modules
+rather than importing one test file from another. A project may group shared
+helpers in `testing/`; keep test-case registration in test files and application
+code independent of test helpers. The names `tests/` and `testing/` are project
+conventions, not reserved directories: a helper without the `_test.trb` suffix
+is an ordinary module under the language rules.
+
+Keep unit tests beside their source when reorganizing a large directory. Move
+both together by responsibility rather than relocating unit tests only to reduce
+the directory's file count. Add tests for observable contracts and meaningful
+boundaries; one test file per source is a placement convention, not a requirement
+to create a test for every implementation file.
 
 For example, `calculator.trb` can define the function under test:
 
