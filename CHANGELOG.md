@@ -2,6 +2,19 @@
 
 This file records user-visible changes in stable TypeRB releases.
 
+## 0.4.11 - 2026-10-01
+
+### Shared types and package integrations
+
+- Declaration-root imports retain their canonical type identity in ORM enum
+  columns, Jobs arguments, Web input binding, and browser client generation.
+  Shared contracts can live in separate declaration-named modules, including
+  records whose fields are declared in other modules.
+- Go JSON codecs resolve raw enum types through declaration identities and
+  generated compilation units, allowing enum round trips when source files
+  live in different directories.
+  ([#840](https://github.com/type-rb/type-rb/pull/840))
+
 ## 0.4.10 - 2026-09-29
 
 ### Modules and initialization
