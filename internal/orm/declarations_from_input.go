@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/type-rb/type-rb/internal/packageextension"
+	"github.com/type-rb/type-rb/internal/resolver"
 	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/token"
 	"github.com/type-rb/type-rb/internal/types"
@@ -187,6 +188,19 @@ func resolveDeclarationORMEnum(module packageextension.ProjectModule, value pack
 		return local
 	}
 	for _, imported := range module.Imports {
+		if len(imported.Symbols) == 0 {
+			definitions := enums[imported.ModulePath]
+			if definitions == nil {
+				definitions = enums[path.Join(imported.ModulePath, "index")]
+			}
+			for exported, definition := range definitions {
+				if resolver.MatchesDeclarationRoot(imported.Path, exported) &&
+					(imported.Alias == name || imported.Alias == "" && exported == name) {
+					return definition
+				}
+			}
+			continue
+		}
 		for _, symbol := range imported.Symbols {
 			if symbol != name {
 				continue

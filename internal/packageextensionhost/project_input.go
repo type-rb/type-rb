@@ -17,9 +17,13 @@ type ProjectDeclarationInputOptions struct {
 	// KnownModulePaths resolves imports against modules deliberately excluded
 	// from the exported declaration snapshot, without exposing their contents.
 	KnownModulePaths []string
+	// KnownDeclarationRoots preserves the identity of validated declaration-root
+	// imports from excluded modules without exporting their declarations.
+	KnownDeclarationRoots map[string]string
 }
 
 type projectImportBinding struct {
+	name       string
 	importPath string
 	modulePath string
 }
@@ -33,6 +37,7 @@ type projectInputResolver struct {
 	generatedImports       map[string]map[string]projectImportBinding
 	knownModules           map[string]bool
 	packageAliasesByModule map[string]map[string]string
+	knownDeclarationRoots  map[string]string
 }
 
 // ExportProjectDeclarationInput copies the declaration-only portion of parsed
@@ -123,6 +128,7 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 		generatedImports:       map[string]map[string]projectImportBinding{},
 		knownModules:           map[string]bool{},
 		packageAliasesByModule: options.PackageAliasesByModule,
+		knownDeclarationRoots:  options.KnownDeclarationRoots,
 	}
 	for _, modulePath := range options.KnownModulePaths {
 		result.knownModules[modulePath] = true
@@ -145,6 +151,9 @@ func newProjectInputResolver(programs []*ast.Program, options ProjectDeclaration
 	for _, program := range programs {
 		result.collectStatements(program.ModulePath, "", program.Statements)
 	}
+	for _, program := range programs {
+		result.collectImports(program.ModulePath, program.Statements)
+	}
 	return result, nil
 }
 
@@ -152,20 +161,8 @@ func (r projectInputResolver) collectStatements(modulePath, namespace string, st
 	for _, statement := range statements {
 		switch node := statement.(type) {
 		case *ast.ModuleStatement:
+			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
 			r.collectStatements(modulePath, projectQualifiedName(namespace, node.Name), node.Body)
-		case *ast.ImportStatement:
-			if namespace != "" {
-				continue
-			}
-			imports := r.imports[modulePath]
-			if r.compilerGenerated(modulePath, node.Span()) {
-				imports = r.generatedImports[modulePath]
-			}
-			for _, symbol := range node.Symbols {
-				imports[symbol] = projectImportBinding{
-					importPath: node.Path, modulePath: r.importModulePath(modulePath, node.Path),
-				}
-			}
 		case *ast.TypeAliasStatement:
 			name := projectQualifiedName(namespace, node.Name)
 			r.aliases[modulePath][name] = node
@@ -182,6 +179,51 @@ func (r projectInputResolver) collectStatements(modulePath, namespace string, st
 			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
 		case *ast.InterfaceStatement:
 			r.definitions[modulePath][projectQualifiedName(namespace, node.Name)] = true
+		}
+	}
+}
+
+func (r projectInputResolver) collectImports(modulePath string, statements []ast.Statement) {
+	for _, statement := range statements {
+		node, ok := statement.(*ast.ImportStatement)
+		if !ok {
+			continue
+		}
+		imports := r.imports[modulePath]
+		if r.compilerGenerated(modulePath, node.Span()) {
+			imports = r.generatedImports[modulePath]
+		}
+		target := r.importModulePath(modulePath, node.Path)
+		if len(node.Symbols) == 0 {
+			root := ""
+			if r.definitions[target] == nil {
+				root = r.knownDeclarationRoots[target]
+			}
+			for name := range r.definitions[target] {
+				if strings.Contains(name, "::") || !resolver.MatchesDeclarationRoot(node.Path, name) {
+					continue
+				}
+				if root != "" {
+					root = ""
+					break
+				}
+				root = name
+			}
+			if root != "" {
+				local := root
+				if node.Alias != "" {
+					local = node.Alias
+				}
+				imports[local] = projectImportBinding{name: root, importPath: node.Path, modulePath: target}
+			}
+			continue
+		}
+		for _, symbol := range node.Symbols {
+			local := symbol
+			if alias := node.SymbolAliases[symbol]; alias != "" {
+				local = alias
+			}
+			imports[local] = projectImportBinding{name: symbol, importPath: node.Path, modulePath: target}
 		}
 	}
 }
@@ -507,13 +549,13 @@ func (r projectInputResolver) reference(modulePath, namespace, name string, gene
 	if generated {
 		if imported, ok := r.generatedImports[modulePath][name]; ok {
 			return packageextension.ProjectDeclarationReference{
-				Identity: projectDeclarationIdentity(imported.modulePath, name), ImportPath: imported.importPath,
+				Identity: projectDeclarationIdentity(imported.modulePath, imported.name), ImportPath: imported.importPath,
 			}, true
 		}
 	}
 	if imported, ok := r.imports[modulePath][name]; ok {
 		return packageextension.ProjectDeclarationReference{
-			Identity: projectDeclarationIdentity(imported.modulePath, name), ImportPath: imported.importPath,
+			Identity: projectDeclarationIdentity(imported.modulePath, imported.name), ImportPath: imported.importPath,
 		}, true
 	}
 	return packageextension.ProjectDeclarationReference{}, false

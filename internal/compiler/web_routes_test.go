@@ -840,3 +840,39 @@ func assertWebMiddlewareTarget(t *testing.T, mode string, artifact *Artifact) {
 		t.Fatalf("%s output does not contain %q:\n%s", mode, target, artifact.Output)
 	}
 }
+
+func TestPortableWebBindImportsSplitRecordFields(t *testing.T) {
+	units := []SourceUnit{
+		{Filename: "/project/src/values/params.trb", ModulePath: "values/params", Source: []byte("record Params\n\tid: Integer\nend\n")},
+		{Filename: "/project/src/values/payload.trb", ModulePath: "values/payload", Source: []byte("record Payload\n\ttitle: String\nend\n")},
+		{Filename: "/project/src/inputs/input.trb", ModulePath: "inputs/input", Source: []byte(`import values/params
+import values/payload
+
+record Input
+	params: Params
+	body: Payload
+end
+`)},
+		{Filename: "/project/src/routes/todos/[id].trb", ModulePath: "routes/todos/[id]", Source: []byte(`import inputs/input
+import { Context, Response } from trb/web
+
+def post(context: Context): Response
+	input := context.bind<Input>() catch |_error|
+		return Response.text("invalid", 400)
+	end
+	return Response.text(input.params.id.to_s() + input.body.title)
+end
+`)},
+	}
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			_, err := CompileProject(units, Options{
+				Mode: mode, GoModule: "example.com/web-bind-records",
+				SourceRoot: "/project/src", RubyLoader: "require_relative", TypeScriptRuntime: "bun",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

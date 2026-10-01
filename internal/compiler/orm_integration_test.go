@@ -247,23 +247,43 @@ end
 `),
 	}
 
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		mode := mode
-		t.Run(mode, func(t *testing.T) {
-			_, err := CompileProject([]SourceUnit{contracts, model}, Options{
-				Mode:              mode,
-				GoModule:          "example.com/orm-package-enum",
-				RubyLoader:        "require_relative",
-				TypeScriptRuntime: "bun",
-				SourceRoot:        filepath.Join(root, "src"),
-				ProjectRoot:       root,
-				PackageAliases:    map[string]string{"contracts": "github.com/acme/contracts"},
-				PackageOptions: map[string][]byte{
-					"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`),
-				},
-			})
-			if err != nil {
-				t.Fatal(err)
+	for _, test := range []struct {
+		name, module, sourceImport, localName string
+	}{
+		{"named root", "index", "import { PackageOrderStatus } from contracts", "PackageOrderStatus"},
+		{"named submodule", "package_order_status", "import { PackageOrderStatus } from contracts/package_order_status", "PackageOrderStatus"},
+		{"bare submodule", "package_order_status", "import contracts/package_order_status", "PackageOrderStatus"},
+		{"bare directory entry", "package_order_status/index", "import contracts/package_order_status", "PackageOrderStatus"},
+		{"aliased bare submodule", "package_order_status", "import contracts/package_order_status as Status", "Status"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			contracts := contracts
+			contracts.ModulePath = "github.com/acme/contracts/" + test.module
+			contracts.Filename = filepath.Join(root, "packages", "contracts", "src", filepath.FromSlash(test.module)+".trb")
+			model := model
+			model.Source = []byte(strings.ReplaceAll(strings.Replace(string(model.Source), "import { PackageOrderStatus } from contracts", test.sourceImport, 1), "enum_column(:status, PackageOrderStatus)", "enum_column(:status, "+test.localName+")"))
+			if test.localName != "PackageOrderStatus" {
+				model.Source = []byte(strings.Split(string(model.Source), "\ndef create_order(")[0])
+			}
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				mode := mode
+				t.Run(mode, func(t *testing.T) {
+					_, err := CompileProject([]SourceUnit{contracts, model}, Options{
+						Mode:              mode,
+						GoModule:          "example.com/orm-package-enum",
+						RubyLoader:        "require_relative",
+						TypeScriptRuntime: "bun",
+						SourceRoot:        filepath.Join(root, "src"),
+						ProjectRoot:       root,
+						PackageAliases:    map[string]string{"contracts": "github.com/acme/contracts"},
+						PackageOptions: map[string][]byte{
+							"trb/orm": []byte(`{"adapter":"sqlite","database":"application.sqlite3"}`),
+						},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+				})
 			}
 		})
 	}

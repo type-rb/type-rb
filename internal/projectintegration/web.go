@@ -3,6 +3,7 @@ package projectintegration
 import (
 	"github.com/type-rb/type-rb/internal/ast"
 	"github.com/type-rb/type-rb/internal/packageextensionhost"
+	"github.com/type-rb/type-rb/internal/resolver"
 	webintegration "github.com/type-rb/type-rb/internal/web"
 )
 
@@ -33,9 +34,18 @@ func analyzeWeb(context Context) (Contribution, []Issue) {
 		issues = append(issues, Issue{Filename: issue.Filename, Message: issue.Message, Span: issue.Span})
 	}
 	if len(issues) == 0 {
+		declarationRoots := map[string]string{}
+		for _, resolution := range context.Resolutions {
+			for _, imported := range resolution.Imports {
+				if root, ok := resolver.RootDeclaration(imported); ok {
+					declarationRoots[imported.RuntimePath()] = root
+				}
+			}
+		}
 		input, err := packageextensionhost.ExportProjectDeclarationInput(webintegration.PackageName, programs, packageextensionhost.ProjectDeclarationInputOptions{
 			PackageAliasesByModule: context.PackageAliasesByModule,
 			KnownModulePaths:       modulePaths,
+			KnownDeclarationRoots:  declarationRoots,
 		})
 		if err != nil {
 			issues = append(issues, Issue{Filename: firstWebSourceFilename(context.Sources), Message: err.Error()})

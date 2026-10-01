@@ -370,3 +370,50 @@ func parseProjectInputTest(t *testing.T, modulePath, source string) *ast.Program
 	program.ModulePath = modulePath
 	return program
 }
+
+func TestExportProjectDeclarationInputResolvesDeclarationRootImports(t *testing.T) {
+	for _, test := range []struct{ name, sourceImport, localName string }{
+		{"bare", "import types/order_id", "OrderId"},
+		{"bare alias", "import types/order_id as Key", "Key"},
+		{"named alias", "import { OrderId as Key } from types/order_id", "Key"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			consumer := parseProjectInputTest(t, "requests/input", test.sourceImport+"\nrecord Input\n\tid: "+test.localName+"\n\tother: OtherId\nend\n")
+			owner := parseProjectInputTest(t, "types/order_id", "newtype OrderId = Integer\nnewtype OtherId = String\n")
+			input, err := ExportProjectDeclarationInput("example", []*ast.Program{consumer, owner}, ProjectDeclarationInputOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			field := input.Modules[0].Records[0].Fields[0].Type
+			if field.Representation == nil || field.Representation.Name != "Integer" || len(field.ResolutionPath) != 1 || field.ResolutionPath[0].Identity.Name != "OrderId" {
+				t.Fatalf("imported newtype lost its canonical identity or representation: %#v", field)
+			}
+			if input.Modules[0].Records[0].Fields[1].Type.Authored.Definition != nil {
+				t.Fatal("an unrelated export became an implicit binding")
+			}
+		})
+	}
+}
+
+func TestExportProjectDeclarationInputResolvesAnExcludedDeclarationRoot(t *testing.T) {
+	for _, imported := range []string{"import acme/contracts/report_input", "import acme/contracts/report_input as ReportInput"} {
+		t.Run(imported, func(t *testing.T) {
+			program := parseProjectInputTest(t, "routes/reports", imported+"\n\nrecord LocalContract\n\tinput: ReportInput\nend\n")
+			input, err := ExportProjectDeclarationInput("trb/web", []*ast.Program{program}, ProjectDeclarationInputOptions{
+				PackageAliasesByModule: map[string]map[string]string{"routes/reports": {"acme/contracts": "github.com/acme/contracts"}},
+				KnownModulePaths:       []string{"github.com/acme/contracts/report_input"},
+				KnownDeclarationRoots:  map[string]string{"github.com/acme/contracts/report_input": "ReportInput"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			field := input.Modules[0].Records[0].Fields[0].Type.Authored
+			if field.Definition == nil || field.Definition.Name != "ReportInput" || field.Definition.ModulePath != "github.com/acme/contracts/report_input" {
+				t.Fatalf("missing excluded root identity: %#v", field.Definition)
+			}
+			if len(input.Modules) != 1 {
+				t.Fatalf("excluded declarations leaked into snapshot: %#v", input.Modules)
+			}
+		})
+	}
+}
