@@ -1,0 +1,75 @@
+def multiply_add(left: Float, right: Float, addend: Float): Float
+	return left * right + addend
+end
+
+def add_multiply(addend: Float, left: Float, right: Float): Float
+	return addend + left * right
+end
+
+def multiply_subtract(left: Float, right: Float, subtrahend: Float): Float
+	return left * right - subtrahend
+end
+
+def subtract_multiply(minuend: Float, left: Float, right: Float): Float
+	return minuend - left * right
+end
+
+def temporary_product(left: Float, right: Float, addend: Float): Float
+	product := left * right
+	return product + addend
+end
+
+def observed_product(left: Float, right: Float, addend: Float): Float
+	product := left * right
+	result := product + addend
+	puts(product == 1.0000000000000004)
+	return result
+end
+
+def permitted(result: Float, fused: Float): Boolean
+	return result == 0.0 || result == fused
+end
+
+def main()
+	left := "1.0000000000000002".to_f()
+	right := "1.0000000000000002".to_f()
+	addend := "-1.0000000000000004".to_f()
+	fused := 0.00000000000000000000000000000004930380657631324
+	puts(permitted(multiply_add(left, right, addend), fused))
+	puts(permitted(add_multiply(addend, left, right), fused))
+	puts(permitted(multiply_subtract(left, right, -addend), fused))
+	puts(permitted(subtract_multiply(-addend, left, right), -fused))
+	puts(permitted(temporary_product(left, right, addend), fused))
+	puts(permitted(observed_product(left, right, addend), fused))
+
+	zero := "0.0".to_f()
+	infinity := 1.0 / zero
+	nan := zero / zero
+	puts((1.0 / multiply_add(-zero, 1.0, -zero)) < 0.0)
+	puts((1.0 / multiply_subtract(-zero, 1.0, zero)) < 0.0)
+	puts(multiply_add(nan, 2.0, 1.0).nan?())
+	puts(multiply_add(infinity, zero, 1.0).nan?())
+	puts(multiply_add(infinity, 1.0, -infinity).nan?())
+	puts(multiply_add(infinity, 2.0, 1.0) == infinity)
+	puts(subtract_multiply(1.0, infinity, 2.0) == -infinity)
+	largest := "1.7976931348623157e308".to_f()
+	overflow := multiply_add(largest, 2.0, -largest)
+	puts(overflow == infinity || overflow == largest)
+
+	large := "1e20".to_f()
+	puts((large + -large) + 1.0 == 1.0)
+	puts(large + (-large + 1.0) == 0.0)
+	huge := "1e308".to_f()
+	tiny := "1e-308".to_f()
+	puts((huge * tiny) * tiny > 0.0)
+	puts(huge * (tiny * tiny) == 0.0)
+
+	mut order := 0
+	mark := fn(value: Float, digit: Integer): Float
+		order = order * 10 + digit
+		return value
+	end
+	result := mark(left, 1) * mark(right, 2) + mark(addend, 3)
+	puts(order == 123)
+	puts(permitted(result, fused))
+end

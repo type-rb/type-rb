@@ -49,6 +49,25 @@ func TestParseMalformedCallExpressionFallsBackWithoutPanicking(t *testing.T) {
 	}
 }
 
+func TestParsePartialExpressionRetainsUnconsumedTokens(t *testing.T) {
+	for _, expression := range []string{"4.930380657631324e-32", "1.5 unexpected", "value() trailing"} {
+		t.Run(expression, func(t *testing.T) {
+			program, diagnostics := Parse([]byte("value := " + expression))
+			if len(diagnostics) != 0 || len(program.Statements) != 1 {
+				t.Fatalf("statements=%#v diagnostics=%v", program.Statements, diagnostics)
+			}
+			declaration, ok := program.Statements[0].(*ast.VariableStatement)
+			if !ok {
+				t.Fatalf("declaration=%#v", program.Statements[0])
+			}
+			value, ok := declaration.Value.(*ast.NativeExpression)
+			if !ok || value.Text != expression {
+				t.Fatalf("value=%#v; want the complete expression %q", declaration.Value, expression)
+			}
+		})
+	}
+}
+
 func TestParseAliasAndNewtypeDeclarations(t *testing.T) {
 	program, diagnostics := Parse([]byte("alias Users = Array<User>\nnewtype UserId = Integer\n"))
 	if len(diagnostics) != 0 || len(program.Statements) != 2 {
