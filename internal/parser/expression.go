@@ -31,7 +31,12 @@ func parseExpressionTokensReporting(tokens []token.Token, embedded map[int]ast.E
 	}
 	p := &exprParser{tokens: filtered, embedded: embedded, report: report, owner: owner}
 	expr := p.parse(0)
-	return expr, expr != nil && p.pos == len(p.tokens)
+	if expr == nil || p.pos != len(p.tokens) {
+		// Callers that use the native-expression fallback must retain the whole
+		// input, rather than silently accepting a parsed prefix.
+		return nil, false
+	}
+	return expr, true
 }
 
 const highestBinaryPrecedence = 12

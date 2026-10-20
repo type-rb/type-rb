@@ -1210,6 +1210,19 @@ Build and execution behavior belongs to the [CLI reference](cli.md).
   corresponding infinity, `0.0 / 0.0` produces NaN, overflow produces infinity, and a
   negative base raised to a non-integral Float exponent produces NaN rather
   than a target-specific complex value.
+- A Float multiplication followed by addition or subtraction may be contracted
+  into a fused multiply-add operation with one binary64 rounding. This applies
+  to `a * b + c`, `c + a * b`, `a * b - c`, and `c - a * b`, including equivalent
+  uses through temporary bindings. Contraction is permitted, not required;
+  assignments and parentheses do not require intermediate rounding. An
+  independently observed product still has its ordinary binary64 value.
+  Fused and separately rounded execution can differ in low bits, zero tests,
+  and whether the intermediate product overflows. Float results therefore
+  need not be bit-identical across backends, targets, or optimization choices.
+  This permission does not allow arbitrary reassociation, changing operand
+  evaluation order or count, dropping observable effects, or assuming that
+  NaN, infinity, or signed zero cannot occur. All other arithmetic rules,
+  including checked Integer operations, remain unchanged.
 - Parenthesized TypeRB expressions retain their AST precedence in generated
   code. Ruby-specific matching, comparison, and bitwise operators (`=~`, `!~`,
   `<=>`, `~`, `|`, `&`, `^`, `<<`, and `>>`) require an explicit Ruby-native
