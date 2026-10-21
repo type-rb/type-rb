@@ -1,5 +1,11 @@
 # Releasing TypeRB
 
+The [v0.5.0 transition contract](native-transition.md) adds paired Native/Go
+release, complete feature-contract and repository/distribution handoff gates
+for the implementation switch. The procedure below describes the current
+Go-based distribution; it must be updated and rehearsed before that cutover.
+Existing tags and release assets remain immutable.
+
 TypeRB publishes prebuilt `trb` binaries for macOS and Linux on Arm64 and
 x86-64. The Homebrew Formula selects the matching archive, so installing the
 compiler does not require Go. Each stable release also publishes the Linux

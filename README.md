@@ -13,6 +13,13 @@ and TypeScript.
 
 [TypeRB documentation](https://type-rb.github.io/docs/)
 
+The [v0.5.0 implementation transition](docs/native-transition.md) will make the
+TypeRB-authored Native compiler canonical after complete Go implementation
+feature parity. The Go implementation will be preserved in `type-rb-go` with
+matching versions and three source backends; Native additionally provides
+executable output. The current compiler and distribution remain unchanged
+until the documented release gates pass.
+
 Install the compiler, follow the learning path, and browse application guides,
 lint rules, and language references.
 

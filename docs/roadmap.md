@@ -11,6 +11,20 @@ For a countable view of the proposed 1.0 target, see the
 [specification.md](specification.md); this document tracks outcomes rather than
 detailed syntax.
 
+## v0.5.0: make Native the canonical implementation
+
+The [v0.5.0 transition contract](native-transition.md) requires complete
+coverage of the reviewed Go implementation feature contract before replacing
+the canonical compiler. Preserve the Go implementation in `type-rb-go` with
+matching release versions and Go/Ruby/TypeScript outputs; the Native
+implementation additionally emits Native executables. Practical application
+previews may precede full parity. Repository migration and archiving
+`type-rb-native` follow verified history, distribution and release handoff.
+The contract is a release gate, not a claim of current Native support.
+
+The broader outcomes below remain the roadmap. Features absent from the
+reviewed Go release contract are not automatically v0.5.0 requirements.
+
 ## 1. Complete the portable language core
 
 - Extend Result-returning higher-order functions across third-party package
