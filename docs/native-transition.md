@@ -44,6 +44,12 @@ application contracts with its own qualified runtime providers.
 
 ## Complete feature contract
 
+The initial versioned [v0.5 feature inventory](v0.5-feature-contract.md),
+[manifest and result contract](../contracts/v0.5/README.md) record the full
+review scope and explicitly unqualified baseline. They do not assert current
+feature parity. Exact-candidate scenario mapping and qualification are tracked
+by [task #1221](https://github.com/type-rb/type-rb-native/issues/1221).
+
 Create and review a versioned manifest from the Go implementation's public
 specification, source registries, CLI/help, tests, integrations and release
 configuration. Record the exact source revisions and manifest identity.

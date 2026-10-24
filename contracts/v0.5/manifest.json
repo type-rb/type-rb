@@ -1,0 +1,4064 @@
+{
+  "schemaVersion": 1,
+  "release": "0.5.0",
+  "sourceRepository": "type-rb/type-rb",
+  "sourceRevision": "a337ea6c5d72d495d8ea918dd8bfa30d1fa8ddc8",
+  "catalogSHA256": "1d5e89a27c994a8dab1a8eb64691afa4873c75da2821ea4d756925dbef06fb0f",
+  "hosts": [
+    "darwin-amd64",
+    "darwin-arm64",
+    "linux-amd64",
+    "linux-arm64"
+  ],
+  "commands": [
+    {
+      "id": "language",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/lexer",
+        "./internal/parser",
+        "./internal/types",
+        "./internal/checker",
+        "./internal/resolver",
+        "./internal/compiler",
+        "./internal/repl"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "library",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/stdlib",
+        "./internal/official",
+        "./internal/pathvalue",
+        "./internal/nativefs",
+        "./internal/compiler",
+        "./internal/repl"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "application",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/web",
+        "./internal/orm",
+        "./internal/jobs/...",
+        "./internal/projectintegration",
+        "./internal/compiler",
+        "./internal/cli"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "cli",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/cli",
+        "./internal/cliapp",
+        "./internal/testsuite",
+        "./internal/formatter",
+        "./internal/lint",
+        "./internal/compilerservice",
+        "./internal/bootstrapsnapshot"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "ecosystem",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/packages",
+        "./internal/project",
+        "./internal/nativepackage",
+        "./internal/packageextension",
+        "./internal/packageextensionhost",
+        "./internal/declarationadapterhost",
+        "./internal/declarationproviderhost",
+        "./internal/runtimeadapterhost",
+        "./internal/typeprovider/...",
+        "./internal/projectintegration"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "protocol",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/toolingprotocol",
+        "./internal/diagnostic",
+        "./internal/languageservice",
+        "./internal/lsp",
+        "./internal/sourcemap"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "outputs",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/target",
+        "./internal/codegen/...",
+        "./internal/compiler",
+        "./internal/cli",
+        "./internal/repl"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "browser",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "./internal/playground",
+        "./internal/site"
+      ],
+      "purpose": "Existing Go owning tests; collect actual non-skipped scenarios and candidate binding before using as paired release qualification."
+    },
+    {
+      "id": "native-language",
+      "repository": "type-rb/type-rb-native",
+      "argv": [
+        "python3",
+        "tools/native-language-coverage.py",
+        "--reference",
+        "${REFERENCE_TRB}",
+        "--native",
+        "${NATIVE_COMPILER}",
+        "--require-parity"
+      ],
+      "purpose": "Existing frozen ordinary check/build/execute/REPL corpus; sample membership does not establish complete release coverage."
+    },
+    {
+      "id": "native-projects",
+      "repository": "type-rb/type-rb-native",
+      "argv": [
+        "python3",
+        "tools/project-scenarios.py",
+        "--native",
+        "${NATIVE_CLI}",
+        "--require"
+      ],
+      "purpose": "Existing composed project manifests. Preserve each manifest and reference expectation; unsupported operations fail."
+    },
+    {
+      "id": "native-cli",
+      "repository": "type-rb/type-rb-native",
+      "argv": [
+        "python3",
+        "tools/native-cli-test.py",
+        "${NATIVE_CLI}"
+      ],
+      "purpose": "Existing Native CLI integration; current Go/Ruby/TypeScript unsupported boundaries are gaps, not v0.5 acceptance."
+    },
+    {
+      "id": "distribution",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "bash",
+        "scripts/render-homebrew-formula_test.sh"
+      ],
+      "purpose": "Existing formula rendering check; archive/install/provenance/editor smoke qualification is still required by the distribution row and migration task."
+    },
+    {
+      "id": "editor",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "npm",
+        "test",
+        "--prefix",
+        "editors/vscode"
+      ],
+      "purpose": "Existing editor test suite; verify exact candidate protocol and packaged extension in release qualification."
+    },
+    {
+      "id": "github-extension",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "npm",
+        "test",
+        "--prefix",
+        "editors/github"
+      ],
+      "purpose": "Existing GitHub browser extension behavior and packaging tests; final store/install identity remains part of migration qualification."
+    },
+    {
+      "id": "syntax-grammar",
+      "repository": "type-rb/type-rb",
+      "argv": [
+        "npm",
+        "test",
+        "--prefix",
+        "tools/textmate"
+      ],
+      "purpose": "Existing shared syntax grammar tests, including editor tokenization."
+    }
+  ],
+  "rows": [
+    {
+      "id": "language.core",
+      "title": "Lexical forms, declarations and control flow",
+      "contract": "Preserve tokens, literal encodings, lexical source spans, declarations, constants, boolean conditions, evaluation order, value-producing branches, loops and transfers. Preserve comments/formatting where observable; internal AST nodes are ownership markers, not extra language features.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#1-language-goals",
+        "document:docs/specification.md#2-project-target-modes",
+        "document:docs/specification.md#3-core-syntax-and-semantics-confirmed",
+        "document:docs/specification.md#31-declarations-and-style",
+        "document:docs/specification.md#310-operators",
+        "document:docs/specification.md#311-loop-control",
+        "document:docs/specification.md#312-hashes",
+        "document:docs/specification.md#315-value-producing-control-flow",
+        "document:docs/specification.md#35-assignment-rules",
+        "document:docs/specification.md#36-constants",
+        "document:docs/specification.md#39-boolean-conditions",
+        "document:docs/specification.md#4-user-defined-generics",
+        "document:docs/specification.md#conditional-expression",
+        "document:docs/specification.md#indexes-ranges-and-subsequences",
+        "document:docs/specification.md#safe-navigation",
+        "kinds:internal/token/token.go",
+        "syntax:ArrayLiteral",
+        "syntax:AssignmentStatement",
+        "syntax:BinaryExpression",
+        "syntax:BlankStatement",
+        "syntax:BreakStatement",
+        "syntax:CaseStatement",
+        "syntax:CommentStatement",
+        "syntax:ExpressionStatement",
+        "syntax:HashLiteral",
+        "syntax:Identifier",
+        "syntax:IfStatement",
+        "syntax:IndexExpression",
+        "syntax:InterpolatedString",
+        "syntax:IterationExpression",
+        "syntax:Literal",
+        "syntax:NextStatement",
+        "syntax:RangeExpression",
+        "syntax:ReturnStatement",
+        "syntax:SymbolLiteral",
+        "syntax:UnaryExpression",
+        "syntax:VariableStatement",
+        "syntax:WhileStatement",
+        "tests:internal/checker",
+        "tests:internal/codegen",
+        "tests:internal/codegen/effectplan",
+        "tests:internal/codegen/naming",
+        "tests:internal/compiler",
+        "tests:internal/identity",
+        "tests:internal/lexer",
+        "tests:internal/modulegraph",
+        "tests:internal/parser",
+        "tests:internal/resolver",
+        "tests:internal/runtimeoperation",
+        "tests:internal/types"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.types",
+      "title": "Typing, identity, narrowing and effects",
+      "contract": "Preserve portable integer/float bounds, mutable/readonly and fresh-collection inference, nullable/union/literal refinement, Any boxing, generic substitution, declaration identity and effect restrictions across ordinary and interactive paths.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#314-enums-raw-values-and-sum-types",
+        "document:docs/specification.md#3142-payload-enums-as-sum-types",
+        "document:docs/specification.md#32-typing",
+        "document:docs/specification.md#aliases-and-nominal-newtypes",
+        "document:docs/specification.md#fresh-empty-mutable-collections",
+        "document:docs/specification.md#literal-types-and-discriminated-unions",
+        "document:docs/specification.md#nullable-narrowing",
+        "document:docs/specification.md#typed-filesystem-boundary",
+        "document:docs/specification.md#typerb-specification-draft-v03",
+        "document:docs/specification.md#union-types",
+        "kinds:internal/types/types.go",
+        "syntax:GenericExpression",
+        "tests:internal/stdlib"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454",
+        "https://github.com/type-rb/type-rb-native/issues/1120",
+        "https://github.com/type-rb/type-rb-native/issues/1128",
+        "https://github.com/type-rb/type-rb-native/issues/1135",
+        "https://github.com/type-rb/type-rb-native/issues/691",
+        "https://github.com/type-rb/type-rb-native/issues/692"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.calls",
+      "title": "Methods, defaults, blocks and function values",
+      "contract": "Preserve positional/named/default arguments, declaration-scoped defaults, callbacks, captured bindings, callable values, private access, generic methods and evaluation count/order.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#callable-names-ending-in--or-",
+        "document:docs/specification.md#function-values",
+        "syntax:BlockExpression",
+        "syntax:CallExpression",
+        "syntax:LambdaExpression",
+        "syntax:MethodStatement"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454",
+        "https://github.com/type-rb/type-rb-native/issues/1134"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.nominal",
+      "title": "Classes, records, enums, aliases and newtypes",
+      "contract": "Preserve nominal and structural rules, construction/initialization, field defaults, inheritance, dispatch, aliases, raw/payload enum matching, interfaces and private newtype constructors. Keep deferred class design and known cross-mode dispatch discrepancies explicit.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#313-records",
+        "document:docs/specification.md#3141-enumerated-values-and-raw-values",
+        "document:docs/specification.md#3143-shared-enum-behavior",
+        "document:docs/specification.md#316-class-member-model-and-deferred-design",
+        "document:docs/specification.md#33-access-rules-private",
+        "document:docs/specification.md#34-instance-variables",
+        "syntax:ClassStatement",
+        "syntax:EnumMemberStatement",
+        "syntax:EnumStatement",
+        "syntax:FieldStatement",
+        "syntax:InterfaceStatement",
+        "syntax:MemberExpression",
+        "syntax:NewtypeStatement",
+        "syntax:RecordFieldStatement",
+        "syntax:RecordStatement",
+        "syntax:TypeAliasStatement"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454",
+        "https://github.com/type-rb/type-rb-native/issues/1160",
+        "https://github.com/type-rb/type-rb-native/issues/1143",
+        "https://github.com/type-rb/type-rb-native/issues/1208",
+        "https://github.com/type-rb/type-rb/issues/797"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.modules",
+      "title": "Imports, module ownership and project entry",
+      "contract": "Preserve named/namespace/bare aliases, import privacy, declaration origins, target activation, unused-binding rules, dependency loading and exactly-once project/interactive initialization.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#37-imports-and-formatting",
+        "document:docs/specification.md#38-program-entry",
+        "document:docs/specification.md#unused-bindings",
+        "syntax:ActivateStatement",
+        "syntax:ImportStatement",
+        "syntax:ModuleStatement"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454",
+        "https://github.com/type-rb/type-rb-native/issues/1180",
+        "https://github.com/type-rb/type-rb-native/issues/1127"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.result",
+      "title": "Result and failure control flow",
+      "contract": "Preserve Result variants, try/attempt/catch propagation, nested failure domains, handler signatures and control transfers through cleanup; success and failure payload types remain observable.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#41-standard-result",
+        "document:docs/specification.md#42-result-control-flow",
+        "syntax:AttemptExpression",
+        "syntax:CatchExpression",
+        "syntax:TryExpression"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/454"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.jsx",
+      "title": "JSX and TypeScript native interoperation",
+      "contract": "Preserve JSX intrinsic/component typing and expressions, typed native islands and target-specific capabilities on the documented TypeScript path. Do not turn platform APIs into portable Native APIs.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#jsx-expressions",
+        "syntax:JSXElement"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "language.native-islands",
+      "title": "Explicit host native boundaries",
+      "contract": "Preserve declared Go/Ruby/TypeScript native declarations, blocks and expressions, package capabilities, symbol typing and target rejection. Host source islands are not an additional Native executable backend.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "syntax:NativeBlock",
+        "syntax:NativeExpression",
+        "syntax:NativeStatement"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "language",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.array",
+      "title": "Array receiver API",
+      "contract": "Preserve every public Array receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Array",
+        "document:docs/standard-library.md#arrays-and-hashes"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.boolean",
+      "title": "Boolean receiver API",
+      "contract": "Preserve every public Boolean receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Boolean"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.bytes",
+      "title": "Bytes receiver API",
+      "contract": "Preserve every public Bytes receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Bytes",
+        "document:docs/standard-library.md#bytes"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.float",
+      "title": "Float receiver API",
+      "contract": "Preserve every public Float receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Float"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.hash",
+      "title": "Hash receiver API",
+      "contract": "Preserve every public Hash receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Hash"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.integer",
+      "title": "Integer receiver API",
+      "contract": "Preserve every public Integer receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Integer"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.range",
+      "title": "Range receiver API",
+      "contract": "Preserve every public Range receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:Range"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.string",
+      "title": "String receiver API",
+      "contract": "Preserve every public String receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:String",
+        "document:docs/standard-library.md#scalars-and-strings"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "builtin.stringbuilder",
+      "title": "StringBuilder receiver API",
+      "contract": "Preserve every public StringBuilder receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "builtin:StringBuilder",
+        "document:docs/standard-library.md#stringbuilder-and-unicode"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.auth.oidc",
+      "title": "trb/auth/oidc",
+      "contract": "Preserve OidcBearerOptions construction/defaults, OidcPrincipal fields and OidcAuthError kinds, including issuer/audience/JWKS/roles/clock-skew configuration consumed by Web Bearer authentication. This package does not promise an authorization-code/token-exchange client. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/authentication.md#oidc-bearer-authentication",
+        "package:trb/auth/oidc"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.cli",
+      "title": "trb/cli",
+      "contract": "Preserve typed command declarations, parsing, generated help, dispatch and process exit/error behavior on its currently supported Go output. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/cli-applications.md#build-a-command-line-application",
+        "document:docs/guides/cli-applications.md#compile-one-executable",
+        "document:docs/guides/cli-applications.md#define-the-schema",
+        "document:docs/guides/cli-applications.md#initial-contract",
+        "document:docs/guides/cli-applications.md#parse-and-dispatch",
+        "package:trb/cli",
+        "tests:internal/cliapp"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.http",
+      "title": "trb/http",
+      "contract": "Preserve HttpMethod values, ordered Headers operations and byte-backed Body values, including construction, aliases, type identity, mutation/copy and text/byte conversion. Browser HttpClient belongs to its TypeScript platform package; networking is not inferred from the HTTP value package. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/http.md#shared-http-values",
+        "package:trb/http"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/631",
+        "https://github.com/type-rb/type-rb-native/issues/626"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.jobs",
+      "title": "trb/jobs",
+      "contract": "Preserve job declaration, enqueue/perform/retry/discard, durable payload and lease lifecycle. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/jobs.md#adapter-contract",
+        "document:docs/guides/jobs.md#application-and-repl-behavior",
+        "document:docs/guides/jobs.md#configure-the-sql-adapter",
+        "document:docs/guides/jobs.md#define-and-enqueue-a-job",
+        "document:docs/guides/jobs.md#fallible-jobs",
+        "document:docs/guides/jobs.md#run-and-inspect-workers",
+        "document:docs/guides/jobs.md#trbjobs",
+        "package:trb/jobs",
+        "tests:internal/jobs"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/631",
+        "https://github.com/type-rb/type-rb-native/issues/627"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.jobs.sql",
+      "title": "trb/jobs/sql",
+      "contract": "Preserve SQL job persistence, claim/release/timeout and database adapter failure semantics. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/jobs/sql",
+        "tests:internal/jobs/sqladapter",
+        "tests:internal/jobs/sqlstore"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/631"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.orm",
+      "title": "trb/orm",
+      "contract": "Preserve typed schema/query/projection, relation loading, CRUD, transactions and SQLite/MySQL failure/cleanup contracts. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/orm.md#configuration",
+        "document:docs/guides/orm.md#date-and-time-columns",
+        "document:docs/guides/orm.md#enum-columns",
+        "document:docs/guides/orm.md#models-and-associations",
+        "document:docs/guides/orm.md#queries-and-results",
+        "document:docs/guides/orm.md#repl",
+        "document:docs/guides/orm.md#streaming-in-batches",
+        "document:docs/guides/orm.md#trborm",
+        "document:docs/guides/orm.md#writes-and-transactions",
+        "package:trb/orm",
+        "tests:internal/orm"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/629",
+        "https://github.com/type-rb/type-rb-native/issues/630"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.go.context",
+      "title": "trb/platform/go/context",
+      "contract": "Preserve the documented trb/platform/go/context host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/go/context"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.go.gorm",
+      "title": "trb/platform/go/gorm",
+      "contract": "Preserve the documented trb/platform/go/gorm host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/go/gorm"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.go.http",
+      "title": "trb/platform/go/http",
+      "contract": "Preserve the documented trb/platform/go/http host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/go/http"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.ruby.native",
+      "title": "trb/platform/ruby/native",
+      "contract": "Preserve the documented trb/platform/ruby/native host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/ruby/native"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "ruby"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.ruby.rails",
+      "title": "trb/platform/ruby/rails",
+      "contract": "Preserve the documented trb/platform/ruby/rails host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/ruby/rails"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "ruby"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.typescript.browser",
+      "title": "trb/platform/typescript/browser",
+      "contract": "Preserve the documented trb/platform/typescript/browser host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/browser-http.md#browser-http-client",
+        "document:docs/guides/browser-http.md#errors-and-bodies",
+        "document:docs/guides/browser-http.md#generated-clients-for-trbweb",
+        "document:docs/guides/browser-http.md#response-model",
+        "package:trb/platform/typescript/browser"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.typescript.dom",
+      "title": "trb/platform/typescript/dom",
+      "contract": "Preserve the documented trb/platform/typescript/dom host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/typescript/dom"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.typescript.node",
+      "title": "trb/platform/typescript/node",
+      "contract": "Preserve the documented trb/platform/typescript/node host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/platform/typescript/node"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.platform.typescript.react",
+      "title": "trb/platform/typescript/react",
+      "contract": "Preserve the documented trb/platform/typescript/react host API, native symbol declarations, provider behavior and target-specific dependency integration. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/react.md#component-state",
+        "document:docs/guides/react.md#native-react-packages",
+        "document:docs/guides/react.md#react-and-jsx",
+        "document:docs/guides/react.md#run-a-first-component",
+        "package:trb/platform/typescript/react"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.digest",
+      "title": "trb/std/digest",
+      "contract": "Preserve documented digest algorithms, byte inputs and encoded outputs. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#hashing",
+        "package:trb/std/digest"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.dir",
+      "title": "trb/std/dir",
+      "contract": "Preserve anchored directory capabilities, RelativePath containment, listing/creation, lifetime and escape/close failure boundaries. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#cooperative-directory-locks",
+        "document:docs/standard-library.md#opened-directory-anchors",
+        "document:docs/standard-library.md#recursive-directory-creation",
+        "package:trb/std/dir"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.encoding.base64",
+      "title": "trb/std/encoding/base64",
+      "contract": "Preserve Base64 alphabets/padding, round trips and malformed-input errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#binary-encoding",
+        "package:trb/std/encoding/base64"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.encoding.hex",
+      "title": "trb/std/encoding/hex",
+      "contract": "Preserve hexadecimal encoding/decoding and malformed-input errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/encoding/hex"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.errors",
+      "title": "trb/std/errors",
+      "contract": "Preserve standard error domains and identity across imports and nested Result values. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/errors"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.file",
+      "title": "trb/std/file",
+      "contract": "Preserve scoped File.open modes, bounded byte/text reads, byte/text writes, FileSystemError domains and close/error precedence. Preserve scoped resource typing and reject escape/suspension as specified. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#filesystem",
+        "package:trb/std/file",
+        "tests:internal/nativefs"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.hmac",
+      "title": "trb/std/hmac",
+      "contract": "Preserve keyed digest algorithms, byte keys/messages and result encodings. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/hmac"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.io",
+      "title": "trb/std/io",
+      "contract": "Preserve IO.puts output, accepted argument and newline behavior, output errors where specified and interactive execution. Do not infer additional stream APIs from the package name. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#output",
+        "package:trb/std/io"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.json",
+      "title": "trb/std/json",
+      "contract": "Preserve JSON parse/encode and typed codecs, numeric/string/null/container values and deterministic codec errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#json-and-jsonc",
+        "package:trb/std/json"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1138",
+        "https://github.com/type-rb/type-rb-native/issues/1179"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.jsonc",
+      "title": "trb/std/jsonc",
+      "contract": "Preserve JSONC line/block comments and JSON value/error semantics. Both JSON and JSONC reject trailing commas. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/jsonc"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.math",
+      "title": "trb/std/math",
+      "contract": "Preserve portable numeric functions, domains, finite/non-finite results and rounding boundaries. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/math"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.path",
+      "title": "trb/std/path",
+      "contract": "Preserve Path/RelativePath grammar, validation precedence, join/child/parent and exact parent spelling without filesystem I/O. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/specification.md#path-values",
+        "document:docs/standard-library.md#host-composition",
+        "document:docs/standard-library.md#logical-descendant-grammar",
+        "document:docs/standard-library.md#path-values",
+        "package:trb/std/path",
+        "tests:internal/pathvalue"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1219"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.process",
+      "title": "trb/std/process",
+      "contract": "Preserve process arguments/environment, subprocess execution, status, signals and pipe/resource cleanup. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#process",
+        "package:trb/std/process"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.random",
+      "title": "trb/std/random",
+      "contract": "Preserve Random.integer bound rules and Random.float result range, including invalid-bound behavior. No public seeding or generator-state API is implied. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#randomness",
+        "package:trb/std/random"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.result",
+      "title": "trb/std/result",
+      "contract": "Preserve Result variants, generic payloads, predicates/projections and propagation. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#result-and-unit",
+        "package:trb/std/result"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.secure_compare",
+      "title": "trb/std/secure_compare",
+      "contract": "Preserve equal-length and unequal-length constant-time comparison behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/secure_compare"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.secure_random",
+      "title": "trb/std/secure_random",
+      "contract": "Preserve SecureRandom.bytes length/result/error behavior and use of the host cryptographic entropy source. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/secure_random"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.string_builder",
+      "title": "trb/std/string_builder",
+      "contract": "Preserve StringBuilder.new and from_string construction and initial content; the complete receiver API is separately owned by builtin.stringbuilder. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/string_builder"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.test",
+      "title": "trb/std/test",
+      "contract": "Preserve test/suite declarations, assertions, selection, isolation, failure reporting and exit behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#tests",
+        "package:trb/std/test"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/624",
+        "https://github.com/type-rb/type-rb-native/issues/643"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.time",
+      "title": "trb/std/time",
+      "contract": "Preserve Instant/duration/time-zone/clock operations, parsing/formatting/codecs and portable range/error semantics. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#date-and-time",
+        "package:trb/std/time"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/625",
+        "https://github.com/type-rb/type-rb-native/issues/1187",
+        "https://github.com/type-rb/type-rb-native/issues/1188",
+        "https://github.com/type-rb/type-rb-native/issues/1189"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.unicode",
+      "title": "trb/std/unicode",
+      "contract": "Preserve the versioned Unicode scalar, letter/digit/whitespace/case/identifier predicates and from_codepoint conversion, including invalid scalar behavior. Case predicates do not imply normalization or case-conversion APIs. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/unicode"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.unit",
+      "title": "trb/std/unit",
+      "contract": "Preserve Unit values in generic results and target emission. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/std/unit"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.std.url",
+      "title": "trb/std/url",
+      "contract": "Preserve URL component encode/decode and query parse/build behavior, repeated keys and malformed-input handling; this is not a general URL parser. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/standard-library.md#url-encoding",
+        "package:trb/std/url"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "library",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web",
+      "title": "trb/web",
+      "contract": "Preserve routing/context/typed parameter binding, response serialization, endpoint contracts, OpenAPI/client generation and server/request lifecycle. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/guides/web.md#portable-web-applications",
+        "package:trb/web",
+        "tests:internal/web"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/628",
+        "https://github.com/type-rb/type-rb-native/issues/1175",
+        "https://github.com/type-rb/type-rb-native/issues/1178",
+        "https://github.com/type-rb/type-rb-native/issues/1183",
+        "https://github.com/type-rb/type-rb-native/issues/1184",
+        "https://github.com/type-rb/type-rb-native/issues/1192",
+        "https://github.com/type-rb/type-rb-native/issues/1207",
+        "https://github.com/type-rb/type-rb-native/issues/1211",
+        "https://github.com/type-rb/type-rb-native/issues/1212"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.auth.bearer",
+      "title": "trb/web/auth/bearer",
+      "contract": "Preserve Bearer token extraction, verification, context propagation and authentication failures. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/auth/bearer"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware",
+      "title": "trb/web/middleware",
+      "contract": "Preserve middleware registration/order, next-handler invocation and request/response/error propagation. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.compression",
+      "title": "trb/web/middleware/compression",
+      "contract": "Preserve negotiated response compression and header/body consistency. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/compression"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.cors",
+      "title": "trb/web/middleware/cors",
+      "contract": "Preserve cross-origin headers, preflight and allowed/denied request behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/cors"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.logger",
+      "title": "trb/web/middleware/logger",
+      "contract": "Preserve request logging fields, completion/errors and middleware ordering. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/logger"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.request_id",
+      "title": "trb/web/middleware/request_id",
+      "contract": "Preserve request ID input/generation, response propagation and context. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/request_id"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.secure_headers",
+      "title": "trb/web/middleware/secure_headers",
+      "contract": "Preserve documented security response headers and override behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/secure_headers"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.middleware.timeout",
+      "title": "trb/web/middleware/timeout",
+      "contract": "Preserve request deadlines, timeout responses and cleanup after cancellation. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/middleware/timeout"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "package.web.testing",
+      "title": "trb/web/testing",
+      "contract": "Preserve in-process request/response testing, typed handlers and faithful error/status/body observation. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "package:trb/web/testing"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.fmt",
+      "title": "Formatting",
+      "contract": "Preserve deterministic formatting, check/write/stdin/config behavior, comments and origin-sensitive syntax.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:fmt",
+        "document:docs/cli.md#format",
+        "flags:runFmt",
+        "tests:internal/formatter"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.lint",
+      "title": "Linting",
+      "contract": "Preserve configured rule set, severities, diagnostics, safe fixes and invalid-config handling.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:lint",
+        "document:docs/cli.md#lint",
+        "document:docs/guides/linting.md#configuration",
+        "document:docs/guides/linting.md#extension-boundary",
+        "document:docs/guides/linting.md#linting",
+        "document:docs/guides/linting.md#running-lint",
+        "document:docs/guides/linting.md#versions-and-compatibility",
+        "document:docs/lint-rules/index.md#lint-rule-index",
+        "document:docs/lint-rules/omit-terminal-void-return.md#examples",
+        "document:docs/lint-rules/omit-terminal-void-return.md#fix-boundary",
+        "document:docs/lint-rules/omit-terminal-void-return.md#trbomit-terminal-void-return",
+        "document:docs/lint-rules/omit-terminal-void-return.md#why",
+        "document:docs/lint-rules/prefer-conditional-transfer.md#examples",
+        "document:docs/lint-rules/prefer-conditional-transfer.md#fix-boundary",
+        "document:docs/lint-rules/prefer-conditional-transfer.md#trbprefer-conditional-transfer",
+        "document:docs/lint-rules/prefer-conditional-transfer.md#why",
+        "flags:runLint",
+        "tests:internal/lint"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.check",
+      "title": "Checking",
+      "contract": "Preserve project/standalone analysis, target validation, structured diagnostics and exit status without executing user code.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:check",
+        "flags:runCheck",
+        "tests:internal/cli"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.build",
+      "title": "Build",
+      "contract": "Preserve target generation, outfile/stdout/project outputs, native dependency setup, compile integration and build failures.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:build",
+        "document:docs/cli.md#check-build-and-run",
+        "flags:runBuild"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.run",
+      "title": "Run",
+      "contract": "Preserve standalone/project entry, arguments, build caching, execution status, signals and cleanup.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:run",
+        "flags:runProgram"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.repl",
+      "title": "REPL",
+      "contract": "Preserve interactive declarations/imports, retained bindings and values, display/diagnostic contracts, failed-submission rollback and exit.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:repl",
+        "document:docs/cli.md#repl",
+        "flags:runRepl",
+        "tests:internal/repl"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.test",
+      "title": "Project tests",
+      "contract": "Preserve discovery, name patterns, execution, assertions, suite nesting, reporting, failure status and project configuration. Resolve the known suite-name selection discrepancy before qualification.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:test",
+        "document:docs/cli.md#test",
+        "document:docs/guides/testing.md#testing-typerb-applications",
+        "document:docs/specification.md#43-test-declarations",
+        "flags:runTest",
+        "tests:internal/testsuite"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "contradictory",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/643",
+        "https://github.com/type-rb/type-rb-native/issues/624"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.packages",
+      "title": "Project and dependency commands",
+      "contract": "Preserve init/add/remove/update/sync/install, trbconfig/trb.lock, local/remote/official dependencies, integrity/frozen/offline behavior and deterministic configuration edits.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:add",
+        "command:init",
+        "command:install",
+        "command:remove",
+        "command:sync",
+        "command:update",
+        "document:docs/cli.md#projects-and-dependencies",
+        "document:docs/guides/packages.md#declaration-adapters",
+        "document:docs/guides/packages.md#experimental-bundled-call-specialization",
+        "document:docs/guides/packages.md#experimental-bundled-declaration-providers",
+        "document:docs/guides/packages.md#experimental-bundled-project-source-generation",
+        "document:docs/guides/packages.md#fixed-declaration-providers",
+        "document:docs/guides/packages.md#install-a-package",
+        "document:docs/guides/packages.md#local-development",
+        "document:docs/guides/packages.md#lock-and-cache",
+        "document:docs/guides/packages.md#native-dependencies",
+        "document:docs/guides/packages.md#native-runtime-adapters",
+        "document:docs/guides/packages.md#package-categories",
+        "document:docs/guides/packages.md#package-manifest",
+        "document:docs/guides/packages.md#production-readiness-boundaries",
+        "document:docs/guides/packages.md#typerb-packages",
+        "flags:runAdd",
+        "flags:runInit",
+        "flags:runInstall",
+        "flags:runRemove",
+        "flags:runSync",
+        "tests:internal/packages"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.adapter",
+      "title": "Adapter operations",
+      "contract": "Preserve adapter check/test, canonical declaration projections, fixture selection, structured diagnostics and layer-specific failures.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:adapter",
+        "command:adapter check",
+        "command:adapter test",
+        "flags:runAdapterCheck",
+        "flags:runAdapterTest"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.compiler",
+      "title": "Compiler services",
+      "contract": "Preserve compiler inspect/bootstrap-snapshot output schema, exact inputs, deterministic source identity and invalid/unsupported requests.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:compiler",
+        "command:compiler bootstrap-snapshot",
+        "command:compiler inspect",
+        "document:docs/cli.md#compiler-tooling",
+        "document:docs/guides/compiler-tooling.md#compiler-tooling-protocol",
+        "document:docs/guides/compiler-tooling.md#version-3-snapshot",
+        "document:docs/guides/compiler-tooling.md#version-policy-and-scope",
+        "flags:runCompilerBootstrapSnapshot",
+        "flags:runCompilerInspect",
+        "tests:internal/bootstrapsnapshot",
+        "tests:internal/compilerservice"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.db",
+      "title": "Database operations",
+      "contract": "Preserve schema check/export/plan/lock/apply, database target/credentials input, transactional behavior, lock identity and failure status.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:db",
+        "command:db apply",
+        "command:db check",
+        "command:db export",
+        "command:db lock",
+        "command:db plan",
+        "document:docs/cli.md#database-schema",
+        "document:docs/guides/database.md#configuration",
+        "document:docs/guides/database.md#database-schema-workflow",
+        "document:docs/guides/database.md#using-another-migration-system",
+        "document:docs/guides/database.md#workflow",
+        "flags:databaseFlags",
+        "flags:runDatabaseApply",
+        "flags:runDatabaseCheck",
+        "flags:runDatabaseExport",
+        "flags:runDatabaseLock",
+        "tests:internal/dbtool",
+        "tests:internal/mysqlsource",
+        "tests:internal/schemalock"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.jobs",
+      "title": "Job administration",
+      "contract": "Preserve worker start and job list/retry/discard, filtering, lease/status persistence, signal shutdown and invalid-operation errors.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:jobs",
+        "command:jobs discard",
+        "command:jobs list",
+        "command:jobs retry",
+        "command:jobs start",
+        "document:docs/cli.md#background-jobs"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.web",
+      "title": "Web artifacts",
+      "contract": "Preserve endpoint OpenAPI and browser client generation, deterministic artifacts, collision/invalid-contract rejection and package boundaries until their architecture review.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:web",
+        "command:web client",
+        "command:web openapi",
+        "document:docs/cli.md#web-contract-artifacts",
+        "flags:runWebClient",
+        "flags:runWebOpenAPI"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1211"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.lsp",
+      "title": "Language server",
+      "contract": "Preserve stdio/service startup, capabilities, request/cancel/shutdown and document/project state synchronization.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:lsp",
+        "document:docs/cli.md#language-server",
+        "flags:runLSP"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.browser",
+      "title": "Playground and tour",
+      "contract": "Preserve local browser/HTTP and WASM playground, interactive tour examples, versions, diagnostics and load/update behavior.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:play",
+        "command:tour",
+        "document:docs/cli.md#playground-and-tour",
+        "flags:runBrowserTool",
+        "tests:internal/playground"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "browser",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.clean",
+      "title": "Generated-output cleanup",
+      "contract": "Preserve the documented output/cache scope and configuration validation; do not remove source or unrelated files.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:clean",
+        "document:docs/cli.md#clean",
+        "flags:runClean"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "cli.help",
+      "title": "Help and version",
+      "contract": "Preserve command spellings/aliases, help/status, implementation/version/target reporting and invalid-command rejection.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "command:--help",
+        "command:--version",
+        "command:-h",
+        "command:-v",
+        "command:help",
+        "command:version",
+        "document:docs/cli.md#command-line-reference"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "cli",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "ecosystem.protocols",
+      "title": "Packages, adapters and extension protocols",
+      "contract": "Preserve manifest/lock schemas, source and native dependency resolution, declaration/provider/runtime adapters, generation protocols, version negotiation, sandbox/trust boundaries and fail-closed invalid responses. Preserve all public fields in the catalog.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/configuration.md#database-schema-workflow",
+        "document:docs/configuration.md#example",
+        "document:docs/configuration.md#job-adapter-composition",
+        "document:docs/configuration.md#lint-configuration",
+        "document:docs/configuration.md#local-packages",
+        "document:docs/configuration.md#modes",
+        "document:docs/configuration.md#native-package-management",
+        "document:docs/configuration.md#project-configuration",
+        "document:docs/configuration.md#project-entrypoint",
+        "document:docs/configuration.md#ruby-toolchain-and-loader",
+        "document:docs/configuration.md#typerb-packages",
+        "document:docs/configuration.md#typescript-toolchain",
+        "document:docs/guides/native-package-adapters.md#1-fix-the-scope-and-native-input",
+        "document:docs/guides/native-package-adapters.md#2-try-the-existing-path",
+        "document:docs/guides/native-package-adapters.md#3-choose-the-narrowest-sufficient-boundary",
+        "document:docs/guides/native-package-adapters.md#4-validate-a-projection-in-layers",
+        "document:docs/guides/native-package-adapters.md#5-classify-gaps-and-leave-a-reproducible-result",
+        "document:docs/guides/native-package-adapters.md#authoring-native-package-adapters",
+        "document:docs/standard-library.md#package-index",
+        "document:docs/standard-library.md#standard-library",
+        "protocol:internal/cli/generated_workspace.go:generatedWorkspaceFormatVersion",
+        "protocol:internal/cli/generated_workspace.go:generatedWorkspaceMetadata",
+        "protocol:internal/declarationadaptertooling/protocol.go:Adapter",
+        "protocol:internal/declarationadaptertooling/protocol.go:Package",
+        "protocol:internal/declarationadaptertooling/protocol.go:ProtocolVersion",
+        "protocol:internal/declarationadaptertooling/protocol.go:Report",
+        "protocol:internal/declarationadaptertooling/protocol.go:Summary",
+        "protocol:internal/declarationadaptertooling/protocol.go:Test",
+        "protocol:internal/declarationadaptertooling/protocol.go:TestPhase",
+        "protocol:internal/declarationadaptertooling/protocol.go:TestReport",
+        "protocol:internal/declarationadaptertooling/protocol.go:TestSummary",
+        "protocol:internal/nativepackage/index.go:Catalog",
+        "protocol:internal/nativepackage/index.go:Export",
+        "protocol:internal/nativepackage/index.go:Field",
+        "protocol:internal/nativepackage/index.go:FormatVersion",
+        "protocol:internal/nativepackage/index.go:Module",
+        "protocol:internal/nativepackage/index.go:ResultBridge",
+        "protocol:internal/nativepackage/index.go:Type",
+        "protocol:internal/nativepackage/index_codec.go:cacheCatalog",
+        "protocol:internal/nativepackage/index_codec.go:cacheDiagnostic",
+        "protocol:internal/nativepackage/index_codec.go:cacheExport",
+        "protocol:internal/nativepackage/index_codec.go:cacheField",
+        "protocol:internal/nativepackage/index_codec.go:cacheModule",
+        "protocol:internal/nativepackage/index_codec.go:cacheResultBridge",
+        "protocol:internal/nativepackage/index_codec.go:cacheType",
+        "protocol:internal/nativepackage/indexer.go:indexRequest",
+        "protocol:internal/nativepackage/indexer.go:indexResult",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterCatalog",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterExport",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterField",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterModule",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterProtocolVersion",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterResultBridge",
+        "protocol:internal/packageextension/declaration_adapter.go:DeclarationAdapterType",
+        "protocol:internal/packageextension/declarations.go:DeclarationCatalog",
+        "protocol:internal/packageextension/declarations.go:DeclarationProtocolVersion",
+        "protocol:internal/packageextension/declarations.go:DeclaredBlock",
+        "protocol:internal/packageextension/declarations.go:DeclaredClassBodyDeclarationRule",
+        "protocol:internal/packageextension/declarations.go:DeclaredFunctionArgumentReferenceRule",
+        "protocol:internal/packageextension/declarations.go:DeclaredFunctionBlockRule",
+        "protocol:internal/packageextension/declarations.go:DeclaredMember",
+        "protocol:internal/packageextension/declarations.go:DeclaredModule",
+        "protocol:internal/packageextension/declarations.go:DeclaredModuleRuntimeTypes",
+        "protocol:internal/packageextension/declarations.go:DeclaredParameter",
+        "protocol:internal/packageextension/declarations.go:DeclaredReference",
+        "protocol:internal/packageextension/declarations.go:DeclaredSignature",
+        "protocol:internal/packageextension/declarations.go:DeclaredType",
+        "protocol:internal/packageextension/native_runtime_adapter.go:NativeRuntimeAdapterBinding",
+        "protocol:internal/packageextension/native_runtime_adapter.go:NativeRuntimeAdapterCatalog",
+        "protocol:internal/packageextension/native_runtime_adapter.go:NativeRuntimeAdapterProtocolVersion",
+        "protocol:internal/packageextension/project_generation.go:ProjectGeneratedSource",
+        "protocol:internal/packageextension/project_generation.go:ProjectGenerationIssue",
+        "protocol:internal/packageextension/project_generation.go:ProjectGenerationProtocolVersion",
+        "protocol:internal/packageextension/project_generation.go:ProjectGenerationResponse",
+        "protocol:internal/packageextension/project_input.go:ProjectAttribute",
+        "protocol:internal/packageextension/project_input.go:ProjectClass",
+        "protocol:internal/packageextension/project_input.go:ProjectDeclarationIdentity",
+        "protocol:internal/packageextension/project_input.go:ProjectDeclarationInput",
+        "protocol:internal/packageextension/project_input.go:ProjectDeclarationInputProtocolVersion",
+        "protocol:internal/packageextension/project_input.go:ProjectDeclarationReference",
+        "protocol:internal/packageextension/project_input.go:ProjectDirective",
+        "protocol:internal/packageextension/project_input.go:ProjectDirectiveArgument",
+        "protocol:internal/packageextension/project_input.go:ProjectDirectiveBlock",
+        "protocol:internal/packageextension/project_input.go:ProjectEnum",
+        "protocol:internal/packageextension/project_input.go:ProjectEnumMember",
+        "protocol:internal/packageextension/project_input.go:ProjectImport",
+        "protocol:internal/packageextension/project_input.go:ProjectMethod",
+        "protocol:internal/packageextension/project_input.go:ProjectModule",
+        "protocol:internal/packageextension/project_input.go:ProjectNewtype",
+        "protocol:internal/packageextension/project_input.go:ProjectParameter",
+        "protocol:internal/packageextension/project_input.go:ProjectRecord",
+        "protocol:internal/packageextension/project_input.go:ProjectRecordField",
+        "protocol:internal/packageextension/project_input.go:ProjectTypeAlias",
+        "protocol:internal/packageextension/project_input.go:ProjectTypeUse",
+        "protocol:internal/packageextension/project_input.go:ProjectValue",
+        "protocol:internal/packageextension/project_input.go:SourcePosition",
+        "protocol:internal/packageextension/project_input.go:SourceSpan",
+        "protocol:internal/packageextension/protocol.go:CallSite",
+        "protocol:internal/packageextension/protocol.go:Definition",
+        "protocol:internal/packageextension/protocol.go:Field",
+        "protocol:internal/packageextension/protocol.go:GeneratedSource",
+        "protocol:internal/packageextension/protocol.go:Issue",
+        "protocol:internal/packageextension/protocol.go:ProtocolVersion",
+        "protocol:internal/packageextension/protocol.go:Record",
+        "protocol:internal/packageextension/protocol.go:Replacement",
+        "protocol:internal/packageextension/protocol.go:RequiredImport",
+        "protocol:internal/packageextension/protocol.go:SpecializeCallRequest",
+        "protocol:internal/packageextension/protocol.go:SpecializeCallResponse",
+        "protocol:internal/packageextension/protocol.go:Type",
+        "protocol:internal/packages/typerb_lock.go:TypeRBLock",
+        "protocol:internal/packages/typerb_lock.go:TypeRBLockedPackage",
+        "protocol:internal/packages/typerb_manifest.go:AdapterTest",
+        "protocol:internal/packages/typerb_manifest.go:TypeRBManifest",
+        "protocol:internal/project/config.go:Config",
+        "protocol:internal/project/config.go:DBSqldefConfig",
+        "protocol:internal/project/config.go:DatabaseConfig",
+        "protocol:internal/project/config.go:GoConfig",
+        "protocol:internal/project/config.go:JobsConfig",
+        "protocol:internal/project/config.go:LintConfig",
+        "protocol:internal/project/config.go:PackageRequirement",
+        "protocol:internal/project/config.go:RubyConfig",
+        "protocol:internal/project/config.go:SqldefConfig",
+        "protocol:internal/project/config.go:TypeScriptConfig",
+        "protocol:internal/schemalock/lock.go:Column",
+        "protocol:internal/schemalock/lock.go:ForeignKey",
+        "protocol:internal/schemalock/lock.go:FormatVersion",
+        "protocol:internal/schemalock/lock.go:Lock",
+        "protocol:internal/schemalock/lock.go:Table",
+        "protocol:internal/schemalock/lock.go:UniqueConstraint",
+        "tests:internal/declarationadapterhost",
+        "tests:internal/declarationproviderhost",
+        "tests:internal/nativepackage",
+        "tests:internal/official",
+        "tests:internal/packageextension",
+        "tests:internal/packageextensionhost",
+        "tests:internal/project",
+        "tests:internal/runtimeadapterhost",
+        "tests:internal/typeprovider",
+        "tests:internal/typeprovider/rails",
+        "tests:internal/typeprovider/rails/schema"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "ecosystem",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/636"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "tooling.protocols",
+      "title": "Diagnostics, compiler and LSP schemas",
+      "contract": "Preserve diagnostic codes/categories/spans/source maps, JSON service envelopes, capabilities, all LSP inputs/notifications and editor-facing result structures; reject malformed messages without corrupting retained state.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "diagnostic:TRB1000",
+        "diagnostic:TRB2000",
+        "diagnostic:TRB3000",
+        "diagnostic:TRB3001",
+        "diagnostic:TRB3002",
+        "diagnostic:TRB4000",
+        "diagnostic:TRB4001",
+        "diagnostic:TRB5000",
+        "lsp-output:textDocument/publishDiagnostics",
+        "lsp-output:typerb/fileRootFilesChanged",
+        "lsp-output:window/showMessage",
+        "lsp:$/cancelRequest",
+        "lsp:exit",
+        "lsp:initialize",
+        "lsp:initialized",
+        "lsp:shutdown",
+        "lsp:textDocument/codeAction",
+        "lsp:textDocument/codeLens",
+        "lsp:textDocument/completion",
+        "lsp:textDocument/definition",
+        "lsp:textDocument/didChange",
+        "lsp:textDocument/didClose",
+        "lsp:textDocument/didOpen",
+        "lsp:textDocument/didSave",
+        "lsp:textDocument/documentHighlight",
+        "lsp:textDocument/documentSymbol",
+        "lsp:textDocument/foldingRange",
+        "lsp:textDocument/formatting",
+        "lsp:textDocument/hover",
+        "lsp:textDocument/implementation",
+        "lsp:textDocument/prepareRename",
+        "lsp:textDocument/references",
+        "lsp:textDocument/rename",
+        "lsp:textDocument/selectionRange",
+        "lsp:textDocument/semanticTokens/full",
+        "lsp:textDocument/signatureHelp",
+        "lsp:typerb/discoverTests",
+        "lsp:typerb/fileRootFiles",
+        "lsp:workspace/didChangeConfiguration",
+        "lsp:workspace/didChangeWatchedFiles",
+        "lsp:workspace/symbol",
+        "protocol:internal/diagnostic/json.go:JSONDiagnostic",
+        "protocol:internal/diagnostic/json.go:JSONFix",
+        "protocol:internal/diagnostic/json.go:JSONLocation",
+        "protocol:internal/diagnostic/json.go:JSONPosition",
+        "protocol:internal/diagnostic/json.go:JSONRelatedInformation",
+        "protocol:internal/diagnostic/json.go:JSONReport",
+        "protocol:internal/diagnostic/json.go:JSONSchemaVersion",
+        "protocol:internal/diagnostic/json.go:JSONSpan",
+        "protocol:internal/diagnostic/json.go:JSONSummary",
+        "protocol:internal/diagnostic/json.go:JSONTextEdit",
+        "protocol:internal/lsp/protocol.go:message",
+        "protocol:internal/lsp/protocol.go:notification",
+        "protocol:internal/lsp/protocol.go:response",
+        "protocol:internal/lsp/protocol.go:responseError",
+        "protocol:internal/lsp/types.go:codeAction",
+        "protocol:internal/lsp/types.go:codeActionParams",
+        "protocol:internal/lsp/types.go:codeLens",
+        "protocol:internal/lsp/types.go:codeLensOptions",
+        "protocol:internal/lsp/types.go:command",
+        "protocol:internal/lsp/types.go:completionItem",
+        "protocol:internal/lsp/types.go:completionList",
+        "protocol:internal/lsp/types.go:completionOptions",
+        "protocol:internal/lsp/types.go:contentChange",
+        "protocol:internal/lsp/types.go:didChangeParams",
+        "protocol:internal/lsp/types.go:didChangeWatchedFilesParams",
+        "protocol:internal/lsp/types.go:didCloseParams",
+        "protocol:internal/lsp/types.go:didOpenParams",
+        "protocol:internal/lsp/types.go:didSaveParams",
+        "protocol:internal/lsp/types.go:documentHighlight",
+        "protocol:internal/lsp/types.go:documentParams",
+        "protocol:internal/lsp/types.go:documentPositionParams",
+        "protocol:internal/lsp/types.go:documentSymbol",
+        "protocol:internal/lsp/types.go:fileEvent",
+        "protocol:internal/lsp/types.go:fileRootFilesChangedParams",
+        "protocol:internal/lsp/types.go:foldingRange",
+        "protocol:internal/lsp/types.go:formattingParams",
+        "protocol:internal/lsp/types.go:hoverResult",
+        "protocol:internal/lsp/types.go:initializeResult",
+        "protocol:internal/lsp/types.go:location",
+        "protocol:internal/lsp/types.go:locationLink",
+        "protocol:internal/lsp/types.go:markupContent",
+        "protocol:internal/lsp/types.go:parameterInformation",
+        "protocol:internal/lsp/types.go:position",
+        "protocol:internal/lsp/types.go:prepareRenameResult",
+        "protocol:internal/lsp/types.go:protocolDiagnostic",
+        "protocol:internal/lsp/types.go:publishDiagnosticsParams",
+        "protocol:internal/lsp/types.go:rangeValue",
+        "protocol:internal/lsp/types.go:referenceContext",
+        "protocol:internal/lsp/types.go:referenceParams",
+        "protocol:internal/lsp/types.go:relatedInformation",
+        "protocol:internal/lsp/types.go:renameOptions",
+        "protocol:internal/lsp/types.go:renameParams",
+        "protocol:internal/lsp/types.go:selectionRange",
+        "protocol:internal/lsp/types.go:selectionRangeParams",
+        "protocol:internal/lsp/types.go:semanticTokens",
+        "protocol:internal/lsp/types.go:semanticTokensLegend",
+        "protocol:internal/lsp/types.go:semanticTokensOptions",
+        "protocol:internal/lsp/types.go:serverCapabilities",
+        "protocol:internal/lsp/types.go:serverInfo",
+        "protocol:internal/lsp/types.go:signatureHelpResult",
+        "protocol:internal/lsp/types.go:signatureInformation",
+        "protocol:internal/lsp/types.go:signatureOptions",
+        "protocol:internal/lsp/types.go:symbolInformation",
+        "protocol:internal/lsp/types.go:testItem",
+        "protocol:internal/lsp/types.go:textDocumentIdentifier",
+        "protocol:internal/lsp/types.go:textDocumentItem",
+        "protocol:internal/lsp/types.go:textDocumentSyncOptions",
+        "protocol:internal/lsp/types.go:textEdit",
+        "protocol:internal/lsp/types.go:versionedTextDocumentIdentifier",
+        "protocol:internal/lsp/types.go:workspaceEdit",
+        "protocol:internal/lsp/types.go:workspaceSymbolParams",
+        "protocol:internal/toolingprotocol/protocol.go:Declaration",
+        "protocol:internal/toolingprotocol/protocol.go:Import",
+        "protocol:internal/toolingprotocol/protocol.go:Module",
+        "protocol:internal/toolingprotocol/protocol.go:Parameter",
+        "protocol:internal/toolingprotocol/protocol.go:ProtocolVersion",
+        "protocol:internal/toolingprotocol/protocol.go:Report",
+        "protocol:internal/toolingprotocol/protocol.go:Signature",
+        "protocol:internal/toolingprotocol/protocol.go:Source",
+        "protocol:internal/toolingprotocol/protocol.go:Type",
+        "tests:internal/diagnostic",
+        "tests:internal/languageservice",
+        "tests:internal/lsp",
+        "tests:internal/sourcemap",
+        "tests:internal/toolingprotocol"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "protocol",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/455"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "editor.integrations",
+      "title": "Editor integration and syntax distribution",
+      "contract": "Preserve VS Code commands/settings/activation/debug-test tooling, syntax grammar and Neovim/JetBrains/GitHub integration instructions against the canonical compiler and stable LSP behavior.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "delivery:.github/workflows/chrome-extension-release.yml",
+        "delivery:.github/workflows/github-syntax-highlighting.yml",
+        "delivery:.github/workflows/vscode.yml",
+        "delivery:editors/github/README.md",
+        "delivery:editors/github/package.json",
+        "delivery:editors/jetbrains/README.md",
+        "delivery:editors/neovim/README.md",
+        "delivery:editors/vscode/README.md",
+        "delivery:editors/vscode/package.json",
+        "document:docs/editor-support.md#editor-support",
+        "document:docs/editor-support.md#portable-syntax-highlighting"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "editor",
+        "github-extension",
+        "syntax-grammar",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1168",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "distribution",
+      "title": "Installation and paired release artifacts",
+      "contract": "Preserve Darwin/Linux amd64/arm64 CLI archives, executable permissions, Homebrew, OCI, checksums/provenance, release notes, Pages/WASM, package indexes and editor release routes. Rehearse history/immutable seed/support/security handoff before cutover; current Native host gaps remain unqualified.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "delivery:.github/workflows/adapter-conformance.yml",
+        "delivery:.github/workflows/container.yml",
+        "delivery:.github/workflows/native-package-index.yml",
+        "delivery:.github/workflows/pages.yml",
+        "delivery:.github/workflows/release.yml",
+        "delivery:packaging/container/Dockerfile",
+        "delivery:scripts/extract-release-notes.sh",
+        "delivery:scripts/package-release.sh",
+        "delivery:scripts/prepare-container-rootfs.sh",
+        "delivery:scripts/render-homebrew-formula.sh",
+        "document:docs/containers.md#add-typerb-to-a-target-toolchain",
+        "document:docs/containers.md#go",
+        "document:docs/containers.md#image-scope",
+        "document:docs/containers.md#ruby",
+        "document:docs/containers.md#try-the-compiler-without-installing-it",
+        "document:docs/containers.md#typerb-in-containers",
+        "document:docs/containers.md#typescript",
+        "document:docs/containers.md#verify-an-image",
+        "document:docs/native-transition.md#complete-feature-contract",
+        "document:docs/native-transition.md#development-and-release-gates",
+        "document:docs/native-transition.md#meaning-of-equivalence",
+        "document:docs/native-transition.md#release-outcome",
+        "document:docs/native-transition.md#repository-ownership",
+        "document:docs/native-transition.md#typerb-v050-implementation-transition",
+        "document:docs/native-transition.md#versions-and-shared-maintenance",
+        "document:docs/releasing.md#one-time-setup",
+        "document:docs/releasing.md#release",
+        "document:docs/releasing.md#releasing-typerb",
+        "document:docs/releasing.md#version-convention",
+        "document:docs/releasing.md#visual-studio-code-extension",
+        "tests:internal/site"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "accepted-input",
+        "rejected-input",
+        "structured-output",
+        "retained-state-cleanup"
+      ],
+      "commands": [
+        "distribution",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1168",
+      "related": [],
+      "qualificationReady": false
+    },
+    {
+      "id": "output.go",
+      "title": "go source backend",
+      "contract": "Preserve go source generation, backend naming/effects and dependency wiring, build/run execution, source origins, failure behavior and retained interactive semantics for every applicable language/package contract. Source text alone is insufficient.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "tests:internal/codegen/golang",
+        "tests:internal/target"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "outputs",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1164"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "output.ruby",
+      "title": "ruby source backend",
+      "contract": "Preserve ruby source generation, backend naming/effects and dependency wiring, build/run execution, source origins, failure behavior and retained interactive semantics for every applicable language/package contract. Source text alone is insufficient.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "tests:internal/codegen/ruby"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "ruby"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "outputs",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1164"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "output.typescript",
+      "title": "typescript source backend",
+      "contract": "Preserve typescript source generation, backend naming/effects and dependency wiring, build/run execution, source origins, failure behavior and retained interactive semantics for every applicable language/package contract. Source text alone is insufficient.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "tests:internal/codegen/typescript"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "typescript"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "outputs",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1164"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "application.composed",
+      "title": "Composed Web, ORM and durable jobs",
+      "contract": "Run the public Web/ORM/jobs tutorial and corresponding project scenarios end to end: route input, transactional data changes, job enqueue/retry, durable database state, HTTP response and worker cleanup. Retain SQLite/MySQL and backend applicability rather than treating isolated helpers as application acceptance.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [
+        "document:docs/tutorials/web-orm-jobs.md#add-file-based-routes",
+        "document:docs/tutorials/web-orm-jobs.md#build-a-report-api-with-web-orm-and-jobs",
+        "document:docs/tutorials/web-orm-jobs.md#configure-the-project-and-database",
+        "document:docs/tutorials/web-orm-jobs.md#configure-the-queue",
+        "document:docs/tutorials/web-orm-jobs.md#define-the-model-and-job",
+        "document:docs/tutorials/web-orm-jobs.md#map-errors-once-at-the-http-boundary",
+        "document:docs/tutorials/web-orm-jobs.md#prerequisites",
+        "document:docs/tutorials/web-orm-jobs.md#put-the-transaction-in-an-application-service",
+        "document:docs/tutorials/web-orm-jobs.md#run-the-server-and-worker",
+        "document:docs/tutorials/web-orm-jobs.md#switch-backends",
+        "document:docs/tutorials/web-orm-jobs.md#test-the-slice-without-a-network-server",
+        "tests:internal/projectintegration"
+      ],
+      "implementations": [
+        "go",
+        "native"
+      ],
+      "outputs": [
+        "go",
+        "ruby",
+        "typescript"
+      ],
+      "nativeExecutable": true,
+      "obligations": [
+        "check-accepted",
+        "check-rejected",
+        "emit-build",
+        "execute",
+        "repl-state",
+        "failure-cleanup"
+      ],
+      "commands": [
+        "application",
+        "native-projects",
+        "native-cli"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/622",
+        "https://github.com/type-rb/type-rb-native/issues/628",
+        "https://github.com/type-rb/type-rb-native/issues/629",
+        "https://github.com/type-rb/type-rb-native/issues/630",
+        "https://github.com/type-rb/type-rb-native/issues/631",
+        "https://github.com/type-rb/type-rb-native/issues/632"
+      ],
+      "qualificationReady": false
+    },
+    {
+      "id": "native.qualification",
+      "title": "Native bootstrap, runtime and retained gates",
+      "contract": "Qualify ordinary self-hosting/fixed points, independent snapshot recovery, managed memory/resource stability, interruption, supported targets and existing performance/security criteria at exact source and tool identities. This inventory does not replace their existing acceptance procedures.",
+      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "surfaces": [],
+      "implementations": [
+        "native"
+      ],
+      "outputs": [
+        "service"
+      ],
+      "nativeExecutable": false,
+      "obligations": [
+        "ordinary-bootstrap",
+        "recovery",
+        "runtime-safety",
+        "targets",
+        "performance",
+        "security"
+      ],
+      "commands": [
+        "native-cli",
+        "native-language"
+      ],
+      "baseline": "unqualified",
+      "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
+      "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/104",
+        "https://github.com/type-rb/type-rb-native/issues/608",
+        "https://github.com/type-rb/type-rb-native/issues/439",
+        "https://github.com/type-rb/type-rb-native/issues/1164"
+      ],
+      "qualificationReady": false
+    }
+  ]
+}
