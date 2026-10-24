@@ -87,6 +87,11 @@ jobs:
       - name: Verify website Go packages
         run: go test ./internal/site ./internal/playground ./cmd/trb-site
 
+      - name: Verify shared release contract
+        run: |
+          go test ./internal/releasecontract ./tools/release-contract
+          go run ./tools/release-contract --check
+
       - name: Verify TextMate grammar
         run: |
           npm ci --prefix tools/textmate
