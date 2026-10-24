@@ -330,28 +330,6 @@
         "document:docs/specification.md#typed-filesystem-boundary",
         "document:docs/specification.md#typerb-specification-draft-v03",
         "document:docs/specification.md#union-types",
-        "document:docs/standard-library.md#arrays-and-hashes",
-        "document:docs/standard-library.md#binary-encoding",
-        "document:docs/standard-library.md#bytes",
-        "document:docs/standard-library.md#cooperative-directory-locks",
-        "document:docs/standard-library.md#date-and-time",
-        "document:docs/standard-library.md#filesystem",
-        "document:docs/standard-library.md#hashing",
-        "document:docs/standard-library.md#host-composition",
-        "document:docs/standard-library.md#json-and-jsonc",
-        "document:docs/standard-library.md#logical-descendant-grammar",
-        "document:docs/standard-library.md#opened-directory-anchors",
-        "document:docs/standard-library.md#output",
-        "document:docs/standard-library.md#package-index",
-        "document:docs/standard-library.md#path-values",
-        "document:docs/standard-library.md#process",
-        "document:docs/standard-library.md#randomness",
-        "document:docs/standard-library.md#recursive-directory-creation",
-        "document:docs/standard-library.md#scalars-and-strings",
-        "document:docs/standard-library.md#standard-library",
-        "document:docs/standard-library.md#stringbuilder-and-unicode",
-        "document:docs/standard-library.md#tests",
-        "document:docs/standard-library.md#url-encoding",
         "kinds:internal/types/types.go",
         "syntax:GenericExpression",
         "tests:internal/stdlib"
@@ -658,7 +636,8 @@
       "contract": "Preserve every public Array receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
-        "builtin:Array"
+        "builtin:Array",
+        "document:docs/standard-library.md#arrays-and-hashes"
       ],
       "implementations": [
         "go",
@@ -730,7 +709,8 @@
       "contract": "Preserve every public Bytes receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
-        "builtin:Bytes"
+        "builtin:Bytes",
+        "document:docs/standard-library.md#bytes"
       ],
       "implementations": [
         "go",
@@ -910,7 +890,8 @@
       "contract": "Preserve every public String receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
-        "builtin:String"
+        "builtin:String",
+        "document:docs/standard-library.md#scalars-and-strings"
       ],
       "implementations": [
         "go",
@@ -946,7 +927,8 @@
       "contract": "Preserve every public StringBuilder receiver declaration and signature in the catalog, including argument/default/block rules, mutation, bounds, result values, failure and retained interactive values. Test composed operations as well as individual calls.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
-        "builtin:StringBuilder"
+        "builtin:StringBuilder",
+        "document:docs/standard-library.md#stringbuilder-and-unicode"
       ],
       "implementations": [
         "go",
@@ -1549,6 +1531,7 @@
       "contract": "Preserve documented digest algorithms, byte inputs and encoded outputs. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#hashing",
         "package:trb/std/digest"
       ],
       "implementations": [
@@ -1585,6 +1568,9 @@
       "contract": "Preserve anchored directory capabilities, RelativePath containment, listing/creation, lifetime and escape/close failure boundaries. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#cooperative-directory-locks",
+        "document:docs/standard-library.md#opened-directory-anchors",
+        "document:docs/standard-library.md#recursive-directory-creation",
         "package:trb/std/dir"
       ],
       "implementations": [
@@ -1621,6 +1607,7 @@
       "contract": "Preserve Base64 alphabets/padding, round trips and malformed-input errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#binary-encoding",
         "package:trb/std/encoding/base64"
       ],
       "implementations": [
@@ -1729,6 +1716,7 @@
       "contract": "Preserve scoped File.open modes, bounded byte/text reads, byte/text writes, FileSystemError domains and close/error precedence. Preserve scoped resource typing and reject escape/suspension as specified. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#filesystem",
         "package:trb/std/file",
         "tests:internal/nativefs"
       ],
@@ -1802,6 +1790,7 @@
       "contract": "Preserve IO.puts output, accepted argument and newline behavior, output errors where specified and interactive execution. Do not infer additional stream APIs from the package name. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#output",
         "package:trb/std/io"
       ],
       "implementations": [
@@ -1838,6 +1827,7 @@
       "contract": "Preserve JSON parse/encode and typed codecs, numeric/string/null/container values and deterministic codec errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#json-and-jsonc",
         "package:trb/std/json"
       ],
       "implementations": [
@@ -1874,7 +1864,7 @@
     {
       "id": "package.std.jsonc",
       "title": "trb/std/jsonc",
-      "contract": "Preserve JSONC comments/trailing commas and JSON value semantics, source origins and parse errors. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve JSONC line/block comments and JSON value/error semantics. Both JSON and JSONC reject trailing commas. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "package:trb/std/jsonc"
@@ -1950,6 +1940,9 @@
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "document:docs/specification.md#path-values",
+        "document:docs/standard-library.md#host-composition",
+        "document:docs/standard-library.md#logical-descendant-grammar",
+        "document:docs/standard-library.md#path-values",
         "package:trb/std/path",
         "tests:internal/pathvalue"
       ],
@@ -1989,6 +1982,7 @@
       "contract": "Preserve process arguments/environment, subprocess execution, status, signals and pipe/resource cleanup. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#process",
         "package:trb/std/process"
       ],
       "implementations": [
@@ -2025,6 +2019,7 @@
       "contract": "Preserve Random.integer bound rules and Random.float result range, including invalid-bound behavior. No public seeding or generator-state API is implied. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#randomness",
         "package:trb/std/random"
       ],
       "implementations": [
@@ -2206,6 +2201,7 @@
       "contract": "Preserve test/suite declarations, assertions, selection, isolation, failure reporting and exit behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#tests",
         "package:trb/std/test"
       ],
       "implementations": [
@@ -2245,6 +2241,7 @@
       "contract": "Preserve Instant/duration/time-zone/clock operations, parsing/formatting/codecs and portable range/error semantics. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#date-and-time",
         "package:trb/std/time"
       ],
       "implementations": [
@@ -2358,6 +2355,7 @@
       "contract": "Preserve URL component encode/decode and query parse/build behavior, repeated keys and malformed-input handling; this is not a general URL parser. Every public catalog member/signature belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
+        "document:docs/standard-library.md#url-encoding",
         "package:trb/std/url"
       ],
       "implementations": [
@@ -3448,6 +3446,8 @@
         "document:docs/guides/native-package-adapters.md#4-validate-a-projection-in-layers",
         "document:docs/guides/native-package-adapters.md#5-classify-gaps-and-leave-a-reproducible-result",
         "document:docs/guides/native-package-adapters.md#authoring-native-package-adapters",
+        "document:docs/standard-library.md#package-index",
+        "document:docs/standard-library.md#standard-library",
         "protocol:internal/cli/generated_workspace.go:generatedWorkspaceFormatVersion",
         "protocol:internal/cli/generated_workspace.go:generatedWorkspaceMetadata",
         "protocol:internal/declarationadaptertooling/protocol.go:Adapter",
