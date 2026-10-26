@@ -7572,7 +7572,9 @@ func (c *Checker) checkExpression(expression ast.Expression, sc *scope) types.Ty
 				typ = blockType
 			}
 		}
-		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" {
+		// Imported library factories already carry their declared result type.
+		// Their local alias must not replace it with a nominal constructor type.
+		if member, ok := n.Callee.(*ast.MemberExpression); ok && member.Name == "new" && c.result.References[n.Callee].Library == nil {
 			constructorType := c.result.Expressions[member.Receiver]
 			if message := stdlib.OpaqueTypeConstructionMessage(constructorType); message != "" {
 				c.error(n.Span(), message)
