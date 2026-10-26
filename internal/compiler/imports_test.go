@@ -1501,27 +1501,40 @@ end
 			`builder.splice(0)`,
 		},
 	}
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		artifact, err := CompileWithOptions("builder.trb", source, Options{Mode: mode, Package: "builderexample", RubyLoader: "require_relative"})
-		if err != nil {
-			t.Fatalf("%s rejected portable StringBuilder: %v", mode, err)
-		}
-		output := string(artifact.Output)
-		for _, want := range wants[mode] {
-			if !strings.Contains(output, want) {
-				t.Fatalf("generated %s StringBuilder output is missing %q:\n%s", mode, want, output)
+	for _, imported := range []struct {
+		name, declaration, receiver string
+	}{
+		{"canonical", "import trb/std/string_builder", "StringBuilder"},
+		{"bare alias", "import trb/std/string_builder as Text", "Text"},
+		{"named alias", "import { StringBuilder as Text } from trb/std/string_builder", "Text"},
+	} {
+		t.Run(imported.name, func(t *testing.T) {
+			text := strings.ReplaceAll(string(source), "StringBuilder.", imported.receiver+".")
+			text = strings.Replace(text, "import trb/std/string_builder", imported.declaration, 1)
+			aliasedSource := []byte(text)
+			for _, mode := range []string{"go", "ruby", "typescript"} {
+				artifact, err := CompileWithOptions("builder.trb", aliasedSource, Options{Mode: mode, Package: "builderexample", RubyLoader: "require_relative"})
+				if err != nil {
+					t.Fatalf("%s rejected portable StringBuilder: %v", mode, err)
+				}
+				output := string(artifact.Output)
+				for _, want := range wants[mode] {
+					if !strings.Contains(output, want) {
+						t.Fatalf("generated %s StringBuilder output is missing %q:\n%s", mode, want, output)
+					}
+				}
+				if mode == "go" {
+					fileSet := token.NewFileSet()
+					parsed, parseErr := parser.ParseFile(fileSet, "builder.go", artifact.Output, parser.AllErrors)
+					if parseErr != nil {
+						t.Fatalf("generated Go StringBuilder output does not parse: %v\n%s", parseErr, output)
+					}
+					if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("builderexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
+						t.Fatalf("generated Go StringBuilder output does not type-check: %v\n%s", checkErr, output)
+					}
+				}
 			}
-		}
-		if mode == "go" {
-			fileSet := token.NewFileSet()
-			parsed, parseErr := parser.ParseFile(fileSet, "builder.go", artifact.Output, parser.AllErrors)
-			if parseErr != nil {
-				t.Fatalf("generated Go StringBuilder output does not parse: %v\n%s", parseErr, output)
-			}
-			if _, checkErr := (&gotypes.Config{Importer: importer.Default()}).Check("builderexample", fileSet, []*goast.File{parsed}, nil); checkErr != nil {
-				t.Fatalf("generated Go StringBuilder output does not type-check: %v\n%s", checkErr, output)
-			}
-		}
+		})
 	}
 }
 
@@ -1544,6 +1557,16 @@ func TestPortableStringBuilderMutabilityAndTypesAreModeIndependent(t *testing.T)
 		{
 			name:   "append type",
 			source: "import trb/std/string_builder\ndef bad()\n\tmut builder := StringBuilder.new()\n\tbuilder.append(1)\n\treturn\nend\n",
+			want:   "argument 1 to append() has type Integer, expected String",
+		},
+		{
+			name:   "aliased factory receiver requires mut",
+			source: "import trb/std/string_builder as Text\ndef bad()\n\tbuilder := Text.new()\n\tbuilder.append(\"x\")\n\treturn\nend\n",
+			want:   "builder is immutable; declare it with mut to use append()",
+		},
+		{
+			name:   "aliased factory append type",
+			source: "import trb/std/string_builder as Text\ndef bad()\n\tmut builder := Text.new()\n\tbuilder.append(1)\n\treturn\nend\n",
 			want:   "argument 1 to append() has type Integer, expected String",
 		},
 		{

@@ -8582,6 +8582,7 @@
       "TestImplicitMethodReceiverSurvivesCaptureAndReplay (internal/repl/implicit_class_method_test.go)",
       "TestImportedGenericEnumPatternsInTypedIREvaluator (internal/repl/generic_enum_import_test.go)",
       "TestInitializationRetryDoesNotRepeatCompletedSideEffects (internal/repl/module_cycles_test.go)",
+      "TestInteractiveAliasedStringBuilderAcrossModes (internal/repl/string_builder_test.go)",
       "TestInteractiveGenericIdentityAliasesAcrossModes (internal/repl/identity_alias_test.go)",
       "TestInteractiveImportedAliasIdentitiesAcrossModes (internal/repl/identity_alias_test.go)",
       "TestInteractiveRecordAliasConstructionAcrossModes (internal/repl/record_alias_test.go)",
