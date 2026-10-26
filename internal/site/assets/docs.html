@@ -22,8 +22,8 @@
 			</a>
 			<nav class="site-nav" aria-label="Primary navigation">
 				<a class="active" href="/docs/">Docs</a>
-				<a href="/tour/">Learn</a>
-				<a href="/play/">Playground</a>
+				<a href="/tour/">{{if .DocsOnly}}Tour (paused){{else}}Learn{{end}}</a>
+				<a href="/play/">Playground{{if .DocsOnly}} (paused){{end}}</a>
 				<a href="https://github.com/type-rb/type-rb">GitHub</a>
 			</nav>
 		</header>

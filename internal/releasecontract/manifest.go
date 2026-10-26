@@ -37,21 +37,37 @@ type Command struct {
 }
 
 type Row struct {
-	ID                 string   `json:"id"`
-	Title              string   `json:"title"`
-	Contract           string   `json:"contract"`
-	Failure            string   `json:"failure"`
-	Surfaces           []string `json:"surfaces"`
-	Implementations    []string `json:"implementations"`
-	Outputs            []string `json:"outputs"`
-	NativeExecutable   bool     `json:"nativeExecutable"`
-	Obligations        []string `json:"obligations"`
-	Commands           []string `json:"commands"`
-	Baseline           string   `json:"baseline"`
-	Remaining          string   `json:"remaining"`
-	Owner              string   `json:"owner"`
-	Related            []string `json:"related,omitempty"`
-	QualificationReady bool     `json:"qualificationReady"`
+	ID                 string     `json:"id"`
+	Title              string     `json:"title"`
+	Contract           string     `json:"contract"`
+	Failure            string     `json:"failure"`
+	Surfaces           []string   `json:"surfaces"`
+	Implementations    []string   `json:"implementations"`
+	Outputs            []string   `json:"outputs"`
+	NativeExecutable   bool       `json:"nativeExecutable"`
+	Obligations        []string   `json:"obligations"`
+	Commands           []string   `json:"commands"`
+	Baseline           string     `json:"baseline"`
+	Remaining          string     `json:"remaining"`
+	Owner              string     `json:"owner"`
+	Related            []string   `json:"related,omitempty"`
+	QualificationReady bool       `json:"qualificationReady"`
+	Deferrals          []Deferral `json:"deferrals,omitempty"`
+}
+
+// Deferral exempts only named obligations in the reviewed manifest. It never
+// changes catalog ownership, host coverage or other obligations in the row.
+type Deferral struct {
+	ID              string   `json:"id"`
+	Release         string   `json:"release"`
+	Implementations []string `json:"implementations"`
+	Outputs         []string `json:"outputs"`
+	Obligations     []string `json:"obligations"`
+	Scope           string   `json:"scope"`
+	Reason          string   `json:"reason"`
+	Decision        string   `json:"decision"`
+	Owner           string   `json:"owner"`
+	ReviewTrigger   string   `json:"reviewTrigger"`
 }
 
 var revisionPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -172,7 +188,7 @@ func unique(values []string) bool {
 }
 
 func ValidateManifest(manifest Manifest, catalog []Surface) error {
-	if manifest.SchemaVersion != 1 || manifest.Release != "0.5.0" || manifest.SourceRepository != "type-rb/type-rb" || !revisionPattern.MatchString(manifest.SourceRevision) || !digestPattern.MatchString(manifest.CatalogSHA256) {
+	if manifest.SchemaVersion != 2 || manifest.Release != "0.5.0" || manifest.SourceRepository != "type-rb/type-rb" || !revisionPattern.MatchString(manifest.SourceRevision) || !digestPattern.MatchString(manifest.CatalogSHA256) {
 		return fmt.Errorf("invalid release/source/catalog identity")
 	}
 	if strings.Join(manifest.Hosts, ",") != "darwin-amd64,darwin-arm64,linux-amd64,linux-arm64" {
@@ -196,6 +212,7 @@ func ValidateManifest(manifest Manifest, catalog []Surface) error {
 		commands[command.ID] = true
 	}
 	rows, owned := map[string]bool{}, map[string]string{}
+	deferralIDs := map[string]bool{}
 	for _, row := range manifest.Rows {
 		if !identifierPattern.MatchString(row.ID) || rows[row.ID] || row.Title == "" || row.Contract == "" || row.Failure == "" || row.Remaining == "" || !publicIssue(row.Owner) || !unique(row.Implementations) || !unique(row.Outputs) || !unique(row.Obligations) || !unique(row.Commands) {
 			return fmt.Errorf("incomplete or duplicate release row %s", row.ID)
@@ -219,6 +236,30 @@ func ValidateManifest(manifest Manifest, catalog []Surface) error {
 		for _, output := range row.Outputs {
 			if output != "go" && output != "ruby" && output != "typescript" && output != "service" {
 				return fmt.Errorf("unknown shared output %s", output)
+			}
+		}
+		scoped := map[string]bool{}
+		for _, d := range row.Deferrals {
+			if !identifierPattern.MatchString(d.ID) || deferralIDs[d.ID] || d.Release != manifest.Release || !unique(d.Implementations) || !unique(d.Outputs) || !unique(d.Obligations) || strings.TrimSpace(d.Scope) == "" || strings.TrimSpace(d.Reason) == "" || !publicIssue(d.Decision) || !publicIssue(d.Owner) || strings.TrimSpace(d.ReviewTrigger) == "" {
+				return fmt.Errorf("incomplete, duplicate or stale deferral in %s", row.ID)
+			}
+			deferralIDs[d.ID] = true
+			for _, implementation := range d.Implementations {
+				if !contains(row.Implementations, implementation) {
+					return fmt.Errorf("unknown deferred implementation in %s", row.ID)
+				}
+				for _, output := range d.Outputs {
+					if !contains(row.Outputs, output) && !(output == "native" && implementation == "native" && row.NativeExecutable) {
+						return fmt.Errorf("unknown deferred output in %s", row.ID)
+					}
+					for _, obligation := range d.Obligations {
+						key := implementation + "/" + output + "/" + obligation
+						if !contains(row.Obligations, obligation) || scoped[key] {
+							return fmt.Errorf("unknown or overlapping deferred obligation in %s", row.ID)
+						}
+						scoped[key] = true
+					}
+				}
 			}
 		}
 		for _, id := range row.Commands {
@@ -264,9 +305,12 @@ func CheckDiscovery(root string, expected []Surface) error {
 
 func Render(manifest Manifest, digest string) []byte {
 	var out strings.Builder
-	fmt.Fprintf(&out, "# v0.5.0 shared feature contract\n\nGenerated by `go run ./tools/release-contract --write-view`. Edit the reviewed\n[manifest](../%s), not this view. See the [maintenance and result contract](../contracts/v0.5/README.md).\n\nSource: [`%s`](https://github.com/type-rb/type-rb/tree/%s).\nManifest SHA-256: `%s`.\n\nThese are release obligations, **not a support percentage**. Every baseline is\nexplicitly unqualified, blocked or contradictory. Existing tests and Native\nfeature batches are evidence inputs; they do not qualify all release cells.\n\nBoth implementations require each listed shared output. `service` means a\nCLI/protocol/distribution contract independent of emitted program language.\nThe Native compiler additionally requires the executable path where indicated.\nAll four retained host targets apply: %s.\n\n", ManifestPath, manifest.SourceRevision, manifest.SourceRevision, digest, strings.Join(manifest.Hosts, ", "))
+	fmt.Fprintf(&out, "# v0.5.0 shared feature contract\n\nGenerated by `go run ./tools/release-contract --write-view`. Edit the reviewed\n[manifest](../%s), not this view. See the [maintenance and result contract](../contracts/v0.5/README.md).\n\nSource: [`%s`](https://github.com/type-rb/type-rb/tree/%s).\nManifest SHA-256: `%s`.\n\nThese are release obligations, **not a support percentage**. Every baseline is\nexplicitly unqualified, blocked or contradictory. Existing tests and Native\nfeature batches are evidence inputs; they do not qualify all release cells.\n\nBoth implementations require each listed shared output, subject only to the\nscoped approved deferrals below. Deferred obligations remain visible and never\ncount as passed; all other obligations in the same row remain required. `service` means a\nCLI/protocol/distribution contract independent of emitted program language.\nThe Native compiler additionally requires the executable path where indicated.\nAll four retained host targets apply: %s.\n\n", ManifestPath, manifest.SourceRevision, manifest.SourceRevision, digest, strings.Join(manifest.Hosts, ", "))
 	for _, row := range manifest.Rows {
 		fmt.Fprintf(&out, "## %s — %s\n\n%s\n\nFailure boundary: %s\n\n- Implementations: %s.\n- Shared outputs: %s; Native executable: %t.\n- Obligations: %s.\n- Baseline: **%s**; qualification plan ready: **%t**.\n- Owning commands: %s.\n- Remaining: %s\n- Next action owner: %s\n", row.ID, row.Title, row.Contract, row.Failure, strings.Join(row.Implementations, ", "), strings.Join(row.Outputs, ", "), row.NativeExecutable, strings.Join(row.Obligations, ", "), row.Baseline, row.QualificationReady, strings.Join(row.Commands, ", "), row.Remaining, row.Owner)
+		for _, d := range row.Deferrals {
+			fmt.Fprintf(&out, "- Approved deferral `%s` for %s: %s; outputs %s; obligations %s. Scope: %s Reason: %s Decision: %s Owner: %s Review trigger: %s\n", d.ID, d.Release, strings.Join(d.Implementations, ", "), strings.Join(d.Outputs, ", "), strings.Join(d.Obligations, ", "), d.Scope, d.Reason, d.Decision, d.Owner, d.ReviewTrigger)
+		}
 		if len(row.Related) > 0 {
 			fmt.Fprintf(&out, "- Existing work/decisions: %s\n", strings.Join(row.Related, ", "))
 		}

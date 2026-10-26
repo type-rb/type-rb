@@ -19,8 +19,8 @@
 			</a>
 			<nav class="site-nav" aria-label="Primary navigation">
 				<a href="/docs/">Docs</a>
-				<a href="/tour/">Learn</a>
-				<a href="/play/">Playground</a>
+				<a href="/tour/">{{if .DocsOnly}}Tour (paused){{else}}Learn{{end}}</a>
+				<a href="/play/">Playground{{if .DocsOnly}} (paused){{end}}</a>
 				<a href="https://github.com/type-rb/type-rb">GitHub</a>
 			</nav>
 		</header>
@@ -64,15 +64,15 @@
 					<span class="entry-arrow" aria-hidden="true">→</span>
 				</a>
 				<a class="entry-card" href="/tour/">
-					<span class="entry-kicker">Learn</span>
+					<span class="entry-kicker">{{if .DocsOnly}}Tour paused{{else}}Learn{{end}}</span>
 					<strong>A Tour of TypeRB</strong>
-					<span>Work through guided lessons that compile and evaluate directly in the browser.</span>
+					<span>{{if .DocsOnly}}Browser lessons are paused during the Native transition. Read the guides or use the Go implementation locally.{{else}}Work through guided lessons that compile and evaluate directly in the browser.{{end}}</span>
 					<span class="entry-arrow" aria-hidden="true">→</span>
 				</a>
 				<a class="entry-card" href="/play/">
-					<span class="entry-kicker">Experiment</span>
+					<span class="entry-kicker">{{if .DocsOnly}}Playground paused{{else}}Experiment{{end}}</span>
 					<strong>Playground</strong>
-					<span>Write, evaluate, format, and inspect generated Go, Ruby, or TypeScript.</span>
+					<span>{{if .DocsOnly}}Browser Run, Transpile and Format are paused. Documentation and command-line tools remain available.{{else}}Write, evaluate, format, and inspect generated Go, Ruby, or TypeScript.{{end}}</span>
 					<span class="entry-arrow" aria-hidden="true">→</span>
 				</a>
 			</section>

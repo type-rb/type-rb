@@ -164,7 +164,7 @@ func TestResultDecoderRejectsMissingAndUnknownFields(t *testing.T) {
 		bytes.Replace(data, []byte(`"exitCode":0,`), nil, 1),
 		bytes.Replace(data, []byte(`"skipped":0,`), nil, 1),
 		bytes.Replace(data, []byte(`"cases":1`), []byte(`"cases":null`), 1),
-		bytes.Replace(data, []byte(`"schemaVersion":1`), []byte(`"schemaVersion":1,"invented":true`), 1),
+		bytes.Replace(data, []byte(`"schemaVersion":2`), []byte(`"schemaVersion":2,"invented":true`), 1),
 		append(append([]byte{}, data...), []byte(` {}`)...),
 	} {
 		var decoded Results
