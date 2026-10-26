@@ -3,11 +3,11 @@
 This is the versioned inventory required by the accepted
 [implementation transition](../../docs/native-transition.md). The reviewed
 source baseline is `type-rb/type-rb` at
-`68fecc393b4fd5ad54bcf71071fa5406d4dd95b2`. It inventories existing Go
+`c1e4a898fcb546080c4a3f6b6dda10ba4f7698e1`. It inventories existing Go
 contracts; the proposed 1.0 capability roadmap is not the denominator.
 The generated [feature view](../../docs/v0.5-feature-contract.md) explains the
 91 release rows. The machine-readable catalog retains all 676 discovered
-owners and their 4,065 declarations, fields, flags and owning test names.
+owners and their 4,067 declarations, fields, flags and owning test names.
 Those counts describe inventory structure, **not supported features or percent
 completion**. A test name is not a scenario, and a package signature is not
 proof of its semantics.
@@ -74,7 +74,7 @@ and generated view even when only documentation/JSON changed.
 
 ## Result schema and candidate qualification
 
-The v1 result schema is defined by the JSON-tagged `Results`, `Candidate`, `Cell`
+The v2 result schema is defined by the JSON-tagged `Results`, `Candidate`, `Cell`
 and `Observation` records in
 [`internal/releasecontract/results.go`](../../internal/releasecontract/results.go)
 and the strict decoder/validator. Unknown or missing fields, null required
@@ -88,17 +88,20 @@ go run ./tools/release-contract --results results.json --qualify
 ```
 
 The first validation accepts a structurally complete unqualified progress
-report. The final command intentionally **fails** for that template. Only
-`passed` cells count toward qualification; `unqualified`, `blocked`,
+report. The final command intentionally **fails** for that template. Cells with
+manifest-approved deferrals use `qualified-with-deferrals`, never
+`passed`; all their other obligations must still pass. These cells qualify the
+approved release scope, not full parity. `unqualified`, `blocked`,
 `contradictory` and `failed` require a reason and remain in the matrix.
 
-- Top level: `schemaVersion: 1`, `release: "0.5.0"`, `manifestSHA256`,
+- Top level: `schemaVersion: 2`, `release: "0.5.0"`, `manifestSHA256`,
   `candidates`, and `cells`.
 - Candidate: `implementation` (`go` or `native`), `host`, exact 40-character
   `sourceRevision`, 64-character `compilerSHA256`, and nonempty `toolchains`
   mapping tool names to exact versions/identities. One identity per
   implementation/host prevents mixed candidate receipts.
-- Cell: `row`, `implementation`, `output`, `host`, `status`, optional `reason`,
+- Cell: `row`, `implementation`, `output`, `host`, `status`, optional `reason` and
+  `deferrals` (exact manifest IDs),
   and `observations`. The manifest expands every required row/output across
   both implementations and retained Darwin/Linux amd64/arm64 hosts. `service`
   denotes CLI/protocol/distribution behavior independent of program output.
@@ -120,6 +123,23 @@ and project manifests must keep their frozen expectations and cannot substitute
 for every release row. Backend compilers/runtimes, databases, external adapters,
 editor packages and browser tools must be recorded when a scenario uses them;
 a missing dependency cannot become a skip-based pass.
+
+The v2 manifest may attach scoped `deferrals` to a row. Each has a unique ID,
+exact release, implementations, outputs, existing obligation names, plain-language
+scope/reason, public decision/owner issues and review trigger. Hosts cannot be
+waived. Unknown or overlapping selectors are rejected. The manifest hash binds
+these decisions; a result file cannot add, omit or broaden them. Required test
+selection and browser availability diagnostics remain outside the exemptions.
+The distribution exemption covers only hosted browser tools, not documentation.
+
+For every cell the result template derives deferral IDs from the manifest.
+Passing receipts must omit deferred obligations and provide all other obligations
+with no skipped cases. A cell containing deferrals must use
+`qualified-with-deferrals`; reporting it as `passed` is an error. The qualification
+summary counts these separately. Ordinary progress/failure statuses retain the
+same exact IDs, reasons and unsuccessful observations. Changing a deferral or
+schema invalidates old result bundles; never rewrite historical evidence to
+turn an earlier failure into success.
 
 Every row starts with `qualificationReady: false`. Before changing it, review
 the complete member-to-scenario mapping, exact candidate consumption and

@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "68fecc393b4fd5ad54bcf71071fa5406d4dd95b2",
-  "catalogSHA256": "50036c402f1639556b8ec079aa29dbfce369e630b61b786bc04a3e49faf9ac91",
+  "sourceRevision": "c1e4a898fcb546080c4a3f6b6dda10ba4f7698e1",
+  "catalogSHA256": "973a4b62200d5232e3b98736b60a77bc984c08934b9b5768937499bbe753c2f6",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -1165,7 +1165,7 @@
     {
       "id": "package.orm",
       "title": "trb/orm",
-      "contract": "Preserve typed schema/query/projection, relation loading, CRUD, transactions and SQLite/MySQL failure/cleanup contracts. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve typed schema/query/projection, relation loading, CRUD, transactions and SQLite/PostgreSQL/MySQL failure/cleanup contracts. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "document:docs/guides/orm.md#configuration",
@@ -2981,7 +2981,7 @@
     {
       "id": "cli.test",
       "title": "Project tests",
-      "contract": "Preserve discovery, name patterns, execution, assertions, suite nesting, reporting, failure status and project configuration. Resolve the known suite-name selection discrepancy before qualification.",
+      "contract": "Preserve file/directory discovery and selection, execution, assertions, suite nesting, reporting, failure status and project configuration. The name-pattern obligation separately covers -t/--test-name-pattern; Go retains it, while Native omits it pending specification review. Native must diagnose the unsupported option rather than silently ignore it.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "command:test",
@@ -3003,7 +3003,8 @@
         "accepted-input",
         "rejected-input",
         "structured-output",
-        "retained-state-cleanup"
+        "retained-state-cleanup",
+        "name-pattern"
       ],
       "commands": [
         "cli",
@@ -3016,7 +3017,27 @@
         "https://github.com/type-rb/type-rb-native/issues/643",
         "https://github.com/type-rb/type-rb-native/issues/624"
       ],
-      "qualificationReady": false
+      "qualificationReady": false,
+      "deferrals": [
+        {
+          "id": "native-test-name-pattern",
+          "release": "0.5.0",
+          "implementations": [
+            "native"
+          ],
+          "outputs": [
+            "service"
+          ],
+          "obligations": [
+            "name-pattern"
+          ],
+          "scope": "Only -t/--test-name-pattern matching; file/directory selection and unsupported-option diagnostics remain required.",
+          "reason": "Resolve suite-name versus individual-test matching before adding this optional Native feature.",
+          "decision": "https://github.com/type-rb/type-rb-native/issues/1255",
+          "owner": "https://github.com/type-rb/type-rb-native/issues/643",
+          "reviewTrigger": "Review at v0.5 candidate freeze and before restoring this feature after v0.5; no automatic renewal in a later release."
+        }
+      ]
     },
     {
       "id": "cli.packages",
@@ -3317,7 +3338,7 @@
     {
       "id": "cli.browser",
       "title": "Playground and tour",
-      "contract": "Preserve local browser/HTTP and WASM playground, interactive tour examples, versions, diagnostics and load/update behavior.",
+      "contract": "Go retains local play/tour evaluation, three-language generated source, formatting, diagnostics and fresh-request state. Native local play/tour execution is deferred for v0.5 and must return an explicit unsupported diagnostic, without invoking the Go compiler behind the command. The availability obligation checks these implementation-specific command boundaries. Public-site execution belongs to distribution, separately from local commands.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "command:play",
@@ -3338,7 +3359,8 @@
         "accepted-input",
         "rejected-input",
         "structured-output",
-        "retained-state-cleanup"
+        "retained-state-cleanup",
+        "availability"
       ],
       "commands": [
         "browser",
@@ -3348,7 +3370,30 @@
       "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
       "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
       "related": [],
-      "qualificationReady": false
+      "qualificationReady": false,
+      "deferrals": [
+        {
+          "id": "native-local-browser",
+          "release": "0.5.0",
+          "implementations": [
+            "native"
+          ],
+          "outputs": [
+            "service"
+          ],
+          "obligations": [
+            "accepted-input",
+            "rejected-input",
+            "structured-output",
+            "retained-state-cleanup"
+          ],
+          "scope": "Native local play/tour execution only; explicit unsupported diagnostics remain required. REPL is unaffected.",
+          "reason": "Prioritize the required REPL and application/CLI parity before browser wrappers.",
+          "decision": "https://github.com/type-rb/type-rb-native/issues/1255",
+          "owner": "https://github.com/type-rb/type-rb-native/issues/1256",
+          "reviewTrigger": "Review at v0.5 candidate freeze and before restoring this feature after v0.5; no automatic renewal in a later release."
+        }
+      ]
     },
     {
       "id": "cli.clean",
@@ -3801,7 +3846,7 @@
     {
       "id": "distribution",
       "title": "Installation and paired release artifacts",
-      "contract": "Preserve Darwin/Linux amd64/arm64 CLI archives, executable permissions, Homebrew, OCI, checksums/provenance, release notes, Pages/WASM, package indexes and editor release routes. Rehearse history/immutable seed/support/security handoff before cutover; current Native host gaps remain unqualified.",
+      "contract": "Preserve Darwin/Linux amd64/arm64 CLI archives, executable permissions, Homebrew, OCI, checksums/provenance, release notes, updated Pages documentation, package indexes and editor release routes. Rehearse history/immutable seed/support/security handoff before cutover; current Native host gaps remain unqualified. The site-browser-runtime obligation separately covers hosted Run, Transpile, Format, interactive tour and their WASM/Worker assets; it is deferred at the v0.5 cutover. Keep documentation, installation/CLI guidance, clear unavailable pages and links current. Go local play/tour remains required under cli.browser.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "delivery:.github/workflows/adapter-conformance.yml",
@@ -3848,7 +3893,8 @@
         "accepted-input",
         "rejected-input",
         "structured-output",
-        "retained-state-cleanup"
+        "retained-state-cleanup",
+        "site-browser-runtime"
       ],
       "commands": [
         "distribution",
@@ -3858,7 +3904,28 @@
       "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
       "owner": "https://github.com/type-rb/type-rb-native/issues/1168",
       "related": [],
-      "qualificationReady": false
+      "qualificationReady": false,
+      "deferrals": [
+        {
+          "id": "public-site-browser-runtime",
+          "release": "0.5.0",
+          "implementations": [
+            "go",
+            "native"
+          ],
+          "outputs": [
+            "service"
+          ],
+          "obligations": [
+            "site-browser-runtime"
+          ],
+          "scope": "Hosted Run/Transpile/Format and interactive tour execution/assets only; documentation publishing and local Go tools remain required.",
+          "reason": "Use documentation-only Pages during the Native transition rather than add a browser artifact supply chain to the v0.5 critical path.",
+          "decision": "https://github.com/type-rb/type-rb-native/issues/1255",
+          "owner": "https://github.com/type-rb/type-rb-native/issues/1168",
+          "reviewTrigger": "Review at v0.5 candidate freeze and before restoring this feature after v0.5; no automatic renewal in a later release."
+        }
+      ]
     },
     {
       "id": "output.go",

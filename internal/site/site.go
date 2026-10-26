@@ -32,6 +32,7 @@ var (
 )
 
 type Options struct {
+	DocsOnly  bool
 	OutputDir string
 	DocsDir   string
 	Version   string
@@ -73,10 +74,12 @@ type navPage struct {
 }
 
 type landingData struct {
-	Version string
+	DocsOnly bool
+	Version  string
 }
 
 type docsData struct {
+	DocsOnly      bool
 	Title         string
 	URL           string
 	SourceURL     string
@@ -97,6 +100,11 @@ func Export(options Options) error {
 		options.Version = "dev"
 	}
 
+	if options.DocsOnly {
+		if err := exportBrowserUnavailable(options); err != nil {
+			return err
+		}
+	}
 	configuration, err := loadManifest(options.DocsDir)
 	if err != nil {
 		return err
@@ -141,12 +149,13 @@ func Export(options Options) error {
 			return err
 		}
 	}
-	if err := renderTemplate(options.OutputDir, "index.html", "landing.html", landingData{Version: options.Version}); err != nil {
+	if err := renderTemplate(options.OutputDir, "index.html", "landing.html", landingData{Version: options.Version, DocsOnly: options.DocsOnly}); err != nil {
 		return err
 	}
 
 	for _, current := range pages {
 		data := docsData{
+			DocsOnly:      options.DocsOnly,
 			Title:         current.Title,
 			URL:           current.URL,
 			SourceURL:     "https://github.com/type-rb/type-rb/blob/main/docs/" + current.Source,

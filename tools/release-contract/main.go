@@ -19,7 +19,7 @@ func main() {
 	write := flag.Bool("write-view", false, "write the generated review view")
 	template := flag.Bool("results-template", false, "print a complete unqualified result template")
 	results := flag.String("results", "", "validate an evidence result bundle")
-	qualify := flag.Bool("qualify", false, "require all result cells to pass (with --results)")
+	qualify := flag.Bool("qualify", false, "require all non-deferred obligations to pass (with --results)")
 	flag.Parse()
 	actions := 0
 	for _, active := range []bool{*discover, *check, *write, *template, *results != ""} {
@@ -57,7 +57,15 @@ func main() {
 		fail(err)
 		fail(releasecontract.ValidateResults(manifest, digest, result, filepath.Dir(*results), *qualify))
 		if *qualify {
-			fmt.Println("All release contract cells pass; independent release, migration and authorization gates still apply.")
+			passed, deferred := 0, 0
+			for _, cell := range result.Cells {
+				if cell.Status == "passed" {
+					passed++
+				} else if cell.Status == "qualified-with-deferrals" {
+					deferred++
+				}
+			}
+			fmt.Printf("Required obligations qualify: %d passed cells, %d qualified with approved deferrals (not full parity). Independent release, migration and authorization gates still apply.\n", passed, deferred)
 		} else {
 			fmt.Println("Result schema is valid. This does not qualify a release.")
 		}

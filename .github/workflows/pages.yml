@@ -102,6 +102,18 @@ jobs:
           npm ci --prefix tools/site
           npm test --prefix tools/site
 
+      - name: Verify documentation-only transition build
+        shell: bash
+        run: |
+          ./scripts/build-site.sh "$RUNNER_TEMP/docs-only-site" v0.5-scope-check docs-only
+          test -s "$RUNNER_TEMP/docs-only-site/docs/getting-started/index.html"
+          grep -F 'temporarily paused' "$RUNNER_TEMP/docs-only-site/play/index.html"
+          grep -F 'temporarily paused' "$RUNNER_TEMP/docs-only-site/tour/index.html"
+          test ! -e "$RUNNER_TEMP/docs-only-site/assets/trb.wasm"
+          test ! -e "$RUNNER_TEMP/docs-only-site/assets/wasm_exec.js"
+          test ! -e "$RUNNER_TEMP/docs-only-site/assets/playground-worker.js"
+          test ! -e "$RUNNER_TEMP/docs-only-site/runtime.json"
+
       - name: Build TypeRB website
         shell: bash
         run: |

@@ -8697,6 +8697,8 @@
     "source": "internal/site",
     "members": [
       "TestCompileDocumentationExampleRequiresMainForPrograms (internal/site/documentation_examples_test.go)",
+      "TestDocumentationOnlyExportKeepsDocsWithoutBrowserExecution (internal/site/browser_unavailable_test.go)",
+      "TestDocumentationOnlyRefusesStaleInteractiveAssets (internal/site/browser_unavailable_test.go)",
       "TestExportBuildsCapabilityMapFromValidatedCatalog (internal/site/site_test.go)",
       "TestExportBuildsLandingAndPublicDocumentation (internal/site/site_test.go)",
       "TestExportRejectsNavigationToUnpublishedPage (internal/site/site_test.go)",

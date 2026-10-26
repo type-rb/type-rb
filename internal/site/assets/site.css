@@ -1581,3 +1581,14 @@ a {
 		gap: 2px;
 	}
 }
+
+.browser-unavailable-content {
+ width: min(100% - 48px, 780px);
+ margin: 64px auto;
+ line-height: 1.75;
+}
+.browser-unavailable-content h1 {
+ line-height: 1.2;
+ font-size: clamp(28px, 5vw, 42px);
+}
+.browser-unavailable-content a { color: var(--accent-bright); }

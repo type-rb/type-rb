@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
-// Results is the v1 evidence interchange schema. ValidateResults distinguishes
+// Results is the v2 evidence interchange schema. ValidateResults distinguishes
 // a structurally valid progress report from complete release qualification.
 type Results struct {
 	SchemaVersion  int         `json:"schemaVersion"`
@@ -33,6 +34,7 @@ type Cell struct {
 	Status         string        `json:"status"`
 	Reason         string        `json:"reason,omitempty"`
 	Observations   []Observation `json:"observations"`
+	Deferrals      []string      `json:"deferrals,omitempty"`
 }
 
 type Observation struct {
@@ -52,8 +54,22 @@ func cellKey(cell Cell) string {
 }
 func candidateKey(implementation, host string) string { return implementation + "/" + host }
 
+// deferredObligations is derived only from the hashed, reviewed manifest.
+func deferredObligations(row Row, implementation, output string) (map[string]bool, []string) {
+	obligations, ids := map[string]bool{}, []string{}
+	for _, d := range row.Deferrals {
+		if contains(d.Implementations, implementation) && contains(d.Outputs, output) {
+			ids = append(ids, d.ID)
+			for _, obligation := range d.Obligations {
+				obligations[obligation] = true
+			}
+		}
+	}
+	return obligations, ids
+}
+
 func ResultsTemplate(manifest Manifest, digest string) Results {
-	result := Results{SchemaVersion: 1, Release: manifest.Release, ManifestSHA256: digest, Candidates: []Candidate{}, Cells: []Cell{}}
+	result := Results{SchemaVersion: 2, Release: manifest.Release, ManifestSHA256: digest, Candidates: []Candidate{}, Cells: []Cell{}}
 	for _, row := range manifest.Rows {
 		for _, implementation := range row.Implementations {
 			outputs := append([]string{}, row.Outputs...)
@@ -62,7 +78,8 @@ func ResultsTemplate(manifest Manifest, digest string) Results {
 			}
 			for _, output := range outputs {
 				for _, host := range manifest.Hosts {
-					result.Cells = append(result.Cells, Cell{Row: row.ID, Implementation: implementation, Output: output, Host: host, Status: row.Baseline, Reason: row.Remaining, Observations: []Observation{}})
+					_, deferralIDs := deferredObligations(row, implementation, output)
+					result.Cells = append(result.Cells, Cell{Row: row.ID, Implementation: implementation, Output: output, Host: host, Status: row.Baseline, Reason: row.Remaining, Observations: []Observation{}, Deferrals: deferralIDs})
 				}
 			}
 		}
@@ -103,7 +120,7 @@ func evidenceHash(directory, name string) (string, error) {
 }
 
 func ValidateResults(manifest Manifest, digest string, result Results, directory string, qualify bool) error {
-	if result.SchemaVersion != 1 || result.Release != manifest.Release || result.ManifestSHA256 != digest {
+	if result.SchemaVersion != 2 || result.Release != manifest.Release || result.ManifestSHA256 != digest {
 		return fmt.Errorf("stale or incompatible result identity")
 	}
 	expected := map[string]bool{}
@@ -135,13 +152,20 @@ func ValidateResults(manifest Manifest, digest string, result Results, directory
 		}
 		seen[key] = true
 		row := rows[cell.Row]
+		deferred, ids := deferredObligations(row, cell.Implementation, cell.Output)
+		if !slices.Equal(cell.Deferrals, ids) {
+			return fmt.Errorf("deferrals differ from the reviewed manifest for %s", key)
+		}
 		switch cell.Status {
 		case "unqualified", "blocked", "contradictory", "failed":
 			if strings.TrimSpace(cell.Reason) == "" {
 				return fmt.Errorf("missing non-passing reason for %s", key)
 			}
 			unqualified++
-		case "passed":
+		case "passed", "qualified-with-deferrals":
+			if (cell.Status == "qualified-with-deferrals") != (len(ids) > 0) {
+				return fmt.Errorf("deferred obligations cannot count as passed for %s", key)
+			}
 			if !row.QualificationReady {
 				return fmt.Errorf("%s has no reviewed exact-candidate qualification plan", key)
 			}
@@ -150,7 +174,7 @@ func ValidateResults(manifest Manifest, digest string, result Results, directory
 			}
 			observed := map[string]bool{}
 			for _, observation := range cell.Observations {
-				if observed[observation.Obligation] || !contains(row.Obligations, observation.Obligation) || !contains(row.Commands, observation.CommandID) || len(observation.ExecutedArgv) == 0 {
+				if deferred[observation.Obligation] || observed[observation.Obligation] || !contains(row.Obligations, observation.Obligation) || !contains(row.Commands, observation.CommandID) || len(observation.ExecutedArgv) == 0 {
 					return fmt.Errorf("unknown or duplicate observation for %s", key)
 				}
 				observed[observation.Obligation] = true
@@ -166,7 +190,7 @@ func ValidateResults(manifest Manifest, digest string, result Results, directory
 				}
 			}
 			for _, obligation := range row.Obligations {
-				if !observed[obligation] {
+				if !deferred[obligation] && !observed[obligation] {
 					return fmt.Errorf("missing %s observation for %s", obligation, key)
 				}
 			}
