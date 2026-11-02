@@ -29,9 +29,9 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 	case "trb.internal.test.assert_equal", "trb.internal.test.assert_not_equal", "trb.internal.test.assert_true", "trb.internal.test.assert_false", "trb.internal.test.assert_nil":
 		return "trb_test_" + strings.TrimPrefix(name, "trb.internal.test.") + "(" + strings.Join(arguments, ", ") + ")", true
 	case "trb.internal.test.assert_result_ok":
-		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Ok, got Err(#{actual.error.inspect})\") unless actual.is_a?(Result::Ok); actual.value }).call(" + arguments[0] + ")", true
+		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Ok, got Err(#{trb_test_inspect(actual.error)})\") unless actual.is_a?(Result::Ok); actual.value }).call(" + arguments[0] + ")", true
 	case "trb.internal.test.assert_result_err":
-		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Err, got Ok(#{actual.value.inspect})\") unless actual.is_a?(Result::Err); actual.error }).call(" + arguments[0] + ")", true
+		return "(->(actual) { raise TrbTestFailure.new(" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", \"expected Err, got Ok(#{trb_test_inspect(actual.value)})\") unless actual.is_a?(Result::Err); actual.error }).call(" + arguments[0] + ")", true
 	default:
 		return "", false
 	}
@@ -39,6 +39,7 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 
 func (g *generator) testRuntimeSupport() {
 	g.line(`require "json"`, "")
+	g.testInspectionRuntime()
 	g.line(`class TrbTestFailure < StandardError`, "")
 	g.indent++
 	g.line(`attr_reader :path, :line, :column`, "")
@@ -129,9 +130,9 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`exit(1) if $trb_test_failed > 0`, "")
 	g.indent--
 	g.line(`end`, "")
-	g.line(`def trb_test_assert_equal(actual, expected, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{actual.inspect} to equal #{expected.inspect}") unless trb_test_equal(actual, expected); end`, "")
-	g.line(`def trb_test_assert_not_equal(actual, expected, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{actual.inspect} not to equal #{expected.inspect}") if trb_test_equal(actual, expected); end`, "")
-	g.line(`def trb_test_assert_true(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{actual.inspect} to be true") unless actual == true; end`, "")
-	g.line(`def trb_test_assert_false(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{actual.inspect} to be false") unless actual == false; end`, "")
-	g.line(`def trb_test_assert_nil(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{actual.inspect} to be nil") unless actual.nil?; end`, "")
+	g.line(`def trb_test_assert_equal(actual, expected, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{trb_test_inspect(actual)} to equal #{trb_test_inspect(expected)}") unless trb_test_equal(actual, expected); end`, "")
+	g.line(`def trb_test_assert_not_equal(actual, expected, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{trb_test_inspect(actual)} not to equal #{trb_test_inspect(expected)}") if trb_test_equal(actual, expected); end`, "")
+	g.line(`def trb_test_assert_true(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{trb_test_inspect(actual)} to be true") unless actual == true; end`, "")
+	g.line(`def trb_test_assert_false(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{trb_test_inspect(actual)} to be false") unless actual == false; end`, "")
+	g.line(`def trb_test_assert_nil(actual, path, line, column); raise TrbTestFailure.new(path, line, column, "expected #{trb_test_inspect(actual)} to be nil") unless actual.nil?; end`, "")
 }

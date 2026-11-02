@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -233,4 +234,22 @@ end
 			}
 		})
 	}
+}
+
+func TestAssertionInspectionTypeScriptTypes(t *testing.T) {
+	source, err := os.ReadFile("testdata/assertion_values.trb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	units := []SourceUnit{
+		{Filename: "/project/src/values_test.trb", ModulePath: "values_test", Source: source, TestRegistration: "trb_test_register_values"},
+	}
+	for _, module := range []string{"left/model", "right/model"} {
+		units = append(units, SourceUnit{Filename: "/project/src/" + module + ".trb", ModulePath: module, Source: []byte("record Labelled\n value: Integer\nend\n")})
+	}
+	artifacts, err := CompileProject(units, Options{Mode: "typescript", SourceRoot: "/project/src", ProjectRoot: "/project", TypeScriptRuntime: "bun"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkTypeScriptArtifacts(t, artifacts, "assertion_values")
 }

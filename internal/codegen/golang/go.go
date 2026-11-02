@@ -16,6 +16,7 @@ import (
 	cliapp "github.com/type-rb/type-rb/internal/cliapp"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/codegen/testinspection"
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
@@ -28,6 +29,7 @@ import (
 )
 
 type generator struct {
+	testInspection         *testinspection.Plan
 	initializers           []string
 	initializerNames       []string
 	explicitInitialization bool
@@ -101,6 +103,7 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 }
 
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
+	inspection := testinspection.Analyze(programs)
 	projectNames := analyzeGoProjectNames(programs)
 	enumLayout := analyzeGoEnumLayout(programs)
 	identityAliases := analyzeGoIdentityAliases(programs)
@@ -108,24 +111,25 @@ func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames, ormRuntime, execution, enumLayout, identityAliases)
+		result[index] = generate(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, inspection)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases) sourcemap.Generated {
-	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, nil)
+func generate(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases, inspection *testinspection.Plan) sourcemap.Generated {
+	generated, imports, bindings := generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, inspection, nil)
 	bindingNames := analyzeGoBindingNames(bindings, imports)
 	if len(bindingNames) == 0 {
 		return generated
 	}
-	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, bindingNames)
+	generated, _, _ = generatePass(program, projectNames, ormRuntime, execution, enumLayout, identityAliases, inspection, bindingNames)
 	return generated
 }
 
-func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
+func generatePass(program *ir.Program, projectNames *goProjectNames, ormRuntime *goORMRuntimePlan, execution *effectplan.Plan, enumLayout goEnumLayout, identityAliases goIdentityAliases, inspection *testinspection.Plan, bindingNames map[string]string) (sourcemap.Generated, map[string]string, map[string]bool) {
 	ormPackageKey := goORMPackageKey(program)
 	g := &generator{
+		testInspection:         inspection,
 		explicitInitialization: program.CompilationUnit != "",
 
 		topMethods:       map[string]bool{},
@@ -841,6 +845,7 @@ func (g *generator) record(record *ir.Record) {
 	g.indent--
 	g.line("}")
 	fields := recordFields(record.Body)
+	g.testRecordView(record, name, fields)
 	if recordFieldsHaveDefaults(fields) {
 		g.b.WriteByte('\n')
 		g.recordDefaultConstructor(record, name, fields)
@@ -936,6 +941,7 @@ func (g *generator) enum(enum *ir.Enum) {
 	if enumHasPayload(enum) {
 		g.payloadEnum(enum, name)
 		g.enumMethods(enum, name)
+		g.testEnumView(enum, name)
 		return
 	}
 	underlying := "int"
@@ -967,6 +973,7 @@ func (g *generator) enum(enum *ir.Enum) {
 	g.line(")")
 	g.b.WriteByte('\n')
 	g.enumMethods(enum, name)
+	g.testEnumView(enum, name)
 }
 
 func (g *generator) enumMethods(enum *ir.Enum, enumName string) {
@@ -1282,6 +1289,7 @@ func (g *generator) class(class *ir.Class) {
 	}
 	g.b.WriteByte('\n')
 
+	g.testClassView(class, name, fields)
 	initialize := findInitialize(methods)
 	{
 		parameters := g.classConstructorParameters(class, initialize)

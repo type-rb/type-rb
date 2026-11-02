@@ -1899,6 +1899,38 @@ end
 - `expect<T>(actual)` preserves `T` in `Expectation<T>`. An assertion failure
   aborts the current case, records the assertion's `.trb` location, and does
   not abort subsequent cases.
+- Assertion messages use a portable diagnostic display, not target-language
+  source, JSON serialization, or a user-defined `to_s`/inspection method.
+  Records and classes use their authored declaration and field names, for
+  example `Point(x: 1, y: 2)`. Field order is declaration order; JSON field
+  attributes do not rename diagnostic fields. Generic arguments are omitted.
+  Names include authored module nesting; when separate source modules declare
+  the same name, their canonical import paths disambiguate it, for example
+  `geometry/point::Point(x: 1, y: 2)`. Import aliases do not change this name.
+  This does not define the unsettled superclass initialization semantics below.
+- Value-carrying enums use `Shape::Circle(2)` and `Result::Ok(1)`, with payloads
+  in declaration order; a zero-payload variant of such an enum is
+  `Shape::Empty`. A wholly payloadless enum displays its quoted member name,
+  and a raw-value enum displays its declared String or Integer raw value.
+  Transparent aliases and newtypes display their underlying value. Diagnostic
+  text does not establish type identity or equality.
+- Scalars display as `nil`, `true`, `false`, decimal Integers, or shortest
+  round-tripping decimal Floats without an exponent or redundant `.0`.
+  Negative Float zero is `-0`; nonfinite Floats are `NaN`, `Infinity`, and
+  `-Infinity`. Strings and Symbols use double quotes, JSON-style escapes for
+  quotes, backslashes and U+0000–U+001F, and otherwise retain Unicode characters.
+  Arrays use `[1, 2]`, Bytes use `Bytes[65, 66]`, integer ranges use `1..3` or
+  `1...3`, and Hashes use `{"a" => 1}`. Hash keys are sorted by numeric value
+  or Unicode scalar order before rendering. Functions display as `<function>`;
+  opaque host values display as `<value>`, without host addresses or getters.
+- Each displayed value is bounded independently: at most 128 Unicode scalars
+  per String/Symbol, 16 items or fields per container/nominal value, eight
+  levels starting with the root at depth zero, and 256 visited non-nil values.
+  Hash keys have their own scalar display budget. Reaching a depth or value
+  budget emits `...`; excess items add a final `...` item, and truncated strings
+  append `...` after their closing quote. A reference to an active ancestor is
+  `<cycle>`; shared values outside the active ancestor path display normally.
+  The depth/value bound takes precedence over cycle detection.
 - `expect_ok<T, E>(actual: Result<T, E>)` returns the `Ok` payload and fails the
   current case if `actual` is `Err`. `expect_err<T, E>(actual: Result<T, E>)`
   returns the `Err` payload and fails if `actual` is `Ok`. Standard Result type

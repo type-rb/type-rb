@@ -9,6 +9,7 @@ import (
 
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/codegen/testinspection"
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
@@ -20,6 +21,7 @@ import (
 )
 
 type generator struct {
+	testInspection        *testinspection.Plan
 	separateStartup       bool
 	initializationActions map[string]bool
 	b                     strings.Builder
@@ -63,17 +65,19 @@ func GenerateMapped(program *ir.Program) sourcemap.Generated {
 }
 
 func GenerateProjectMapped(programs []*ir.Program) []sourcemap.Generated {
+	inspection := testinspection.Analyze(programs)
 	projectNames := analyzeRubyProjectNames(programs)
 	execution := effectplan.ExecutionScope(programs)
 	result := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		result[index] = generate(program, projectNames, execution)
+		result[index] = generate(program, projectNames, execution, inspection)
 	}
 	return result
 }
 
-func generate(program *ir.Program, projectNames *rubyProjectNames, execution *effectplan.Plan) sourcemap.Generated {
+func generate(program *ir.Program, projectNames *rubyProjectNames, execution *effectplan.Plan, inspection *testinspection.Plan) sourcemap.Generated {
 	g := &generator{
+		testInspection:  inspection,
 		separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program),
 		loader:          program.RubyLoader, modulePath: program.ModulePath,
 		topFunctions: map[string]bool{}, topTargets: map[string]string{}, topMethodTargets: map[*ir.Method]string{},
@@ -279,6 +283,7 @@ func (g *generator) statement(statement ir.Statement) {
 			g.indent--
 			g.line("end", "")
 		}
+		g.testClassView(n, fields)
 		g.indent--
 		g.line("end", "")
 	case *ir.Record:
@@ -302,9 +307,11 @@ func (g *generator) statement(statement ir.Statement) {
 		} else {
 			g.line(name+" = Data.define("+strings.Join(names, ", ")+")", n.TrailingComment)
 		}
+		g.testRecordView(n, name, fields)
 	case *ir.Enum:
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
+			g.testEnumViews(n)
 			break
 		}
 		fields := ":name"
@@ -335,6 +342,7 @@ func (g *generator) statement(statement ir.Statement) {
 				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new("+arguments+")", member.TrailingComment)
 			}
 		}
+		g.testEnumViews(n)
 	case *ir.TypeAlias:
 		if len(n.Variants) > 0 {
 			g.line(n.Name+" = "+n.Target.Name, n.TrailingComment)

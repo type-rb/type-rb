@@ -108,6 +108,21 @@ The initial assertion surface is:
 Equality assertions compare portable values structurally across backends,
 including Arrays, Hashes, records, and value-carrying enums.
 
+Failures show the names you wrote in TypeRB. For example, comparing two
+`Point` records produces the same message in Go, Ruby, and TypeScript:
+
+```text
+expected Point(x: 1, y: 2) to equal Point(x: 1, y: 3)
+```
+
+Nested values keep this display, including Result payloads and records decoded
+from JSON. Hash keys have a stable sorted order. Long strings and collections
+use `...`, and recursive values use `<cycle>`. Rendering does not call your
+`to_s` method. A payloadless enum displays its member name, such as `"North"`;
+a raw-value enum displays its declared raw value, such as `"READY"`.
+This diagnostic display is not a serialization format; its complete bounds
+and value rules are in the [testing specification](../specification.md#43-test-declarations).
+
 `describe()` contains nested `describe()` and `test()` declarations. A
 `test()` body is ordinary TypeRB code, so shared setup is an explicit helper
 function and data-driven tests use an Array with `each`:
