@@ -13,6 +13,7 @@ import (
 	"github.com/type-rb/type-rb/internal/callsignature"
 	"github.com/type-rb/type-rb/internal/codegen/effectplan"
 	"github.com/type-rb/type-rb/internal/codegen/naming"
+	"github.com/type-rb/type-rb/internal/codegen/testinspection"
 	"github.com/type-rb/type-rb/internal/identity"
 	"github.com/type-rb/type-rb/internal/ir"
 	jobsintegration "github.com/type-rb/type-rb/internal/jobs"
@@ -25,6 +26,8 @@ import (
 )
 
 type generator struct {
+	testInspection          *testinspection.Plan
+	testViews               *testViewRegistry
 	deferredStartupImports  []string
 	initializationActions   map[string]bool
 	initializationFunctions []string
@@ -157,6 +160,7 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 	if err != nil {
 		return nil, err
 	}
+	inspection := testinspection.Analyze(programs)
 	execution := effectplan.ExecutionScope(programs)
 	var projectWeb *webintegration.Manifest
 	for _, program := range programs {
@@ -174,19 +178,19 @@ func GenerateProjectMapped(programs []*ir.Program) ([]sourcemap.Generated, error
 	}
 	generated := make([]sourcemap.Generated, len(programs))
 	for index, program := range programs {
-		generated[index] = generate(program, plan, execution, moduleExtensions, projectWeb)
+		generated[index] = generate(program, plan, execution, moduleExtensions, projectWeb, inspection)
 	}
 	return generated, nil
 }
 
-func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string, projectWeb *webintegration.Manifest) sourcemap.Generated {
+func generate(program *ir.Program, suspension *SuspensionPlan, execution *effectplan.Plan, moduleExtensions map[string]string, projectWeb *webintegration.Manifest, inspection *testinspection.Plan) sourcemap.Generated {
 	webManifest := webintegration.ManifestFrom(program.Extensions)
 	webDispatchOnly := false
 	if webManifest == nil && projectWeb != nil && importsWebTestingDispatch(program) {
 		webManifest = projectWeb
 		webDispatchOnly = true
 	}
-	g := &generator{separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program), moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
+	g := &generator{testInspection: inspection, testViews: &testViewRegistry{names: map[string]string{}}, separateStartup: program.CompilationUnit != "" && ir.HasEntrypoint(program), moduleNames: analyzeModuleNames(program.Statements), modulePath: program.ModulePath, moduleExtensions: moduleExtensions, topFunctions: map[string]bool{}, topMethods: map[string]*ir.Method{}, topTargets: map[string]string{}, records: map[string]bool{}, typeAliases: map[string]string{}, typeMappings: map[string]string{}, localTypeOwners: localNestedTypeOwners(program.Statements), namedImportTypes: namedImportedTypes(program.Statements), typeParameters: map[string]int{}, lexicalNames: map[string]string{}, exactTypes: map[string]*typescriptTypeIdentity{}, declarationNames: map[identity.Declaration]string{}, runtimeImports: map[string]bool{}, emittedImports: map[string]bool{}, standardResult: standardResultAvailable(program), suspension: suspension, execution: execution, jobs: jobsintegration.ManifestFrom(program.Extensions), jobsSQL: jobssql.ManifestFrom(program.Extensions), orm: ormintegration.ManifestFrom(program.Extensions), web: webManifest, webDispatchOnly: webDispatchOnly, sourceRecorder: sourcemap.NewRecorder(program.SourcePath), sourcePath: program.SourcePath}
 	g.initializationActions = map[string]bool{}
 	if program.CyclicInitialization {
 		for _, action := range program.InitializationActions {
@@ -235,6 +239,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		g.line(function)
 	}
 	g.integrations(program.Extensions)
+	g.testViewSupport()
 	if g.modulePath == "trb/std/test/index" {
 		g.testRuntimeSupport()
 	}
@@ -1982,7 +1987,7 @@ func (g *generator) importedFunctionUsesExecutionScope(reference *ir.Reference) 
 	return g.execution.Method(reference.Package, "", name)
 }
 
-func (g *generator) expr(expression ir.Expression) string {
+func (g *generator) exprRaw(expression ir.Expression) string {
 	if expression == nil {
 		return ""
 	}
@@ -2838,7 +2843,7 @@ func (g *generator) assignmentTarget(expression ir.Expression) string {
 		}
 		return g.expr(index.Receiver) + "[" + g.expr(index.Index) + "]"
 	}
-	return g.expr(expression)
+	return g.exprRaw(expression)
 }
 
 func (g *generator) binaryOperand(expression ir.Expression) string {

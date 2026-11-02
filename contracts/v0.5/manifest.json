@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "c1e4a898fcb546080c4a3f6b6dda10ba4f7698e1",
-  "catalogSHA256": "973a4b62200d5232e3b98736b60a77bc984c08934b9b5768937499bbe753c2f6",
+  "sourceRevision": "7e2c38fa523edf5d8717e8400f3cc2f057f5facd",
+  "catalogSHA256": "1c773f7d9ad8630ff3cb731e02db45dba887c7f9a62d1a7d6148d6d438546f21",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -2198,7 +2198,7 @@
     {
       "id": "package.std.test",
       "title": "trb/std/test",
-      "contract": "Preserve test/suite declarations, assertions, selection, isolation, failure reporting and exit behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve test/suite declarations, assertions, selection, isolation, failure reporting and exit behavior. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence. Assertion failure values follow the testing specification: authored names, portable scalar/container forms, deterministic ordering and bounded cycle/truncation output.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "document:docs/standard-library.md#tests",
@@ -2981,7 +2981,7 @@
     {
       "id": "cli.test",
       "title": "Project tests",
-      "contract": "Preserve file/directory discovery and selection, execution, assertions, suite nesting, reporting, failure status and project configuration. The name-pattern obligation separately covers -t/--test-name-pattern; Go retains it, while Native omits it pending specification review. Native must diagnose the unsupported option rather than silently ignore it.",
+      "contract": "Preserve file/directory discovery and selection, execution, assertions, suite nesting, reporting, failure status and project configuration. The name-pattern obligation separately covers -t/--test-name-pattern; Go retains it, while Native omits it pending specification review. Native must diagnose the unsupported option rather than silently ignore it. Assertion failure values follow the testing specification: authored names, portable scalar/container forms, deterministic ordering and bounded cycle/truncation output.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "command:test",

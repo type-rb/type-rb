@@ -3,11 +3,11 @@
 This is the versioned inventory required by the accepted
 [implementation transition](../../docs/native-transition.md). The reviewed
 source baseline is `type-rb/type-rb` at
-`c1e4a898fcb546080c4a3f6b6dda10ba4f7698e1`. It inventories existing Go
+`7e2c38fa523edf5d8717e8400f3cc2f057f5facd`. It inventories existing Go
 contracts; the proposed 1.0 capability roadmap is not the denominator.
 The generated [feature view](../../docs/v0.5-feature-contract.md) explains the
 91 release rows. The machine-readable catalog retains all 676 discovered
-owners and their 4,067 declarations, fields, flags and owning test names.
+owners and their 4,069 declarations, fields, flags and owning test names.
 Those counts describe inventory structure, **not supported features or percent
 completion**. A test name is not a scenario, and a package signature is not
 proof of its semantics.

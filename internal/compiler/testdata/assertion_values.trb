@@ -1,0 +1,183 @@
+import { describe, expect, expect_ok, test } from trb/std/test
+import trb/std/result
+import trb/std/json
+import { Labelled as LeftLabel } from left/model
+import { Labelled as RightLabel } from right/model
+record Point
+	x: Integer @json("horizontal")
+	y: Integer
+end
+record Box<T>
+	value: T
+end
+enum Shape
+	Empty
+	Circle(radius: Integer)
+end
+enum Direction
+	North
+	South
+end
+enum Status
+	Ready = "READY"
+	Done = "DONE"
+end
+enum Priority
+	Low = -1
+	High = 2
+end
+class Base
+end
+class Child < Base
+	@child: String := "child"
+end
+def generic_failure<T>(value: T)
+	expect(value).to_be_nil()
+end
+class Node
+	@value: Integer
+	@next: Node?
+	def initialize(value: Integer)
+		@value = value
+		@next = nil
+	end
+	def link(value: Node)
+		@next = value
+	end
+	def to_s(): String
+		puts("USER FORMATTER CALLED")
+		return "wrong"
+	end
+end
+describe("Values") do
+	test("record") do
+		expect(Point.new(x: 1, y: 2)).to_equal(Point.new(x: 1, y: 3))
+	end
+	test("generic record") do
+		expect(Box<String>.new(value: "text")).to_be_nil()
+	end
+	test("nested array") do
+		expect([Point.new(x: 1, y: 2)]).to_be_nil()
+	end
+	test("hash") do
+		expect({ "b" => 2, "a" => 1 }).to_be_nil()
+	end
+	test("optional") do
+		value: String? := "present"
+		expect(value).to_be_nil()
+	end
+	test("nil") do
+		expect(nil).to_be_true()
+	end
+	test("enum") do
+		expect(Shape::Circle(2)).to_equal(Shape::Circle(3))
+	end
+	test("empty variant") do
+		expect(Shape::Empty).to_be_nil()
+	end
+	test("result payload") do
+		value := expect_ok(Result<Integer, Point>::Err(Point.new(x: 1, y: 2)))
+		puts(value)
+	end
+	test("cycle") do
+		value := Node.new(7)
+		value.link(value)
+		expect(value).to_be_nil()
+	end
+	test("bytes") do
+		expect("AB".to_bytes()).to_be_nil()
+	end
+	test("quote") do
+		expect("quote\"\\\n値😀").to_be_nil()
+	end
+	test("integer hash") do
+		expect({ 10 => "ten", 2 => "two" }).to_be_nil()
+	end
+	test("decoded record") do
+		value := expect_ok(JSON.decode<Point>("{\"horizontal\":4,\"y\":5}"))
+		expect(value).to_be_nil()
+	end
+	test("decoded result") do
+		expect(JSON.decode<Point>("{\"horizontal\":4,\"y\":5}")).to_be_nil()
+	end
+	test("nested generic record") do
+		expect(Box<Point>.new(value: Point.new(x: 1, y: 2))).to_be_nil()
+	end
+	test("long array") do
+		expect([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]).to_be_nil()
+	end
+	test("plain enum") do
+		generic_failure<Direction>(Direction::North)
+	end
+	test("raw enum") do
+		generic_failure<Status>(Status::Ready)
+	end
+	test("integer raw enum") do
+		generic_failure<Priority>(Priority::Low)
+	end
+	test("inherited class") do
+		expect(Child.new()).to_be_nil()
+	end
+	test("generic helper") do
+		generic_failure<Point>(Point.new(x: 8, y: 9))
+	end
+	test("shared value") do
+		point := Point.new(x: 1, y: 2)
+		expect([point, point]).to_be_nil()
+	end
+	test("unicode hash order") do
+		expect({ "😀" => 2, "" => 1 }).to_be_nil()
+	end
+	test("long string") do
+		expect("値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値").to_be_nil()
+	end
+	test("depth limit") do
+		mut value := Node.new(0)
+		mut current := value
+		mut index := 1
+		while index < 10
+			mut child := Node.new(index)
+			current.link(child)
+			current = child
+			index += 1
+		end
+		expect(value).to_be_nil()
+	end
+	test("range") do
+		expect(2..5).to_be_nil()
+	end
+	test("exclusive range") do
+		expect(2...5).to_be_nil()
+	end
+	test("small float") do
+		expect(0.0000001).to_be_nil()
+	end
+	test("large float") do
+		expect(100000000000000000000.0).to_be_nil()
+	end
+	test("negative zero") do
+		expect(-0.0).to_be_nil()
+	end
+	test("function") do
+		expect(fn(): Integer; return 1; end).to_be_nil()
+	end
+	test("imported names") do
+		expect(LeftLabel.new(value: 1)).to_be_nil()
+	end
+	test("other imported name") do
+		expect(RightLabel.new(value: 2)).to_be_nil()
+	end
+	test("node budget") do
+		values := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+		expect([values, values, values, values, values, values, values, values, values, values, values, values, values, values, values, values]).to_be_nil()
+	end
+	test("cycle budget") do
+		node := Node.new(1)
+		node.link(node)
+		values := [node, node, node, node, node, node, node, node, node, node, node, node, node, node, node, node]
+		expect([values, values, values, values, values, values, values, values, values, values, values, values, values, values, values, values]).to_be_nil()
+	end
+	test("continued") do
+		expect(1).to_equal(1)
+	end
+end

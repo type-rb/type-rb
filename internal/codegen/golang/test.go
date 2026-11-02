@@ -40,11 +40,11 @@ func (g *generator) testIntrinsic(name string, call *ir.Call, arguments []string
 		if resultAlias == "" {
 			resultAlias = "__trb_result"
 		}
-		tag, field, message := "ResultOkTag", "OkValue", "expected Ok, got Err(%#v)"
+		tag, field, message := "ResultOkTag", "OkValue", "expected Ok, got Err(%s)"
 		if name == "trb.internal.test.assert_result_err" {
-			tag, field, message = "ResultErrTag", "ErrError", "expected Err, got Ok(%#v)"
+			tag, field, message = "ResultErrTag", "ErrError", "expected Err, got Ok(%s)"
 		}
-		return "func() " + g.goType(call.ExprType()) + " { actual := " + arguments[0] + "; if actual.Kind != " + resultAlias + "." + tag + " { panic(trbTestFailure{" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", fmt.Sprintf(" + strconv.Quote(message) + ", actual." + oppositeResultField(field) + ")}) }; return actual." + field + " }()", true
+		return "func() " + g.goType(call.ExprType()) + " { actual := " + arguments[0] + "; if actual.Kind != " + resultAlias + "." + tag + " { panic(trbTestFailure{" + arguments[1] + ", " + arguments[2] + ", " + arguments[3] + ", fmt.Sprintf(" + strconv.Quote(message) + ", trbTestInspect(actual." + oppositeResultField(field) + "))}) }; return actual." + field + " }()", true
 	case "trb.std.test.describe", "trb.std.test.test":
 		return "", true
 	default:
@@ -81,6 +81,7 @@ func (g *generator) testCallBlock(call *ir.Call) bool {
 }
 
 func (g *generator) testRuntimeSupport() {
+	g.testInspectionRuntime()
 	g.requireImport("encoding/json", "json")
 	g.requireImport("fmt", "fmt")
 	g.requireImport("os", "os")
@@ -129,9 +130,9 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`if trbTestFailed > 0 { os.Exit(1) }`)
 	g.indent--
 	g.line(`}`)
-	g.line(`func trbTestAssertEqual(actual any, expected any, path string, line int, column int) { if !reflect.DeepEqual(actual, expected) { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %#v to equal %#v", actual, expected)}) } }`)
-	g.line(`func trbTestAssertNotEqual(actual any, expected any, path string, line int, column int) { if reflect.DeepEqual(actual, expected) { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %#v not to equal %#v", actual, expected)}) } }`)
-	g.line(`func trbTestAssertTrue(actual any, path string, line int, column int) { if value, ok := actual.(bool); !ok || !value { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %#v to be true", actual)}) } }`)
-	g.line(`func trbTestAssertFalse(actual any, path string, line int, column int) { if value, ok := actual.(bool); !ok || value { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %#v to be false", actual)}) } }`)
-	g.line(`func trbTestAssertNil(actual any, path string, line int, column int) { if actual == nil { return }; value := reflect.ValueOf(actual); if value.Kind() == reflect.Ptr && value.IsNil() { return }; panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %#v to be nil", actual)}) }`)
+	g.line(`func trbTestAssertEqual(actual any, expected any, path string, line int, column int) { if !reflect.DeepEqual(actual, expected) { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %s to equal %s", trbTestInspect(actual), trbTestInspect(expected))}) } }`)
+	g.line(`func trbTestAssertNotEqual(actual any, expected any, path string, line int, column int) { if reflect.DeepEqual(actual, expected) { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %s not to equal %s", trbTestInspect(actual), trbTestInspect(expected))}) } }`)
+	g.line(`func trbTestAssertTrue(actual any, path string, line int, column int) { if value, ok := actual.(bool); !ok || !value { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %s to be true", trbTestInspect(actual))}) } }`)
+	g.line(`func trbTestAssertFalse(actual any, path string, line int, column int) { if value, ok := actual.(bool); !ok || value { panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %s to be false", trbTestInspect(actual))}) } }`)
+	g.line(`func trbTestAssertNil(actual any, path string, line int, column int) { if actual == nil { return }; value := reflect.ValueOf(actual); if value.Kind() == reflect.Ptr && value.IsNil() { return }; panic(trbTestFailure{path, line, column, fmt.Sprintf("expected %s to be nil", trbTestInspect(actual))}) }`)
 }

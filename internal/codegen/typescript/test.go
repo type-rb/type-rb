@@ -73,6 +73,7 @@ func upperCamel(value string) string {
 }
 
 func (g *generator) testRuntimeSupport() {
+	g.testInspectionRuntime()
 	g.line(`class TrbTestFailure extends Error { constructor(readonly path: string, readonly line: number, readonly column: number, message: string) { super(message); } }`)
 	g.line(`const trbTestSuites: string[] = [];`)
 	g.line(`let trbTestTotal = 0;`)
@@ -81,7 +82,6 @@ func (g *generator) testRuntimeSupport() {
 	g.line(`const trbTestNamesJSON = trbTestEnv().TRB_TEST_NAMES;`)
 	g.line(`const trbTestNames: string[] = trbTestNamesJSON ? JSON.parse(trbTestNamesJSON) : [];`)
 	g.line(`const trbTestEqual = (left: any, right: any): boolean => { if (left === right) return true; if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false; if (Array.isArray(left) !== Array.isArray(right)) return false; const leftKeys = Object.keys(left).sort(); const rightKeys = Object.keys(right).sort(); return leftKeys.length === rightKeys.length && leftKeys.every((key, index) => key === rightKeys[index] && trbTestEqual(left[key], right[key])); };`)
-	g.line(`const trbTestInspect = (value: any): string => { try { return JSON.stringify(value); } catch { return String(value); } };`)
 	g.line(`const trbTestEvent = (type: string, name: string, test_file: string, file: string, line: number, column: number, message = ""): void => { const event: any = { type, name, test_file, file, line, column }; if (message) event.message = message; if (trbTestEnv().TRB_TEST_REPORTER === "json") { console.log(JSON.stringify(event)); return; } if (type === "test_passed") console.log("PASS " + name); if (type === "test_failed") console.log("FAIL " + name + "\n  " + file + ":" + line + ":" + column + ": " + message); };`)
 	g.line(`export async function trbTestDescribe(name: string, body: () => Promise<void>): Promise<void> { trbTestSuites.push(name); try { await body(); } finally { trbTestSuites.pop(); } }`)
 	g.line(`export async function trbTest(name: string, file: string, line: number, column: number, body: () => Promise<void>): Promise<void> { const fullName = [...trbTestSuites, name].join(" / "); const environment = trbTestEnv(); if (environment.TRB_TEST_FILE && environment.TRB_TEST_FILE !== file) return; if (trbTestNames.length > 0 && !trbTestNames.includes(fullName)) return; trbTestTotal++; trbTestEvent("test_started", fullName, file, file, line, column); try { await body(); trbTestEvent("test_passed", fullName, file, file, line, column); } catch (error) { trbTestFailed++; const failure = error instanceof TrbTestFailure ? error : undefined; trbTestEvent("test_failed", fullName, file, failure?.path ?? file, failure?.line ?? line, failure?.column ?? column, error instanceof Error ? error.message : String(error)); } }`)
