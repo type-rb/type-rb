@@ -360,6 +360,40 @@ func mergeTypeScriptImports(statements []ir.Statement) []ir.Statement {
 			reserve(tsBindingName(node.Name), "local")
 		}
 	}
+	var reserveParameters func([]ir.Statement)
+	reserveParameters = func(statements []ir.Statement) {
+		for _, statement := range statements {
+			var parameters []string
+			switch node := statement.(type) {
+			case *ir.Method:
+				parameters = node.TypeParameters
+			case *ir.Class:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.Record:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.Enum:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.TypeAlias:
+				parameters = node.TypeParameters
+			case *ir.Interface:
+				parameters = node.TypeParameters
+				for _, method := range node.Methods {
+					parameters = append(slices.Clone(parameters), method.TypeParameters...)
+				}
+			case *ir.Module:
+				reserveParameters(node.Body)
+			case *ir.Newtype:
+				reserveParameters(node.Body)
+			}
+			for _, parameter := range parameters {
+				reserve(parameter, "type parameter")
+			}
+		}
+	}
+	reserveParameters(result)
 	for _, statement := range result {
 		imported, ok := statement.(*ir.Import)
 		if !ok || imported.Namespace || imported.Native {
@@ -4062,6 +4096,14 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 			result.name = tsOwnedTypeName(typ.Declaration.Name)
 		} else {
 			result.name = g.declarationNames[typ.Declaration]
+			// Intrinsic transports import their runtime namespace independently
+			// of authored symbols. Keep their concrete types in that namespace
+			// even inside a generic declaration with the same short name.
+			if typ.Declaration.Module == "trb/http/index" && g.httpRuntime {
+				result.name = "__trb_http." + tsOwnedTypeName(typ.Declaration.Name)
+			} else if typ.Declaration.Module == "trb/platform/typescript/browser/index" && g.browserRuntime != "" {
+				result.name = g.browserRuntime + "." + tsOwnedTypeName(typ.Declaration.Name)
+			}
 		}
 	}
 	if !typeScriptTypeIdentityPresent(result) {
@@ -4071,7 +4113,7 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 }
 
 func (g *generator) typeNameMappings() map[string]string {
-	if len(g.localTypeOwners) == 0 {
+	if len(g.localTypeOwners) == 0 && len(g.typeParameters) == 0 {
 		return g.typeMappings
 	}
 	result := make(map[string]string, len(g.typeMappings)+len(g.localTypeOwners))
@@ -4081,6 +4123,11 @@ func (g *generator) typeNameMappings() map[string]string {
 	for name, owner := range g.localTypeOwners {
 		if g.typeParameters[name] == 0 && !g.namedImportTypes[name] {
 			result[name] = owner
+		}
+	}
+	for name, depth := range g.typeParameters {
+		if depth > 0 {
+			result[name] = name
 		}
 	}
 	return result

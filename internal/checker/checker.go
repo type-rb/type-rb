@@ -10277,7 +10277,10 @@ func (c *Checker) canonicalType(typ types.Type, typeParameters map[string]bool) 
 		}
 		return typ
 	}
-	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] {
+	if typ.Kind == types.Named && typ.Declaration.Empty() && typeParameters[typ.Name] {
+		typ.TypeParameter = true
+	}
+	if typ.Kind != types.Named || typ.Name == "" || typ.TypeParameter {
 		return typ
 	}
 	if declaration := c.authoredTypeIdentity(typ.Name, c.activeTypeOwner); !declaration.Empty() {
@@ -10334,7 +10337,10 @@ func (c *Checker) canonicalContractType(typ types.Type, typeParameters map[strin
 	for index := range typ.Args {
 		typ.Args[index] = c.canonicalContractType(typ.Args[index], typeParameters, imported)
 	}
-	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] || !typ.Declaration.Empty() {
+	if typ.Kind == types.Named && typ.Declaration.Empty() && typeParameters[typ.Name] {
+		typ.TypeParameter = true
+	}
+	if typ.Kind != types.Named || typ.Name == "" || typ.TypeParameter || !typ.Declaration.Empty() {
 		return typ
 	}
 	if imported != nil {
@@ -10361,7 +10367,14 @@ func (c *Checker) resolvedBindingType(binding resolver.Binding) types.Type {
 	if binding.Export != nil && typ.Kind == types.Named && typ.Name == binding.Export.Name {
 		typ.Declaration = binding.DeclarationIdentity()
 	}
-	return c.canonicalContractType(typ, c.activeTypeParameterSet(), binding.Import)
+	parameters := c.activeTypeParameterSet()
+	if binding.Library != nil {
+		parameters = make(map[string]bool, len(binding.Library.TypeParameters))
+		for _, name := range binding.Library.TypeParameters {
+			parameters[name] = true
+		}
+	}
+	return c.canonicalContractType(typ, parameters, binding.Import)
 }
 
 func (c *Checker) activeTypeParameterSet() map[string]bool {
