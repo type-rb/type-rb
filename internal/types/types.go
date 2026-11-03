@@ -52,7 +52,7 @@ type Type struct {
 	Readonly    bool
 	Declaration identity.Declaration
 	// TypeParameter distinguishes a bound generic name from a concrete named type.
-	TypeParameter bool
+	TypeParameter bool `json:",omitempty"`
 }
 
 func (t Type) String() string {
