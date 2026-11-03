@@ -4333,7 +4333,7 @@ func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSc
 			schema.Reference = &copy
 			break
 		}
-		raw, module, reference, ok := c.codecRawEnum(base.Name)
+		raw, module, reference, ok := c.codecRawEnumResolved(base, false)
 		if !ok {
 			return schema, false
 		}
@@ -4408,7 +4408,7 @@ func (c *Checker) codecSchemaResolved(span token.Span, typ types.Type, visiting 
 			schema.Reference = &copy
 			break
 		}
-		if raw, module, reference, ok := c.codecRawEnumResolved(base.Name, catalogContext); ok {
+		if raw, module, reference, ok := c.codecRawEnumResolved(base, catalogContext); ok {
 			schema.Kind = "raw_enum"
 			schema.Module = module
 			schema.RawType = raw.Type
@@ -4521,11 +4521,18 @@ func (c *Checker) codecTimeScalar(name string) (string, string, resolver.Binding
 	return kind, binding.Import.RuntimePath(), binding, true
 }
 
-func (c *Checker) codecRawEnum(name string) (RawEnum, string, *resolver.Binding, bool) {
-	return c.codecRawEnumResolved(name, false)
-}
-
-func (c *Checker) codecRawEnumResolved(name string, catalogContext bool) (RawEnum, string, *resolver.Binding, bool) {
+func (c *Checker) codecRawEnumResolved(typ types.Type, catalogContext bool) (RawEnum, string, *resolver.Binding, bool) {
+	name := typ.Name
+	if !typ.Declaration.Empty() {
+		if enum := c.enums[name]; enum != nil && enum.raw != nil && typ.Declaration == c.authoredTypeIdentities[name] {
+			return *enum.raw, c.result.Program.ModulePath, nil, true
+		}
+		if binding, ok := c.resolution.ContractTypeIdentity(typ.Declaration); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
+			copy := binding
+			return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
+		}
+		return RawEnum{}, "", nil, false
+	}
 	if catalogContext {
 		if binding, ok := c.resolution.CatalogType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
 			copy := binding
@@ -8679,6 +8686,7 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 			inferenceArguments[index] = c.expandAlias(argument, map[string]bool{})
 		}
 		specialized := stdlib.Instantiate(*binding.Library, inferenceArguments)
+		specialized.Return = c.canonicalContractType(specialized.Return, c.activeTypeParameterSet(), binding.Import)
 		library = &specialized
 		for index := range specialized.Parameters {
 			parameter := &specialized.Parameters[index]
@@ -10320,6 +10328,10 @@ func (c *Checker) canonicalContractType(typ types.Type, typeParameters map[strin
 		return typ
 	}
 	if imported != nil {
+		if binding, ok := c.resolution.ImportedContractType(imported, typ.Name); ok {
+			typ.Declaration = binding.DeclarationIdentity()
+			return typ
+		}
 		if exported, ok := imported.Exports[typ.Name]; ok {
 			binding := resolver.Binding{Import: imported, Name: typ.Name, Export: &exported}
 			if declaration := binding.DeclarationIdentity(); declaration.Kind.IsType() {

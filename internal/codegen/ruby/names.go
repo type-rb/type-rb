@@ -189,6 +189,7 @@ func analyzeRubyTypeNames(programs []*ir.Program) map[string]string {
 				}
 			case *ir.Enum:
 				name = node.Name
+				declarations = append(declarations, node.Declaration)
 			case *ir.Module:
 				name = node.Name
 			case *ir.Interface:
@@ -215,7 +216,7 @@ func analyzeRubyTypeNames(programs []*ir.Program) map[string]string {
 		if declaration.Empty() || counts[declaration.Name] < 2 || strings.HasPrefix(declaration.Module, "trb/std/") {
 			continue
 		}
-		prefix := map[identity.Kind]string{identity.Record: "TrbRecord_", identity.Class: "TrbClass_", identity.Interface: "TrbInterface_"}[declaration.Kind]
+		prefix := map[identity.Kind]string{identity.Record: "TrbRecord_", identity.Class: "TrbClass_", identity.Interface: "TrbInterface_", identity.Enum: "TrbEnum_"}[declaration.Kind]
 		target := prefix + naming.PrivateSuffix(declaration.Key())
 		for occupied[target] {
 			target += "_"

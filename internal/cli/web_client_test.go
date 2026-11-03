@@ -68,6 +68,15 @@ func TestWebClientWritesBelowTheProjectRootAndCompilesForBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeOpenAPIProject(t, root)
+	// A shared application's Body is unrelated to the transport's raw Body.
+	contractsPath := filepath.Join(root, "src", "contracts", "reports.trb")
+	contractSource, err := os.ReadFile(contractsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(contractsPath, bytes.ReplaceAll(contractSource, []byte("CreateReportBody"), []byte("Body")), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	var stdout, stderr bytes.Buffer
 	command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}

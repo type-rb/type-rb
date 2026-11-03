@@ -59,10 +59,25 @@ func canonicalizeTypeContracts(catalog *Catalog) {
 				scope[name] = catalogTypeBinding(module, exported)
 			}
 		}
+		module.contractTypes = scope
 		for name, exported := range module.Exports {
 			module.Exports[name] = canonicalTypeExport(exported, scope, nil)
 		}
 	}
+}
+
+// ImportedContractType resolves a semantic provider's type name in its defining
+// source module, including that module's imports. It does not expose the name
+// to callers or let an unrelated project declaration replace the contract.
+func (r Result) ImportedContractType(imported *Import, name string) (Binding, bool) {
+	if imported == nil || r.Catalog == nil {
+		return Binding{}, false
+	}
+	module := r.Catalog.Modules[imported.RuntimePath()]
+	if module == nil {
+		return Binding{}, false
+	}
+	return contractTypeBinding(module.contractTypes, name)
 }
 
 func catalogContractExport(module *Module, exported Export) bool {
