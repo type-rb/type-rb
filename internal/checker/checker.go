@@ -8681,16 +8681,26 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 	name := binding.Name
 	var library *stdlib.Symbol
 	if binding.Library != nil {
+		// Resolve provider-owned names before substituting caller types. An
+		// outer type parameter with the same spelling is not part of this scope.
+		declared := *binding.Library
+		typeParameters := make(map[string]bool, len(declared.TypeParameters))
+		for _, name := range declared.TypeParameters {
+			typeParameters[name] = true
+		}
+		declared.Return = c.canonicalContractType(declared.Return, typeParameters, binding.Import)
+		declared.Parameters = append([]stdlib.Parameter(nil), declared.Parameters...)
+		for index := range declared.Parameters {
+			declared.Parameters[index].Type = c.canonicalContractType(declared.Parameters[index].Type, typeParameters, binding.Import)
+		}
 		inferenceArguments := make([]types.Type, len(actual))
 		for index, argument := range actual {
 			inferenceArguments[index] = c.expandAlias(argument, map[string]bool{})
 		}
-		specialized := stdlib.Instantiate(*binding.Library, inferenceArguments)
-		specialized.Return = c.canonicalContractType(specialized.Return, c.activeTypeParameterSet(), binding.Import)
+		specialized := stdlib.Instantiate(declared, inferenceArguments)
 		library = &specialized
 		for index := range specialized.Parameters {
 			parameter := &specialized.Parameters[index]
-			parameter.Type = c.canonicalContractType(parameter.Type, c.activeTypeParameterSet(), binding.Import)
 			parameters = append(parameters, parameter.Type)
 			if !parameter.Optional {
 				required++

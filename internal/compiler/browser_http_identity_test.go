@@ -220,6 +220,13 @@ def rejected(client: HttpClient, headers: Headers): Result<Response<Body>, Reque
 	return client.request("/items", headers: headers)
 end
 `, "argument 2 to request()"},
+		{"generic request headers", `import { HttpClient, RequestError, Response } from trb/platform/typescript/browser
+import { Body } from trb/http
+import trb/std/result
+def rejected<Headers>(client: HttpClient, headers: Headers): Result<Response<Body>, RequestError>
+	return client.request("/items", headers: headers)
+end
+`, "argument 2 to request()"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bodyName := "Body"
