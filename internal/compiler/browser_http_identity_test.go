@@ -66,6 +66,43 @@ end
 	}
 }
 
+func TestBrowserTransportContractsIgnoreCallerTypeParameterNames(t *testing.T) {
+	for _, parameter := range []string{"Body", "Headers", "HttpMethod", "Response", "RequestError", "RequestBody", "NoBody", "HttpClient"} {
+		t.Run(parameter, func(t *testing.T) {
+			source := fmt.Sprintf(`import { Input } from contracts/models
+import { HttpClient as TransportClient, RequestError as TransportError, RequestErrorKind as ErrorKind } from trb/platform/typescript/browser
+import trb/std/result
+
+def request<%s>(client: TransportClient, _input: %s): Result<Integer, TransportError>
+	raw := try client.request("/items")
+	return Result<Integer, TransportError>::Err(TransportError.new(ErrorKind::Contract, "unexpected status", raw))
+end
+
+def describe_failure(client: TransportClient, input: Input): String
+	case request<Input>(client, input)
+	when Result::Ok(value)
+		return value.to_s()
+	when Result::Err(error)
+		raw := error.response
+		if raw != nil
+			return error.message + ":" + raw.status.to_s() + ":" + raw.text().body
+		end
+		return error.message
+	end
+end
+`, parameter, parameter)
+			artifacts, err := CompileProject(browserIdentityUnits("Body", source), Options{
+				Mode: "typescript", TypeScriptRuntime: "browser", ProjectRoot: "/project", SourceRoot: "/project/src",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkTypeScriptArtifacts(t, artifacts, "browser_parameter_identity_"+parameter)
+			checkBrowserIdentityExecution(t, artifacts)
+		})
+	}
+}
+
 func checkBrowserIdentityExecution(t *testing.T, artifacts []*Artifact) {
 	t.Helper()
 	harness := `import { describe_failure } from "./client.ts";
