@@ -309,6 +309,7 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		g.testRecordView(n, name, fields)
 	case *ir.Enum:
+		name := g.declarationName(n.Name, n.Declaration)
 		if enumHasPayload(n) {
 			g.payloadEnum(n)
 			g.testEnumViews(n)
@@ -320,9 +321,9 @@ func (g *generator) statement(statement ir.Statement) {
 		}
 		methods := enumMethods(n)
 		if len(methods) == 0 {
-			g.line(n.Name+" = Data.define("+fields+")", n.TrailingComment)
+			g.line(name+" = Data.define("+fields+")", n.TrailingComment)
 		} else {
-			g.line(n.Name+" = Data.define("+fields+") do", n.TrailingComment)
+			g.line(name+" = Data.define("+fields+") do", n.TrailingComment)
 			g.indent++
 			for _, method := range methods {
 				g.method(method, nil)
@@ -339,13 +340,13 @@ func (g *generator) statement(statement ir.Statement) {
 				if member.RawValue != nil {
 					arguments += ", " + g.expr(member.RawValue)
 				}
-				g.line(n.Name+"::"+member.Name+" = "+n.Name+".new("+arguments+")", member.TrailingComment)
+				g.line(name+"::"+member.Name+" = "+name+".new("+arguments+")", member.TrailingComment)
 			}
 		}
 		g.testEnumViews(n)
 	case *ir.TypeAlias:
 		if len(n.Variants) > 0 {
-			g.line(n.Name+" = "+n.Target.Name, n.TrailingComment)
+			g.line(n.Name+" = "+g.declarationName(n.Target.Name, n.Target.Declaration), n.TrailingComment)
 		}
 	case *ir.Newtype:
 		g.newtypeMethods(n)
@@ -622,7 +623,7 @@ func caseHasPayload(value *ir.Case) bool {
 }
 
 func (g *generator) payloadEnum(enum *ir.Enum) {
-	g.line("module "+enum.Name, enum.TrailingComment)
+	g.line("module "+g.declarationName(enum.Name, enum.Declaration), enum.TrailingComment)
 	g.indent++
 	methods := enumMethods(enum)
 	if len(methods) > 0 {
@@ -1822,8 +1823,13 @@ func (b *rubyJSONCodecBuilder) decoder(schema *ir.CodecSchema) string {
 			kind = "Integer"
 		}
 		branches := make([]string, 0, len(schema.RawValues))
+		owner := schema.Type.Name
+		if !schema.Type.Declaration.Empty() {
+			owner = "::" + schema.Type.Declaration.Name
+		}
+		owner = b.generator.declarationName(owner, schema.Type.Declaration)
 		for _, item := range schema.RawValues {
-			branches = append(branches, "when "+quoteRawValue(item.Raw)+" then "+schema.Type.Name+"::"+item.Member)
+			branches = append(branches, "when "+quoteRawValue(item.Raw)+" then "+owner+"::"+item.Member)
 		}
 		body = "unless value.is_a?(JSON::Value::" + kind + "); " + expected(kind) + "; end; case value.value; " + strings.Join(branches, "; ") + "; else; fail.call(path, " + strconv.Quote("unknown raw value for "+schema.Type.Name) + "); end"
 	case "array":

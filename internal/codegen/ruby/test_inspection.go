@@ -51,12 +51,13 @@ func (g *generator) testEnumViews(enum *ir.Enum) {
 	if g.testInspection == nil || !g.testInspection.Enabled {
 		return
 	}
+	name := g.declarationName(enum.Name, enum.Declaration)
 	if !enumHasPayload(enum) {
 		value := "name.to_s"
 		if enum.RawType.Kind != "" {
 			value = "raw_value"
 		}
-		g.line(enum.Name+".class_eval { def __trb_test_scalar__; "+value+"; end }", "")
+		g.line(name+".class_eval { def __trb_test_scalar__; "+value+"; end }", "")
 		return
 	}
 	for _, statement := range enum.Body {
@@ -68,7 +69,7 @@ func (g *generator) testEnumViews(enum *ir.Enum) {
 		for _, field := range member.Fields {
 			values = append(values, "self."+field.Name)
 		}
-		target := enum.Name + "::" + member.Name
+		target := name + "::" + member.Name
 		if !enumHasPayload(enum) || len(member.Fields) == 0 {
 			target += ".class"
 		}

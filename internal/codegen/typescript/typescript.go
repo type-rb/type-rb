@@ -317,6 +317,98 @@ func mergeTypeScriptImports(statements []ir.Statement) []ir.Statement {
 		byKey[key] = len(result)
 		result = append(result, &clone)
 	}
+	// Transitive annotation dependencies have no authored local binding. If
+	// their spelling is already in use, assign a declaration-owned alias.
+	bindings := map[string]map[string]bool{}
+	reserve := func(name, owner string) {
+		if bindings[name] == nil {
+			bindings[name] = map[string]bool{}
+		}
+		bindings[name][owner] = true
+	}
+	for _, statement := range result {
+		switch node := statement.(type) {
+		case *ir.Import:
+			if node.Namespace {
+				reserve(node.Alias, node.Path)
+				continue
+			}
+			for _, symbol := range append(slices.Clone(node.Symbols), node.GeneratedTypeSymbols...) {
+				name := node.SymbolAliases[symbol]
+				if name == "" {
+					name = symbol
+				}
+				reserve(name, node.Path+"::"+symbol)
+			}
+		case *ir.Class:
+			reserve(node.Name, "local")
+		case *ir.Record:
+			reserve(node.Name, "local")
+		case *ir.Enum:
+			reserve(node.Name, "local")
+		case *ir.Interface:
+			reserve(node.Name, "local")
+		case *ir.TypeAlias:
+			reserve(node.Name, "local")
+		case *ir.Newtype:
+			reserve(node.Name, "local")
+		case *ir.Module:
+			reserve(node.Name, "local")
+		case *ir.Method:
+			reserve(tsCallableName(node.Name), "local")
+		case *ir.Variable:
+			reserve(tsBindingName(node.Name), "local")
+		}
+	}
+	var reserveParameters func([]ir.Statement)
+	reserveParameters = func(statements []ir.Statement) {
+		for _, statement := range statements {
+			var parameters []string
+			switch node := statement.(type) {
+			case *ir.Method:
+				parameters = node.TypeParameters
+			case *ir.Class:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.Record:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.Enum:
+				parameters = node.TypeParameters
+				reserveParameters(node.Body)
+			case *ir.TypeAlias:
+				parameters = node.TypeParameters
+			case *ir.Interface:
+				parameters = node.TypeParameters
+				for _, method := range node.Methods {
+					parameters = append(slices.Clone(parameters), method.TypeParameters...)
+				}
+			case *ir.Module:
+				reserveParameters(node.Body)
+			case *ir.Newtype:
+				reserveParameters(node.Body)
+			}
+			for _, parameter := range parameters {
+				reserve(parameter, "type parameter")
+			}
+		}
+	}
+	reserveParameters(result)
+	for _, statement := range result {
+		imported, ok := statement.(*ir.Import)
+		if !ok || imported.Namespace || imported.Native {
+			continue
+		}
+		for _, symbol := range imported.GeneratedTypeSymbols {
+			if len(bindings[symbol]) < 2 || containsString(imported.Symbols, symbol) || strings.Contains(symbol, "::") || imported.SymbolAliases[symbol] != "" {
+				continue
+			}
+			if imported.SymbolAliases == nil {
+				imported.SymbolAliases = map[string]string{}
+			}
+			imported.SymbolAliases[symbol] = tsModuleMemberName("type", imported.Path+"::"+symbol)
+		}
+	}
 	return result
 }
 
@@ -764,9 +856,10 @@ func (g *generator) statement(statement ir.Statement) {
 				}
 			}
 			for _, symbol := range n.GeneratedTypeSymbols {
-				if strings.Contains(symbol, "::") {
+				if strings.Contains(symbol, "::") || containsString(n.Symbols, symbol) {
 					continue
 				}
+				local := n.SymbolAliases[symbol]
 				target := &types
 				switch n.SymbolKinds[symbol] {
 				case "class":
@@ -775,9 +868,14 @@ func (g *generator) statement(statement ir.Statement) {
 					}
 				case "record":
 					if n.RecordDefaults[symbol] {
-						values = append(values, tsRecordConstructorName(symbol))
+						localConstructor, localSyncConstructor := "", ""
+						if local != "" {
+							localConstructor = tsRecordConstructorName(local)
+							localSyncConstructor = tsRecordSyncConstructorName(local)
+						}
+						values = append(values, tsImportSpecifier(tsRecordConstructorName(symbol), localConstructor))
 						if g.suspension != nil && g.suspension.RecordDefault(n.Path, symbol) {
-							values = append(values, tsRecordSyncConstructorName(symbol))
+							values = append(values, tsImportSpecifier(tsRecordSyncConstructorName(symbol), localSyncConstructor))
 						}
 					}
 
@@ -791,8 +889,9 @@ func (g *generator) statement(statement ir.Statement) {
 						target = &values
 					}
 				}
-				if !containsString(*target, symbol) {
-					*target = append(*target, symbol)
+				specifier := tsImportSpecifier(symbol, local)
+				if !containsString(*target, specifier) {
+					*target = append(*target, specifier)
 				}
 			}
 			if intrinsicRuntime && !browserRuntime && !webRuntime && !(jsonRuntime && g.jsonRuntime) {
@@ -3610,16 +3709,18 @@ func (g *generator) tsCodecRuntimeTypeName(schema *ir.CodecSchema) string {
 func (g *generator) jsonCodecBuilder(jsonAlias string) *tsJSONCodecBuilder {
 	return &tsJSONCodecBuilder{
 		jsonAlias: jsonAlias, modulePath: g.modulePath, typeName: g.tsType, localTypeOwners: g.localTypeOwners,
+		declarationNames: g.declarationNames,
 	}
 }
 
 type tsJSONCodecBuilder struct {
-	jsonAlias       string
-	modulePath      string
-	typeName        func(types.Type) string
-	localTypeOwners map[string]string
-	source          strings.Builder
-	next            int
+	jsonAlias        string
+	modulePath       string
+	typeName         func(types.Type) string
+	localTypeOwners  map[string]string
+	declarationNames map[identity.Declaration]string
+	source           strings.Builder
+	next             int
 }
 
 func (b *tsJSONCodecBuilder) typeString(typ types.Type) string {
@@ -3651,6 +3752,9 @@ func (b *tsJSONCodecBuilder) codecType(schema *ir.CodecSchema) string {
 }
 
 func (b *tsJSONCodecBuilder) runtimeTypeName(schema *ir.CodecSchema) string {
+	if name := b.declarationNames[schema.Type.Declaration]; name != "" {
+		return name
+	}
 	name := schema.Type.Name
 	if schema.Reference != nil && schema.Reference.Package != "" {
 		if schema.Reference.Alias != "" && schema.Reference.Alias != "$named" {
@@ -3992,6 +4096,14 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 			result.name = tsOwnedTypeName(typ.Declaration.Name)
 		} else {
 			result.name = g.declarationNames[typ.Declaration]
+			// Intrinsic transports import their runtime namespace independently
+			// of authored symbols. Keep their concrete types in that namespace
+			// even inside a generic declaration with the same short name.
+			if typ.Declaration.Module == "trb/http/index" && g.httpRuntime {
+				result.name = "__trb_http." + tsOwnedTypeName(typ.Declaration.Name)
+			} else if typ.Declaration.Module == "trb/platform/typescript/browser/index" && g.browserRuntime != "" {
+				result.name = g.browserRuntime + "." + tsOwnedTypeName(typ.Declaration.Name)
+			}
 		}
 	}
 	if !typeScriptTypeIdentityPresent(result) {
@@ -4001,7 +4113,7 @@ func (g *generator) semanticTypeIdentity(typ types.Type) *typescriptTypeIdentity
 }
 
 func (g *generator) typeNameMappings() map[string]string {
-	if len(g.localTypeOwners) == 0 {
+	if len(g.localTypeOwners) == 0 && len(g.typeParameters) == 0 {
 		return g.typeMappings
 	}
 	result := make(map[string]string, len(g.typeMappings)+len(g.localTypeOwners))
@@ -4011,6 +4123,11 @@ func (g *generator) typeNameMappings() map[string]string {
 	for name, owner := range g.localTypeOwners {
 		if g.typeParameters[name] == 0 && !g.namedImportTypes[name] {
 			result[name] = owner
+		}
+	}
+	for name, depth := range g.typeParameters {
+		if depth > 0 {
+			result[name] = name
 		}
 	}
 	return result

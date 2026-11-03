@@ -28,3 +28,35 @@ end
 `,
 	}, "ready\n", "")
 }
+
+func TestJSONCodecKeepsTransitiveEnumIdentityAcrossBackends(t *testing.T) {
+	runPortableExecutionFiles(t, map[string]string{
+		"models.trb": `enum Status
+	Remote = "REMOTE"
+end
+record User
+	status: Status
+end
+`,
+		"main.trb": `import { User } from models
+import trb/std/json
+enum Status
+	Local = "LOCAL"
+end
+def main()
+	decoded := JSON.decode<User>("{\"status\":\"REMOTE\"}") catch |error|
+		puts(error.message)
+		return
+	end
+	puts(decoded.status.raw_value())
+	puts(Status::Local.raw_value())
+	encoded := JSON.encode(decoded) catch |error|
+		puts(error.message)
+		return
+	end
+	puts(encoded)
+	return
+end
+`,
+	}, "REMOTE\nLOCAL\n{\"status\":\"REMOTE\"}\n", "")
+}

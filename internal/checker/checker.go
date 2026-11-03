@@ -4333,7 +4333,7 @@ func (c *Checker) parameterValueSchema(typ types.Type, allowArray bool) (CodecSc
 			schema.Reference = &copy
 			break
 		}
-		raw, module, reference, ok := c.codecRawEnum(base.Name)
+		raw, module, reference, ok := c.codecRawEnumResolved(base, false)
 		if !ok {
 			return schema, false
 		}
@@ -4408,7 +4408,7 @@ func (c *Checker) codecSchemaResolved(span token.Span, typ types.Type, visiting 
 			schema.Reference = &copy
 			break
 		}
-		if raw, module, reference, ok := c.codecRawEnumResolved(base.Name, catalogContext); ok {
+		if raw, module, reference, ok := c.codecRawEnumResolved(base, catalogContext); ok {
 			schema.Kind = "raw_enum"
 			schema.Module = module
 			schema.RawType = raw.Type
@@ -4521,11 +4521,18 @@ func (c *Checker) codecTimeScalar(name string) (string, string, resolver.Binding
 	return kind, binding.Import.RuntimePath(), binding, true
 }
 
-func (c *Checker) codecRawEnum(name string) (RawEnum, string, *resolver.Binding, bool) {
-	return c.codecRawEnumResolved(name, false)
-}
-
-func (c *Checker) codecRawEnumResolved(name string, catalogContext bool) (RawEnum, string, *resolver.Binding, bool) {
+func (c *Checker) codecRawEnumResolved(typ types.Type, catalogContext bool) (RawEnum, string, *resolver.Binding, bool) {
+	name := typ.Name
+	if !typ.Declaration.Empty() {
+		if enum := c.enums[name]; enum != nil && enum.raw != nil && typ.Declaration == c.authoredTypeIdentities[name] {
+			return *enum.raw, c.result.Program.ModulePath, nil, true
+		}
+		if binding, ok := c.resolution.ContractTypeIdentity(typ.Declaration); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
+			copy := binding
+			return rawEnumFromExport(binding.Export), binding.Import.RuntimePath(), &copy, true
+		}
+		return RawEnum{}, "", nil, false
+	}
 	if catalogContext {
 		if binding, ok := c.resolution.CatalogType(name); ok && binding.Export != nil && binding.Export.Kind == resolver.EnumExport && binding.Export.EnumRawType.Kind != "" {
 			copy := binding
@@ -8674,15 +8681,26 @@ func (c *Checker) checkImportedArguments(call *ast.CallExpression, binding resol
 	name := binding.Name
 	var library *stdlib.Symbol
 	if binding.Library != nil {
+		// Resolve provider-owned names before substituting caller types. An
+		// outer type parameter with the same spelling is not part of this scope.
+		declared := *binding.Library
+		typeParameters := make(map[string]bool, len(declared.TypeParameters))
+		for _, name := range declared.TypeParameters {
+			typeParameters[name] = true
+		}
+		declared.Return = c.canonicalContractType(declared.Return, typeParameters, binding.Import)
+		declared.Parameters = append([]stdlib.Parameter(nil), declared.Parameters...)
+		for index := range declared.Parameters {
+			declared.Parameters[index].Type = c.canonicalContractType(declared.Parameters[index].Type, typeParameters, binding.Import)
+		}
 		inferenceArguments := make([]types.Type, len(actual))
 		for index, argument := range actual {
 			inferenceArguments[index] = c.expandAlias(argument, map[string]bool{})
 		}
-		specialized := stdlib.Instantiate(*binding.Library, inferenceArguments)
+		specialized := stdlib.Instantiate(declared, inferenceArguments)
 		library = &specialized
 		for index := range specialized.Parameters {
 			parameter := &specialized.Parameters[index]
-			parameter.Type = c.canonicalContractType(parameter.Type, c.activeTypeParameterSet(), binding.Import)
 			parameters = append(parameters, parameter.Type)
 			if !parameter.Optional {
 				required++
@@ -10259,7 +10277,10 @@ func (c *Checker) canonicalType(typ types.Type, typeParameters map[string]bool) 
 		}
 		return typ
 	}
-	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] {
+	if typ.Kind == types.Named && typ.Declaration.Empty() && typeParameters[typ.Name] {
+		typ.TypeParameter = true
+	}
+	if typ.Kind != types.Named || typ.Name == "" || typ.TypeParameter {
 		return typ
 	}
 	if declaration := c.authoredTypeIdentity(typ.Name, c.activeTypeOwner); !declaration.Empty() {
@@ -10316,10 +10337,17 @@ func (c *Checker) canonicalContractType(typ types.Type, typeParameters map[strin
 	for index := range typ.Args {
 		typ.Args[index] = c.canonicalContractType(typ.Args[index], typeParameters, imported)
 	}
-	if typ.Kind != types.Named || typ.Name == "" || typeParameters[typ.Name] || !typ.Declaration.Empty() {
+	if typ.Kind == types.Named && typ.Declaration.Empty() && typeParameters[typ.Name] {
+		typ.TypeParameter = true
+	}
+	if typ.Kind != types.Named || typ.Name == "" || typ.TypeParameter || !typ.Declaration.Empty() {
 		return typ
 	}
 	if imported != nil {
+		if binding, ok := c.resolution.ImportedContractType(imported, typ.Name); ok {
+			typ.Declaration = binding.DeclarationIdentity()
+			return typ
+		}
 		if exported, ok := imported.Exports[typ.Name]; ok {
 			binding := resolver.Binding{Import: imported, Name: typ.Name, Export: &exported}
 			if declaration := binding.DeclarationIdentity(); declaration.Kind.IsType() {
@@ -10339,7 +10367,14 @@ func (c *Checker) resolvedBindingType(binding resolver.Binding) types.Type {
 	if binding.Export != nil && typ.Kind == types.Named && typ.Name == binding.Export.Name {
 		typ.Declaration = binding.DeclarationIdentity()
 	}
-	return c.canonicalContractType(typ, c.activeTypeParameterSet(), binding.Import)
+	parameters := c.activeTypeParameterSet()
+	if binding.Library != nil {
+		parameters = make(map[string]bool, len(binding.Library.TypeParameters))
+		for _, name := range binding.Library.TypeParameters {
+			parameters[name] = true
+		}
+	}
+	return c.canonicalContractType(typ, parameters, binding.Import)
 }
 
 func (c *Checker) activeTypeParameterSet() map[string]bool {

@@ -294,6 +294,7 @@ type Options struct {
 
 type Module struct {
 	sourcePath          string
+	contractTypes       map[string]Binding
 	CompilationUnit     string
 	Path                string
 	Filename            string
@@ -964,7 +965,7 @@ func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool)
 		if !exists || !symbol.HasReceiver() || receiver.Nullable {
 			continue
 		}
-		pattern := importedReceiverPattern(imported, symbol.Receiver)
+		pattern := r.importedReceiverPattern(imported, symbol.Receiver, symbol.TypeParameters)
 		if !stdlib.ReceiverMatches(pattern, receiver, symbol.TypeParameters) {
 			continue
 		}
@@ -992,10 +993,17 @@ func (r Result) ReceiverMethod(receiver types.Type, name string) (Binding, bool)
 // packages describe intrinsics separately from their TypeRB declarations, so
 // matching by display name alone could otherwise lend a method to an unrelated
 // declaration with the same name.
-func importedReceiverPattern(imported *Import, pattern types.Type) types.Type {
+func (r Result) importedReceiverPattern(imported *Import, pattern types.Type, parameters []string) types.Type {
 	result := pattern
 	if imported != nil && result.Kind == types.Named && result.Declaration.Empty() {
-		if exported, ok := exportNamed(imported.Exports, result.Name); ok && typeExport(exported.Kind) {
+		for _, parameter := range parameters {
+			if result.Name == parameter {
+				return result
+			}
+		}
+		if binding, ok := r.ImportedContractType(imported, result.Name); ok {
+			result.Declaration = binding.DeclarationIdentity()
+		} else if exported, ok := exportNamed(imported.Exports, result.Name); ok && typeExport(exported.Kind) {
 			result.Declaration = identity.Declaration{
 				Module: imported.RuntimePath(),
 				Name:   exported.Name,
@@ -1005,7 +1013,7 @@ func importedReceiverPattern(imported *Import, pattern types.Type) types.Type {
 	}
 	result.Args = make([]types.Type, len(pattern.Args))
 	for index, argument := range pattern.Args {
-		result.Args[index] = importedReceiverPattern(imported, argument)
+		result.Args[index] = r.importedReceiverPattern(imported, argument, parameters)
 	}
 	return result
 }

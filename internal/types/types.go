@@ -51,6 +51,8 @@ type Type struct {
 	Nullable    bool
 	Readonly    bool
 	Declaration identity.Declaration
+	// TypeParameter distinguishes a bound generic name from a concrete named type.
+	TypeParameter bool `json:",omitempty"`
 }
 
 func (t Type) String() string {
@@ -425,6 +427,9 @@ func Assignable(target, value Type) bool {
 		return false
 	}
 	if target.Kind == Named {
+		if target.TypeParameter != value.TypeParameter {
+			return false
+		}
 		if !target.Declaration.Empty() && !value.Declaration.Empty() && target.Declaration != value.Declaration {
 			return false
 		}
@@ -448,7 +453,7 @@ func Assignable(target, value Type) bool {
 // Equivalent compares semantic types while ignoring binding-level readonly
 // state. Mutable generic containers use it to avoid unsound argument widening.
 func Equivalent(left, right Type) bool {
-	if left.Kind != right.Kind || left.Nullable != right.Nullable || len(left.Args) != len(right.Args) {
+	if left.Kind != right.Kind || left.Nullable != right.Nullable || left.TypeParameter != right.TypeParameter || len(left.Args) != len(right.Args) {
 		return false
 	}
 	if !left.Declaration.Empty() && !right.Declaration.Empty() {

@@ -89,6 +89,11 @@ func TestAssignableDistinguishesCanonicalDeclarationsWithSameDisplayName(t *test
 	if !Assignable(standardFile, aliasedStandardFile) || !Assignable(aliasedStandardFile, standardFile) {
 		t.Fatal("aliases of the same declaration must remain assignable")
 	}
+	unbound := FromName("File")
+	unbound.TypeParameter = true
+	if Equivalent(standardFile, unbound) || Assignable(standardFile, unbound) || Assignable(unbound, standardFile) {
+		t.Fatal("a type parameter must not acquire a concrete declaration identity")
+	}
 }
 
 func TestAssignableNamedGenericIsInvariant(t *testing.T) {
