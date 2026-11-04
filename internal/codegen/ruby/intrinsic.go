@@ -432,11 +432,32 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return portableLog(arguments[0], "log2")
 	case "trb.std.math.log10":
 		return portableLog(arguments[0], "log10")
+	case "trb.std.math.sin":
+		return portableTrigonometry(arguments[0], "sin")
+	case "trb.std.math.cos":
+		return portableTrigonometry(arguments[0], "cos")
+	case "trb.std.math.pow":
+		return portableFloatPower(arguments[0], arguments[1])
 	case "trb.std.booleans.to_string":
 		return "(" + arguments[0] + ").to_s"
 	default:
 		return "nil"
 	}
+}
+
+// Ruby raises on infinite trigonometric arguments; the portable API returns NaN.
+func portableTrigonometry(value, method string) string {
+	return "->(value) { value.finite? ? Math." + method + "(value) : Float::NAN }.call(" + value + ")"
+}
+
+func portableFloatPower(base, exponent string) string {
+	// Evaluate both arguments once, and never expose Ruby's Complex result.
+	return "->(base, exponent) { " +
+		"if exponent == 0.0 || base == 1.0 || (base == -1.0 && exponent.infinite?); 1.0; " +
+		"elsif base.nan? || exponent.nan?; Float::NAN; " +
+		"elsif base.infinite? == -1; (-0.0) ** (-exponent); " +
+		"elsif base < 0.0 && base.finite? && exponent.finite? && exponent % 1.0 != 0.0; Float::NAN; " +
+		"else; base ** exponent; end }.call(" + base + ", " + exponent + ")"
 }
 
 func rubyUTF8WithReplacement(value string) string {

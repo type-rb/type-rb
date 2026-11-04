@@ -1,0 +1,81 @@
+import trb/std/math
+
+def classify(value: Float): String
+	if value.nan?()
+		return "nan"
+	end
+	if value == 0.0
+		if 1.0 / value < 0.0
+			return "negative-zero"
+		end
+		return "positive-zero"
+	end
+	if value.infinite?()
+		if value < 0.0
+			return "negative-infinity"
+		end
+		return "positive-infinity"
+	end
+	if value == 1.0
+		return "one"
+	end
+	if value == -8.0
+		return "negative-eight"
+	end
+	if value == 0.25
+		return "quarter"
+	end
+	return "unexpected-finite"
+end
+
+def observed(label: String, value: Float): Float
+	puts(label)
+	return value
+end
+
+def main()
+	zero := 0.0
+	negative_zero := -zero
+	infinity := 1.0 / zero
+	nan := zero / zero
+	values := [zero, negative_zero, infinity, -infinity, nan]
+	values.each do |value|
+		puts(classify(Math.sin(value)))
+		puts(classify(Math.cos(value)))
+	end
+	puts((Math.sin(1) - 0.8414709848078965).abs() < 0.00000000000001)
+	puts((Math.cos(1) - 0.5403023058681398).abs() < 0.00000000000001)
+	puts((Math.sin(-1) + Math.sin(1)).abs() < 0.00000000000001)
+	puts((Math.cos(-1) - Math.cos(1)).abs() < 0.00000000000001)
+	powers := [
+		[nan, 0.0], [nan, negative_zero], [1.0, nan], [-1.0, infinity], [-1.0, -infinity],
+		[nan, 2.0], [2.0, nan], [-1.0, nan], [-2.0, 0.5],
+		[zero, -3.0], [negative_zero, -3.0], [negative_zero, -2.0],
+		[negative_zero, 3.0], [negative_zero, 2.0], [negative_zero, -infinity], [negative_zero, infinity],
+		[infinity, 2.0], [infinity, -2.0], [-infinity, 3.0], [-infinity, -3.0],
+		[-infinity, 2.0], [-infinity, -2.0], [-infinity, 0.5],
+		[2.0, infinity], [2.0, -infinity], [0.5, infinity], [0.5, -infinity],
+		[-2.0, 3.0], [2.0, -2.0], [10.0, 400.0], [10.0, -400.0],
+	]
+	powers.each do |pair|
+		puts(classify(Math.pow(pair[0], pair[1])))
+	end
+	puts(Math.pow(2, 3) == 8.0)
+	sine := fn(value: Float): Float
+		return Math.sin(value)
+	end
+	cosine := fn(value: Float): Float
+		return Math.cos(value)
+	end
+	power := fn(base: Float, exponent: Float): Float
+		return Math.pow(base, exponent)
+	end
+	puts(sine(0) == 0.0)
+	puts(cosine(0) == 1.0)
+	puts(power(2, 3) == 8.0)
+	puts(Math.pow(observed("base", 1), observed("exponent", nan)) == 1.0)
+	puts(Math.sin(observed("angle", 0)) == 0.0)
+	puts(classify(Math.pow(-infinity, -0.5)))
+	puts(classify(Math.pow(-infinity, nan)))
+	puts((Math.pow(2.0, 0.5) - 1.4142135623730951).abs() < 0.00000000000001)
+end

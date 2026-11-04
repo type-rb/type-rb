@@ -801,6 +801,15 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.std.math.log10":
 		g.requireImport("math", "")
 		return "math.Log10(" + arguments[0] + ")"
+	case "trb.std.math.sin":
+		g.requireImport("math", "")
+		return "math.Sin(" + arguments[0] + ")"
+	case "trb.std.math.cos":
+		g.requireImport("math", "")
+		return "math.Cos(" + arguments[0] + ")"
+	case "trb.std.math.pow":
+		g.requireImport("math", "")
+		return "math.Pow(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.booleans.to_string":
 		g.requireImport("strconv", "")
 		return "strconv.FormatBool(" + arguments[0] + ")"

@@ -90,10 +90,23 @@ non-finite and out-of-range results. `round()` resolves halfway values away
 from zero. `abs()` converts negative zero to positive zero and leaves NaN as
 NaN.
 
-`trb/std/math` provides `sqrt`, `exp`, `log`, `log2`, and `log10`, returning
+`trb/std/math` provides `sqrt`, `exp`, `log`, `log2`, `log10`, `sin`, `cos`, and `pow`, returning
 Float. Integer arguments use the ordinary safe widening to Float. Negative
 square roots and logarithms are NaN, and logarithms of zero are negative
-infinity. Exponentiation remains the `**` operator.
+infinity.
+
+`Math.sin(value)` and `Math.cos(value)` take radians. Sine preserves signed zero;
+cosine of either zero is 1. Both return NaN for infinite or NaN inputs.
+`Math.pow(base, exponent)` always selects Float exponentiation, including when
+its arguments are Integers; Integer `**` continues to use checked Integer
+arithmetic. Power follows the special-value rules of
+[Go math.Pow](https://pkg.go.dev/math#Pow): a zero exponent or base 1 produces 1
+even with NaN, and `pow(-1, Infinity)` and `pow(-1, -Infinity)` produce 1. A finite
+negative base with a finite non-integral exponent produces NaN, never a complex
+value. Signed zero and infinity retain the sign for odd integral powers;
+overflow produces infinity and underflow can produce zero. Finite results use
+each backend's binary64 math implementation, so last-bit rounding differences
+are permitted across backends and the REPL.
 
 `Boolean#to_s()` returns lowercase `"true"` or `"false"`.
 
