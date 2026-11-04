@@ -310,7 +310,7 @@ generated imports are loaded:
 ```jsonc
 {
   "ruby": {
-    "version": "4.0.7",
+    "version": "4.0.9",
     "loader": "zeitwerk"
   }
 }
