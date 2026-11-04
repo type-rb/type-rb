@@ -1276,6 +1276,13 @@ end
 			"log":   unary("log", "trb.std.math.log", floatType, floatType),
 			"log2":  unary("log2", "trb.std.math.log2", floatType, floatType),
 			"log10": unary("log10", "trb.std.math.log10", floatType, floatType),
+			"sin":   unary("sin", "trb.std.math.sin", floatType, floatType),
+			"cos":   unary("cos", "trb.std.math.cos", floatType, floatType),
+			"pow": {
+				Name: "pow", Intrinsic: "trb.std.math.pow",
+				Parameters: []Parameter{{Name: "base", Type: floatType}, {Name: "exponent", Type: floatType}},
+				Return:     floatType,
+			},
 		},
 	},
 	"trb/internal/booleans": {
