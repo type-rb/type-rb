@@ -526,6 +526,14 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		return "Math.log2(" + arguments[0] + ")"
 	case "trb.std.math.log10":
 		return "Math.log10(" + arguments[0] + ")"
+	case "trb.std.math.sin":
+		return "Math.sin(" + arguments[0] + ")"
+	case "trb.std.math.cos":
+		return "Math.cos(" + arguments[0] + ")"
+	case "trb.std.math.pow":
+		// ECMAScript differs for 1**NaN and (+/-1)**(+/-Infinity).
+		// Lambda parameters preserve left-to-right, single argument evaluation.
+		return "((base: number, exponent: number): number => base === 1 || exponent === 0 || (base === -1 && !Number.isFinite(exponent) && !Number.isNaN(exponent)) ? 1 : Math.pow(base, exponent))(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.booleans.to_string":
 		return "String(" + arguments[0] + ")"
 	case "trb.platform.typescript.node.argv":

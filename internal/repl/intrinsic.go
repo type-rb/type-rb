@@ -1468,7 +1468,17 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			return e.numberParseResultErr(typ, kind, value, message)
 		}
 		return e.filesystemOK(typ, Value{Type: types.FromName("Float"), Data: parsed})
-	case "trb.std.math.sqrt", "trb.std.math.exp", "trb.std.math.log", "trb.std.math.log2", "trb.std.math.log10":
+	case "trb.std.math.pow":
+		if err := require(2); err != nil {
+			return Value{}, err
+		}
+		base, baseOK := values[0].Data.(float64)
+		exponent, exponentOK := values[1].Data.(float64)
+		if !baseOK || !exponentOK {
+			return Value{}, errors.New("math function expects Float")
+		}
+		return Value{Type: typ, Data: math.Pow(base, exponent)}, nil
+	case "trb.std.math.sqrt", "trb.std.math.exp", "trb.std.math.log", "trb.std.math.log2", "trb.std.math.log10", "trb.std.math.sin", "trb.std.math.cos":
 		if err := require(1); err != nil {
 			return Value{}, err
 		}
@@ -1485,6 +1495,10 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 			value = math.Log(value)
 		case "trb.std.math.log2":
 			value = math.Log2(value)
+		case "trb.std.math.sin":
+			value = math.Sin(value)
+		case "trb.std.math.cos":
+			value = math.Cos(value)
 		default:
 			value = math.Log10(value)
 		}

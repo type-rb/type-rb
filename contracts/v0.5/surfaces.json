@@ -3293,11 +3293,14 @@
       "typescript"
     ],
     "members": [
+      "cos(value: Float): Float",
       "declaration root Math",
       "exp(value: Float): Float",
       "log(value: Float): Float",
       "log10(value: Float): Float",
       "log2(value: Float): Float",
+      "pow(base: Float, exponent: Float): Float",
+      "sin(value: Float): Float",
       "sqrt(value: Float): Float"
     ]
   },
@@ -7640,6 +7643,8 @@
       "TestPortableTestBlocksRejectEscapingControlAcrossBackends (internal/compiler/test_suite_test.go)",
       "TestPortableTimeDiagnosticsAreModeIndependent (internal/compiler/time_test.go)",
       "TestPortableTimePackageLowersAcrossBackends (internal/compiler/time_test.go)",
+      "TestPortableTrigonometryAcrossBackends (internal/compiler/math_trigonometry_test.go)",
+      "TestPortableTrigonometryRejectsInvalidCalls (internal/compiler/math_trigonometry_test.go)",
       "TestPortableURLComponentDiagnosticsAreModeIndependent (internal/compiler/imports_test.go)",
       "TestPortableURLComponentsLowerAcrossBackends (internal/compiler/imports_test.go)",
       "TestPortableURLQueryCompilesFromSharedSourceAcrossBackends (internal/compiler/imports_test.go)",
@@ -8603,6 +8608,7 @@
       "TestNegativeIndexesCountFromTheEndAndRemainBoundsChecked (internal/repl/evaluator_test.go)",
       "TestNullableLoopChecksAndRunsInREPL (internal/repl/nullable_loop_test.go)",
       "TestNullableNumericConversionInTypedIREvaluator (internal/repl/nullable_numeric_conversion_test.go)",
+      "TestPortableTrigonometryInTypedIR (internal/repl/math_trigonometry_test.go)",
       "TestRangeLiteralCompletionInsertsToArray (internal/repl/reader_pty_test.go)",
       "TestRawEnumResultInitializerIsNotReplayedOnInspection (internal/repl/raw_enum_retention_test.go)",
       "TestRawEnumStandardErrorIdentityInTypedIREvaluator (internal/repl/raw_enum_error_identity_test.go)",
