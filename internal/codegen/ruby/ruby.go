@@ -42,6 +42,7 @@ type generator struct {
 	executionActive       bool
 	lexicalNames          map[string]string
 	oidcRuntime           bool
+	processRuntime        bool
 	sourceRecorder        *sourcemap.Recorder
 	sourcePath            string
 	checkedInteger        bool
@@ -128,6 +129,9 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.processRuntime {
+		g.b.WriteString(rubyProcessRuntime)
 	}
 	if g.topFunctions["main"] {
 		if len(program.Statements) > 0 {
@@ -1377,6 +1381,7 @@ func (g *generator) mergeExpressionChild(child *generator) {
 	g.temporary = child.temporary
 	g.checkedInteger = g.checkedInteger || child.checkedInteger
 	g.oidcRuntime = g.oidcRuntime || child.oidcRuntime
+	g.processRuntime = g.processRuntime || child.processRuntime
 }
 
 func (g *generator) ifExpression(node *ir.If) string {

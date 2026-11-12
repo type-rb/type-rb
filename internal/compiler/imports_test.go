@@ -2999,12 +2999,12 @@ end
 			`os.LookupEnv(`,
 		},
 		"ruby": {
-			`Open3.capture3([command, command], *arguments)`,
+			`TrbProcessRuntime.capture(command, arguments)`,
 			`Process::Output.new(status: status.exitstatus || -1`,
 			`ENV[name]`,
 		},
 		"typescript": {
-			`childProcess.spawnSync(__trbCommand, __trbArguments)`,
+			`__trbProcessCapture(__trbCommand, __trbArguments)`,
 			`} satisfies ProcessOutput`,
 			`?.env?.[name] ?? null`,
 		},

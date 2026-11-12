@@ -59,7 +59,7 @@ jobs:
 
       - name: Install Jobs SQLite runtime dependencies
         if: steps.test-scope.outputs.full-tests == 'true'
-        run: gem install --no-document sequel:5.107.0 sqlite3:2.9.5
+        run: gem install --no-document sequel:5.107.0 sqlite3:2.9.5 fiddle:1.1.8
 
       - uses: actions/setup-node@v6
         with:

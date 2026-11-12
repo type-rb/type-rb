@@ -134,6 +134,9 @@ type Package struct {
 	TypeProvider   string
 	JSX            *JSXProvider
 	Capability     bool
+	// NativeDependencies are host packages required by this owned capability,
+	// selected by output mode when the source dependency graph imports it.
+	NativeDependencies map[string]map[string]string
 	// OpaqueTypes are compiler-owned declarations that source code may receive
 	// or name but cannot construct directly. Each entry provides a
 	// source-facing construction diagnostic.
@@ -603,6 +606,10 @@ end
 		Path: "trb/internal/process", Root: "Process",
 		Kind:     Portable,
 		Internal: true,
+		NativeDependencies: map[string]map[string]string{
+			"ruby":       {"fiddle": "1.1.8"},
+			"typescript": {"koffi": "3.3.7"},
+		},
 		Symbols: map[string]Symbol{
 			"argv": {
 				Name:      "argv",

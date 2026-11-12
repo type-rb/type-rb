@@ -1292,6 +1292,11 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 	}
 	defer c.closeGeneratedWorkspace(workspace, &resultErr)
 	runRoot := workspace.Path()
+	if standalone && config.Mode == "typescript" {
+		if err := linkStandaloneTypeScriptDependencies(config.Root, runRoot); err != nil {
+			return err
+		}
+	}
 	target := ""
 	entrySource := filename
 	if entrySource == "" {
@@ -2556,6 +2561,20 @@ func sourcePackageDependencies(config *project.Config, sources [][]byte, package
 		for _, statement := range program.Statements {
 			imported, ok := statement.(*ast.ImportStatement)
 			if !ok {
+				continue
+			}
+			if standard, exists := stdlib.Lookup(imported.Path); exists {
+				if seen[standard.Path] {
+					continue
+				}
+				seen[standard.Path] = true
+				for name, version := range standard.NativeDependencies[config.Mode] {
+					if existing, present := dependencies[name]; present && existing != version {
+						return nil, fmt.Errorf("TypeRB packages require conflicting versions of %s: %s and %s", name, existing, version)
+					}
+					dependencies[name] = version
+				}
+				sources = append(sources, []byte(standard.Source))
 				continue
 			}
 			bundled, exists := official.Lookup(imported.Path)

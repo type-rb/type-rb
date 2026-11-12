@@ -1,0 +1,73 @@
+name: Process conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/cli/process_runtime_test.go"
+      - "internal/cli/cli.go"
+      - "internal/cli/generated_workspace.go"
+      - "internal/codegen/*/process*"
+      - "internal/codegen/*/intrinsic.go"
+      - "internal/codegen/ruby/ruby.go"
+      - "internal/codegen/typescript/typescript.go"
+      - "internal/repl/intrinsic.go"
+      - "internal/stdlib/process.go"
+      - "internal/stdlib/registry.go"
+      - "go.mod"
+      - "go.sum"
+      - ".ruby-version"
+      - ".github/workflows/process-conformance.yml"
+  pull_request:
+    paths:
+      - "internal/cli/process_runtime_test.go"
+      - "internal/cli/cli.go"
+      - "internal/cli/generated_workspace.go"
+      - "internal/codegen/*/process*"
+      - "internal/codegen/*/intrinsic.go"
+      - "internal/codegen/ruby/ruby.go"
+      - "internal/codegen/typescript/typescript.go"
+      - "internal/repl/intrinsic.go"
+      - "internal/stdlib/process.go"
+      - "internal/stdlib/registry.go"
+      - "go.mod"
+      - "go.sum"
+      - ".ruby-version"
+      - ".github/workflows/process-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    name: Process (${{ matrix.host }})
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.host }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: ruby/setup-ruby@v1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install Process host tools
+        run: |
+          gem install --no-document fiddle:1.1.8
+          npm install --global typescript@7.0.2
+          go version
+          ruby --version
+          node --version
+          bun --version
+      - name: Verify Process semantics, dependencies and child cleanup
+        run: go test ./internal/cli ./internal/compiler ./internal/codegen/ruby ./internal/codegen/typescript -run '^(TestPortableProcess|TestProcess|TestRunCompilerOwnedProcess)' -count=1 -timeout=10m
