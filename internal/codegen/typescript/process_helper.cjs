@@ -17,6 +17,14 @@ try {
     if (flags === -1 || fcntl(fd, 2, "int", fd === 3 ? flags | 1 : flags & ~1) === -1) {
       throw new Error("process descriptor setup failed: " + koffi.errno());
     }
+    if (fd !== 3) {
+      // A host runtime can make its stdio nonblocking. The target is an
+      // ordinary executable and must not lose output when a pipe fills.
+      const status = fcntl(fd, 3);
+      if (status === -1 || fcntl(fd, 4, "int", status & ~fs.constants.O_NONBLOCK) === -1) {
+        throw new Error("process blocking I/O setup failed: " + koffi.errno());
+      }
+    }
   }
   signal(13, null); // SIGPIPE / SIG_DFL on supported POSIX hosts.
   const command = payload.command;

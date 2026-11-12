@@ -7,10 +7,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 )
 
 func TestProcessAdapterCleanup(t *testing.T) {
+	if os.Getenv("TRB_PROCESS_DESCRIPTOR_PROBE") == "1" {
+		for fd := uintptr(0); fd < 3; fd++ {
+			flags, _, err := syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETFL, 0)
+			if err != 0 || flags&syscall.O_NONBLOCK != 0 {
+				os.Exit(20 + int(fd))
+			}
+		}
+		os.Stdout.WriteString("blocking\n")
+		os.Exit(0)
+	}
 	if _, err := exec.LookPath("npm"); err != nil {
 		t.Skip("npm unavailable")
 	}
@@ -20,7 +32,21 @@ func TestProcessAdapterCleanup(t *testing.T) {
 		t.Fatalf("install: %v\n%s", err, output)
 	}
 	support := "const __trbProcessHelper = " + strconv.Quote(tsProcessHelper) + ";\n" + tsProcessRuntime
-	probe := support + `
+	// Simulate a runtime making its standard descriptors nonblocking before
+	// handing them to the target. The exec boundary must restore blocking I/O.
+	nonblocking := strings.Replace(tsProcessHelper, "  // Node marks standard", `  for (const fd of [0, 1, 2]) {
+    const flags = fcntl(fd, 3);
+    if (flags === -1 || fcntl(fd, 4, "int", flags | fs.constants.O_NONBLOCK) === -1) throw new Error("probe setup failed");
+  }
+  // Node marks standard`, 1)
+	if nonblocking == tsProcessHelper {
+		t.Fatal("missing descriptor setup boundary")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := strings.Replace(support, "const __trbProcessHelper", "let __trbProcessHelper", 1) + `
 const host = Reflect.get(globalThis, "process");
 const fs = host.getBuiltinModule("fs");
 __trbProcessCapture("/bin/sh", ["-c", "exit 0"]);
@@ -35,6 +61,10 @@ for (let index = 0; index < 12; index++) {
   catch (error) { if (!String(error).includes("cannot execute command")) throw error; }
 }
 if (fs.readdirSync("/dev/fd").length !== before) throw new Error("process descriptors leaked");
+__trbProcessHelper = ` + strconv.Quote(nonblocking) + `;
+host.env.TRB_PROCESS_DESCRIPTOR_PROBE = "1";
+const descriptors = __trbProcessCapture(` + strconv.Quote(executable) + `, ["-test.run=^TestProcessAdapterCleanup$"]);
+if (descriptors.status !== 0 || new TextDecoder().decode(descriptors.stdout) !== "blocking\n") throw new Error("target inherited nonblocking I/O: " + descriptors.status);
 console.log("joined and closed");
 `
 	for name, source := range map[string]string{"support.ts": support, "probe.mts": probe} {
