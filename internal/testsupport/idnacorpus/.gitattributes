@@ -1,0 +1,2 @@
+# Preserve the exact upstream Unicode corpus, including comment whitespace.
+IdnaTestV2.txt -whitespace

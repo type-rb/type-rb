@@ -23,6 +23,7 @@ func (g *generator) oidcIntrinsic(name string, call *ir.Call, arguments []string
 }
 
 func (g *generator) oidcBearerRuntimeSupport() {
+	g.b.WriteString(tsOidcHostnameRuntime)
 	g.b.WriteString(tsOidcBearerRuntime)
 	g.b.WriteByte('\n')
 }
@@ -47,11 +48,41 @@ function trb_oidc_base64url(value: string): Uint8Array {
 
 async function trb_oidc_get_json(uri: string, label: string): Promise<TrbOidcResult<unknown>> {
 	try {
-		const response = await fetch(uri, { signal: AbortSignal.timeout(5000) });
-		if (!response.ok) return { failure: { kind: "provider", message: label + ": HTTP " + String(response.status) } };
-		const body = await response.text();
-		if (new TextEncoder().encode(body).byteLength > 1_048_576) return { failure: { kind: "provider", message: label + " response is too large" } };
-		return { data: JSON.parse(body) as unknown };
+        const signal = AbortSignal.timeout(5000);
+        let target = trb_oidc_normalize_url(uri);
+        for (let hop = 0; hop < 10; hop++) {
+            const response = await fetch(target, { signal, redirect: "manual" });
+            try {
+                if ([301, 302, 303, 307, 308].includes(response.status)) {
+                    const location = response.headers.get("location");
+                    if (location !== null) {
+                        if (hop === 9) throw new Error("stopped after 10 redirects");
+                        target = trb_oidc_redirect_url(location, target);
+                        continue;
+                    }
+                }
+                if (!response.ok) return { failure: { kind: "provider", message: label + ": HTTP " + String(response.status) } };
+                const reader = response.body?.getReader();
+                const chunks: Uint8Array[] = [];
+                let size = 0;
+                if (reader !== undefined) {
+                    try {
+                        while (true) {
+                            const { done, value } = await reader.read();
+                            if (done) break;
+                            size += value.byteLength;
+                            if (size > 1_048_576) return { failure: { kind: "provider", message: label + " response is too large" } };
+                            chunks.push(value);
+                        }
+                    } finally { await reader.cancel(); reader.releaseLock(); }
+                }
+                const body = new Uint8Array(size);
+                let offset = 0;
+                for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+                return { data: JSON.parse(new TextDecoder().decode(body)) as unknown };
+            } finally { await response.body?.cancel(); }
+        }
+        throw new Error("stopped after 10 redirects");
 	} catch (error) {
 		return { failure: { kind: "provider", message: label + ": " + (error instanceof Error ? error.message : String(error)) } };
 	}

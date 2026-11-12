@@ -1,6 +1,9 @@
 package ruby
 
-import "github.com/type-rb/type-rb/internal/ir"
+import (
+	"github.com/type-rb/type-rb/internal/ir"
+	"github.com/type-rb/type-rb/internal/oidchost"
+)
 
 const oidcVerifyBearerIntrinsic = "trb.internal.auth.oidc.verify_bearer"
 
@@ -16,9 +19,11 @@ func (g *generator) oidcIntrinsic(name string, _ *ir.Call, arguments []string) (
 }
 
 func (g *generator) oidcBearerRuntimeSupport() {
-	for _, library := range []string{"base64", "json", "net/http", "openssl", "uri"} {
+	for _, library := range []string{"base64", "json", "net/http", "openssl", "uri", "timeout"} {
 		g.line("require "+quoteRuby(library), "")
 	}
+	g.b.WriteString(oidchost.Ruby())
+	g.b.WriteString(rubyOidcHostnameRuntime)
 	g.b.WriteString(rubyOidcBearerRuntime)
 	g.b.WriteByte('\n')
 }
@@ -37,16 +42,33 @@ module TrbOidcRuntime
   module_function
 
   def get_json(uri, label)
-    target = URI.parse(uri)
-    client = Net::HTTP.new(target.host, target.port)
-    client.use_ssl = target.scheme == "https"
-    client.open_timeout = 5
-    client.read_timeout = 5
-    response = client.request(Net::HTTP::Get.new(target.request_uri))
-    return { failure: { kind: :provider, message: "#{label}: HTTP #{response.code}" } } unless response.is_a?(Net::HTTPSuccess)
-    body = response.body.to_s
-    return { failure: { kind: :provider, message: "#{label} response is too large" } } if body.bytesize > HTTP_LIMIT
-    { value: JSON.parse(body) }
+    Timeout.timeout(5) do
+      target = normalize_url(uri)
+      10.times do |hop|
+        client = Net::HTTP.new(target.hostname, target.port)
+        client.use_ssl = target.scheme == "https"
+        client.open_timeout = 5
+        client.read_timeout = 5
+        response = nil
+        body = +""
+        client.start do |http|
+          http.request(Net::HTTP::Get.new(target.request_uri)) do |received|
+            response = received
+            received.read_body do |chunk|
+              body << chunk
+              return { failure: { kind: :provider, message: "#{label} response is too large" } } if body.bytesize > HTTP_LIMIT
+            end
+          end
+        end
+        if [301, 302, 303, 307, 308].include?(response.code.to_i) && response["location"]
+          raise IOError, "stopped after 10 redirects" if hop == 9
+          target = redirect_url(response["location"], target)
+          next
+        end
+        return { failure: { kind: :provider, message: "#{label}: HTTP #{response.code}" } } unless response.is_a?(Net::HTTPSuccess)
+        return { value: JSON.parse(body) }
+      end
+    end
   rescue StandardError => error
     { failure: { kind: :provider, message: "#{label}: #{error.message}" } }
   end

@@ -1,0 +1,47 @@
+{
+  "UnicodeData.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/UnicodeData.txt",
+    "sha256": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "bytes": 2198209
+  },
+  "PropList.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/PropList.txt",
+    "sha256": "130dcddcaadaf071008bdfce1e7743e04fdfbc910886f017d9f9ac931d8c64dd",
+    "bytes": 145465
+  },
+  "DerivedCoreProperties.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt",
+    "sha256": "24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08",
+    "bytes": 1134783
+  },
+  "Blocks.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/Blocks.txt",
+    "sha256": "c0edefaf1a19771e830a82735472716af6bf3c3975f6c2a23ffbe2580fbbcb15",
+    "bytes": 11663
+  },
+  "CaseFolding.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/CaseFolding.txt",
+    "sha256": "ff8d8fefbf123574205085d6714c36149eb946d717a0c585c27f0f4ef58c4183",
+    "bytes": 87539
+  },
+  "HangulSyllableType.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/HangulSyllableType.txt",
+    "sha256": "5a57450afde0d082bc5026f7458649eac3b615490cc7e3d916b0367f1593c0e3",
+    "bytes": 51360
+  },
+  "ArabicShaping.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/ArabicShaping.txt",
+    "sha256": "39afa01e680e27d0fd10b67a9b27be13fbaa3d0efecfb5be45991de9a0d267d0",
+    "bytes": 41441
+  },
+  "Scripts.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/ucd/Scripts.txt",
+    "sha256": "9f5e50d3abaee7d6ce09480f325c706f485ae3240912527e651954d2d6b035bf",
+    "bytes": 192460
+  },
+  "IdnaMappingTable.txt": {
+    "url": "https://www.unicode.org/Public/17.0.0/idna/IdnaMappingTable.txt",
+    "sha256": "87f05505dc026fdb2bff16132bdc68a8014675836882a9a2b1844540ad3be382",
+    "bytes": 787378
+  }
+}

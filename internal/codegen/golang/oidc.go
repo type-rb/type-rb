@@ -34,28 +34,32 @@ func (g *generator) oidcIntrinsic(name string, call *ir.Call, arguments []string
 
 func (g *generator) oidcBearerRuntimeSupport() {
 	for path, alias := range map[string]string{
-		"crypto":          "",
-		"crypto/rsa":      "",
-		"crypto/sha256":   "",
-		"encoding/base64": "",
-		"encoding/json":   "stdjson",
-		"fmt":             "",
-		"io":              "",
-		"math/big":        "",
-		"net/http":        "nethttp",
-		"strings":         "",
-		"sync":            "",
-		"time":            "stdtime",
+		"crypto":                "",
+		"crypto/rsa":            "",
+		"crypto/sha256":         "",
+		"encoding/base64":       "",
+		"encoding/json":         "stdjson",
+		"fmt":                   "",
+		"io":                    "",
+		"math/big":              "",
+		"net/http":              "nethttp",
+		"net/netip":             "",
+		"net/url":               "",
+		"golang.org/x/net/idna": "",
+		"strings":               "",
+		"sync":                  "",
+		"time":                  "stdtime",
 	} {
 		g.requireImport(path, alias)
 	}
+	g.b.WriteString(goOidcHostnameRuntime)
 	g.line("type trbOidcPrincipalData struct { subject string; name string; email string; roles []string }")
 	g.line("type trbOidcFailure struct { kind string; message string }")
 	g.line("type trbOidcJwk struct { Kid string `json:\"kid\"`; Kty string `json:\"kty\"`; Use string `json:\"use\"`; Alg string `json:\"alg\"`; N string `json:\"n\"`; E string `json:\"e\"` }")
 	g.line("type trbOidcProviderMetadata struct { Issuer string `json:\"issuer\"`; JwksURI string `json:\"jwks_uri\"` }")
 	g.line("type trbOidcProviderCacheEntry struct { metadata trbOidcProviderMetadata; expires stdtime.Time }")
 	g.line("type trbOidcJwksCacheEntry struct { keys []trbOidcJwk; expires stdtime.Time; refreshAfter stdtime.Time }")
-	g.line("var trbOidcHTTPClient = &nethttp.Client{Timeout: 5 * stdtime.Second}")
+	g.line("var trbOidcHTTPClient = &nethttp.Client{Timeout: 5 * stdtime.Second, Transport: trbOidcTransport{}}")
 	g.line("var trbOidcProviderCache = struct { sync.Mutex; entries map[string]trbOidcProviderCacheEntry }{entries: map[string]trbOidcProviderCacheEntry{}}")
 	g.line("var trbOidcJwksCache = struct { sync.Mutex; entries map[string]trbOidcJwksCacheEntry }{entries: map[string]trbOidcJwksCacheEntry{}}")
 	g.line("func trbOidcGetJSON(uri string, target any, label string) *trbOidcFailure {")
