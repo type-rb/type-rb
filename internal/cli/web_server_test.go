@@ -239,7 +239,7 @@ func webServerCommand(t *testing.T, mode, buildDirectory string) *exec.Cmd {
 	switch mode {
 	case "go":
 		output := filepath.Join(t.TempDir(), "server")
-		build := exec.Command("go", "build", "-o", output, generatedEntrypoint(t, buildDirectory, mode))
+		build := exec.Command("go", "build", "-mod=mod", "-o", output, generatedEntrypoint(t, buildDirectory, mode))
 		build.Dir = buildDirectory
 		if result, err := build.CombinedOutput(); err != nil {
 			t.Fatalf("go build failed: %v\n%s", err, result)

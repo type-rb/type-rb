@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "092b3236becf2be836d384468f24075d9f254afb",
-  "catalogSHA256": "9d13a878cb0b792b021b7d67fb4020dbd88e8553b0fa1394fef735c957802cb2",
+  "sourceRevision": "79e226897f27d75c8bba78545d3cc14879a6a57e",
+  "catalogSHA256": "3d08ad2ef324356df435f1820b6a235d01d0324df3b0d359b9fa9dace1a80dd1",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -2437,10 +2437,11 @@
     {
       "id": "package.web.auth.bearer",
       "title": "trb/web/auth/bearer",
-      "contract": "Preserve Bearer token extraction, verification, context propagation and authentication failures. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve Bearer token extraction, verification, context propagation and authentication failures. Normalize discovery, JWKS and redirect network hostnames with strict non-transitional Unicode 17.0.0 UTS #46 before connecting, while preserving exact issuer identity. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
-        "package:trb/web/auth/bearer"
+        "package:trb/web/auth/bearer",
+        "tests:internal/oidchost"
       ],
       "implementations": [
         "go",

@@ -66,6 +66,30 @@ to 1 MiB and cached for five minutes. An unknown key ID triggers one
 rate-limited JWKS refresh so normal signing-key rotation does not create an
 unbounded provider request path.
 
+Endpoint hostnames are normalized before connecting, including discovery,
+JWKS URLs and redirect targets. Every output uses non-transitional UTS #46
+with Unicode 17.0.0 tables and explicit hostname validation. For example,
+`ＢＵＣＨＥＲ.example.invalid` connects to `bucher.example.invalid`, while
+`bücher.example.invalid` connects to `xn--bcher-kva.example.invalid`.
+Invalid names fail as provider errors before a connection to that target.
+Paths and queries retain their contents. A terminal DNS root dot and ordinary
+IPv4/IPv6 literals are supported; ambiguous numeric URL forms such as `127.1`
+are rejected.
+
+This normalization applies to network addresses. The configured issuer,
+discovery issuer and JWT `iss` claim still require exact string equality;
+Unicode and ASCII spellings do not become interchangeable identity values.
+Redirects use the same hostname validation and one five-second request budget,
+with at most ten requests. HTTP and HTTPS are the supported endpoint schemes.
+Environment proxies continue to follow the selected runtime's transport policy;
+Node requires its explicit environment-proxy option. Hostname normalization
+also precedes the transport's proxy exclusion and TLS name checks.
+
+See the [provider pins and qualification](../../internal/oidchost/README.md)
+for dependency identities, validation flags and the Ruby source/table update
+procedure. Run `trb install` to install managed dependencies before running
+generated Go or TypeScript sources directly.
+
 Server-managed browser sessions, authorization-code PKCE, cookie-key rotation,
 and pluggable session stores are not part of this first bearer profile. Keep
 production issuers and JWKS endpoints on HTTPS and apply authorization policy

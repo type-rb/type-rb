@@ -1,0 +1,9 @@
+{
+  "commit": "29fadb2b73599c66db3202d62ceb1d25eefeca12",
+  "archiveUrl": "https://codeload.github.com/skryukov/uri-idna/tar.gz/29fadb2b73599c66db3202d62ceb1d25eefeca12",
+  "sha256": "963d5d4483035637494eb0b84305b8058167172b61ba8e7d3bd919765bbf3595",
+  "unicodeVersion": "17.0.0",
+  "rubyVersion": "0.3.1",
+  "goProvider": "golang.org/x/net v0.62.0",
+  "typescriptProvider": "tr46 6.0.0"
+}
