@@ -6725,6 +6725,7 @@
       "TestPlainEnumRawMembersRejectedAcrossTargetsAndREPL (internal/cli/enum_call_contract_test.go)",
       "TestPlaygroundModeSelection (internal/cli/cli_test.go)",
       "TestPortableArraySortKeepsNaNsLastAcrossExecutionPaths (internal/cli/array_sort_nan_test.go)",
+      "TestPortableProcessExitOutcomes (internal/cli/process_runtime_test.go)",
       "TestPortableTimeAcrossAvailableBackendsAndREPL (internal/cli/time_conformance_test.go)",
       "TestProjectWalkSkipsTypeRBPackageCache (internal/cli/package_system_test.go)",
       "TestQualifiedClassConstantOwnersAcrossTargetsAndREPL (internal/cli/qualified_class_execution_test.go)",
