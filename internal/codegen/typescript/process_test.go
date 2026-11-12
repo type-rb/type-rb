@@ -15,7 +15,7 @@ func TestProcessAdapterCleanup(t *testing.T) {
 		t.Skip("npm unavailable")
 	}
 	root := t.TempDir()
-	install := exec.Command("npm", "install", "--prefix", root, "--ignore-scripts", "--no-audit", "--no-fund", "koffi@3.3.7")
+	install := exec.Command("npm", "install", "--prefix", root, "--ignore-scripts", "--no-audit", "--no-fund", "koffi@3.3.7", "typescript@7.0.2")
 	if output, err := install.CombinedOutput(); err != nil {
 		t.Fatalf("install: %v\n%s", err, output)
 	}
@@ -42,12 +42,10 @@ console.log("joined and closed");
 			t.Fatal(err)
 		}
 	}
-	if _, err := exec.LookPath("tsc"); err == nil {
-		check := exec.Command("tsc", "--noEmit", "--strict", "--target", "ES2022", "--module", "ESNext", "support.ts")
-		check.Dir = root
-		if output, err := check.CombinedOutput(); err != nil {
-			t.Fatalf("typecheck: %v\n%s", err, output)
-		}
+	check := exec.Command("node", filepath.Join(root, "node_modules/typescript/bin/tsc"), "--noEmit", "--strict", "--target", "ES2022", "--module", "ESNext", "support.ts")
+	check.Dir = root
+	if output, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("typecheck: %v\n%s", err, output)
 	}
 	for _, runtime := range []string{"node", "bun"} {
 		t.Run(runtime, func(t *testing.T) {

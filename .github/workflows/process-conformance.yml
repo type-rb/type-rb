@@ -64,7 +64,6 @@ jobs:
       - name: Install Process host tools
         run: |
           gem install --no-document fiddle:1.1.8
-          npm install --global typescript@7.0.2
           go version
           ruby --version
           node --version

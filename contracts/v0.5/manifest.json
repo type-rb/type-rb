@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "ccd65f310073ac99cedb24fc48d910705db77211",
-  "catalogSHA256": "78c8b705bb7a399214ebb6d312fe2fddd10783ca16b5644dadee2ed0b4b67413",
+  "sourceRevision": "dd76069c4ed2c0194a8b22ec62dd594a2ee5d1cb",
+  "catalogSHA256": "c2a0bbdcecea88b12a9835ac5b885f00523c520e2093cac66b859e2a8f897f57",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -1979,7 +1979,7 @@
     {
       "id": "package.std.process",
       "title": "trb/std/process",
-      "contract": "Preserve process arguments/environment, subprocess execution, status, signals and pipe/resource cleanup. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve process arguments/environment, subprocess execution, status, signals and pipe/resource cleanup. Decode captured stdout/stderr exactly like Bytes.to_s(), preserving U+FEFF independently of read boundaries. Reject unsupported executable formats without an implicit interpreter; explicit interpreters and OS-supported shebang scripts remain supported. Distinguish launch errors from started-child nonzero exits. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "document:docs/standard-library.md#process",
@@ -2010,7 +2010,11 @@
       "baseline": "unqualified",
       "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
       "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
-      "related": [],
+      "related": [
+        "https://github.com/type-rb/type-rb-native/issues/1339",
+        "https://github.com/type-rb/type-rb-native/issues/1342",
+        "https://github.com/type-rb/type-rb/issues/865"
+      ],
       "qualificationReady": false
     },
     {
@@ -3856,6 +3860,7 @@
         "delivery:.github/workflows/container.yml",
         "delivery:.github/workflows/native-package-index.yml",
         "delivery:.github/workflows/pages.yml",
+        "delivery:.github/workflows/process-conformance.yml",
         "delivery:.github/workflows/release.yml",
         "delivery:packaging/container/Dockerfile",
         "delivery:scripts/extract-release-notes.sh",
