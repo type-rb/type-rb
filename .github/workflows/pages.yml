@@ -57,6 +57,10 @@ jobs:
       - uses: ruby/setup-ruby@v1
         if: steps.test-scope.outputs.full-tests == 'true'
 
+      - name: Install Jobs SQLite runtime dependencies
+        if: steps.test-scope.outputs.full-tests == 'true'
+        run: gem install --no-document sequel:5.107.0 sqlite3:2.9.5
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -76,7 +80,7 @@ jobs:
 
       - name: Verify compiler and tour
         if: steps.test-scope.outputs.full-tests == 'true'
-        run: go test ./...
+        run: go test ./... -timeout 20m
 
       - name: Verify workflow tooling
         run: |
