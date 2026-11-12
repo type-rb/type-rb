@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	gotypes "go/types"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"

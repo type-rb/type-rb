@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
