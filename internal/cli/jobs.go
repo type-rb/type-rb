@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/type-rb/type-rb/internal/compiler"
+	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 )
 
 func (c *CLI) runJobs(args []string) error {
@@ -70,7 +74,20 @@ func (c *CLI) runJobsStart(args []string) error {
 		restoreQueue := temporaryEnvironment("TRB_JOBS_QUEUE", queue)
 		defer restoreQueue()
 	}
-	return c.runProgram(forwarded)
+	return c.runProgramWithWorker(forwarded, true)
+}
+
+// The worker owns the handler grace period. The CLI allows a bounded final
+// interval for claim/database cleanup before forcing the still-owned process
+// to exit. Derive both phases from the checked adapter configuration.
+func jobsWorkerShutdownTimeout(artifact *compiler.Artifact) time.Duration {
+	config := jobssql.DefaultConfig()
+	if artifact != nil && artifact.IR != nil {
+		if manifest := jobssql.ManifestFrom(artifact.IR.Extensions); manifest != nil {
+			config = manifest.Config
+		}
+	}
+	return time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond + 5*time.Second
 }
 
 func temporaryEnvironment(name, value string) func() {

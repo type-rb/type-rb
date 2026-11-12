@@ -358,7 +358,10 @@ func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
 	g.line("case executionError = <-execution:")
 	g.line("case <-signalContext.Done():")
 	g.indent++
-	g.line("select { case executionError = <-execution: case <-stdtime.After(shutdownTimeout): close(heartbeatDone); return true }")
+	// A handler that ignores cancellation is still running. Releasing its claim
+	// from a deferred cleanup could make that same job runnable concurrently.
+	// Exit the whole process and let the retained lease recover after expiry.
+	g.line("select { case executionError = <-execution: case <-stdtime.After(shutdownTimeout): fmt.Fprintln(os.Stderr, \"trb jobs shutdown: grace period expired; active claim retained for lease recovery\"); os.Exit(1) }")
 	g.indent--
 	g.line("}")
 	g.line("close(heartbeatDone)")

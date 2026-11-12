@@ -185,9 +185,19 @@ single-worker use only. `--once` claims at most one ready Job and is useful for
 tests and operational scripts.
 
 Workers retry failures with adapter-configured backoff, move exhausted Jobs to
-`failed`, heartbeat active claims, and recover stale claims. Shutdown stops new
-claims and lets the current Job return before releasing it. Delivery is at
-least once, so Job implementations must be idempotent.
+`failed`, heartbeat active claims, and recover stale claims. On SIGINT or
+SIGTERM, shutdown stops new claims and requests cancellation of the current
+Job. `trb jobs start` waits for the worker to exit and removes its temporary
+generated workspace before returning. An idle worker or a Job that completes
+and acknowledges its claim during shutdown exits successfully.
+
+A second stop signal or an expired shutdown deadline forces the worker to stop
+and returns a nonzero status with a diagnostic. The SQL worker's grace period
+is 30 seconds; the CLI allows another five seconds for cleanup before its hard
+stop. A forcibly stopped Job keeps its running claim until the lease expires
+and stale-claim recovery makes it ready again. It is never released while the
+old worker can still execute it. Delivery is at least once, so Job
+implementations must be idempotent.
 
 `trb jobs list` shows persisted state. `retry` returns a failed Job to the ready
 queue, and `discard` removes a non-running Job.

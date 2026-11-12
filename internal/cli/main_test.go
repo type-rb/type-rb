@@ -17,6 +17,14 @@ func TestMain(m *testing.M) {
 		runTestSignalHelper()
 		return
 	}
+	if os.Getenv("TRB_TEST_JOBS_CLI_HELPER") == "1" {
+		os.Exit(New().Run(os.Args[1:]))
+	}
+	// A caller may supply bounded shared caches. Respect them instead of
+	// redownloading modules and rebuilding the toolchain for each test process.
+	if os.Getenv("GOCACHE") != "" && os.Getenv("GOMODCACHE") != "" {
+		os.Exit(m.Run())
+	}
 	// Generated project roots remain isolated; only Go's content-addressed caches are shared.
 	cacheRoot, err := os.MkdirTemp("", "trb-cli-test-go-cache-")
 	if err != nil {

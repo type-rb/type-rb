@@ -166,7 +166,6 @@ func runNativeRuntimeArtifact(t *testing.T, mode, root string, artifacts []*Arti
 		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "wire.go"), []byte("package runtimewire\n\nimport \"context\"\n\nfunc Invoke(scope context.Context, input string) string {\n\tif scope == nil { panic(\"missing scope\") }\n\treturn \"wire:\" + input\n}\n"))
 		command := exec.Command("go", "run", "./"+filepath.Dir(artifacts[0].EntryPath))
 		command.Dir = root
-		command.Env = append(os.Environ(), "GOCACHE="+filepath.Join(root, "go-cache"))
 		output, err := command.CombinedOutput()
 		if err != nil {
 			t.Fatalf("generated Go runtime adapter failed: %v\n%s", err, output)
@@ -229,7 +228,6 @@ func TestGoUnreachableModulesDoNotLoadNativeImports(t *testing.T) {
 		writeCompilerRuntimeFile(t, filepath.Join(root, "runtime-wire", "wire.go"), []byte("package runtimewire\nimport (\"context\"; \"fmt\")\nfunc init() { fmt.Println(\"native\") }\nfunc Invoke(scope context.Context, input string) string { return \"wire:\"+input }\n"))
 		command := exec.Command("go", "run", "./"+filepath.Dir(artifactForModule(artifacts, "main").EntryPath))
 		command.Dir = root
-		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 		output, err := command.CombinedOutput()
 		if err != nil || string(output) != want {
 			t.Fatalf("reachable=%v error=%v output=%q want=%q", reachable, err, output, want)

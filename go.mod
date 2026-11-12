@@ -7,6 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/mattn/go-isatty v0.0.20
 	github.com/reeflective/readline v1.3.1-0.20260802023205-4d8e27a037bd
 	github.com/rivo/uniseg v0.4.7
 	github.com/yuin/goldmark v1.8.5
@@ -25,7 +26,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sync v0.20.0 // indirect
