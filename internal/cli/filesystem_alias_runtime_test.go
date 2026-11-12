@@ -465,16 +465,24 @@ import { FileSystemError } from trb/std/errors
 import { Result } from trb/std/result
 
 def write(fs: String, flags: String, file: String, data: String): Result<String, FileSystemError>
+	path := "path-ok"
 	return File.open(Path.new(fs), mode: FileMode::Write) do |handle|
 		error := "error-ok"
 		try handle.write_text(data)
-		flags + ":" + file + ":" + error
+		flags + ":" + file + ":" + error + ":" + path
 	end
 end
 
 def read(fs: String, file: Integer): Result<String, FileSystemError>
+	path := "path-ok"
+	data := "data-ok"
+	remaining := "remaining-ok"
+	request_bytes := "request-ok"
+	chunk := "chunk-ok"
+	error := "error-ok"
 	return File.open(Path.new(fs)) do |handle|
-		try handle.read_text(max_bytes: file)
+		loaded := try handle.read_text(max_bytes: file)
+		loaded + ":" + path + ":" + data + ":" + remaining + ":" + request_bytes + ":" + chunk + ":" + error
 	end
 end
 
@@ -505,7 +513,7 @@ end
 			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
 				t.Fatalf("status=%d stderr=%s", status, stderr.String())
 			}
-			if want := "flags-ok:file-ok:error-ok\npayload\n"; stdout.String() != want {
+			if want := "flags-ok:file-ok:error-ok:path-ok\npayload:path-ok:data-ok:remaining-ok:request-ok:chunk-ok:error-ok\n"; stdout.String() != want {
 				t.Fatalf("unexpected output: want %q, got %q", want, stdout.String())
 			}
 		})

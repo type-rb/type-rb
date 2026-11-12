@@ -1200,6 +1200,10 @@ func executableOutputPath(config *project.Config, outfile string) (string, error
 }
 
 func (c *CLI) runProgram(args []string) (resultErr error) {
+	return c.runProgramWithWorker(args, false)
+}
+
+func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error) {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
@@ -1327,7 +1331,26 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	case "ruby":
 		command = rubyRunCommand(target, programArgs)
 	case "go":
-		command = exec.Command("go", append([]string{"run", "-mod=mod", "."}, programArgs...)...)
+		if worker {
+			// Supervise the generated worker itself. A `go run` launcher can
+			// exit on a signal while its worker still owns a running claim.
+			executable := filepath.Join(runRoot, ".jobs-worker")
+			if runtime.GOOS == "windows" {
+				executable += ".exe"
+			}
+			build := exec.Command("go", "build", "-mod=mod", "-o", executable, ".")
+			build.Dir = filepath.Dir(target)
+			build.Stdout, build.Stderr = c.Stdout, c.Stderr
+			if err := relay.Run(build); err != nil {
+				return fmt.Errorf("build jobs worker: %w", err)
+			}
+			if relay.interrupted {
+				return errors.New("jobs start interrupted during build")
+			}
+			command = exec.Command(executable, programArgs...)
+		} else {
+			command = exec.Command("go", append([]string{"run", "-mod=mod", "."}, programArgs...)...)
+		}
 		if config.Go.Sqldef != nil {
 			database := filepath.Join(config.Root, config.Go.Sqldef.Database)
 			command.Env = append(os.Environ(), "TRB_DATABASE="+database)
@@ -1348,6 +1371,9 @@ func (c *CLI) runProgram(args []string) (resultErr error) {
 	command.Stdin = c.Stdin
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
+	if worker {
+		relay.shutdownTimeout = jobsWorkerShutdownTimeout(compiled[entrySource])
+	}
 	return relay.Run(command)
 }
 

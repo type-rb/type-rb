@@ -109,7 +109,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 			value = "data.force_encoding(Encoding::UTF_8)"
 			failureCheck = "return Result::Err.new(" + rubyFilesystemError(operation, "path", strconv.Quote("file is not valid UTF-8"), "InvalidEncoding") + ") unless data.dup.force_encoding(Encoding::UTF_8).valid_encoding?; "
 		}
-		return "->(file, max_bytes) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = \"\".b; while data.bytesize <= max_bytes; remaining = max_bytes - data.bytesize; request_bytes = remaining == 0 ? 1 : [65536, remaining].min; chunk = file.read(request_bytes); break if chunk.nil? || chunk.empty?; data << chunk; end; if data.bytesize > max_bytes; " + tooLarge + "; else; " + failureCheck + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(file, max_bytes; path, data, remaining, request_bytes, chunk, error) { path = file.path; if max_bytes < 0; " + invalid + "; else; begin; data = \"\".b; while data.bytesize <= max_bytes; remaining = max_bytes - data.bytesize; request_bytes = remaining == 0 ? 1 : [65536, remaining].min; chunk = file.read(request_bytes); break if chunk.nil? || chunk.empty?; data << chunk; end; if data.bytesize > max_bytes; " + tooLarge + "; else; " + failureCheck + filesystemOK(value) + "; end; rescue StandardError => error; " + failure + "; end; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.std.file.write", "trb.std.file.write_text":
 		operation := strings.TrimPrefix(name, "trb.std.file.")
 		failure := "Result::Err.new(" + rubyFilesystemNativeError(operation, "path", "error") + ")"
@@ -117,7 +117,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		if name == "trb.std.file.write_text" {
 			value += ".encode(Encoding::UTF_8)"
 		}
-		return "->(file, value) { path = file.path; begin; file.write(value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + failure + "; end }.call(" + arguments[0] + ", " + value + ")"
+		return "->(file, value; path, error) { path = file.path; begin; file.write(value); " + filesystemOK("Unit.new") + "; rescue StandardError => error; " + failure + "; end }.call(" + arguments[0] + ", " + value + ")"
 	case "trb.internal.process.arguments":
 		return "ARGV.dup"
 	case "trb.internal.process.environment":

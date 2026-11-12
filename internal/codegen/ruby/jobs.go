@@ -197,8 +197,12 @@ func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
 	g.line("worker_id = \"worker-#{Process.pid}\"", "")
 	g.line("stopping = false", "")
 	g.line("worker_scope = TrbExecutionScope.root", "")
-	g.line("Signal.trap(\"TERM\") { stopping = true; worker_scope.cancel }", "")
-	g.line("Signal.trap(\"INT\") { stopping = true; worker_scope.cancel }", "")
+	// Execution cancellation acquires a mutex and invokes callbacks, neither of
+	// which belongs in Ruby's signal trap context. Join that work at shutdown.
+	g.line("cancellation = nil", "")
+	g.line("request_stop = ->(_signal) { stopping = true; cancellation ||= Thread.new { worker_scope.cancel } }", "")
+	g.line("Signal.trap(\"TERM\", &request_stop)", "")
+	g.line("Signal.trap(\"INT\", &request_stop)", "")
 	g.line("begin", "")
 	g.indent++
 	g.line("loop do", "")
@@ -214,6 +218,7 @@ func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
 	g.indent--
 	g.line("ensure", "")
 	g.indent++
+	g.line("cancellation.join if cancellation", "")
 	g.line("TrbJobsRuntime.release(worker_id)", "")
 	g.line("TrbJobsRuntime.close", "")
 	g.indent--

@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	gotypes "go/types"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -117,7 +116,6 @@ end
 				writeCompilerRuntimeFile(t, filepath.Join(root, "main.go"), artifact.Output)
 				writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte("module example.com/concurrent-map-test\n\ngo 1.27\n"))
 				command = exec.CommandContext(ctx, "go", "run", ".")
-				command.Env = append(os.Environ(), "GOCACHE="+filepath.Join(root, "go-cache"))
 			case "ruby":
 				writeCompilerRuntimeFile(t, filepath.Join(root, "main.rb"), artifact.Output)
 				command = exec.CommandContext(ctx, "ruby", "main.rb")
@@ -320,7 +318,6 @@ func Probe(scope context.Context, value int) int {
 func Maximum() int { return int(maximum.Load()) }
 `))
 		command = exec.CommandContext(ctx, "go", "run", entry)
-		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 	case "ruby":
 		if len(artifacts) == 0 {
 			writeCompilerRuntimeFile(t, filepath.Join(root, "main.rb"), source)

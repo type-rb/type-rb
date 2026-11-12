@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -1252,7 +1251,6 @@ func runEffectProject(t *testing.T, mode string, artifacts []*Artifact, goModule
 		}
 		writeCompilerRuntimeFile(t, filepath.Join(root, "go.mod"), []byte(manifest))
 		command = exec.CommandContext(ctx, "go", "run", "-mod=mod", "./"+filepath.Dir(artifactForModule(artifacts, "main").EntryPath))
-		command.Env = append(os.Environ(), "GOCACHE=/tmp/type-rb-go-cache")
 	case "ruby":
 		command = exec.CommandContext(ctx, "ruby", artifactForModule(artifacts, "main").EntryPath)
 	case "typescript":

@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "b44f2aa754b2bf6c945aa1f1bbe5ee9712f2c605",
-  "catalogSHA256": "6c9916bd7fd9c9790f80a30e0623dc07040f1a56272f5b3d40f0b6ab1aad3974",
+  "sourceRevision": "4a5f01500f5de98bbddc31eca299d657b22e3cab",
+  "catalogSHA256": "005df20911fa5fefdaf7876fdebf35d03d2e952889a88cf6fc0263abaf10bfa6",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -1125,7 +1125,7 @@
     {
       "id": "package.jobs.sql",
       "title": "trb/jobs/sql",
-      "contract": "Preserve SQL job persistence, claim/release/timeout and database adapter failure semantics. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
+      "contract": "Preserve SQL job persistence, claim/release/timeout and database adapter failure semantics. Forced shutdown retains an unfinished running claim until stale-lease recovery; ordinary completion is acknowledged before cleanup. Every public catalog member/signature, alias, capability and provider belongs to this row; registry membership alone is not passing evidence.",
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "package:trb/jobs/sql",
@@ -2917,7 +2917,7 @@
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "command:run",
-        "flags:runProgram"
+        "flags:runProgramWithWorker"
       ],
       "implementations": [
         "go",
@@ -3228,8 +3228,8 @@
     {
       "id": "cli.jobs",
       "title": "Job administration",
-      "contract": "Preserve worker start and job list/retry/discard, filtering, lease/status persistence, signal shutdown and invalid-operation errors.",
-      "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
+      "contract": "Preserve worker start and job list/retry/discard, filtering, lease/status persistence and invalid-operation errors. Worker start joins the actual worker and generated-workspace cleanup before CLI completion; graceful stop succeeds, while repeated signals or an expired shutdown deadline fail explicitly.",
+      "failure": "Never release an executing claim merely because a launcher exited or the shutdown grace period expired. Forced termination retains the claim for stale-lease recovery; qualify worker absence, lease disposition, terminal and non-terminal signals, idle and active handlers, and temporary-workspace cleanup.",
       "surfaces": [
         "command:jobs",
         "command:jobs discard",
@@ -3259,7 +3259,9 @@
       "baseline": "unqualified",
       "remaining": "Map every owned declaration and semantic boundary to an exact-candidate scenario; review the per-output plan and record non-skipped success/failure evidence on all required hosts. Existing source tests are not a complete paired-candidate result.",
       "owner": "https://github.com/type-rb/type-rb-native/issues/1221",
-      "related": [],
+      "related": [
+        "https://github.com/type-rb/type-rb/issues/853"
+      ],
       "qualificationReady": false
     },
     {

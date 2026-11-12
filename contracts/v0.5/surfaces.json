@@ -2344,7 +2344,7 @@
     ]
   },
   {
-    "id": "flags:runProgram",
+    "id": "flags:runProgramWithWorker",
     "kind": "cli",
     "source": "internal/cli/cli.go",
     "members": [
@@ -6523,6 +6523,8 @@
       "TestCleanRemovesUnknownOldWorkspaceButNotNewWorkspace (internal/cli/generated_workspace_test.go)",
       "TestCleanSkipsActiveGeneratedWorkspace (internal/cli/generated_workspace_test.go)",
       "TestCollectionArgumentsRetainSourceScope (internal/cli/collection_argument_scope_test.go)",
+      "TestCommandSignalRelayDoesNotStartAfterStop (internal/cli/child_process_test.go)",
+      "TestCommandSignalRelayForcedStopIsFailure (internal/cli/child_process_test.go)",
       "TestCommandSignalRelayForwardsInterruptAndWaits (internal/cli/child_process_test.go)",
       "TestCommonClassUnionFieldStoresAcrossTargetsAndREPL (internal/cli/union_field_assignment_test.go)",
       "TestCommonClassUnionLogicalAssignmentSkipsRightHandSide (internal/cli/union_field_assignment_test.go)",
@@ -6588,6 +6590,7 @@
       "TestGenericEnumAliasNullableMethodsStayLazy (internal/cli/generic_enum_alias_method_test.go)",
       "TestGenericUnionAliasesNormalizeAfterSubstitution (internal/cli/union_runtime_test.go)",
       "TestGoJobWorkerBuildsWithWebAndImportedAliasPayload (internal/cli/jobs_go_runtime_test.go)",
+      "TestGoJobsWorkerGraceExpiryRetainsLeaseUntilRecovery (internal/cli/jobs_shutdown_test.go)",
       "TestGoKeywordBindingsPreserveScopesAcrossBackendsAndREPL (internal/cli/go_keyword_bindings_test.go)",
       "TestGoModuleEmissionPreservesSameNamedClassesAndEnums (internal/cli/module_initialization_test.go)",
       "TestGoTestSuiteDispatchesRouteBelowDynamicSegment (internal/cli/web_test_suite_test.go)",
@@ -6643,6 +6646,9 @@
       "TestJobApplicationConformanceAcrossServerDatabases (internal/cli/jobs_database_conformance_test.go)",
       "TestJobEnqueueFromProjectREPLAcrossBackends (internal/cli/jobs_repl_conformance_test.go)",
       "TestJobResultControlsAcknowledgementAndRetryAcrossBackends (internal/cli/jobs_result_runtime_test.go)",
+      "TestJobsIdleWorkerStopsAfterAcknowledgement (internal/cli/jobs_shutdown_test.go)",
+      "TestJobsWorkerForcedShutdownRetainsLease (internal/cli/jobs_shutdown_test.go)",
+      "TestJobsWorkerShutdownAcrossBackends (internal/cli/jobs_shutdown_test.go)",
       "TestLSPCommandRecoversFromUnclosedStandaloneMethodParameters (internal/cli/lsp_test.go)",
       "TestLSPCommandRejectsStandaloneModeForConfiguredProject (internal/cli/lsp_test.go)",
       "TestLSPCommandRequiresProjectOrStandaloneFile (internal/cli/lsp_test.go)",
