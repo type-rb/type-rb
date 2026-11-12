@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -43,6 +44,52 @@ end
 		"7\nbefore\nfailure\nfalse\ntrue\n" +
 		"-1\nsignal\nstopped\nfalse\ntrue\n" +
 		"run\ntrb-process-command-does-not-exist\nfalse\n"
+	testPortableProcessProgram(t, source, want)
+}
+
+func TestPortableProcessLiteralCommands(t *testing.T) {
+	command := filepath.Join(t.TempDir(), "literal command")
+	const script = "#!/bin/sh\nprintf 'started'\nfor argument do printf '<%s>' \"$argument\"; done\nprintf 'captured' >&2\n"
+	if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := `import trb/std/process
+import trb/std/result
+
+def report(command: String, args: Array<String>)
+	case Process.run(command, args)
+	when Result::Ok(value)
+		puts("ok")
+		puts(value.status)
+		puts(value.stdout)
+		puts(value.stderr)
+		puts(value.success)
+	when Result::Err(error)
+		puts("error")
+		puts(error.operation)
+		puts(error.command)
+		puts(error.message.empty?())
+	end
+end
+
+def main()
+	report("printf process-shell-probe", [])
+	report("printf 'quoted-probe'", [])
+	report("printf first; printf second", [])
+	report(` + strconv.Quote(command) + `, [])
+	report(` + strconv.Quote(command) + `, ["two words", "$(printf expanded)", "; literal", "*"])
+end
+`
+	const want = "error\nrun\nprintf process-shell-probe\nfalse\n" +
+		"error\nrun\nprintf 'quoted-probe'\nfalse\n" +
+		"error\nrun\nprintf first; printf second\nfalse\n" +
+		"ok\n0\nstarted\ncaptured\ntrue\n" +
+		"ok\n0\nstarted<two words><$(printf expanded)><; literal><*>\ncaptured\ntrue\n"
+	testPortableProcessProgram(t, source, want)
+}
+
+func testPortableProcessProgram(t *testing.T, source, want string) {
+	t.Helper()
 	for _, backend := range filesystemRuntimeBackends {
 		t.Run(backend.name, func(t *testing.T) {
 			if _, err := exec.LookPath(backend.executable); err != nil {

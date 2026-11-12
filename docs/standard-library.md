@@ -951,6 +951,9 @@ end
 `run` takes a command and separate `Array<String>` arguments. It captures
 stdout and stderr. A started process with any exit status is
 `Ok(Process::Output)`; launch or host failures are `Err(Process::Error)`.
+The command is a literal executable name or path, even with an empty argument
+array. Spaces and shell metacharacters are never interpreted as a command line;
+paths containing spaces and literal argument values remain supported.
 
 ## JSON and JSONC
 
