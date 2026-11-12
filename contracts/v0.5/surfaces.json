@@ -6950,6 +6950,8 @@
       "TestSelectedTestRootsShareOneCyclicInitialization (internal/cli/module_cycles_test.go)",
       "TestSelectedTestsInitializeOnlyTheirImportClosures (internal/cli/module_initialization_test.go)",
       "TestSingleQuotedStringsAcrossTargetsAndREPL (internal/cli/string_escape_test.go)",
+      "TestStandaloneGoModulePreservesOfficialDependencyVersions (internal/cli/standalone_dependencies_test.go)",
+      "TestStandaloneGoOIDCRunAndBuild (internal/cli/standalone_dependencies_test.go)",
       "TestStandaloneTRBModeSupportsAnalysisOnly (internal/cli/trb_mode_test.go)",
       "TestStringEscapesAcrossTargetsAndREPL (internal/cli/string_escape_test.go)",
       "TestSymbolKeywordsAcrossTargetsAndREPL (internal/cli/symbol_keyword_test.go)",
