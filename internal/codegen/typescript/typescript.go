@@ -63,6 +63,7 @@ type generator struct {
 	jsonRuntime      bool
 	reactStateHelper bool
 	oidcRuntime      bool
+	processRuntime   bool
 	temporary        int
 	suspension       *SuspensionPlan
 	execution        *effectplan.Plan
@@ -245,6 +246,9 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 	}
 	if g.oidcRuntime {
 		g.oidcBearerRuntimeSupport()
+	}
+	if g.processRuntime {
+		g.processRuntimeSupport()
 	}
 	if g.checkedInteger || strings.Contains(g.b.String(), "__trbInteger") {
 		g.checkedIntegerRuntimeSupport()

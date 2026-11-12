@@ -237,9 +237,8 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 		g.requireImport("bytes", "")
 		g.requireImport("errors", "")
 		g.requireImport("os/exec", "exec")
-		g.requireImport("strings", "")
 		resultType, successType, _ := filesystemResultType()
-		value := successType + "{Status: status, Stdout: strings.ToValidUTF8(stdout.String(), \"�\"), Stderr: strings.ToValidUTF8(stderr.String(), \"�\"), Success: status == 0}"
+		value := successType + "{Status: status, Stdout: " + g.utf8WithReplacement("stdout.Bytes()") + ", Stderr: " + g.utf8WithReplacement("stderr.Bytes()") + ", Success: status == 0}"
 		return "func() " + resultType + " { commandName := " + arguments[0] + "; commandArguments := " + g.arrayValues(arguments[1]) + "; process := exec.Command(commandName, commandArguments...); var stdout bytes.Buffer; var stderr bytes.Buffer; process.Stdout = &stdout; process.Stderr = &stderr; err := process.Run(); status := 0; if err != nil { var exitError *exec.ExitError; if errors.As(err, &exitError) { status = exitError.ExitCode() } else { return " + processError("run", "commandName", "err.Error()") + " } }; return " + filesystemOK(value) + " }()"
 	case "trb.internal.json.parse":
 		return g.jsonParse(call, arguments[0], false)

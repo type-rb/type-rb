@@ -184,10 +184,9 @@ func runPTYSteps(t *testing.T, screenOnly bool, steps ...ptyInputStep) []byte {
 	}
 	defer terminal.Close()
 
-	var output []byte
-	if screenOnly {
-		output = readPTYUntil(t, terminal, []byte("trb:go> "))
-	}
+	// Input sent before Readline enters raw mode can be echoed by the terminal
+	// and collapse Escape/Enter into one buffered sequence under CPU contention.
+	output := readPTYUntil(t, terminal, []byte("trb:go> "))
 	for _, step := range steps {
 		if _, err := terminal.Write([]byte(step.input)); err != nil {
 			t.Fatal(err)
