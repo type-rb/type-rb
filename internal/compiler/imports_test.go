@@ -2999,7 +2999,7 @@ end
 			`os.LookupEnv(`,
 		},
 		"ruby": {
-			`Open3.capture3(command, *arguments)`,
+			`Open3.capture3([command, command], *arguments)`,
 			`Process::Output.new(status: status.exitstatus || -1`,
 			`ENV[name]`,
 		},

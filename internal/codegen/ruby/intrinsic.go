@@ -127,7 +127,7 @@ func (g *generator) intrinsic(name string, call *ir.Call, arguments []string) st
 	case "trb.internal.process.run":
 		text := "->(value) { value.force_encoding(Encoding::UTF_8).encode(Encoding::UTF_8, invalid: :replace, undef: :replace) }"
 		value := "Process::Output.new(status: status.exitstatus || -1, stdout: text.call(stdout), stderr: text.call(stderr), success: status.success? == true)"
-		return "->(command, arguments) { begin; require \"open3\"; stdout, stderr, status = Open3.capture3(command, *arguments); text = " + text + "; " + filesystemOK(value) + "; rescue StandardError => error; " + processError("run", "command", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
+		return "->(command, arguments) { begin; require \"open3\"; stdout, stderr, status = Open3.capture3([command, command], *arguments); text = " + text + "; " + filesystemOK(value) + "; rescue StandardError => error; " + processError("run", "command", "error.message") + "; end }.call(" + arguments[0] + ", " + arguments[1] + ")"
 	case "trb.internal.json.parse":
 		return rubyJSONParse(arguments[0], false)
 	case "trb.internal.json.parse_jsonc":
