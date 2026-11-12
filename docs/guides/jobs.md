@@ -192,9 +192,9 @@ generated workspace before returning. An idle worker or a Job that completes
 and acknowledges its claim during shutdown exits successfully.
 
 A second stop signal or an expired shutdown deadline forces the worker to stop
-and returns a nonzero status with a diagnostic. The SQL worker's grace period
-is 30 seconds; the CLI allows another five seconds for cleanup before its hard
-stop. A forcibly stopped Job keeps its running claim until the lease expires
+and returns a nonzero status with a diagnostic. The CLI enforces a 35-second outer deadline: the SQL adapter's 30-second
+grace period plus five seconds for cleanup. The Go worker also enforces the
+grace period internally. A forcibly stopped Job keeps its running claim until the lease expires
 and stale-claim recovery makes it ready again. It is never released while the
 old worker can still execute it. Delivery is at least once, so Job
 implementations must be idempotent.
