@@ -3804,7 +3804,7 @@
       "Bearer::def self.verify(request: Request, options: OidcBearerOptions): Result<OidcPrincipal, OidcAuthError>",
       "binding  = ContextKey<OidcPrincipal>.new(\"oidc_principal\") PRINCIPAL_KEY",
       "module Bearer",
-      "nativeDependencies {}"
+      "nativeDependencies {\"go\":{\"golang.org/x/net\":\"v0.62.0\",\"golang.org/x/text\":\"v0.43.0\"},\"typescript\":{\"@types/tr46\":\"5.0.1\",\"punycode\":\"2.3.1\",\"tr46\":\"6.0.0\"}}"
     ]
   },
   {
@@ -6722,6 +6722,7 @@
       "TestOfficialWebServerLifecycleAcrossAvailableBackends (internal/cli/web_server_test.go)",
       "TestOfficialWebServerRejectsInvalidConfigAcrossAvailableBackends (internal/cli/web_server_test.go)",
       "TestOidcBearerAuthenticationAcrossAvailableBackends (internal/cli/oidc_bearer_test.go)",
+      "TestOidcEndpointHostnamesAcrossRuntimes (internal/cli/oidc_hostname_test.go)",
       "TestPlainEnumRawMembersRejectedAcrossTargetsAndREPL (internal/cli/enum_call_contract_test.go)",
       "TestPlaygroundModeSelection (internal/cli/cli_test.go)",
       "TestPortableArraySortKeepsNaNsLastAcrossExecutionPaths (internal/cli/array_sort_nan_test.go)",
@@ -7039,6 +7040,7 @@
       "TestNarrowedNullableReceiverPreservesMemberPrecedence (internal/codegen/golang/nullable_test.go)",
       "TestORMPoolResolvesRuntimeDatabaseFromEnvironment (internal/codegen/golang/orm_test.go)",
       "TestORMRuntimeUsesSelectedDatabaseDialect (internal/codegen/golang/orm_test.go)",
+      "TestOidcUnicode17Conformance (internal/codegen/golang/oidc_hostname_test.go)",
       "TestRequireSourceImportSeparatesEqualPackageBasenames (internal/codegen/golang/names_test.go)"
     ]
   },
@@ -7081,6 +7083,7 @@
       "TestORMResultStreamingIntrinsicsSuspendWithoutLegacyEffects (internal/codegen/typescript/suspension_test.go)",
       "TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary (internal/codegen/typescript/orm_test.go)",
       "TestORMTransactionSuspendsEvenWhenItsBlockIsPure (internal/codegen/typescript/suspension_test.go)",
+      "TestOidcUnicode17Conformance (internal/codegen/typescript/oidc_hostname_test.go)",
       "TestPureTypeScriptFunctionsRemainSynchronous (internal/codegen/typescript/suspension_test.go)",
       "TestSuspendingResultLambdaUsesPortableBoundaryWithoutRequiringNativeBridge (internal/codegen/typescript/suspension_test.go)",
       "TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration (internal/codegen/typescript/suspension_test.go)",
@@ -8281,6 +8284,14 @@
       "TestManifestDeclaresPlatformTargets (internal/official/registry_test.go)",
       "TestManifestRejectsInvalidPackageBoundary (internal/official/registry_test.go)",
       "TestResultOnlyBundledPackageVersions (internal/official/registry_test.go)"
+    ]
+  },
+  {
+    "id": "tests:internal/oidchost",
+    "kind": "existing test owner",
+    "source": "internal/oidchost",
+    "members": [
+      "TestRubyUnicode17Conformance (internal/oidchost/ruby_test.go)"
     ]
   },
   {
