@@ -33,7 +33,7 @@ function trb_oidc_normalize_url(value: string): string {
  const address = authority.slice(at + 1);
  let normalized: string;
  if (address.startsWith("[")) {
-  if (/[^\x00-\x7f]/.test(address)) throw new Error("invalid OIDC hostname");
+  if (/[^\x21-\x7e]|\\/.test(address)) throw new Error("invalid OIDC hostname");
   normalized = address;
  } else {
   const colon = address.lastIndexOf(":");

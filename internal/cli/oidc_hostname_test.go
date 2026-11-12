@@ -193,6 +193,9 @@ end
 		{"bücher.example.invalid:8080", "xn--bcher-kva.example.invalid:8080"},
 	}
 	invalid := []string{"bad_name.example.invalid", "-bad.example.invalid", "ab--cd.example.invalid", "bad..example.invalid", "xn--.example.invalid", "a\u200cb.example.invalid", "אa.example.invalid", "\u0301a.example.invalid", strings.Repeat("a", 64) + ".example.invalid", "127.1", "0x7f000001", "0177.0.0.1", "example.123", "[127.0.0.1]", "[fe80::1%25lo0]", "%62ucher.example.invalid", "%FF.example.invalid"}
+	// WHATWG parsers discard these characters before validating bracketed IPs.
+	// Reject them before transport instead of connecting to a rewritten host.
+	invalid = append(invalid, "[2001:db8::1]\t:8080", "[2001:db8::1]\n:8080", "[2001:db8::1]\\")
 	for _, backend := range filesystemRuntimeBackends {
 		t.Run(backend.name, func(t *testing.T) {
 			if _, err := exec.LookPath(backend.executable); err != nil {
