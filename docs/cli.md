@@ -242,8 +242,11 @@ Go when `--mode` is omitted, accepts `ruby`, `go`, or `typescript`, and accepts
 `--runtime node|bun` for TypeScript. The selected entry file must define
 `main()`. Its explicit local imports are resolved transitively from the entry
 directory. Unrelated siblings are ignored, and imports of `*_test.trb` modules
-are excluded from the production closure. TypeRB package and native
-dependencies still require `trbconfig.jsonc`.
+are excluded from the production closure. User-declared TypeRB package and
+native dependencies still require `trbconfig.jsonc`. In Go mode, standalone
+run and executable builds include imported official packages' declared Go
+dependency versions in the temporary module. They do not write `go.mod` or
+`go.sum` beside the source file.
 
 If a configuration is discovered or passed through `--config`, its mode and
 runtime always win. Supplying standalone `--mode` or `--runtime` options in

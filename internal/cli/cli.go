@@ -1313,7 +1313,7 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 	}
 	if config.Mode == "go" {
 		if standalone {
-			err = writeStandaloneGoModule(config, runRoot, compiled)
+			err = writeStandaloneGoModule(config, runRoot, compiled, sourceGraph.Sources)
 		} else {
 			err = copyGoModuleFiles(config, runRoot, compiled)
 		}
@@ -1424,13 +1424,24 @@ func loadCommandConfig(command, explicit, start, filename, mode, runtimeName str
 	return config, true, nil
 }
 
-func writeStandaloneGoModule(config *project.Config, root string, compiled map[string]*compiler.Artifact) error {
+func writeStandaloneGoModule(config *project.Config, root string, compiled map[string]*compiler.Artifact, sources []fileRootSource) error {
+	sourceBytes := make([][]byte, 0, len(sources))
+	for _, source := range sources {
+		sourceBytes = append(sourceBytes, source.Source)
+	}
+	dependencies, err := sourcePackageDependencies(config, sourceBytes, nil)
+	if err != nil {
+		return err
+	}
 	version := project.DefaultGoVersion
 	if config.Go != nil && config.Go.Version != "" {
 		version = config.Go.Version
 	}
 	module := fmt.Sprintf("module trb.local/standalone\n\ngo %s\n", version)
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(module), 0o644); err != nil {
+		return err
+	}
+	if err := writeGoModuleDependencies(config, root, dependencies); err != nil {
 		return err
 	}
 	return writeCompiledGoDependencies(config, root, compiled)
@@ -2529,8 +2540,12 @@ func projectPackageDependencies(config *project.Config, files []string) (map[str
 	for _, unit := range units {
 		sources = append(sources, unit.Source)
 	}
+	return sourcePackageDependencies(config, sources, resolvedPackages.NativeDependencies)
+}
+
+func sourcePackageDependencies(config *project.Config, sources [][]byte, packageDependencies map[string]string) (map[string]string, error) {
 	dependencies := map[string]string{}
-	for name, version := range resolvedPackages.NativeDependencies {
+	for name, version := range packageDependencies {
 		dependencies[name] = version
 	}
 	seen := map[string]bool{}
@@ -2550,6 +2565,7 @@ func projectPackageDependencies(config *project.Config, files []string) (map[str
 			seen[bundled.Name] = true
 			options := config.PackageOptions[bundled.Name]
 			if bundled.Name == jobssql.PackageName {
+				var err error
 				options, err = jobsSQLNativeOptions(config)
 				if err != nil {
 					return nil, err

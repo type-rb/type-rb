@@ -63,6 +63,10 @@ func writeCompiledGoDependencies(config *project.Config, root string, compiled m
 			}
 		}
 	}
+	return writeGoModuleDependencies(config, root, dependencies)
+}
+
+func writeGoModuleDependencies(config *project.Config, root string, dependencies map[string]string) error {
 	if len(dependencies) == 0 {
 		return nil
 	}
@@ -81,7 +85,10 @@ func writeCompiledGoDependencies(config *project.Config, root string, compiled m
 		return err
 	}
 	names := make([]string, 0, len(dependencies))
-	for name := range dependencies {
+	for name, version := range dependencies {
+		if !semver.IsValid(version) {
+			return fmt.Errorf("invalid Go dependency version %q for %s", version, name)
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
