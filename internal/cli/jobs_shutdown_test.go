@@ -115,6 +115,13 @@ func (f jobsShutdownProject) openDatabase(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
+	// These shutdown tests observe the queue through a separate connection.
+	// Select WAL before starting the worker so an observer's read transaction
+	// cannot block the worker's journal setup, claim or acknowledgement.
+	var journalMode string
+	if err := database.QueryRow("PRAGMA journal_mode=WAL").Scan(&journalMode); err != nil || journalMode != "wal" {
+		t.Fatalf("prepare shutdown observation: journal_mode=%q error=%v", journalMode, err)
+	}
 	return database
 }
 
@@ -316,6 +323,17 @@ func TestJobsIdleWorkerStopsAfterAcknowledgement(t *testing.T) {
 			fixture := newJobsShutdownProject(t, mode)
 			fixture.run(t, "run")
 			database := fixture.openDatabase(t)
+			// A read observer must not prevent the worker from claiming and
+			// acknowledging its job. Keep its initial snapshot open throughout.
+			observer, err := database.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer observer.Rollback()
+			var initialCount int
+			if err := observer.QueryRow("SELECT COUNT(*) FROM trb_jobs").Scan(&initialCount); err != nil || initialCount != 1 {
+				t.Fatalf("initial observer snapshot: count=%d error=%v", initialCount, err)
+			}
 			worker := fixture.start(t, false)
 			fixture.waitStarted(t, database, worker)
 			if err := os.WriteFile(fixture.release, []byte("release"), 0o600); err != nil {
@@ -337,6 +355,9 @@ func TestJobsIdleWorkerStopsAfterAcknowledgement(t *testing.T) {
 			}
 			worker.signal(t, os.Interrupt)
 			worker.finish(t, 5*time.Second, true)
+			if err := observer.QueryRow("SELECT COUNT(*) FROM trb_jobs").Scan(&initialCount); err != nil || initialCount != 1 {
+				t.Fatalf("observer lost its initial snapshot: count=%d error=%v", initialCount, err)
+			}
 		})
 	}
 }
