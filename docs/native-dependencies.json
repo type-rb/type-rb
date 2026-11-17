@@ -502,7 +502,7 @@
       "status": "current",
       "scope": "Application runtime",
       "role": "Incremental bounded gzip decoding for OIDC discovery/JWKS responses.",
-      "configuration": "zlib 1.3.2, Zlib license, pinned commit/archive; selectively static with the OIDC profile. TypeRB bounds decompressed bytes, checks completion and owns each inflate state. Existing libdeflate response encoding is unchanged.",
+      "configuration": "zlib 1.3.2, Zlib license, pinned commit and checksum-verified upstream GitHub release archive; selectively static with the OIDC profile. TypeRB bounds decompressed bytes, checks completion and owns each inflate state. Existing libdeflate response encoding is unchanged.",
       "evidence": [
         "tools/oidc-dependencies.json",
         "tools/build-oidc-dependencies.py",
