@@ -65,7 +65,7 @@ def repl_syntax_flat(source: String): ReplSyntax
 		else
 			if character == "\"" || character == "'"
 				kind = repl_style_string()
-				finish := interpolation_quote_end(source, index, character)
+				finish := interpolation_quote_end(source, source.size(), index, character)
 				if finish < 0
 					index = source.size()
 					kind = repl_style_incomplete()
@@ -203,7 +203,7 @@ def repl_string_spans(mut spans: ReplSyntax, source: String, start: Integer, fin
 			end
 			if embedded
 				repl_syntax_span(spans, source, chunk, index, repl_style_string())
-				mut end_index := interpolation_end(source, index + 2)
+				mut end_index := interpolation_end(source, source.size(), index + 2)
 				mut marker_kind := repl_style_keyword()
 				if end_index < 0
 					end_index = finish
