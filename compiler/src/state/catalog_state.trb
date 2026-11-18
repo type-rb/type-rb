@@ -32,6 +32,7 @@ record CompilerModuleGraph
 	module_count: Array<Integer>
 	module_import_starts: IntegerStorage
 	module_import_counts: IntegerStorage
+	module_generated_dependencies: IntegerStorage
 	module_lookup: Hash<String, Integer>
 	entry_module: Array<Integer>
 	active_module: Array<Integer>
@@ -118,6 +119,7 @@ def compiler_module_graph_new(capacity: Integer): CompilerModuleGraph
 		module_count: [0],
 		module_import_starts: integer_storage(capacity),
 		module_import_counts: integer_storage(capacity),
+		module_generated_dependencies: integer_storage(capacity),
 		module_lookup: {},
 		entry_module: [0],
 		active_module: [0],
@@ -141,6 +143,7 @@ def compiler_module_graph_fork(graph: CompilerModuleGraph, active_module: Array<
 		module_count: graph.module_count,
 		module_import_starts: graph.module_import_starts,
 		module_import_counts: graph.module_import_counts,
+		module_generated_dependencies: graph.module_generated_dependencies,
 		module_lookup: graph.module_lookup,
 		entry_module: graph.entry_module,
 		active_module: active_module,

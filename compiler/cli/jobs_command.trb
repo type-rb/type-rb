@@ -1,0 +1,132 @@
+import { cli_absolute, cli_error, cli_find_config, cli_program_path } from main
+import { check, compiler_file_exists, compiler_read_source, emit_qbe, load_configured_project } from compiler
+import { cli_diagnostic } from diagnostics
+import { resolve } from frontend/checking/program/resolution
+import { jobs_worker_runtime } from jobs_worker_runtime
+import { append_jobs_worker } from jobs_worker_entry
+import { native_cli_cwd, native_cli_env, native_cli_execute, native_cli_interrupt, native_cli_link_qbe, native_cli_package_signals, native_cli_remove, native_cli_save, native_cli_target, native_cli_tempdir, native_cli_write } from host
+import { qbe_output_chunk } from backend/qbe/output
+import { parse_project_config } from project/config
+import { has_diagnostic } from state/state
+import { path_directory, path_join, string_starts_with } from support/path
+
+def cli_jobs_command(arguments: Array<String>): Integer
+	if arguments.size() < 2 || arguments[1] != "start"
+		return cli_error("expected jobs start [--config PATH] [--once] [--queue NAME]")
+	end
+	mut config := ""
+	mut queue := ""
+	mut once := ""
+	mut index := 2
+	while index < arguments.size()
+		flag := arguments[index]
+		if flag == "--once"
+			once = "once"
+		elsif string_starts_with(flag, "--queue=")
+			queue = flag.slice(8...flag.size())
+			if queue.strip() == ""
+				return cli_error("jobs start --queue requires a queue name")
+			end
+		elsif flag == "--queue" || flag == "--config"
+			index += 1
+			if index >= arguments.size() || arguments[index].strip() == "" || string_starts_with(arguments[index], "--")
+				return cli_error("jobs start " + flag + " requires a value")
+			end
+			if flag == "--config"
+				config = arguments[index]
+			else
+				queue = arguments[index]
+			end
+		else
+			return cli_error("unknown jobs start option " + flag)
+		end
+		index += 1
+	end
+	cwd := native_cli_cwd()
+	if cwd == ""
+		return cli_error("cannot resolve the working directory")
+	end
+	if config == ""
+		config = cli_find_config(cwd)
+	else
+		config = cli_absolute(config, cwd)
+	end
+	if config == "" || !compiler_file_exists(config)
+		return cli_error("no readable trbconfig.jsonc found")
+	end
+	config_source := compiler_read_source(config)
+	project := parse_project_config(config_source)
+	if project.error != ""
+		return cli_error(project.error)
+	end
+	if project.mode != "trb"
+		return cli_error("jobs start is not available for mode " + project.mode + " in this compiler")
+	end
+	native_cli_package_signals()
+	profile := native_cli_target()
+	if profile == ""
+		return cli_error("unsupported host platform")
+	end
+	mut qbe := native_cli_env("TRBN_QBE")
+	if qbe == ""
+		qbe = path_join(path_directory(cli_program_path(cwd)), "qbe")
+	end
+	qbe = cli_absolute(qbe, cwd)
+	mut cc := native_cli_env("TRBN_CC")
+	if cc == ""
+		cc = "/usr/bin/cc"
+	end
+	cc = cli_absolute(cc, cwd)
+	if !compiler_file_exists(qbe)
+		return cli_error("QBE is missing; place qbe beside trbn or set TRBN_QBE")
+	end
+	mut state := load_configured_project(config_source, config)
+	if !has_diagnostic(state) && append_jobs_worker(state, project.jobs_configuration)
+		if resolve(state)
+			check(state)
+		end
+	end
+	if has_diagnostic(state)
+		native_cli_write(cli_diagnostic(state, config, 0) + "\n", 2)
+		return 1
+	end
+	output := emit_qbe(state)
+	if has_diagnostic(state)
+		native_cli_write(cli_diagnostic(state, config, 0) + "\n", 2)
+		return 1
+	end
+	if native_cli_interrupt(0) != 0
+		return 130
+	end
+	mut temp_root := native_cli_env("TMPDIR")
+	if temp_root == ""
+		temp_root = "/tmp"
+	end
+	temporary := native_cli_tempdir(path_join(cli_absolute(temp_root, cwd), "trbn-jobs-"))
+	if temporary == ""
+		return cli_error("cannot create worker build directory")
+	end
+	ssa := path_join(temporary, "worker.ssa")
+	program := path_join(temporary, "worker")
+	mut position := [0]
+	mut status := native_cli_save(ssa, jobs_worker_runtime(string_starts_with(profile, "darwin-")) + "\n", 0)
+	while status == 0 && position[0] < output.lines.used[0]
+		status = native_cli_save(ssa, qbe_output_chunk(output, position) + "\n", 1)
+	end
+	if status == 0 && native_cli_interrupt(0) == 0
+		status = native_cli_link_qbe(ssa, program, qbe, cc)
+	end
+	if status == 0
+		if native_cli_interrupt(0) == 0
+			status = native_cli_execute([program, once, queue], 2)
+		else
+			status = 130
+		end
+	end
+	native_cli_remove(program, 0)
+	native_cli_remove(ssa, 0)
+	if native_cli_remove(temporary, 1) != 0
+		return cli_error("cannot remove worker build directory " + temporary)
+	end
+	return status
+end

@@ -19,6 +19,7 @@ def render():
     pins.update(json.loads((ROOT / 'tools/compression-dependencies.json').read_text()))
     pins.update(json.loads((ROOT / 'tools/crypto-dependencies.json').read_text()))
     pins.update(json.loads((ROOT / 'tools/oidc-dependencies.json').read_text()))
+    pins.update(json.loads((ROOT / 'tools/sqlite-dependencies.json').read_text()))
     qbe = json.loads((ROOT / 'tools/qbe/backend.json').read_text())
     pins['qbe'] = {'version': qbe['version'] + ' / ' + qbe['variant'], 'sha256': qbe['sourceSHA256']}
     rows, ids = [], set()

@@ -1,0 +1,290 @@
+import { find_visible_declaration, find_visible_function } from frontend/resolution/declaration_lookup
+import { resolve_bare_imports } from frontend/resolution/import_resolution
+import { parse_function } from frontend/syntax/declaration_syntax
+import { lex_module } from frontend/syntax/lexer
+import { append_import, parse_module } from frontend/syntax/parser
+import { token_is } from frontend/syntax/syntax_tokens
+import { declaration_object } from frontend/types/declaration_kinds
+import { namespace_parent } from frontend/types/namespace_model
+import { ObjectDefinition, ObjectMethod } from frontend/types/object_model
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { official_source_kind } from project/official_catalog
+import { project_config_blank } from project/config
+import { load_standard_source } from project/standard_library
+import { web_dispatch_quote } from project/web_dispatch_source
+import { web_route_has, web_route_join } from project/web_route_paths
+import { import_kind_named } from state/import_kinds
+import { compiler_reserve_source } from state/source_capacity
+import { CompilerState, add_module, diagnostic, find_module, has_diagnostic } from state/state
+import { standard_source_errors } from state/standard_source_kinds
+import { token_kind_number, token_kind_string } from state/token_kinds
+import { compiler_string_bytes } from support/compiler_bytes
+import { ascii_code, integer_string } from support/literals
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def jobs_class_owner(mut state: CompilerState, row: ObjectDefinition): Boolean
+	if row.interface_type || row.superclass == "" || namespace_parent(row.name) != ""
+		return false
+	end
+	parent := find_visible_declaration(state, row.source_id, row.superclass, declaration_object())
+	if parent < 0
+		return false
+	end
+	definition := state.nominal.objects[parent]
+	if definition.name == "Job" && !definition.interface_type && definition.parameters.size() == 0 && sparse_integer_at(state.standard_modules, definition.source_id) == official_source_kind("trb/jobs")
+		return true
+	end
+	return false
+end
+
+record NativeJob
+	object_id: Integer
+	name: String
+	parameter_names: Array<String>
+	parameter_types: Array<String>
+	queue: String
+	priority: Integer
+	maximum_attempts: String
+end
+
+def native_job_error(mut state: CompilerState, origin: Integer, message: String)
+	diagnostic(state, "TRBN4003", load_integer(state.source_tokens.token_lines, origin), "trb/jobs " + message)
+end
+
+def native_job_integer_literal(value: String): Integer
+	mut parsed := 0
+	mut index := 0
+	while index < value.size()
+		character := value[index]
+		if character != "_"
+			digit := ascii_code(character) - 48
+			if digit < 0 || digit > 9 || parsed > 214748364
+				return -1
+			end
+			parsed = parsed * 10 + digit
+		end
+		index += 1
+	end
+	return parsed
+end
+
+def discover_native_job(mut state: CompilerState, object_id: Integer): NativeJob
+	row := state.nominal.objects[object_id]
+	mut queue := "default"
+	mut priority := 0
+	mut maximum_attempts := "nil"
+	mut names: Array<String> := []
+	mut types: Array<String> := []
+	mut perform := -1
+	row.methods.each do |method|
+		if method.name == "perform" && !method.class_member
+			perform = method.generic_function
+		elsif method.name == "perform_later" || method.name == "perform_at" || method.name == "perform_in"
+			generated := find_module(state, "$jobs:enqueue")
+			if generated < 0 || method.generic_function < 0 || state.type_resolution.generic_functions[method.generic_function].source_id != generated
+				native_job_error(state, method.origin, row.name + " method " + method.name + " is supplied by trb/jobs")
+			end
+		end
+	end
+	if perform < 0
+		native_job_error(state, row.origin, row.name + " must declare an instance perform method")
+	else
+		method := state.type_resolution.generic_functions[perform]
+		if row.parameters.size() > 0 || method.type_parameters.size() > 0
+			native_job_error(state, row.origin, row.name + " perform does not support type parameters")
+		end
+		mut index := 1
+		while index < method.parameters.size()
+			parameter := method.parameters[index]
+			argument := resolve_type_name(state, row.source_id, parameter.type_name, false)
+			if parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0
+				native_job_error(state, row.origin, row.name + " perform accepts required positional parameters")
+			elsif argument != "Boolean" && argument != "Integer" && argument != "Float" && argument != "String"
+				native_job_error(state, row.origin, row.name + " has an unsupported payload parameter " + parameter.name)
+			end
+			names.push(parameter.name)
+			types.push(argument)
+			index += 1
+		end
+	end
+	mut seen: Hash<String, Integer> := {}
+	state.nominal.object_directives.each do |directive|
+		if directive.source_id == row.source_id && directive.owner == row.name
+			name := load_string(state.source_tokens.token_texts, directive.origin)
+			function := find_visible_function(state, row.source_id, name)
+			mut owned := false
+			if function >= 0
+				owner := load_integer(state.declarations.function_modules, function)
+				if sparse_integer_at(state.standard_modules, owner) == official_source_kind("trb/jobs")
+					owned = true
+				end
+			end
+			value_token := directive.origin + 2
+			if !owned || !token_is(state, directive.origin + 1, "(") || !token_is(state, value_token + 1, ")") || directive.finish != value_token + 2
+				native_job_error(state, directive.origin, row.name + " requires an owned job directive with one positional literal")
+			elsif seen.key?(name)
+				native_job_error(state, directive.origin, row.name + " repeats " + name)
+			else
+				seen[name] = 1
+				value := load_string(state.source_tokens.token_texts, value_token)
+				kind := load_integer(state.source_tokens.token_kinds, value_token)
+				if name == "queue" && kind == token_kind_string() && !project_config_blank(value) && compiler_string_bytes(value).size() <= 255
+					queue = value
+				elsif(name == "priority" || name == "maximum_attempts") && kind == token_kind_number()
+					parsed := native_job_integer_literal(value)
+					if parsed < 0 || parsed > 2147483647 || (name == "maximum_attempts" && parsed == 0)
+						native_job_error(state, directive.origin, "invalid " + name + " for " + row.name)
+					elsif name == "priority"
+						priority = parsed
+					else
+						maximum_attempts = integer_string(parsed)
+					end
+				else
+					native_job_error(state, directive.origin, "invalid " + name + " for " + row.name)
+				end
+			end
+		end
+	end
+	return NativeJob.new(object_id: object_id, name: row.name, parameter_names: names, parameter_types: types, queue: queue, priority: priority, maximum_attempts: maximum_attempts)
+end
+
+def jobs_request_source(job: NativeJob, name: String): String
+	mut signature: Array<String> := []
+	mut values: Array<String> := []
+	mut index := 0
+	while index < job.parameter_types.size()
+		parameter := "argument_" + integer_string(index)
+		type_name := job.parameter_types[index]
+		signature.push(parameter + ": " + type_name)
+		values.push("JSON::Value::" + type_name + "(" + parameter + ")")
+		index += 1
+	end
+	result := "Result<EnqueueRequest, EnqueueError>"
+	mut source := "def " + name + "(" + web_route_join(signature, ", ") + "): " + result + "\n"
+	source += "payload_values: Array<JSON::Value> := [" + web_route_join(values, ", ") + "]\n"
+	source += "payload := JSON.stringify(JSON::Value::Array(payload_values)) catch |error|\n"
+	source += "return " + result + "::Err(EnqueueError.new(kind: EnqueueErrorKind::Serialization, message: error.message))\nend\n"
+	source += "return " + result + "::Ok(EnqueueRequest.new(job_name: " + web_dispatch_quote(job.name)
+	source += ", payload: payload, payload_version: 1, queue_name: " + web_dispatch_quote(job.queue)
+	source += ", priority: " + integer_string(job.priority) + ", maximum_attempts: " + job.maximum_attempts + "))\nend\n"
+	return source
+end
+
+def jobs_local_name(job: NativeJob, base: String): String
+	mut candidate := base
+	while web_route_has(job.parameter_names, candidate)
+		candidate = "_" + candidate
+	end
+	return candidate
+end
+
+def append_native_job_method(mut state: CompilerState, generated: Integer, job: NativeJob, request: String, name: String): Boolean
+	mut parameters: Array<String> := []
+	delay := jobs_local_name(job, "delay")
+	scheduled := jobs_local_name(job, "scheduled_at")
+	request_variable := jobs_local_name(job, "request")
+	error_variable := jobs_local_name(job, "error")
+	if name == "perform_at"
+		parameters.push(scheduled + ": Instant")
+	elsif name == "perform_in"
+		parameters.push(delay + ": Duration")
+	end
+	mut index := 0
+	while index < job.parameter_types.size()
+		parameters.push(job.parameter_names[index] + ": " + job.parameter_types[index])
+		index += 1
+	end
+	result := "Result<JobReference, EnqueueError>"
+	mut source := "def self." + name + "(" + web_route_join(parameters, ", ") + "): " + result + "\n"
+	if name == "perform_in"
+		source += "if " + delay + ".before?(Duration.seconds(0))\nreturn " + result + "::Err(EnqueueError.new(kind: EnqueueErrorKind::InvalidArgument, message: \"job delay must not be negative\"))\nend\n"
+	end
+	source += request_variable + " := " + request + "(" + web_route_join(job.parameter_names, ", ") + ") catch |" + error_variable + "|\nreturn " + result + "::Err(" + error_variable + ")\nend\n"
+	if name == "perform_at"
+		source += "return JOBS_ADAPTER.enqueue_at(" + request_variable + ", " + scheduled + ")\n"
+	elsif name == "perform_in"
+		source += "return JOBS_ADAPTER.enqueue_at(" + request_variable + ", Instant.now().add(" + delay + "))\n"
+	else
+		source += "return JOBS_ADAPTER.enqueue(" + request_variable + ")\n"
+	end
+	source += "end\n"
+	compiler_reserve_source(state, source.size())
+	state.module_graph.active_module[0] = generated
+	start := state.source_tokens.token_count[0]
+	lex_module(state, source, generated)
+	state.global_bindings.declaration_owner[0] = job.name
+	mut position := [start]
+	template := state.type_resolution.generic_functions.size()
+	if has_diagnostic(state) || !parse_function(state, position, "", [], true, false)
+		return false
+	end
+	state.nominal.objects[job.object_id].methods.push(ObjectMethod.new(name: name, class_member: true, origin: state.nominal.objects[job.object_id].origin, function: -1, generic_function: template))
+	return true
+end
+
+def prepare_native_jobs(mut state: CompilerState, configuration: String): Boolean
+	if !resolve_bare_imports(state)
+		return false
+	end
+	previous := state.module_graph.active_module[0]
+	mut jobs: Array<NativeJob> := []
+	mut index := 0
+	while index < state.nominal.objects.size()
+		row := state.nominal.objects[index]
+		if jobs_class_owner(state, row)
+			state.module_graph.active_module[0] = row.source_id
+			jobs.push(discover_native_job(state, index))
+			if has_diagnostic(state)
+				return false
+			end
+		end
+		index += 1
+	end
+	state.module_graph.active_module[0] = previous
+	if jobs.size() == 0
+		return true
+	end
+	config := find_module(state, configuration)
+	if configuration == "" || config < 0
+		diagnostic(state, "TRBN4003", 1, "trb/jobs requires an existing jobs.configuration module in trbconfig.jsonc")
+		return false
+	end
+	# Generated JSON payload code can introduce checked number parsing during
+	# import resolution. Load its error declarations before the type pass.
+	load_standard_source(state, standard_source_errors(), 1)
+	if has_diagnostic(state)
+		return false
+	end
+	mut source := "import { EnqueueError, EnqueueErrorKind, EnqueueRequest, JobReference } from trb/jobs\nimport trb/std/json\nimport trb/std/result\nimport { Duration, Instant } from trb/std/time\n"
+	index = 0
+	while index < jobs.size()
+		source += jobs_request_source(jobs[index], "_jobs_request_" + integer_string(index))
+		index += 1
+	end
+	compiler_reserve_source(state, source.size())
+	generated := add_module(state, "$jobs:enqueue", "<job enqueue>")
+	start := state.source_tokens.token_count[0]
+	lex_module(state, source, generated)
+	if has_diagnostic(state) || !parse_module(state, start, generated)
+		return false
+	end
+	configuration_binding := append_import(state, configuration, "JOBS_ADAPTER", "JOBS_ADAPTER", import_kind_named(), 1)
+	store_integer(state.module_graph.import_targets, configuration_binding, config)
+	store_integer(state.module_graph.module_import_counts, generated, load_integer(state.module_graph.module_import_counts, generated) + 1)
+	index = 0
+	while index < jobs.size()
+		request := "_jobs_request_" + integer_string(index)
+		job := jobs[index]
+		# Class methods retain their generated scope, including the adapter
+		# binding. Follow that dependency when initializing the authored class.
+		owner := state.nominal.objects[job.object_id].source_id
+		store_integer(state.module_graph.module_generated_dependencies, owner, generated + 1)
+		if !append_native_job_method(state, generated, job, request, "perform_later") || !append_native_job_method(state, generated, job, request, "perform_in") || !append_native_job_method(state, generated, job, request, "perform_at")
+			return false
+		end
+		index += 1
+	end
+	state.global_bindings.declaration_owner[0] = ""
+	state.module_graph.active_module[0] = previous
+	return true
+end

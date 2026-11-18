@@ -48,6 +48,7 @@ record ProjectConfig
 	source_dir: String
 	out_dir: String
 	copy_files: Boolean
+	jobs_configuration: String
 	package_management: String
 	go_config: ProjectGoConfig
 	packages: Array<ProjectPackageRequirement>
@@ -827,6 +828,8 @@ def parse_project_config(source: String): ProjectConfig
 			project_json_set_error(error, error_line, "jobs.configuration is required", 1)
 		elsif !project_config_below_root(configuration)
 			project_json_set_error(error, error_line, "jobs.configuration must stay below sourceDir", 1)
+		else
+			jobs_configuration = configuration
 		end
 	end
 	if error[0] == ""
@@ -856,6 +859,7 @@ def parse_project_config(source: String): ProjectConfig
 		source_dir: source_dir,
 		out_dir: out_dir,
 		copy_files: copy_files,
+		jobs_configuration: jobs_configuration,
 		package_management: package_management,
 		go_config: go_config,
 		packages: packages,

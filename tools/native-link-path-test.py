@@ -15,6 +15,7 @@ FAMILIES = {
     'compression': ('libdeflate.a', 'compression-identity.o'),
     'crypto': ('libcrypto.a', 'crypto-identity.o'),
     'oidc': ('libcurl.a', 'libssl.a', 'libz.a', 'libnghttp2.a', 'libicuuc.a', 'libicu-uts46.a', 'oidc-identity.o'),
+    'sqlite': ('libsqlite3.a', 'sqlite-identity.o'),
 }
 
 
@@ -29,7 +30,11 @@ def main():
     for family in FAMILIES:
         text = (source / (family + '_link.trb')).read_text()
         chunks.extend(json.loads(match.group()) for match in re.finditer(r'"(?:[^"\\]|\\.)*"', text))
-    il = '\n'.join(chunks) + '\ndata $trbn_project_selected_linker = align 8 { l 0 }\n'
+    il = '\n'.join(chunks) + '''
+data $trbn_project_selected_linker = align 8 { l 0 }
+data $trbn_selected_dead_strip = align 8 { l 0 }
+data $trbn_dead_strip_linux = { b "--gc-sections", b 0 }
+'''
     il = re.sub(r'^(function(?: [lw])?|data) ', r'export \1 ', il, flags=re.M)
     # Intercept libc failures. All path selection, argv ownership,
     # failure propagation and diagnostics remain the production QBE functions.
@@ -47,7 +52,7 @@ def main():
 #define FAMILY(name) extern int64_t trbn_##name##_link_required; \
  extern void *trbn_##name##_link_arguments(void *, const char *); \
  extern void trbn_##name##_link_cleanup(void *);
-FAMILY(network) FAMILY(compression) FAMILY(crypto) FAMILY(oidc)
+FAMILY(network) FAMILY(compression) FAMILY(crypto) FAMILY(oidc) FAMILY(sqlite)
 static const char *scenario;
 static int resolutions, reads;
 /* Reserve virtual address space, then commit only two pages we own. This
@@ -124,7 +129,7 @@ int main(int argc,char **argv) {
  trbn_##name##_link_required=strcmp(scenario,"unused")!=0; \
  tail=trbn_##name##_link_arguments(slots,argv[3]); \
  if(tail)trbn_##name##_link_cleanup(slots); }
- RUN(network) RUN(compression) RUN(crypto) RUN(oidc)
+ RUN(network) RUN(compression) RUN(crypto) RUN(oidc) RUN(sqlite)
  if(!strncmp(scenario,"wide-",5) && !wide_hits)abort();
  /* getenv results are borrowed, while allocations must have been released. */
  for(size_t i=0;i<48;i++)if(mappings[i].mapping) {

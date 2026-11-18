@@ -32,6 +32,10 @@ def artifact_spec(family):
         return (Path(__file__).with_name("compression-dependencies.json"),
                 {"libdeflate.a", "compression-identity.o", "libdeflate-LICENSE"},
                 b"TRBN-COMPRESSION-V1\0", ("libdeflate",))
+    if family == "sqlite":
+        return (Path(__file__).with_name("sqlite-dependencies.json"),
+                {"libsqlite3.a", "sqlite-identity.o", "sqlite-PUBLIC-DOMAIN"},
+                b"TRBN-SQLITE-V1\0", ("libsqlite3",))
     raise ValueError("unknown dependency family")
 
 

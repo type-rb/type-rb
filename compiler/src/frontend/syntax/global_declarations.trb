@@ -4,7 +4,7 @@ import { find_declaration_in_module } from frontend/resolution/declaration_looku
 import { namespace_parent } from frontend/types/namespace_model
 import { integer_string } from support/literals
 import { CompilerState, diagnostic, has_diagnostic } from state/state
-import { load_integer, store_integer, store_string } from support/storage
+import { load_integer, sparse_integer_at, store_integer, store_string } from support/storage
 import { resolve_type_name } from frontend/resolution/type_resolution
 
 def order_global_module(mut state: CompilerState, source: Integer, mut visited: Array<Integer>)
@@ -20,6 +20,10 @@ def order_global_module(mut state: CompilerState, source: Integer, mut visited: 
 			order_global_module(state, target, visited)
 		end
 		binding += 1
+	end
+	generated := sparse_integer_at(state.module_graph.module_generated_dependencies, source) - 1
+	if generated >= 0
+		order_global_module(state, generated, visited)
 	end
 	mut index := 0
 	while index < state.global_bindings.globals.size()

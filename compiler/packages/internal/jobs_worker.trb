@@ -1,0 +1,176 @@
+import { JobError, JobResult } from trb/jobs
+import { SQLAdapter } from trb/jobs/sql
+import trb/internal/jobs/sql
+import trb/internal/sqlite
+import trb/std/json
+import trb/std/process
+import trb/std/result
+import { Duration } from trb/std/time
+
+WORKER_INSTALL_SIGNALS: Integer := 0
+WORKER_PID: Integer := 1
+WORKER_STOP_REQUESTS: Integer := 2
+WORKER_MONOTONIC_MILLISECONDS: Integer := 3
+WORKER_PAUSE: Integer := 4
+WORKER_FORK: Integer := 5
+WORKER_POLL_CHILD: Integer := 6
+WORKER_TERMINATE_CHILD: Integer := 7
+WORKER_EXIT: Integer := 8
+WORKER_SHUTDOWN_MILLISECONDS: Integer := 30000
+
+def worker_milliseconds(duration: Duration): Integer
+	return duration.whole_seconds() * 1000 + (duration.nanosecond() + 999999) / 1000000
+end
+
+def worker_report(message: String)
+	SQLite.worker_log("trbn jobs: " + message + "\n")
+end
+
+def worker_fail(adapter: SQLAdapter, database: String, job: SQL::Claim, owner: String, message: String): Integer
+	case SQL.fail(database, job.id, owner, message, adapter.retry_base_delay)
+	when Result::Ok(_value)
+		return 0
+	when Result::Err(error)
+		worker_report("record failure: " + error.message)
+		return 1
+	end
+end
+
+def worker_handle(adapter: SQLAdapter, database: String, job: SQL::Claim, owner: String): Integer
+	case dispatch_job(job)
+	when Result::Ok(_value)
+		case SQL.acknowledge(database, job.id, owner)
+		when Result::Ok(_acknowledged)
+			return 0
+		when Result::Err(error)
+			worker_report("acknowledge: " + error.message)
+			return 1
+		end
+	when Result::Err(error)
+		return worker_fail(adapter, database, job, owner, error.message)
+	end
+end
+
+def worker_join(adapter: SQLAdapter, database: String, job: SQL::Claim, owner: String, child: Integer): Integer
+	mut interval := worker_milliseconds(adapter.lease_timeout) / 3
+	if interval < 100
+		interval = 100
+	end
+	mut heartbeat_at := SQLite.worker_control(WORKER_MONOTONIC_MILLISECONDS, 0) + interval
+	mut stop_at := -1
+	while true
+		status := SQLite.worker_control(WORKER_POLL_CHILD, child)
+		if status == 0
+			return 0
+		elsif status > 0
+			return worker_fail(adapter, database, job, owner, "handler process exited with status " + status.to_s())
+		elsif status != -1
+			worker_report("cannot join job handler")
+			return 1
+		end
+		now := SQLite.worker_control(WORKER_MONOTONIC_MILLISECONDS, 0)
+		stops := SQLite.worker_control(WORKER_STOP_REQUESTS, 0)
+		if stops > 1 || now < 0 || (stop_at >= 0 && now >= stop_at)
+			SQLite.worker_control(WORKER_TERMINATE_CHILD, child)
+			if stops > 1
+				worker_report("child process forced to stop (repeated stop request)")
+			elsif now < 0
+				worker_report("cannot read the worker monotonic clock")
+			else
+				worker_report("shutdown: grace period expired; active claim retained for lease recovery")
+			end
+			return 1
+		end
+		if stops == 1 && stop_at < 0
+			stop_at = now + WORKER_SHUTDOWN_MILLISECONDS
+		end
+		if now >= heartbeat_at
+			case SQL.heartbeat(database, job.id, owner)
+			when Result::Ok(_updated)
+			when Result::Err(error)
+				if error.code != 12
+					worker_report("heartbeat: " + error.message)
+				end
+			end
+			heartbeat_at = now + interval
+		end
+		SQLite.worker_control(WORKER_PAUSE, 0)
+	end
+	return 1
+end
+
+def worker_run(adapter: SQLAdapter, database: String, once: Boolean, queue: String): Integer
+	owner := "worker-" + SQLite.worker_control(WORKER_PID, 0).to_s()
+	interval := worker_milliseconds(adapter.poll_interval)
+	if interval <= 0 || worker_milliseconds(adapter.lease_timeout) <= 0
+		worker_report("poll interval and lease timeout must be positive")
+		return 1
+	end
+	while SQLite.worker_control(WORKER_STOP_REQUESTS, 0) == 0
+		_recovered := SQL.recover_stale(database, adapter.lease_timeout) catch |error|
+			worker_report("recover stale: " + error.message)
+			if once
+				return 1
+			end
+			0
+		end
+		if SQLite.worker_control(WORKER_STOP_REQUESTS, 0) != 0
+			return 0
+		end
+		job := SQL.claim(database, owner, queue) catch |error|
+			worker_report("claim: " + error.message)
+			if once
+				return 1
+			end
+			nil
+		end
+		if job != nil
+			child := SQLite.worker_control(WORKER_FORK, 0)
+			if child < 0
+				worker_report("cannot start job handler")
+				return 1
+			elsif child == 0
+				SQLite.worker_control(WORKER_EXIT, worker_handle(adapter, database, job, owner))
+				return 1
+			end
+			if worker_join(adapter, database, job, owner, child) != 0
+				return 1
+			end
+		end
+		if once
+			return 0
+		end
+		if job == nil
+			mut now := SQLite.worker_control(WORKER_MONOTONIC_MILLISECONDS, 0)
+			if now < 0
+				return 1
+			end
+			wake := now + interval
+			while now < wake && SQLite.worker_control(WORKER_STOP_REQUESTS, 0) == 0
+				SQLite.worker_control(WORKER_PAUSE, 0)
+				now = SQLite.worker_control(WORKER_MONOTONIC_MILLISECONDS, 0)
+				if now < 0
+					return 1
+				end
+			end
+		end
+	end
+	return 0
+end
+
+def worker_start(adapter: SQLAdapter): Integer
+	args := Process.argv()
+	if args.size() != 2 || SQLite.worker_control(WORKER_INSTALL_SIGNALS, 0) != 0
+		worker_report("cannot initialize worker")
+		return 1
+	end
+	database := SQL.open_store(adapter) catch |error|
+		worker_report(error.message)
+		return 1
+	end
+	return worker_run(adapter, database, args[0] == "once", args[1])
+end
+
+def main()
+	SQLite.worker_control(WORKER_EXIT, worker_start(JOBS_ADAPTER))
+end

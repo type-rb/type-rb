@@ -1,4 +1,5 @@
 import { cli_test_command } from test_command
+import { cli_jobs_command } from jobs_command
 import { cli_format_command } from format_command
 import { cli_package_command, cli_package_install, cli_package_save } from packages
 import { project_packages_lock } from project/packages
@@ -96,6 +97,7 @@ def cli_usage(): Integer
 	puts("  trbn build --compile [SOURCE] Build an executable")
 	puts("  trbn run [SOURCE] [-- ARGS...] Build and run")
 	puts("  trbn test [PATHS...]         Run project tests selected by file or directory")
+	puts("  trbn jobs start [--once] [--queue NAME] Run a SQLite Jobs worker")
 	puts("  trbn fmt [--check] [PATHS...] Format source files; use - for stdin")
 	puts("  trbn install [--frozen] [--offline] Resolve TypeRB path and Git packages")
 	puts("  trbn add/remove/update       Manage TypeRB package requirements and locks")
@@ -301,6 +303,9 @@ end
 
 def native_cli_main(): Integer
 	arguments := Process.argv()
+	if arguments.size() > 0 && arguments[0] == "jobs"
+		return cli_jobs_command(arguments)
+	end
 	if arguments.size() > 0 && arguments[0] == "fmt"
 		return cli_format_command(arguments)
 	end

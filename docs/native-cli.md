@@ -166,6 +166,24 @@ A discovered configuration selects the project. `--config PATH` explicitly
 selects one. `--mode` may select a standalone mode; it cannot override a
 configured build. `repl --mode trb` can explicitly select a REPL mode.
 
+### SQLite Jobs
+
+Use `trbn jobs start` from a Native project with `jobs.configuration` and a
+SQLite `JOBS_ADAPTER`. `--config PATH` selects the project explicitly,
+`--queue NAME` limits acquisition to one queue, and `--once` processes up to
+one eligible job. The initial worker dispatches Integer, String, Float and
+Boolean payload arguments to `perform` and records its outcome in SQLite.
+
+The worker updates the active lease while the handler runs in a child process.
+The first interrupt or termination request stops acquisition and gives the
+handler 30 seconds to finish. A repeated request or grace expiry terminates
+and reaps the active handler, preserving its lease for recovery. The CLI waits
+for the worker to exit before removing its temporary build directory.
+
+SQLite Jobs links the pinned static bundle beside QBE in `sqlite/` or from
+`TRBN_SQLITE_LIB_DIR`. A development checkout can build the bundle with
+`python3 tools/build-sqlite-dependencies.py --output bin/sqlite`.
+
 Configurations follow the reference schema and validation, including `lint`,
 `packageOptions`, `jobs`, `db` and the mode-specific sections. `check` accepts
 every declared mode (`go`, `ruby`, `typescript` and `trb`). Commands that build,

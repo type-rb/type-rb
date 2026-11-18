@@ -1,0 +1,52 @@
+import { check, emit_qbe } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { MirSignature } from mir/model/module
+import { sqlite_adapter_start } from mir/model/sqlite_contract
+import { verify_mir } from mir/verify/module
+import { CompilerState, compiler_new } from state/state
+import { standard_source_jobs_sql } from state/standard_source_kinds
+import { load_string, store_integer } from support/storage
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+
+def sqlite_fixture_state(owned: Boolean): CompilerState
+	source := "import trb/internal/sqlite\nimport trb/std/result\ndef main()\nrequests := [SQLite::WriteStatement.new(sql: \"CREATE TABLE sample(value INTEGER)\", parameters: []), SQLite::WriteStatement.new(sql: \"INSERT INTO sample VALUES(?)\", parameters: [SQLite::Parameter::Integer(4294967297)])]\ncase SQLite.execute_writes(\"fixture.sqlite\", requests, true, 0)\nwhen Result::Ok(changes)\nputs(changes)\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n"
+	mut state := compiler_new(source.size() + 1)
+	entry := state.module_graph.entry_module[0]
+	expect(lex(state, source)).to_be_true()
+	expect(parse_module(state, 0, entry)).to_be_true()
+	if owned
+		store_integer(state.standard_modules, entry, standard_source_jobs_sql())
+	end
+	return state
+end
+
+describe("SQLite host ownership") do
+	test("resolves only the loader-owned database adapter") do
+		mut state := sqlite_fixture_state(false)
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("internal SQLite operations are reserved for verified database adapters")
+	end
+
+	test("emits the verified writes and preserves mutable result ownership") do
+		mut state := sqlite_fixture_state(true)
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbn_sqlite_write(")).to_be_true()
+		expect(output.include?("call $sqlite3_finalize(")).to_be_true()
+		mut mutated := false
+		state.scalar_mir.signatures.each do |signature|
+			if signature.adapter == sqlite_adapter_start()
+				expect(signature.name).to_equal("trb/internal/sqlite.write")
+				state.scalar_mir.signatures[signature.id] = MirSignature.new(id: signature.id, kind: signature.kind, name: signature.name, adapter: signature.adapter, source_id: signature.source_id, line: signature.line, parameter_types: signature.parameter_types, parameter_mutable: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], result_type: signature.result_type)
+				mutated = true
+			end
+		end
+		expect(mutated).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR standard package parameter differs")
+	end
+end

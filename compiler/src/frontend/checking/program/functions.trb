@@ -1,3 +1,4 @@
+import { standard_sqlite_host } from frontend/resolution/sqlite_intrinsics
 import { standard_process } from frontend/resolution/process_intrinsics
 import { concurrent_borrowed_type } from frontend/types/concurrent_types
 import { mir_deadlines_enabled } from mir/model/deadlines
@@ -121,7 +122,7 @@ def check_function_body(mut state: CompilerState, function_index: Integer, mut l
 		end
 		return !has_diagnostic(state)
 	end
-	if standard_test_scalar_kind(state, function_index) || standard_test_inspect(state, function_index) || standard_test_equal(state, function_index) || standard_test_finish(state, function_index) || standard_test_capture(state, function_index) || standard_test_fail(state, function_index) || standard_process(state, function_index) >= 0 || standard_filesystem_host(state, function_index) >= 0 || standard_oidc_host(state, function_index) >= 0 || standard_crypto(state, function_index) >= 0 || standard_compression(state, function_index) || standard_string_builder(state, function_index) >= 0 || standard_network_host(state, function_index) >= 0 || standard_entropy(state, function_index) || standard_runtime_fail(state, function_index) || standard_runtime_recover(state, function_index) || standard_runtime_deadline(state, function_index) || standard_time_host(state, function_index) > 0
+	if standard_test_scalar_kind(state, function_index) || standard_test_inspect(state, function_index) || standard_test_equal(state, function_index) || standard_test_finish(state, function_index) || standard_test_capture(state, function_index) || standard_test_fail(state, function_index) || standard_process(state, function_index) >= 0 || standard_sqlite_host(state, function_index) >= 0 || standard_filesystem_host(state, function_index) >= 0 || standard_oidc_host(state, function_index) >= 0 || standard_crypto(state, function_index) >= 0 || standard_compression(state, function_index) || standard_string_builder(state, function_index) >= 0 || standard_network_host(state, function_index) >= 0 || standard_entropy(state, function_index) || standard_runtime_fail(state, function_index) || standard_runtime_recover(state, function_index) || standard_runtime_deadline(state, function_index) || standard_time_host(state, function_index) > 0
 		# Headers and generic arguments use ordinary checking. The verified
 		# intrinsic signature owns this declaration instead of an empty body.
 		return !has_diagnostic(state)

@@ -421,22 +421,25 @@
     {
       "id": "sqlite",
       "name": "SQLite C API",
-      "status": "candidate",
+      "status": "current",
       "scope": "Application runtime",
-      "role": "SQLite storage engine behind typed ORM values and transactions.",
-      "configuration": "Selected amalgamation with selective static linking, not introduced. Initial comparison target SQLite 3.53.2 from reference modernc.org/sqlite v1.53.0; verify exact version and observable compile options before pinning.",
+      "role": "Storage engine for the initial SQLite Jobs enqueue, claim, lease and acknowledgement paths.",
+      "configuration": "SQLite 3.53.2 public-domain amalgamation, selectively linked as libsqlite3.a with embedded identity. Archives are built for Darwin and Linux on arm64 and amd64. Worker execution is exercised on the two ordinary arm64 CLI hosts.",
       "evidence": [
         "docs/decisions/0086-production-web-application-path.md",
         "https://www.sqlite.org/cintro.html",
-        "docs/native-dependency-policy.md"
+        "tools/sqlite-dependencies.json",
+        "tools/build-sqlite-dependencies.py",
+        "tools/native-worker-lifecycle-test.py"
       ],
-      "next": "Qualify the version/options with the current reference, threading, transaction lifetimes and four-host binaries; do not silently use the system SQLite.",
+      "next": "Qualify immutable release artifacts, broader Jobs behavior and the SQLite ORM adapter.",
       "requiredBy": [
-        "package.orm",
-        "0086 M5"
+        "package.jobs",
+        "0086 M3c"
       ],
-      "referenceBehavior": "Match SQLite version and observable options, values, transactions and errors against the reference modernc driver.",
-      "decision": "selected"
+      "referenceBehavior": "Use the same SQLite source release as the pinned modernc driver. Preserve SQLite Jobs payloads, queue selection, leases and acknowledgement.",
+      "decision": "retain",
+      "pin": "sqlite"
     },
     {
       "id": "libpq",

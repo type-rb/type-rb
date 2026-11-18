@@ -1,3 +1,15 @@
+def standard_source_sqlite(): Integer
+	return 49
+end
+
+def standard_source_jobs_sql(): Integer
+	return 50
+end
+
+def standard_source_jobs_worker(): Integer
+	return 51
+end
+
 def standard_source_process(): Integer
 	return 47
 end
@@ -201,6 +213,12 @@ end
 # Root-only exports and file-level service functions are owned loader contracts.
 # These policies never apply to authored declarations with the same spelling.
 def standard_source_root(kind: Integer): String
+	if kind == standard_source_jobs_sql()
+		return "SQL"
+	end
+	if kind == standard_source_sqlite()
+		return "SQLite"
+	end
 	if kind == standard_source_process() || kind == standard_source_internal_process()
 		return "Process"
 	end
@@ -282,6 +300,18 @@ def standard_source_root(kind: Integer): String
 end
 
 def standard_source_function(kind: Integer, name: String): Boolean
+	if kind == standard_source_jobs_sql()
+		if name == "::enqueue" || name == "::enqueue_at" || name == "::open_store" || name == "::claim" || name == "::recover_stale" || name == "::heartbeat" || name == "::acknowledge" || name == "::fail"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_sqlite()
+		if name == "::execute_writes" || name == "::query_one" || name == "::worker_control" || name == "::worker_log"
+			return true
+		end
+		return false
+	end
 	if kind == standard_source_process() || kind == standard_source_internal_process()
 		if name == "::argv" || name == "::environment" || name == "::working_directory" || name == "::run"
 			return true

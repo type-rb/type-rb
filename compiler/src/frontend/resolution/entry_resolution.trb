@@ -82,7 +82,7 @@ def compiler_runtime_intrinsic(state: CompilerState, function_index: Integer): B
 		end
 		return false
 	end
-	if name == "compiler_set_oidc_link" || name == "compiler_set_crypto_link" || name == "compiler_set_compression_link" || name == "compiler_set_network_link" || name == "compiler_reset_temporary_storage" || name == "compiler_file_exists" || name == "compiler_read_source" || name == "compiler_source_slice" || name == "compiler_collect_project_sources" || name == "compiler_collect_package_files" || name == "compiler_collect_test_paths" || name == "compiler_eputs"
+	if name == "compiler_set_sqlite_link" || name == "compiler_set_oidc_link" || name == "compiler_set_crypto_link" || name == "compiler_set_compression_link" || name == "compiler_set_network_link" || name == "compiler_reset_temporary_storage" || name == "compiler_file_exists" || name == "compiler_read_source" || name == "compiler_source_slice" || name == "compiler_collect_project_sources" || name == "compiler_collect_package_files" || name == "compiler_collect_test_paths" || name == "compiler_eputs"
 		owner := compiler_runtime_owner(state)
 		if owner >= 0
 			return find_visible_function(state, owner, name) == function_index

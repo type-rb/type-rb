@@ -7,6 +7,7 @@ import { ObjectDefinition } from frontend/types/object_model
 import { callable_parts } from frontend/types/callable_types
 import { find_object_type } from frontend/types/object_types
 import { official_source_kind } from project/official_catalog
+import { jobs_class_owner } from frontend/providers/jobs_wrappers
 import { CompilerState, diagnostic, has_diagnostic } from state/state
 import { token_kind_identifier, token_kind_number } from state/token_kinds
 import { ProjectWebEndpoint, ProjectWebResponse } from state/web_routes
@@ -294,7 +295,7 @@ def validate_web_endpoints(mut state: CompilerState): Boolean
 			if !validate_web_endpoint(state, object_id)
 				return false
 			end
-		else
+		elsif !jobs_class_owner(state, row)
 			state.nominal.object_directives.each do |directive|
 				if directive.source_id == row.source_id && directive.owner == row.name
 					return web_endpoint_error(state, directive.origin, "unsupported class-body declaration")

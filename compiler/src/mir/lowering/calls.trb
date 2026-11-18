@@ -1,3 +1,5 @@
+import { standard_sqlite_host } from frontend/resolution/sqlite_intrinsics
+import { sqlite_adapter_start, sqlite_names } from mir/model/sqlite_contract
 import { standard_process } from frontend/resolution/process_intrinsics
 import { process_adapter, process_names } from mir/model/process_contract
 import { concurrent_source_call } from frontend/checking/body/concurrency
@@ -130,6 +132,12 @@ def mir_declare_signatures(mut state: CompilerState)
 			kind = mir_signature_standard()
 			adapter = process_adapter(process)
 			name = "trb/internal/process." + process_names()[process]
+		end
+		sqlite := standard_sqlite_host(state, index)
+		if sqlite >= 0
+			kind = mir_signature_standard()
+			adapter = sqlite_adapter_start() + sqlite
+			name = "trb/internal/sqlite." + sqlite_names()[sqlite]
 		end
 		filesystem := standard_filesystem_host(state, index)
 		if filesystem >= 0

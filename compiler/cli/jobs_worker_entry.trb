@@ -1,0 +1,155 @@
+import { NativeJob, discover_native_job, jobs_class_owner } from frontend/providers/jobs_wrappers
+import { native_jobs_worker_source, official_source_kind } from project/official_catalog
+import { web_dispatch_quote } from project/web_dispatch_source
+import { web_route_join } from project/web_route_paths
+import { append_import, parse_module } from frontend/syntax/parser
+import { lex_module } from frontend/syntax/lexer
+import { token_is } from frontend/syntax/syntax_tokens
+import { find_declaration_in_module, find_visible_declaration } from frontend/resolution/declaration_lookup
+import { declaration_global, declaration_object } from frontend/types/declaration_kinds
+import { GlobalDeclaration } from frontend/types/global_model
+import { compiler_reserve_source } from state/source_capacity
+import { import_kind_named } from state/import_kinds
+import { standard_source_jobs_worker } from state/standard_source_kinds
+import { CompilerState, add_module, diagnostic, find_module, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def bind_worker_dependency(mut state: CompilerState, generated: Integer, target: Integer, name: String, alias_name: String)
+	index := append_import(state, load_string(state.module_graph.module_names, target), name, alias_name, import_kind_named(), 1)
+	store_integer(state.module_graph.import_targets, index, target)
+	store_integer(state.module_graph.module_import_counts, generated, load_integer(state.module_graph.module_import_counts, generated) + 1)
+end
+
+# Keep the original interface constant and its initialization order. Bind the
+# concrete value once in the configuration module for the worker to access.
+def jobs_worker_adapter(mut state: CompilerState, config: Integer): String
+	state.module_graph.active_module[0] = config
+	index := find_declaration_in_module(state, config, "JOBS_ADAPTER", declaration_global())
+	adapter := find_visible_declaration(state, config, "SQLAdapter", declaration_object())
+	if index < 0 || adapter < 0 || sparse_integer_at(state.standard_modules, state.nominal.objects[adapter].source_id) != official_source_kind("trb/jobs/sql")
+		diagnostic(state, "TRBN4003", 1, "jobs.configuration must declare JOBS_ADAPTER: JobAdapter := SQLAdapter.new(...)")
+		return ""
+	end
+	row := state.global_bindings.globals[index]
+	if !row.constant || row.annotation != "JobAdapter" || !token_is(state, row.start, "SQLAdapter") || !token_is(state, row.start + 1, ".") || !token_is(state, row.start + 2, "new")
+		diagnostic(state, "TRBN4003", row.line, "jobs.configuration must declare JOBS_ADAPTER: JobAdapter := SQLAdapter.new(...)")
+		return ""
+	end
+	mut name := "TRBN_JOBS_SQL_ADAPTER"
+	while find_declaration_in_module(state, config, name, declaration_global()) >= 0
+		name += "_"
+	end
+	start := state.source_tokens.token_count[0]
+	compiler_reserve_source(state, name.size() + 1)
+	lex_module(state, name + "\n", config)
+	typed := GlobalDeclaration.new(constant: true, mutable: false, name: name, source_id: config, line: row.line, origin: row.origin, start: row.start, finish: row.finish, annotation: "SQLAdapter")
+	interface_value := GlobalDeclaration.new(constant: true, mutable: false, name: row.name, source_id: config, line: row.line, origin: row.origin, start: start, finish: start + 1, annotation: row.annotation)
+	state.global_bindings.globals.push(row)
+	mut move := state.global_bindings.globals.size() - 1
+	while move > index + 1
+		state.global_bindings.globals[move] = state.global_bindings.globals[move - 1]
+		move -= 1
+	end
+	state.global_bindings.globals[index] = typed
+	state.global_bindings.globals[index + 1] = interface_value
+	return name
+end
+
+def worker_dispatch_case(job: NativeJob, alias_name: String, returns_result: Boolean): String
+	mut source := "when " + web_dispatch_quote(job.name) + "\n"
+	source += "if values.size() != " + job.parameter_types.size().to_s() + "\n"
+	source += "return JobResult::Err(JobError.new(message: " + web_dispatch_quote("job " + job.name + " expects " + job.parameter_types.size().to_s() + " arguments, got ") + " + values.size().to_s()))\nend\n"
+	mut arguments: Array<String> := []
+	mut index := 0
+	while index < job.parameter_types.size()
+		id := index.to_s()
+		name := "argument_" + id
+		mut converter := "JSON.as_" + job.parameter_types[index].downcase()
+		if job.parameter_types[index] == "Float"
+			converter = "worker_float"
+		end
+		source += name + " := " + converter + "(values[" + id + "]) catch |error|\n"
+		source += "return JobResult::Err(JobError.new(message: " + web_dispatch_quote("decode " + job.name + "." + job.parameter_names[index] + ": ") + " + error.message))\nend\n"
+		arguments.push(name)
+		index += 1
+	end
+	call := alias_name + ".new().perform(" + web_route_join(arguments, ", ") + ")\n"
+	if returns_result
+		return source + "return " + call
+	end
+	return source + call + "return JobResult::Ok(Unit.new())\n"
+end
+
+def worker_dispatch_start(): String
+	return "\ndef worker_float(value: JSON::Value): Result<Float, JSON::Error>\ncase value\nwhen JSON::Value::Integer(integer)\nreturn Result<Float, JSON::Error>::Ok(integer.to_f())\nelse\nreturn JSON.as_float(value)\nend\nend\ndef dispatch_job(job: SQL::Claim): JobResult\nif job.payload_version != 1\nreturn JobResult::Err(JobError.new(message: \"unsupported job payload version \" + job.payload_version.to_s()))\nend\nparsed := JSON.parse(job.payload) catch |error|\nreturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\nend\nvalues := JSON.as_array(parsed) catch |error|\nreturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\nend\ncase job.job_name\n"
+end
+
+def append_jobs_worker(mut state: CompilerState, configuration: String): Boolean
+	config := find_module(state, configuration)
+	if configuration == "" || config < 0
+		diagnostic(state, "TRBN4003", 1, "jobs start requires an existing jobs.configuration module")
+		return false
+	end
+	adapter := jobs_worker_adapter(state, config)
+	if adapter == ""
+		return false
+	end
+	mut jobs: Array<NativeJob> := []
+	mut names: Hash<String, Integer> := {}
+	mut uses_unit := false
+	mut source := native_jobs_worker_source() + worker_dispatch_start()
+	mut index := 0
+	while index < state.nominal.objects.size()
+		row := state.nominal.objects[index]
+		if jobs_class_owner(state, row)
+			state.module_graph.active_module[0] = row.source_id
+			if names.key?(row.name)
+				diagnostic(state, "TRBN4003", row.line, "duplicate job name " + row.name)
+				return false
+			end
+			names[row.name] = 1
+			job := discover_native_job(state, index)
+			if has_diagnostic(state)
+				return false
+			end
+			mut returns_result := false
+			row.methods.each do |method|
+				if method.name == "perform" && !method.class_member
+					returns_result = state.type_resolution.generic_functions[method.generic_function].result_type != "Void"
+				end
+			end
+			if !returns_result
+				uses_unit = true
+			end
+			source += worker_dispatch_case(job, "WorkerJob" + jobs.size().to_s(), returns_result)
+			jobs.push(job)
+		end
+		index += 1
+	end
+	if jobs.size() == 0
+		diagnostic(state, "TRBN4003", 1, "jobs start requires a Job class")
+		return false
+	end
+	source += "else\nreturn JobResult::Err(JobError.new(message: \"unknown job \" + job.job_name))\nend\nend\n"
+	if uses_unit
+		source = "import trb/std/unit\n" + source
+	end
+	compiler_reserve_source(state, source.size())
+	generated := add_module(state, "$jobs:worker", "<job worker>")
+	store_integer(state.standard_modules, generated, standard_source_jobs_worker())
+	start := state.source_tokens.token_count[0]
+	lex_module(state, source, generated)
+	if has_diagnostic(state) || !parse_module(state, start, generated)
+		return false
+	end
+	bind_worker_dependency(state, generated, config, adapter, "JOBS_ADAPTER")
+	index = 0
+	while index < jobs.size()
+		job := jobs[index]
+		row := state.nominal.objects[job.object_id]
+		bind_worker_dependency(state, generated, row.source_id, row.name, "WorkerJob" + index.to_s())
+		index += 1
+	end
+	state.module_graph.entry_module[0] = generated
+	return true
+end
