@@ -80,7 +80,10 @@ def discover_native_job(mut state: CompilerState, object_id: Integer): NativeJob
 		if method.name == "perform" && !method.class_member
 			perform = method.generic_function
 		elsif method.name == "perform_later" || method.name == "perform_at" || method.name == "perform_in"
-			native_job_error(state, method.origin, row.name + " method " + method.name + " is supplied by trb/jobs")
+			generated := find_module(state, "$jobs:enqueue")
+			if generated < 0 || method.generic_function < 0 || state.type_resolution.generic_functions[method.generic_function].source_id != generated
+				native_job_error(state, method.origin, row.name + " method " + method.name + " is supplied by trb/jobs")
+			end
 		end
 	end
 	if perform < 0

@@ -6,6 +6,10 @@ def standard_source_jobs_sql(): Integer
 	return 50
 end
 
+def standard_source_jobs_worker(): Integer
+	return 51
+end
+
 def standard_source_process(): Integer
 	return 47
 end
@@ -297,13 +301,13 @@ end
 
 def standard_source_function(kind: Integer, name: String): Boolean
 	if kind == standard_source_jobs_sql()
-		if name == "::enqueue" || name == "::enqueue_at"
+		if name == "::enqueue" || name == "::enqueue_at" || name == "::open_store" || name == "::claim" || name == "::recover_stale" || name == "::heartbeat" || name == "::acknowledge" || name == "::fail"
 			return true
 		end
 		return false
 	end
 	if kind == standard_source_sqlite()
-		if name == "::execute_writes" || name == "::query_one"
+		if name == "::execute_writes" || name == "::query_one" || name == "::worker_control" || name == "::worker_log"
 			return true
 		end
 		return false

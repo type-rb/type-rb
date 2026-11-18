@@ -1,6 +1,6 @@
 import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
 import { emit_sqlite_query_runtime } from backend/qbe/runtime/sqlite_query
-import { prepare_native_jobs } from project/jobs_wrappers
+import { prepare_native_jobs } from frontend/providers/jobs_wrappers
 import { emit_process_host_runtime } from backend/qbe/runtime/process
 import { mir_deadlines_enabled } from mir/model/deadlines
 import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines

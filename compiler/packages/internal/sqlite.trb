@@ -39,6 +39,12 @@ end
 def error_message(status: Integer): String
 end
 
+def worker_control(operation: Integer, value: Integer): Integer
+end
+
+def worker_log(message: String): Integer
+end
+
 def query(
 		source: String,
 		statement: String,

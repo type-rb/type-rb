@@ -120,6 +120,10 @@ jobs:
           python3 tools/oidc_artifacts.py pack "$RUNNER_TEMP/oidc" "dist/oidc-$PLATFORM.tar.gz"
           cp tools/oidc-dependencies.json dist/oidc-source-pins.json
           cp "$RUNNER_TEMP/oidc-sources/"*.tar.* dist/
+          python3 tools/build-sqlite-dependencies.py --output "$RUNNER_TEMP/sqlite"
+          python3 tools/sqlite_artifacts.py verify "$RUNNER_TEMP/sqlite" --target "$PLATFORM" > dist/sqlite-build.json
+          python3 tools/sqlite_artifacts.py pack "$RUNNER_TEMP/sqlite" "dist/sqlite-$PLATFORM.tar.gz"
+          cp tools/sqlite-dependencies.json dist/sqlite-source-pins.json
       - uses: actions/upload-artifact@v6
         with:
           name: network-${{ matrix.platform }}
@@ -301,6 +305,20 @@ jobs:
           python3 tools/native-interpolation-test.py bin/trbn
       - name: Verify Process results and owned child cleanup
         run: python3 tools/native-process-test.py bin/trbn
+      - name: Verify SQLite Jobs execution and joined shutdown
+        run: |
+          python3 tools/build-sqlite-dependencies.py --output bin/sqlite
+          python3 tools/native-worker-lifecycle-test.py --native bin/trbn --report "$RUNNER_TEMP/jobs-lifecycle.json"
+      - name: Retain SQLite Jobs lifecycle and archive observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: jobs-lifecycle-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/jobs-lifecycle.json
+            bin/sqlite/sqlite-build.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify ordinary language coverage without a reference compiler
         run: |
           python3 tools/native-language-coverage-test.py
@@ -369,6 +387,7 @@ jobs:
           cp -R bin/crypto dist/package/crypto
           cp docs/native-oidc.md dist/package/OIDC.md
           cp -R bin/oidc dist/package/oidc
+          cp -R bin/sqlite dist/package/sqlite
           tar -czf "dist/trbn-$PLATFORM.tar.gz" -C dist/package .
           cd dist
           shasum -a 256 "trbn-$PLATFORM.tar.gz" > "trbn-$PLATFORM.tar.gz.sha256"

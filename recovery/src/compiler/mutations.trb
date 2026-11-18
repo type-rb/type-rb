@@ -400,6 +400,6 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/resolution/sqlite_intrinsics", "< 0", "< 1"],
 		["backend/qbe/runtime/sqlite_link", "\\\"TRBN_SQLITE_LIB_DIR\\\"", "\\\"TRBN_SQLITE_LIB_DIR~\\\""],
 		["backend/qbe/runtime/sqlite_query", "%same_width =w ceqw %actual, %columns", "%same_width =w cnew %actual, %columns"],
-		["project/jobs_wrappers", "\"Job\"", "\"Job~\""],
+		["frontend/providers/jobs_wrappers", "\"Job\"", "\"Job~\""],
 	]
 end

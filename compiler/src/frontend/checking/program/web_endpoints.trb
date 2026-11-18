@@ -7,7 +7,7 @@ import { ObjectDefinition } from frontend/types/object_model
 import { callable_parts } from frontend/types/callable_types
 import { find_object_type } from frontend/types/object_types
 import { official_source_kind } from project/official_catalog
-import { jobs_class_owner } from project/jobs_wrappers
+import { jobs_class_owner } from frontend/providers/jobs_wrappers
 import { CompilerState, diagnostic, has_diagnostic } from state/state
 import { token_kind_identifier, token_kind_number } from state/token_kinds
 import { ProjectWebEndpoint, ProjectWebResponse } from state/web_routes

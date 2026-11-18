@@ -1,5 +1,5 @@
 import { native_jobs_sql_source, native_sqlite_source } from project/official_catalog
-import { standard_source_internal_process, standard_source_jobs_sql, standard_source_process, standard_source_sqlite } from state/standard_source_kinds
+import { standard_source_internal_process, standard_source_jobs_sql, standard_source_jobs_worker, standard_source_process, standard_source_sqlite } from state/standard_source_kinds
 import { native_process_source, native_web_timeout_source, pinned_process_source } from project/official_catalog
 import { standard_source_web_timeout } from state/standard_source_kinds
 import { declare_test_signatures } from frontend/providers/test_declarations
@@ -501,11 +501,11 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 		return -1
 	end
 	caller_kind := sparse_integer_at(state.standard_modules, state.module_graph.active_module[0])
-	if kind == standard_source_jobs_sql() && caller_kind != official_source_kind("trb/jobs/sql")
+	if kind == standard_source_jobs_sql() && caller_kind != official_source_kind("trb/jobs/sql") && caller_kind != standard_source_jobs_worker()
 		diagnostic(state, "TRBN4003", line, "internal Jobs SQL operations are reserved for the verified SQL adapter")
 		return -1
 	end
-	if kind == standard_source_sqlite() && caller_kind != standard_source_jobs_sql()
+	if kind == standard_source_sqlite() && caller_kind != standard_source_jobs_sql() && caller_kind != standard_source_jobs_worker()
 		diagnostic(state, "TRBN4003", line, "internal SQLite operations are reserved for verified database adapters")
 		return -1
 	end

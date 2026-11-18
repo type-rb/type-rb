@@ -25,6 +25,7 @@ STDLIB_SOURCES["process"] = "internal/stdlib/process.go"
 NATIVE_ADAPTERS.append("process")
 NATIVE_ADAPTERS.append("sqlite")
 NATIVE_ADAPTERS.append("jobs_sql")
+NATIVE_ADAPTERS.append("jobs_worker")
 REPOSITORY = "https://github.com/type-rb/type-rb"
 
 
