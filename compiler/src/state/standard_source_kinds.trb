@@ -303,7 +303,10 @@ def standard_source_function(kind: Integer, name: String): Boolean
 		return false
 	end
 	if kind == standard_source_sqlite()
-		return name == "::execute_writes"
+		if name == "::execute_writes" || name == "::query_one"
+			return true
+		end
+		return false
 	end
 	if kind == standard_source_process() || kind == standard_source_internal_process()
 		if name == "::argv" || name == "::environment" || name == "::working_directory" || name == "::run"

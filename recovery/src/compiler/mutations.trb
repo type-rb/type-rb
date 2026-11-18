@@ -396,8 +396,9 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["mir/model/process_contract", "\"argv\"", "\"argv~\""],
 		["backend/qbe/runtime/process", "\"native_cli_process_capture\"", "\"native_cli_process_capture~\""],
 		["backend/qbe/runtime/sqlite_write", ">= 0", ">= 1"],
-		["mir/model/sqlite_contract", "\"write\"", "\"write~\""],
+		["mir/model/sqlite_contract", "\"error_message\"", "\"error_message~\""],
 		["frontend/resolution/sqlite_intrinsics", "< 0", "< 1"],
 		["backend/qbe/runtime/sqlite_link", "\\\"TRBN_SQLITE_LIB_DIR\\\"", "\\\"TRBN_SQLITE_LIB_DIR~\\\""],
+		["backend/qbe/runtime/sqlite_query", "%same_width =w ceqw %actual, %columns", "%same_width =w cnew %actual, %columns"],
 	]
 end

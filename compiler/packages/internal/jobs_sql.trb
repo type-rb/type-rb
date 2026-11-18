@@ -5,9 +5,18 @@ import trb/std/encoding/hex
 import trb/std/process
 import trb/std/result
 import trb/std/secure_random
+import trb/std/unit
 import { Duration, Instant, TimeZone } from trb/std/time
 
 module SQL
+	record Claim
+		id: String
+		job_name: String
+		payload: String
+		payload_version: Integer
+		attempts: Integer
+		maximum_attempts: Integer
+	end
 end
 
 def _adapter_error(message: String): EnqueueError
@@ -42,11 +51,16 @@ def _run_at(value: Instant): String
 	return local.date().to_s() + " " + _pad(local.hour(), 2) + ":" + _pad(local.minute(), 2) + ":" + _pad(local.second(), 2) + "." + _pad(local.nanosecond() / 1000000, 3)
 end
 
-def _enqueue_statements(request: EnqueueRequest, identity: String, scheduled_at: Instant, maximum_attempts: Integer): Array<SQLite::WriteStatement>
+def _schema_statements(): Array<SQLite::WriteStatement>
 	return [
 		SQLite::WriteStatement.new(sql: "CREATE TABLE IF NOT EXISTS trb_jobs (id TEXT PRIMARY KEY, queue_name TEXT NOT NULL, job_name TEXT NOT NULL, payload TEXT NOT NULL, payload_version INTEGER NOT NULL, priority INTEGER NOT NULL, run_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, maximum_attempts INTEGER NOT NULL, claimed_by TEXT, claimed_at TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", parameters: []),
 		SQLite::WriteStatement.new(sql: "CREATE INDEX IF NOT EXISTS trb_jobs_ready ON trb_jobs (state, priority, run_at, id)", parameters: []),
-		SQLite::WriteStatement.new(sql: "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", parameters: [
+	]
+end
+
+def _enqueue_statements(request: EnqueueRequest, identity: String, scheduled_at: Instant, maximum_attempts: Integer): Array<SQLite::WriteStatement>
+	mut statements := _schema_statements()
+	statements.push(SQLite::WriteStatement.new(sql: "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", parameters: [
 				SQLite::Parameter::Text(identity),
 				SQLite::Parameter::Text(request.queue_name),
 				SQLite::Parameter::Text(request.job_name),
@@ -55,8 +69,8 @@ def _enqueue_statements(request: EnqueueRequest, identity: String, scheduled_at:
 				SQLite::Parameter::Integer(request.priority),
 				SQLite::Parameter::Text(_run_at(scheduled_at)),
 				SQLite::Parameter::Integer(maximum_attempts),
-			]),
-	]
+			]))
+	return statements
 end
 
 def _enqueue(adapter: SQLAdapter, request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
@@ -91,4 +105,113 @@ end
 
 def enqueue(adapter: SQLAdapter, request: EnqueueRequest): Result<JobReference, EnqueueError>
 	return _enqueue(adapter, request, Instant.now())
+end
+
+def _text(parameter: SQLite::Parameter): String?
+	case parameter
+	when SQLite::Parameter::Text(value)
+		return value
+	else
+		return nil
+	end
+end
+
+def _integer(parameter: SQLite::Parameter): Integer?
+	case parameter
+	when SQLite::Parameter::Integer(value)
+		return value
+	else
+		return nil
+	end
+end
+
+def _decode_claim(row: Array<SQLite::Parameter>): Result<SQL::Claim?, SQLite::Error>
+	id := _text(row[0])
+	job_name := _text(row[1])
+	payload := _text(row[2])
+	payload_version := _integer(row[3])
+	attempts := _integer(row[4])
+	maximum_attempts := _integer(row[5])
+	if id == nil || job_name == nil || payload == nil || payload_version == nil || attempts == nil || maximum_attempts == nil
+		return Result<SQL::Claim?, SQLite::Error>::Err(SQLite::Error.new(code: 20, message: "invalid SQLite job row"))
+	end
+	return Result<SQL::Claim?, SQLite::Error>::Ok(SQL::Claim.new(id: id, job_name: job_name, payload: payload, payload_version: payload_version, attempts: attempts, maximum_attempts: maximum_attempts))
+end
+
+def claim(source: String, worker: String, queue: String): Result<SQL::Claim?, SQLite::Error>
+	mut parameters := [SQLite::Parameter::Text(worker)]
+	mut selection := "SELECT id FROM trb_jobs WHERE state = 'ready' AND run_at <= strftime('%Y-%m-%d %H:%M:%f', 'now')"
+	if queue != ""
+		selection += " AND queue_name = ?"
+		parameters.push(SQLite::Parameter::Text(queue))
+	end
+	selection += " ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1"
+	statement := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = ?, claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = (" + selection + ") AND state = 'ready' RETURNING id, job_name, payload, payload_version, attempts, maximum_attempts"
+	row := SQLite.query_one(source, statement, parameters, [3, 3, 3, 1, 1, 1], true, 0) catch |error|
+		return Result<SQL::Claim?, SQLite::Error>::Err(error)
+	end
+	if row == nil
+		return Result<SQL::Claim?, SQLite::Error>::Ok(nil)
+	end
+	return _decode_claim(row)
+end
+
+def open_store(adapter: SQLAdapter): Result<String, EnqueueError>
+	source := _database(adapter) catch |error|
+		return Result<String, EnqueueError>::Err(error)
+	end
+	case SQLite.execute_writes(source, _schema_statements(), true, 0)
+	when Result::Ok(_changes)
+		return Result<String, EnqueueError>::Ok(source)
+	when Result::Err(error)
+		return Result<String, EnqueueError>::Err(_adapter_error(error.message))
+	end
+end
+
+def _seconds_rounded_up(duration: Duration): Integer
+	mut seconds := duration.whole_seconds()
+	if duration.nanosecond() > 0
+		seconds += 1
+	end
+	if seconds < 1
+		return 1
+	end
+	return seconds
+end
+
+def recover_stale(source: String, lease: Duration): Result<Integer, SQLite::Error>
+	statement := SQLite::WriteStatement.new(sql: "UPDATE trb_jobs SET state = 'ready', claimed_by = NULL, claimed_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE state = 'running' AND claimed_at < datetime(CURRENT_TIMESTAMP, ?)", parameters: [
+			SQLite::Parameter::Text("-" + _seconds_rounded_up(lease).to_s() + " seconds"),
+		])
+	return SQLite.execute_writes(source, [statement], false, 0)
+end
+
+def _update_claim(source: String, statement: String, parameters: Array<SQLite::Parameter>, operation: String): Result<Unit, SQLite::Error>
+	row := SQLite.query_one(source, statement + " RETURNING id", parameters, [3], true, 0) catch |error|
+		return Result<Unit, SQLite::Error>::Err(error)
+	end
+	if row == nil
+		return Result<Unit, SQLite::Error>::Err(SQLite::Error.new(code: 12, message: "job claim was lost before " + operation))
+	end
+	return Result<Unit, SQLite::Error>::Ok(Unit.new())
+end
+
+def heartbeat(source: String, id: String, worker: String): Result<Unit, SQLite::Error>
+	statement := "UPDATE trb_jobs SET claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'running' AND claimed_by = ?"
+	return _update_claim(source, statement, [SQLite::Parameter::Text(id), SQLite::Parameter::Text(worker)], "heartbeat")
+end
+
+def acknowledge(source: String, id: String, worker: String): Result<Unit, SQLite::Error>
+	statement := "DELETE FROM trb_jobs WHERE id = ? AND state = 'running' AND claimed_by = ?"
+	return _update_claim(source, statement, [SQLite::Parameter::Text(id), SQLite::Parameter::Text(worker)], "acknowledgement")
+end
+
+def fail(source: String, id: String, worker: String, message: String, retry_base: Duration): Result<Unit, SQLite::Error>
+	statement := "UPDATE trb_jobs SET state = CASE WHEN attempts >= maximum_attempts THEN 'failed' ELSE 'ready' END, run_at = datetime(CURRENT_TIMESTAMP, '+' || (attempts * ?) || ' seconds'), claimed_by = NULL, claimed_at = NULL, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'running' AND claimed_by = ?"
+	return _update_claim(source, statement, [
+			SQLite::Parameter::Integer(_seconds_rounded_up(retry_base)),
+			SQLite::Parameter::Text(message),
+			SQLite::Parameter::Text(id),
+			SQLite::Parameter::Text(worker),
+		], "failure recording")
 end
