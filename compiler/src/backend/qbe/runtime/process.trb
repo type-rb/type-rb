@@ -1,16 +1,13 @@
 import { QbeOutput, qbe_output_line } from backend/qbe/output
 import { process_kind } from mir/model/process_contract
-import { mir_signature_standard } from mir/model/call_kinds
+import { mir_signature_host, mir_signature_standard } from mir/model/call_kinds
 import { mir_deadlines_enabled } from mir/model/deadlines
 import { MirModule } from mir/model/module
 
 def emit_process_host_runtime(native_module: MirModule, mut output: QbeOutput)
 	mut cli := false
-	if native_module.program.size() == 1 && native_module.program[0].cli_function >= 0
-		cli = true
-	end
-	mut requested := cli
-	mut capture := cli
+	mut requested := false
+	mut capture := false
 	native_module.signatures.each do |signature|
 		if signature.kind == mir_signature_standard()
 			operation := process_kind(signature.adapter)
@@ -20,6 +17,10 @@ def emit_process_host_runtime(native_module: MirModule, mut output: QbeOutput)
 			if operation == 3
 				capture = true
 			end
+		elsif signature.kind == mir_signature_host() && signature.name == "native_cli_process_capture"
+			cli = true
+			requested = true
+			capture = true
 		end
 	end
 	if !requested

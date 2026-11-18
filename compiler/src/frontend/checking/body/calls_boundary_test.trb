@@ -39,7 +39,7 @@ describe("Native TypeRB frontend") do
 			"String method argument count differs",
 			"push receiver is immutable",
 			"unsupported Hash method missing",
-			"unsupported standard package member",
+			"unresolved value Process::missing",
 			"size is unavailable on T",
 		]
 		lines := [2, 2, 2, 2, 3, 3, 3, 2]

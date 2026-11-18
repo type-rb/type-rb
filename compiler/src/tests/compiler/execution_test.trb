@@ -215,7 +215,7 @@ describe("Native TypeRB frontend") do
 		expect(resolve(member_state)).to_be_true()
 		expect(check(member_state)).to_be_false()
 		expect(load_string(member_state.diagnostics.codes, 0)).to_equal("TRBN4004")
-		expect(load_string(member_state.diagnostics.messages, 0)).to_equal("unsupported standard package member")
+		expect(load_string(member_state.diagnostics.messages, 0)).to_equal("call argument count does not match Process::environment")
 
 		type_source := "import trb/std/math\n\ndef main()\n\tvalue := Math.sqrt(\"nine\")\n\treturn\nend\n"
 		mut type_state := compiler_new(type_source.size() + 1)
@@ -233,7 +233,7 @@ describe("Native TypeRB frontend") do
 		expect(resolve(arity_state)).to_be_true()
 		expect(check(arity_state)).to_be_false()
 		expect(load_string(arity_state.diagnostics.codes, 0)).to_equal("TRBN4004")
-		expect(load_string(arity_state.diagnostics.messages, 0)).to_equal("call argument count does not match Process")
+		expect(load_string(arity_state.diagnostics.messages, 0)).to_equal("call argument count does not match Process::argv")
 	end
 
 	test("emits deterministic QBE and executes the registered source subset") do
