@@ -13,12 +13,13 @@ describe("Split fragment count reuse") do
 		mut state := logical_checked_source("def split(text: String, separator: String): Array<String>\nreturn text.split(separator)\nend\ndef main()\nputs(0)\nend\n")
 		expect(check(state)).to_be_true()
 		mut output := output_source(emit_qbe(state)).split("export function w $main(").join("function w $unused_main(")
-		mut data := "\ndata $split_format = { b \"%ld,%ld,%d,%d\\n\", b 0 }\ndata $split_size_format = { b \"%ld,%ld,%ld\\n\", b 0 }\n"
+		mut data := "\ndata $split_format = { b \"%ld,%ld,%d,%d,%d\\n\", b 0 }\ndata $split_size_format = { b \"%ld,%ld,%ld\\n\", b 0 }\n"
 		output += "\nexport function w $main() {\n@start\n call $trbn_gc_trace_initialize()\n"
 		mut expected := ""
 		mut sample := 0
 		fixtures.each do |original|
-			mut cut := 0
+			# The first iteration leaves the input as-is, including absent separators.
+			mut cut := -1
 			while cut <= original.size()
 				# Non-ASCII separators also check that the general path is retained.
 				[0, 44, 128, 194].each do |separator|
@@ -44,6 +45,8 @@ describe("Split fragment count reuse") do
 					output += " storel 0, $split_find_calls\n"
 					output += " %result" + name + " =l call $trbn_string_split(l %source" + name + ", l %separator" + name + ")\n"
 					output += " %after" + name + " =l loadl $trbn_gc_temp_count\n %retained" + name + " =l sub %after" + name + ", %roots" + name + "\n"
+					# Keep only the result rooted, so every element must survive through it.
+					output += " call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_temp_push(l %result" + name + ")\n call $trbn_gc_collect(w 0)\n"
 					output += " %size_slot" + name + " =l add %result" + name + ", 8\n %size" + name + " =l loadl %size_slot" + name + "\n"
 					output += " %finds" + name + " =l loadl $split_find_calls\n"
 					output += " call $printf(l $split_size_format, ..., l %size" + name + ", l %retained" + name + ", l %finds" + name + ")\n"
@@ -55,6 +58,10 @@ describe("Split fragment count reuse") do
 						end
 					end
 					expected += parts.to_s() + ",1," + parts.to_s() + "\n"
+					mut reused := "0"
+					if parts == 1
+						reused = "1"
+					end
 					mut start := 0
 					mut finish := 0
 					mut part := 0
@@ -68,8 +75,9 @@ describe("Split fragment count reuse") do
 							output += " %data" + item + " =l add %item" + item + ", 24\n %expected" + item + " =l add " + symbol + ", " + start.to_s() + "\n"
 							output += " %different" + item + " =w call $memcmp(l %data" + item + ", l %expected" + item + ", l " + length.to_s() + ")\n"
 							output += " %end" + item + " =l add %data" + item + ", %length" + item + "\n %nul" + item + " =w loadub %end" + item + "\n"
-							output += " call $printf(l $split_format, ..., l %length" + item + ", l %points" + item + ", w %different" + item + ", w %nul" + item + ")\n"
-							expected += length.to_s() + "," + mir_literal_fragment(bytes, start, finish).points.to_s() + ",0,0\n"
+							output += " %reused" + item + " =w ceql %item" + item + ", %source" + name + "\n"
+							output += " call $printf(l $split_format, ..., l %length" + item + ", l %points" + item + ", w %different" + item + ", w %nul" + item + ", w %reused" + item + ")\n"
+							expected += length.to_s() + "," + mir_literal_fragment(bytes, start, finish).points.to_s() + ",0,0," + reused + "\n"
 							part += 1
 							start = finish + 1
 						end
