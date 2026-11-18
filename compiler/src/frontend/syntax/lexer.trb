@@ -8,10 +8,13 @@ import { load_integer, load_string, store_integer, store_string } from support/s
 
 # The source body supports recovery; the compiler runtime adapts this declaration.
 def compiler_source_slice(source: String, start: Integer, finish: Integer): String
-	if start >= finish
-		return ""
+	mut value := ""
+	mut index := start
+	while index < finish
+		value += source[index]
+		index += 1
 	end
-	return source.slice(start...finish)
+	return value
 end
 
 # The reference frontend validates source encoding before recovery. Ordinary
