@@ -54,10 +54,12 @@ func TestProcessAdapterCleanup(t *testing.T) {
 	if trackedSupport == support {
 		t.Fatal("missing owned pipe boundary")
 	}
+	trackedSupport = strings.Replace(trackedSupport, `host.getBuiltinModule("child_process")`, `(__trbFailSpawn ? {spawnSync: () => ({error: new Error("fixture spawn failure")})} : host.getBuiltinModule("child_process"))`, 1)
 	probe := strings.Replace(trackedSupport, "const __trbProcessHelper", "let __trbProcessHelper", 1) + `
 const host = Reflect.get(globalThis, "process");
 const fs = host.getBuiltinModule("fs");
 const __trbOwnedPipes: {fd:number; dev:bigint; ino:bigint}[] = [];
+let __trbFailSpawn = false;
 function assertOwnedPipesClosed(expected: number) {
   if (__trbOwnedPipes.length !== expected) throw new Error("owned pipe observation is incomplete");
   for (const owned of __trbOwnedPipes.splice(0)) {
@@ -67,18 +69,7 @@ function assertOwnedPipesClosed(expected: number) {
     } catch (error) { if (Reflect.get(error as object, "code") !== "EBADF") throw error; }
   }
 }
-function openStreams() {
-  // Bun can initialize event-loop descriptors lazily, and enumeration can
-  // include descriptors already closed before fstat. Compare live pipe/socket
-  // identities, including the host launcher's stdio, independently of fd reuse.
-  return fs.readdirSync("/dev/fd").flatMap((fd: string) => {
-    try {
-      const value = fs.fstatSync(Number(fd), {bigint:true});
-      return value.isFIFO() || value.isSocket() ? [String(value.dev) + ":" + String(value.ino)] : [];
-    } catch (error) { if (Reflect.get(error as object, "code") === "EBADF") return []; throw error; }
-  }).sort();
-}
-function exercisePair() {
+for (let index = 0; index < 12; index++) {
   const output = __trbProcessCapture("/bin/sh", ["-c", "printf $$"]);
   const pid = Number(new TextDecoder().decode(output.stdout));
   if (output.status !== 0 || !Number.isInteger(pid) || pid <= 0) throw new Error("missing child identity");
@@ -88,13 +79,11 @@ function exercisePair() {
   catch (error) { if (!String(error).includes("cannot execute command")) throw error; }
   assertOwnedPipesClosed(4);
 }
-// Warm both outcomes and the child identity probe before comparing host
-// streams. The exact pipe checks also cover this first pair.
-exercisePair();
-const before = JSON.stringify(openStreams());
-for (let index = 0; index < 12; index++) exercisePair();
-const after = JSON.stringify(openStreams());
-if (after !== before) throw new Error("process streams leaked: " + before + " -> " + after);
+__trbFailSpawn = true;
+try { __trbProcessCapture("/bin/sh", ["-c", "exit 0"]); throw new Error("missing parent-side error"); }
+catch (error) { if (!String(error).includes("fixture spawn failure")) throw error; }
+assertOwnedPipesClosed(2);
+__trbFailSpawn = false;
 __trbProcessHelper = ` + strconv.Quote(nonblocking) + `;
 host.env.TRB_PROCESS_DESCRIPTOR_PROBE = "1";
 const descriptors = __trbProcessCapture(` + strconv.Quote(executable) + `, ["-test.run=^TestProcessAdapterCleanup$"]);
