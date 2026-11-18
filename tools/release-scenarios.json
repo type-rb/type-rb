@@ -305,7 +305,7 @@
       "body": "Process.environment(1)",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "argument[^\\n]*(?:type|expected)[^\\n]*String"
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*String|error\\[TRBN4004\\]: expected String, found Integer$)"
     },
     {
       "id": "process-reject-run-arguments",
@@ -314,7 +314,7 @@
       "body": "Process.run(\"unused\", [1])",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "argument[^\\n]*(?:type|expected)[^\\n]*Array<String>"
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*Array<String>|error\\[TRBN4004\\]: expected String, found Integer$)"
     },
     {
       "id": "process-reject-directory-arity",
@@ -341,7 +341,7 @@
       "body": "Process.argv()",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "package trb/internal/process is internal"
+      "diagnostic": "(?m)(?:package trb/internal/process is internal|error\\[TRBN4003\\]: internal package imports are reserved for verified standard sources: trb/internal/process$)"
     }
   ]
 }

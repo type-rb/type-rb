@@ -127,14 +127,19 @@ end
             + '0\n\ufeff��€\n���\ntrue\n'
             + '0\n80000\n80000\n'
         )
-        entry = root / 'main.trb'
+        sources = root / 'src'
+        sources.mkdir()
+        entry = sources / 'main.trb'
         entry.write_text(source)
+        config = root / 'trbconfig.jsonc'
+        config.write_text(json.dumps({'name': 'process-probe', 'mode': 'trb', 'sourceDir': 'src'}))
         program = root / 'result'
-        checked([binary, 'check', str(entry)], root, env)
-        checked([binary, 'build', str(entry), '--compile', '--outfile', str(program)], root, env)
+        checked([binary, 'check', '--config', str(config)], root, env)
+        checked([binary, 'build', '--config', str(config), '--compile', '--outfile', str(program)], root, env)
         checked([str(program)], root, env, expected=want)
-        print('ordinary check, build and execution passed', flush=True)
+        print('ordinary project check, build and execution passed', flush=True)
         entry.unlink()
+        config.unlink()
         repl_source = source.replace('def main()', 'def run_process_probe()', 1)
         checked([binary, 'repl'], root, env, source=repl_source + '\nrun_process_probe()\n:quit\n', expected=want)
         print('retained REPL output passed', flush=True)
