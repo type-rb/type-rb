@@ -5,6 +5,23 @@ import { resolve } from frontend/checking/program/resolution
 import { CompilerState, compiler_new } from state/state
 import { load_string } from support/storage
 import { QbeOutput } from backend/qbe/output
+import { mir_signature_standard } from mir/model/call_kinds
+import { mir_function_index } from mir/model/module
+import { expect } from trb/std/test
+
+def expect_mir_callable_bodies(state: CompilerState)
+	mut bodies := 0
+	state.scalar_mir.signatures.each do |signature|
+		index := mir_function_index(state.scalar_mir, signature.id)
+		if signature.kind < mir_signature_standard()
+			expect(index >= 0).to_be_true()
+			bodies += 1
+		else
+			expect(index).to_equal(-1)
+		end
+	end
+	expect(state.scalar_mir.functions.size()).to_equal(bodies)
+end
 
 def control_test_state(body: String): CompilerState
 	source := "def choose(value: Integer): Integer\n" + body + "\nend\ndef main()\n\tputs(choose(3))\n\treturn\nend\n"

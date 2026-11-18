@@ -3,6 +3,19 @@
   "referenceAstSha256": "c87666ee5f318b2a4880924504f1dc5211c3c665188589bb0c93da710bb9877b",
   "features": [
     {
+      "id": "process",
+      "title": "Portable Process operations",
+      "scope": "packages",
+      "syntax": [],
+      "cases": [
+        "process-values-and-capture"
+      ],
+      "pending": [
+        "Complete source output and release host qualification"
+      ],
+      "note": "Checked Process declarations cover fresh argv, nullable environment lookup, working directory and explicit subprocess execution. The same Bytes decoding applies to captured stdout and stderr. CLI tests independently exercise shebang and format rejection, both pipes, literal arguments, signal status, large capture, and actual child reaping after retained REPL interruption. Host policy and all release-host qualification remain subject to the shared contract."
+    },
+    {
       "id": "lexical",
       "title": "Source text and lexical forms",
       "scope": "basic",
@@ -4110,6 +4123,57 @@
     }
   ],
   "cases": [
+    {
+      "id": "process-values-and-capture",
+      "title": "Owned Process values and captured output",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "mut args := Process.argv()\nargs.push(\"local\")\nputs(args.size() == Process.argv().size() + 1)\nputs(Process.environment(\"invalid=process=name\") == nil)\ncase Process.working_directory()\nwhen Result::Ok(path)\n\tputs(!path.empty?())\nwhen Result::Err(error)\n\tputs(error.operation)\nend\ncase Process.run(\"/bin/sh\", [\"-c\", \"printf '\\\\357\\\\273\\\\277\\\\377\\\\377'; printf err >&2; exit 127\"])\nwhen Result::Ok(value)\n\tputs(value.status)\n\tputs(value.stdout)\n\tputs(value.stderr)\n\tputs(value.success)\nwhen Result::Err(error)\n\tputs(error.operation)\nend",
+      "files": {},
+      "reference": {
+        "check": {
+          "code": 0,
+          "stdout": "checked 1 file(s) for mode go\n",
+          "stderr": ""
+        },
+        "build": {
+          "code": 0,
+          "stdout": "executable -> <case>/reference-program\n",
+          "stderr": ""
+        },
+        "execute": {
+          "code": 0,
+          "stdout": "true\ntrue\ntrue\n127\n﻿��\nerr\nfalse\n",
+          "stderr": ""
+        },
+        "repl": {
+          "code": 0,
+          "stdout": "[] : Array<String> [mut]\ntrue\ntrue\ntrue\n127\n﻿��\nerr\nfalse\n",
+          "stderr": ""
+        }
+      },
+      "native": {
+        "check": {
+          "code": 0,
+          "stdout": "ok\n",
+          "stderr": ""
+        },
+        "build": {
+          "code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        "execute": {
+          "code": 0,
+          "stdout": "true\ntrue\ntrue\n127\n﻿��\nerr\nfalse\n",
+          "stderr": ""
+        },
+        "repl": {
+          "code": 0,
+          "stdout": "[] : Array<String> [mut]\ntrue\ntrue\ntrue\n127\n﻿��\nerr\nfalse\n",
+          "stderr": ""
+        }
+      }
+    },
     {
       "id": "integer",
       "title": "Integer arithmetic",

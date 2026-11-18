@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/type-rb/type-rb",
-  "revision": "e3aed7648e86912fb52d123b69c1f2b76f64dd98",
+  "revision": "cc8c734f73f5149464838825cdbb2165058ed26d",
   "sourceRoot": "internal/official/packages",
   "files": [
     {
@@ -287,10 +287,16 @@
       "sha256": "38c3fe22a47a9f52b017e8e9a36d0167ad0abd557f7d85f105c86e4da2a17b1e"
     },
     {
+      "path": "stdlib/process.go",
+      "source": "internal/stdlib/process.go",
+      "bytes": 698,
+      "sha256": "16eaae0385e004a88bfcc0996533940a7215184c8534172634b6977ef4a07d4d"
+    },
+    {
       "path": "stdlib/test.go",
       "source": "internal/stdlib/registry.go",
-      "bytes": 75080,
-      "sha256": "cf56d1db75412934e595ea917aeb48c74f545dc0a2a4277aa471e0f74ccf05a3"
+      "bytes": 75410,
+      "sha256": "8038ee19c03bb6ea62a70d1a2718dbb7d0b0755165eb9bd5f4cf12da298218d5"
     },
     {
       "path": "stdlib/time.go",

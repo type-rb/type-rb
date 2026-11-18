@@ -104,6 +104,15 @@ its basename supplies the project name. `--outfile` is for executable builds.
 `run` builds in a temporary directory, forwards arguments after `--`, and
 returns the program's exit status. Failed builds preserve an existing output.
 
+Compiled programs and the retained REPL support `trb/std/process`. `argv`
+returns a fresh array, `environment` distinguishes empty and absent values,
+and `working_directory` reports host errors as a typed result. `run` starts a
+literal executable with separate arguments, gives it EOF on stdin, and captures
+stdout and stderr independently. Output uses `Bytes#to_s()` decoding. A child
+that starts and exits with status 127 is an `Ok` result. Attempting to launch an
+unsupported executable format returns a typed error. REPL interruption joins
+its owned child before accepting the next submission.
+
 `test` discovers `*_test.trb` files recursively under the configured `sourceDir`.
 Positional files and directories select tests relative to the current directory;
 overlapping selections run each file once. Production sources remain available

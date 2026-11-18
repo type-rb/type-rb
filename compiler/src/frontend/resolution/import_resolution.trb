@@ -118,22 +118,15 @@ def path_root_key(name: String): String
 	return ascii_fold(without_underscores)
 end
 
-# Process and Math are virtual receivers, not loaded source-module IDs.
-# Their -2/-3 targets map to checked receiver categories 4/5 at expression lookup.
+# Math is a virtual receiver before its ordinary source package is loaded.
 def standard_package_target(path: String): Integer
-	if path == "trb/std/process"
-		return -2
-	end
 	if path == "trb/std/math"
 		return -3
 	end
 	return -1
 end
 
-def standard_package_root(target: Integer): String
-	if target == -2
-		return "Process"
-	end
+def standard_package_root(_target: Integer): String
 	return "Math"
 end
 

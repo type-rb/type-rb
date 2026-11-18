@@ -1,3 +1,11 @@
+def standard_source_process(): Integer
+	return 47
+end
+
+def standard_source_internal_process(): Integer
+	return 48
+end
+
 def standard_source_web_timeout(): Integer
 	return 46
 end
@@ -124,7 +132,7 @@ end
 
 # Loader-assigned source ownership is independent of declaration spelling.
 # IDs from 100 belong to the generated official catalog; do not rename or reorder
-# its generated rows here. Negative Process/Math import targets are separate.
+# its generated rows here. The virtual Math import target is separate.
 
 def standard_source_unowned(): Integer
 	return 0
@@ -193,6 +201,9 @@ end
 # Root-only exports and file-level service functions are owned loader contracts.
 # These policies never apply to authored declarations with the same spelling.
 def standard_source_root(kind: Integer): String
+	if kind == standard_source_process() || kind == standard_source_internal_process()
+		return "Process"
+	end
 	if kind == standard_source_web_timeout()
 		return "Timeout"
 	end
@@ -271,6 +282,12 @@ def standard_source_root(kind: Integer): String
 end
 
 def standard_source_function(kind: Integer, name: String): Boolean
+	if kind == standard_source_process() || kind == standard_source_internal_process()
+		if name == "::argv" || name == "::environment" || name == "::working_directory" || name == "::run"
+			return true
+		end
+		return false
+	end
 	if kind == standard_source_web_timeout()
 		return name == "::call"
 	end

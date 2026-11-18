@@ -4,13 +4,16 @@ import { logical_checked_source } from testing/pipeline
 import { logical_run_qbe_arguments } from testing/qbe_runner
 import { check, emit_qbe } from compiler
 import { lex } from frontend/syntax/lexer
-import { control_test_output } from testing/mir/control
+import { control_test_output, expect_mir_callable_bodies } from testing/mir/control
+import { mir_adapter_argv, mir_adapter_sqrt, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
 import { MirCall, MirFunction, MirSignature, MirValue, mir_function_index } from mir/model/module
 import { verify_mir } from mir/verify/module
 import { parse_module } from frontend/syntax/parser
 import { resolve } from frontend/checking/program/resolution
 import { CompilerState, compiler_new, has_diagnostic } from state/state
-import { load_integer, load_string, store_string } from support/storage
+import { standard_source_process } from state/standard_source_kinds
+import { load_integer, load_string, sparse_integer_at, store_string } from support/storage
+import { integer_string } from support/literals
 import { describe, expect, test } from trb/std/test
 import trb/std/process
 import trb/std/result
@@ -282,39 +285,62 @@ def standard_call_test_state(): CompilerState
 	return state
 end
 
+def standard_test_signature(state: CompilerState, kind: Integer, name: String, owner: Integer = -1): Integer
+	state.scalar_mir.signatures.each do |signature|
+		if signature.kind == kind && signature.name == name
+			if owner < 0 || sparse_integer_at(state.standard_modules, signature.source_id) == owner
+				return signature.id
+			end
+		end
+	end
+	puts("Missing MIR signature " + name)
+	expect(false).to_be_true()
+	return -1
+end
+
 describe("MIR standard package calls") do
 	test("binds aliases and widening with managed results without capturing user names") do
 		state := standard_call_test_state()
-		expect(state.scalar_mir.functions.size()).to_equal(state.declarations.function_count[0])
+		expect_mir_callable_bodies(state)
 		expect(verify_mir(state.scalar_mir, true)).to_equal("")
-		expect(state.scalar_mir.signatures.size()).to_equal(6)
-		expect(state.scalar_mir.signatures[1].kind).to_equal(0)
-		expect(state.scalar_mir.signatures[2].kind).to_equal(0)
-		expect(state.scalar_mir.signatures[4].adapter).to_equal(10)
-		expect(state.scalar_mir.signatures[5].adapter).to_equal(11)
-		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 3)].kind).to_equal(1)
+		main := standard_test_signature(state, mir_signature_ordinary(), "main")
+		sqrt := standard_test_signature(state, mir_signature_ordinary(), "sqrt")
+		argv := standard_test_signature(state, mir_signature_ordinary(), "argv")
+		leaf := standard_test_signature(state, mir_signature_ordinary(), "leaf")
+		sqrt_adapter := standard_test_signature(state, mir_signature_standard(), "trb/std/math.sqrt")
+		argv_adapter := standard_test_signature(state, mir_signature_standard(), "trb/internal/process.argv")
+		argv_wrapper := standard_test_signature(state, mir_signature_ordinary(), "argv", standard_source_process())
+		expect(state.scalar_mir.signatures[sqrt].source_id).to_equal(state.scalar_mir.signatures[main].source_id)
+		expect(state.scalar_mir.signatures[argv].source_id).to_equal(state.scalar_mir.signatures[main].source_id)
+		expect(state.scalar_mir.signatures[sqrt_adapter].adapter).to_equal(mir_adapter_sqrt())
+		expect(state.scalar_mir.signatures[argv_adapter].adapter).to_equal(mir_adapter_argv())
+		expect(state.scalar_mir.signatures[argv_wrapper].result_type).to_equal("Array<String>")
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, leaf)].kind).to_equal(1)
 		expect(state.scalar_mir.root_plans[0].capacity >= 2).to_be_true()
 		mut math_calls := 0
+		mut wrapper_calls := 0
 		mut process_calls := 0
 		state.scalar_mir.calls.each do |call|
-			signature := state.scalar_mir.signatures[call.callee]
-			if signature.kind == 3 && signature.adapter == 11
+			if call.callee == sqrt_adapter
 				expect(call.effects).to_equal(0)
 				math_calls += 1
-			elsif signature.kind == 3 && signature.adapter == 10
+			elsif call.callee == argv_wrapper
+				expect(call.effects).to_equal(15)
+				wrapper_calls += 1
+			elsif call.callee == argv_adapter
 				expect(call.effects).to_equal(15)
 				process_calls += 1
 			end
 		end
 		expect(math_calls).to_equal(2)
-		expect(process_calls).to_equal(2)
+		expect(wrapper_calls).to_equal(2)
+		expect(process_calls).to_equal(1)
 		mut instruction_index := 0
 		while instruction_index < state.scalar_mir.instructions.size()
 			instruction := state.scalar_mir.instructions[instruction_index]
 			if instruction.kind == 11
 				call := state.scalar_mir.calls[instruction.payload]
-				signature := state.scalar_mir.signatures[call.callee]
-				if signature.kind == 3 && signature.adapter == 11
+				if call.callee == sqrt_adapter
 					expect(state.scalar_mir.root_plans[0].instructions.include?(instruction_index)).to_be_false()
 				end
 			end
@@ -324,6 +350,10 @@ describe("MIR standard package calls") do
 
 	test("executes erased reordered standard calls and retains live argv results at collection") do
 		mut state := standard_call_test_state()
+		main := standard_test_signature(state, mir_signature_ordinary(), "main")
+		argv := standard_test_signature(state, mir_signature_ordinary(), "argv", standard_source_process())
+		main_symbol := "$trbnf" + integer_string(main) + "("
+		argv_call := "call $trbnf" + integer_string(argv) + "("
 		before := control_test_output(emit_qbe(state))
 		intrinsic_mir_erase(state)
 		expect(control_test_output(emit_qbe(state))).to_equal(before)
@@ -347,12 +377,12 @@ describe("MIR standard package calls") do
 		mut hooks := 0
 		control_test_output(emit_qbe(state)).split("\n").each do |line|
 			if line.start_with?("function ")
-				caller = line.include?("$trbnf0(")
+				caller = line.include?(main_symbol)
 			end
 			if line == "}"
 				caller = false
 			end
-			if caller && line.include?("call $trbn_process_argv(")
+			if caller && line.include?(argv_call)
 				forced += "\tcall $trbn_gc_collect(w 0)\n"
 				hooks += 1
 			end
@@ -375,7 +405,8 @@ describe("MIR standard package calls") do
 		mut mode := 0
 		while mode < 8
 			mut state := standard_call_test_state()
-			old := state.scalar_mir.signatures[5]
+			sqrt := standard_test_signature(state, mir_signature_standard(), "trb/std/math.sqrt")
+			old := state.scalar_mir.signatures[sqrt]
 			mut kind := old.kind
 			mut adapter := old.adapter
 			mut name := old.name
@@ -401,10 +432,15 @@ describe("MIR standard package calls") do
 				parameters = []
 				mutable = []
 			end
-			state.scalar_mir.signatures[5] = MirSignature.new(id: old.id, kind: kind, name: name, adapter: adapter, source_id: old.source_id, line: old.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+			state.scalar_mir.signatures[sqrt] = MirSignature.new(id: old.id, kind: kind, name: name, adapter: adapter, source_id: old.source_id, line: old.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
 			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
 			mode += 1
 		end
+		mut state := standard_call_test_state()
+		capture := standard_test_signature(state, mir_signature_standard(), "trb/internal/process.capture")
+		old := state.scalar_mir.signatures[capture]
+		state.scalar_mir.signatures[capture] = MirSignature.new(id: old.id, kind: old.kind, name: old.name, adapter: old.adapter, source_id: old.source_id, line: old.line, parameter_types: old.parameter_types, parameter_mutable: [0, 0, 0, 1], result_type: old.result_type)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
 	end
 
 	test("rejects forged standard math call effects") do

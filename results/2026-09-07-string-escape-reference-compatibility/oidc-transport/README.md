@@ -58,3 +58,8 @@ ordinary Native build verified its existing content keys and reused the
 unchanged binaries from the qualified Linux-link correction. All source/test
 inputs and both Native binary hashes remained unchanged during this validation.
 Both reference corrections also passed their covering main workflows.
+
+The current shared reference is `cc8c734f73f5149464838825cdbb2165058ed26d`,
+which includes the accepted Process launch and UTF-8 decoding correction in
+[type-rb PR 866](https://github.com/type-rb/type-rb/pull/866). The transport
+observations above retain their original reference identities.

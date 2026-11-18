@@ -299,6 +299,8 @@ jobs:
           python3 tools/native-utf8-test.py bin/trbn
           python3 tools/native-diagnostics-test.py bin/trbn
           python3 tools/native-interpolation-test.py bin/trbn
+      - name: Verify Process results and owned child cleanup
+        run: python3 tools/native-process-test.py bin/trbn
       - name: Verify ordinary language coverage without a reference compiler
         run: |
           python3 tools/native-language-coverage-test.py

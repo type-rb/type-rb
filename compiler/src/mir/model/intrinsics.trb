@@ -1,3 +1,4 @@
+import { process_kind, process_mutable, process_names, process_parameters, process_result } from mir/model/process_contract
 import { mir_adapter_runtime_deadline } from mir/model/call_kinds
 import { mir_test_inspection_plan } from mir/analysis/test_inspection
 import { mir_test_comparison_plan } from mir/analysis/test_comparison
@@ -11,7 +12,7 @@ import { mir_adapter_gzip, mir_adapter_set_compression_link, mir_adapter_set_cry
 import { builder_adapter_start, builder_mutates, builder_names, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
 import { network_adapter_start, network_names, network_parameters, network_result } from mir/model/network_contract
 import { callable_type } from frontend/types/callable_types
-import { mir_adapter_argv, mir_adapter_collect_package_files, mir_adapter_collect_project_sources, mir_adapter_collect_test_paths, mir_adapter_entropy, mir_adapter_eputs, mir_adapter_file_exists, mir_adapter_host, mir_adapter_literal_byte, mir_adapter_none, mir_adapter_reset_temporary_storage, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_adapter_set_network_link, mir_adapter_source_is_utf8, mir_adapter_source_slice, mir_adapter_sqrt, mir_adapter_string_bytes, mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { mir_adapter_collect_package_files, mir_adapter_collect_project_sources, mir_adapter_collect_test_paths, mir_adapter_entropy, mir_adapter_eputs, mir_adapter_file_exists, mir_adapter_host, mir_adapter_literal_byte, mir_adapter_none, mir_adapter_reset_temporary_storage, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_adapter_set_network_link, mir_adapter_source_is_utf8, mir_adapter_source_slice, mir_adapter_sqrt, mir_adapter_string_bytes, mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
 import { ascii_code, integer_string } from support/literals
 import { MirModule, MirSignature, mir_type_id } from mir/model/module
 import { mir_semantic_type_name, mir_semantic_value_type } from mir/model/types
@@ -102,8 +103,9 @@ def mir_call_symbol(signature: MirSignature): String
 		if signature.adapter == mir_adapter_entropy()
 			return "trbn_entropy_read"
 		end
-		if signature.adapter == mir_adapter_argv()
-			return "trbn_process_argv"
+		process := process_kind(signature.adapter)
+		if process >= 0
+			return "trbn_process_" + process_names()[process]
 		end
 		if signature.adapter == mir_adapter_runtime_fail()
 			return "trbn_runtime_fail"
@@ -200,10 +202,15 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 		return ""
 	end
 	if signature.kind == mir_signature_standard()
-		mut name := "trb/std/process.argv"
+		mut name := ""
 		mut parameters: Array<String> := []
-		mut result := "Array<String>"
-		if signature.adapter == mir_adapter_sqrt()
+		mut result := ""
+		process := process_kind(signature.adapter)
+		if process >= 0
+			name = "trb/internal/process." + process_names()[process]
+			parameters = process_parameters(process)
+			result = process_result(process)
+		elsif signature.adapter == mir_adapter_sqrt()
 			name = "trb/std/math.sqrt"
 			parameters = ["Float"]
 			result = "Float"
@@ -336,7 +343,7 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 			name = builder_signature_name(builder)
 			parameters = builder_parameters(builder)
 			result = builder_result(builder)
-		elsif signature.adapter != mir_adapter_argv()
+		else
 			return "MIR standard package adapter is invalid"
 		end
 		if signature.name != name || signature.result_type != result || signature.parameter_types.size() != parameters.size()
@@ -345,6 +352,9 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 		mut index := 0
 		while index < parameters.size()
 			mut mutable := 0
+			if process >= 0
+				mutable = process_mutable(process, index)
+			end
 			if signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
 				mutable = filesystem_mutable(signature.adapter - filesystem_adapter_start(), index)
 			end
