@@ -1,0 +1,91 @@
+import trb/std/result
+
+module SQLite
+	enum Parameter
+		Null
+		Integer(value: Integer)
+		Float(value: Float)
+		Text(value: String)
+		Blob(value: Bytes)
+	end
+
+	record WriteStatement
+		sql: String
+		parameters: Array<Parameter>
+	end
+
+	record Error
+		code: Integer
+		message: String
+	end
+end
+
+# The loader-owned bridge receives compatible vectors with one slot per value.
+# It owns the foreign frames and the connection for the complete operation.
+def write(
+		source: String,
+		statements: Array<String>,
+		offsets: Array<Integer>,
+		kinds: Array<Integer>,
+		words: Array<Integer>,
+		reals: Array<Float>,
+		buffers: Array<Bytes>,
+		transactional: Boolean,
+		busy_milliseconds: Integer,
+		mut changes: Array<Integer>,
+	): Integer
+end
+
+def error_message(status: Integer): String
+end
+
+def execute_writes(
+		source: String,
+		requests: Array<SQLite::WriteStatement>,
+		transactional: Boolean,
+		busy_milliseconds: Integer,
+	): Result<Integer, SQLite::Error>
+	mut statements: Array<String> := []
+	mut offsets := [0]
+	mut kinds: Array<Integer> := []
+	mut words: Array<Integer> := []
+	mut reals: Array<Float> := []
+	mut buffers: Array<Bytes> := []
+	empty := "".to_bytes()
+	requests.each do |request|
+		statements.push(request.sql)
+		request.parameters.each do |parameter|
+			mut kind := 5
+			mut word := 0
+			mut real := 0.0
+			mut buffer := empty
+			case parameter
+			when SQLite::Parameter::Null
+			when SQLite::Parameter::Integer(value)
+				kind = 1
+				word = value
+			when SQLite::Parameter::Float(value)
+				kind = 2
+				real = value
+			when SQLite::Parameter::Text(value)
+				kind = 3
+				buffer = value.to_bytes()
+			when SQLite::Parameter::Blob(value)
+				kind = 4
+				buffer = value
+			end
+			kinds.push(kind)
+			words.push(word)
+			reals.push(real)
+			buffers.push(buffer)
+		end
+		offsets.push(kinds.size())
+	end
+	mut changes := [0]
+	status := write(source, statements, offsets, kinds, words, reals, buffers,
+		transactional, busy_milliseconds, changes)
+	if status != 0
+		return Result<Integer, SQLite::Error>::Err(SQLite::Error.new(code: status, message: error_message(status)))
+	end
+	return Result<Integer, SQLite::Error>::Ok(changes[0])
+end
