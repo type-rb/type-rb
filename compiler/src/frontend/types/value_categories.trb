@@ -18,10 +18,6 @@ def checked_category_readonly(): Integer
 	return 3
 end
 
-def checked_category_system(): Integer
-	return 4
-end
-
 def checked_category_math(): Integer
 	return 5
 end

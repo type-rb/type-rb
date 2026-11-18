@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "milestone": "M2-v05",
-  "typeRBRevision": "e3aed7648e86912fb52d123b69c1f2b76f64dd98",
+  "typeRBRevision": "cc8c734f73f5149464838825cdbb2165058ed26d",
   "note": "Initial Native v0.5 test-runner implementation scope. The original M2 manifest remains immutable. Public test-name selection is a visible maintainer-approved deferral under #643 and never contributes a passing result.",
   "comparison": "Native matches exit status, PASS and FAIL lines, origins, messages and summaries. Output from the Go toolchain itself, such as a trailing `exit status N` line, is backend-specific.",
   "modeRule": "Fixtures use one go-mode configuration, as in the reference. Execution steps compare the reference in that mode with Native in mode trb over the same source, changing only the mode; see the M1 manifest's modeRule.",

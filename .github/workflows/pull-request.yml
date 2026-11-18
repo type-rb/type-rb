@@ -81,7 +81,7 @@ jobs:
         if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
         with:
           repository: type-rb/type-rb
-          ref: e3aed7648e86912fb52d123b69c1f2b76f64dd98
+          ref: cc8c734f73f5149464838825cdbb2165058ed26d
           path: .type-rb
       - name: Verify bundled official sources against the pinned reference
         if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
@@ -209,7 +209,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: type-rb/type-rb
-          ref: e3aed7648e86912fb52d123b69c1f2b76f64dd98
+          ref: cc8c734f73f5149464838825cdbb2165058ed26d
           path: .type-rb
       - uses: actions/setup-go@v6
         with:

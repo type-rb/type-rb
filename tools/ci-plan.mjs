@@ -85,6 +85,7 @@ export const cliInputs = new Set([
   'tools/native-enum-test.py',
   'tools/native-callable-test.py',
   'tools/native-repl-flow-test.py',
+  'tools/native-process-test.py',
   'tools/native-hash-test.py',
   'tools/native-cli-key-test.py',
   'tools/native-puts-test.py',

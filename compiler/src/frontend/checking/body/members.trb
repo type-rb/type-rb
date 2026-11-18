@@ -6,7 +6,7 @@ import { web_context_kind } from frontend/providers/web_context
 import { check_inferred_web_context } from frontend/checking/builtins/web_context
 import { time_codec_method_arguments_valid } from frontend/providers/time_codecs
 import { web_input_names_valid } from frontend/providers/web_inputs
-import { checked_category_enum, checked_category_function, checked_category_initializer, checked_category_newtype, checked_category_object, checked_category_readonly, checked_category_record, checked_category_system, checked_category_value } from frontend/types/value_categories
+import { checked_category_enum, checked_category_function, checked_category_initializer, checked_category_math, checked_category_newtype, checked_category_object, checked_category_readonly, checked_category_record, checked_category_value } from frontend/types/value_categories
 import { json_provider_kind, json_provider_response } from frontend/providers/json_declarations
 import { check_inferred_json_encoding } from frontend/checking/builtins/json_codecs
 import { mir_state_enabled_slot, nullable_state_head_slot } from state/local_slots
@@ -130,12 +130,8 @@ def check_member_value(mut state: CompilerState, mut position: Array<Integer>, m
 	if token_is(state, position[0], "(")
 		# Checked dispatch owns receiver admission and diagnostics. Concrete
 		# bodies still require independently verified MIR before emission.
-		if value.category >= checked_category_system()
-			mut expected_member := "sqrt"
-			if value.category == checked_category_system()
-				expected_member = "argv"
-			end
-			if member != expected_member
+		if value.category >= checked_category_math()
+			if member != "sqrt"
 				value = type_diagnostic(
 					state,
 					load_integer(state.source_tokens.token_lines, position[0]),

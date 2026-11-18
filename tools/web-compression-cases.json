@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "reference_revision": "e3aed7648e86912fb52d123b69c1f2b76f64dd98",
+  "reference_revision": "cc8c734f73f5149464838825cdbb2165058ed26d",
   "sample_unit": "TypeRB portable gzip response. 😀 ",
   "sample_repetitions": 48,
   "cases": [

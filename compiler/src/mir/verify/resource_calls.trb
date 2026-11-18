@@ -1,7 +1,8 @@
+import { process_kind } from mir/model/process_contract
 import { filesystem_adapter_start, filesystem_names } from mir/model/filesystem_contract
 import { mir_op_file_scope } from mir/model/instructions
 import { scoped_call_failures, scoped_call_graph, scoped_call_node } from mir/analysis/resource_calls
-import { mir_adapter_argv, mir_adapter_runtime_fail, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { mir_adapter_runtime_fail, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
 import { mir_function_fixture } from mir/model/control
 import { mir_op_direct_call, mir_op_indirect_call } from mir/model/instructions
 import { builder_adapter_start, builder_append_bytes } from mir/model/string_builder_contract
@@ -28,7 +29,7 @@ def mir_resource_standard_call(signature: MirSignature): Boolean
 	if signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
 		return true
 	end
-	if signature.adapter == mir_adapter_argv() || signature.adapter == mir_adapter_runtime_fail()
+	if process_kind(signature.adapter) >= 0 || signature.adapter == mir_adapter_runtime_fail()
 		return true
 	end
 	if signature.adapter >= builder_adapter_start() && signature.adapter <= builder_adapter_start() + builder_append_bytes()

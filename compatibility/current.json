@@ -6,7 +6,7 @@
   "typeRB": {
     "supportMode": "exact",
     "version": "0.4.12-dev",
-    "revision": "e3aed7648e86912fb52d123b69c1f2b76f64dd98"
+    "revision": "cc8c734f73f5149464838825cdbb2165058ed26d"
   },
   "compilerProtocol": {
     "stability": "experimental-unstable",

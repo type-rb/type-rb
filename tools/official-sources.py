@@ -21,6 +21,8 @@ JSON_ADAPTER = Path("compiler/packages/internal/json.trb")
 STDLIB_SOURCES = {"url": URL_SOURCE, "json": "internal/stdlib/json.go", "jsonc": "internal/stdlib/jsonc.go", "time": "internal/stdlib/time.go", "hex": "internal/stdlib/hex.go", "base64": "internal/stdlib/base64.go", "path": "internal/stdlib/path.go", "hash": "internal/stdlib/hash.go", "hmac": "internal/stdlib/hmac.go", "file": "internal/stdlib/file.go", "dir": "internal/stdlib/dir.go", "errors": "internal/stdlib/errors.go"}
 NATIVE_ADAPTERS = ["time", "time_calendar", "time_parse", "time_zones", "time_host", "web_context", "hex", "base64", "encoding_bytes", "secure_random", "entropy", "web_dispatch", "web_timeout", "network_host", "web_server", "oidc", "oidc_json", "oidc_host", "oidc_http"]
 STDLIB_SOURCES["test"] = "internal/stdlib/registry.go"
+STDLIB_SOURCES["process"] = "internal/stdlib/process.go"
+NATIVE_ADAPTERS.append("process")
 REPOSITORY = "https://github.com/type-rb/type-rb"
 
 

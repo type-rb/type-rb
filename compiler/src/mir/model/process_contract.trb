@@ -1,0 +1,59 @@
+import { mir_adapter_argv } from mir/model/call_kinds
+
+def process_adapter(kind: Integer): Integer
+	if kind == 0
+		return mir_adapter_argv()
+	end
+	return 79 + kind
+end
+
+def process_kind(adapter: Integer): Integer
+	if adapter == mir_adapter_argv()
+		return 0
+	end
+	if adapter >= 80 && adapter <= 83
+		return adapter - 79
+	end
+	return -1
+end
+
+def process_names(): Array<String>
+	return ["argv", "lookup_environment", "cwd", "capture", "error_message"]
+end
+
+def process_parameter_names(kind: Integer): Array<String>
+	if kind == 1
+		return ["name", "output"]
+	elsif kind == 2
+		return ["path"]
+	elsif kind == 3
+		return ["command", "args", "streams", "status"]
+	elsif kind == 4
+		return ["status"]
+	end
+	return []
+end
+
+def process_parameters(kind: Integer): Array<String>
+	if kind == 1
+		return ["String", "Array<String>"]
+	elsif kind == 2
+		return ["Array<String>"]
+	elsif kind == 3
+		return ["String", "Array<String>", "Array<Bytes>", "Array<Integer>"]
+	elsif kind == 4
+		return ["Integer"]
+	end
+	return []
+end
+
+def process_mutable(kind: Integer, index: Integer): Integer
+	if (kind == 1 && index == 1) || kind == 2 || (kind == 3 && index >= 2)
+		return 1
+	end
+	return 0
+end
+
+def process_result(kind: Integer): String
+	return ["Array<String>", "Boolean", "Integer", "Integer", "String"][kind]
+end

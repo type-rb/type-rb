@@ -1,0 +1,48 @@
+import { Process as PublicProcess } from trb/std/process
+import trb/std/result
+
+module Process
+end
+
+# Loader-owned host operations return managed values and explicit status codes.
+def argv(): Array<String>
+end
+
+def lookup_environment(name: String, mut output: Array<String>): Boolean
+end
+
+def cwd(mut path: Array<String>): Integer
+end
+
+def capture(command: String, args: Array<String>, mut streams: Array<Bytes>, mut status: Array<Integer>): Integer
+end
+
+def error_message(status: Integer): String
+end
+
+def environment(name: String): String?
+	mut output := [""]
+	if lookup_environment(name, output)
+		return output[0]
+	end
+	return nil
+end
+
+def working_directory(): Result<String, PublicProcess::Error>
+	mut path := [""]
+	status := cwd(path)
+	if status == 0
+		return Result<String, PublicProcess::Error>::Ok(path[0])
+	end
+	return Result<String, PublicProcess::Error>::Err(PublicProcess::Error.new(operation: "working_directory", command: "", message: error_message(status)))
+end
+
+def run(command: String, args: Array<String>): Result<PublicProcess::Output, PublicProcess::Error>
+	mut streams := ["".to_bytes(), "".to_bytes()]
+	mut status := [0]
+	failure := capture(command, args, streams, status)
+	if failure != 0
+		return Result<PublicProcess::Output, PublicProcess::Error>::Err(PublicProcess::Error.new(operation: "run", command: command, message: error_message(failure)))
+	end
+	return Result<PublicProcess::Output, PublicProcess::Error>::Ok(PublicProcess::Output.new(status: status[0], stdout: streams[0].to_s(), stderr: streams[1].to_s(), success: status[0] == 0))
+end

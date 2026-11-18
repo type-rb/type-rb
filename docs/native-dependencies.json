@@ -6,8 +6,8 @@
       "name": "Platform C runtime and OS",
       "status": "current",
       "scope": "Application runtime",
-      "role": "Allocation, scoped file I/O, ambient directory operations, process entry, clocks, entropy and dynamic loading. Native-managed values, resource ownership and GC remain TypeRB implementations.",
-      "configuration": "Darwin: libSystem. Linux: libc, libm and target-specific system linkage. File/Dir use target-qualified LP64 constants and layouts; fstat/stat/lstat/readdir resolve the header-selected symbols, including Darwin amd64 INODE64. No separate filesystem library or runtime library-directory override. Supplied by the target system; no universal library version is claimed. Time services also use getenv, bounded stdio ranges and platform errno access resolved from the process C runtime. Managed deadline scopes use clock_gettime(CLOCK_MONOTONIC) with header-qualified LP64 timespec layout and the existing libc setjmp/longjmp boundary; no timer library is added.",
+      "role": "Allocation, scoped file I/O, ambient directory operations, process entry and capture, clocks, entropy and dynamic loading. Native-managed values, resource ownership and GC remain TypeRB implementations.",
+      "configuration": "Darwin: libSystem. Linux: libc, libm and target-specific system linkage. File/Dir use target-qualified LP64 constants and layouts; fstat/stat/lstat/readdir resolve the header-selected symbols, including Darwin amd64 INODE64. No separate filesystem library or runtime library-directory override. Supplied by the target system; no universal library version is claimed. Time services also use getenv, bounded stdio ranges and platform errno access resolved from the process C runtime. Managed deadline scopes use clock_gettime(CLOCK_MONOTONIC) with header-qualified LP64 timespec layout and the existing libc setjmp/longjmp boundary; no timer library is added. Process uses explicit POSIX spawn actions, pipes, polling and waitpid; captured text is decoded by the managed Bytes API.",
       "evidence": [
         "docs/architecture.md",
         "compiler/src/backend/qbe/runtime/entropy.trb",
@@ -22,7 +22,9 @@
         "tools/native-time-host-test.py",
         "docs/native-deadlines.md",
         "compiler/src/backend/qbe/runtime/deadlines.trb",
-        "tools/native-web-deadline-test.py"
+        "tools/native-web-deadline-test.py",
+        "compiler/src/backend/qbe/runtime/process.trb",
+        "tools/native-process-test.py"
       ],
       "next": "Record actual executable imports and deployment baseline for each release target. Keep four-host filesystem ABI qualification separate from the current Darwin/Linux arm64 ordinary CLI semantics; complete release-host qualification is still required.",
       "requiredBy": [
@@ -30,6 +32,7 @@
         "0086 M3",
         "package.std.file",
         "package.std.dir",
+        "package.std.process",
         "0086 M3b",
         "package.web.middleware.timeout"
       ],
@@ -256,7 +259,7 @@
       "status": "current",
       "scope": "Validation",
       "role": "Reference conformance/recovery and documentation/tooling checks.",
-      "configuration": "TypeRB 0.4.12-dev at e3aed7648e86912fb52d123b69c1f2b76f64dd98, built with Go 1.27 as declared in the pinned go.mod; CI uses Node.js 24 for tooling and synthetic browser Fetch checks. Validation tools are separate from the ordinary Native semantic build and application runtime.",
+      "configuration": "TypeRB 0.4.12-dev at cc8c734f73f5149464838825cdbb2165058ed26d, built with Go 1.27 as declared in the pinned go.mod; CI uses Node.js 24 for tooling and synthetic browser Fetch checks. Validation tools are separate from the ordinary Native semantic build and application runtime.",
       "evidence": [
         "TYPE_RB_REVISION",
         "compatibility/current.json",

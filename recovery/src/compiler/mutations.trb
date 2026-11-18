@@ -392,5 +392,8 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/checking/body/concurrency", "\"concurrent_map cannot capture \"", "\"concurrent_map cannot capture ~\""],
 		["frontend/types/concurrent_types", "\"Integer\"", "\"Integer~\""],
 		["frontend/checking/collections/concurrent_limit", "\"invalid concurrent_map limit boundary\"", "\"invalid concurrent_map limit boundary~\""],
+		["frontend/resolution/process_intrinsics", "< 0", "< 1"],
+		["mir/model/process_contract", "\"argv\"", "\"argv~\""],
+		["backend/qbe/runtime/process", "== 1", "== 2"],
 	]
 end

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "typeRBRevision": "e3aed7648e86912fb52d123b69c1f2b76f64dd98",
+  "typeRBRevision": "cc8c734f73f5149464838825cdbb2165058ed26d",
   "scope": "Portable assertion value and origin observations; unresolved authored Nil Result forms are tracked separately in #1297. No source or expected observation is inferred from Native output.",
   "groups": {
     "values": {

@@ -1,7 +1,7 @@
 import { resolve_without_entry } from frontend/checking/program/resolution
 import { ProjectedType } from state/source_state
 import { import_kind_module, import_kind_named } from state/import_kinds
-import { standard_source_result, standard_source_unit, standard_source_url } from state/standard_source_kinds
+import { standard_source_process, standard_source_result, standard_source_unit, standard_source_url } from state/standard_source_kinds
 import { find_object_type, object_instance_type } from frontend/types/object_types
 import { literal_type_base, literal_type_display } from frontend/types/literal_types
 import { find_newtype_type, newtype_type } from frontend/types/newtype_types
@@ -247,6 +247,8 @@ def repl_project_source(source: String, prelude: String): String
 				name = "Result"
 			elsif kind == standard_source_unit()
 				name = "Unit"
+			elsif kind == standard_source_process()
+				name = "Process"
 			elsif kind == standard_source_url()
 				name = "URL"
 			else
