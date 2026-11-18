@@ -1,5 +1,6 @@
 import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
 import { emit_sqlite_query_runtime } from backend/qbe/runtime/sqlite_query
+import { prepare_native_jobs } from project/jobs_wrappers
 import { emit_process_host_runtime } from backend/qbe/runtime/process
 import { mir_deadlines_enabled } from mir/model/deadlines
 import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines
@@ -1129,7 +1130,11 @@ def load_configured_sources_with_tests(config: ProjectConfig, config_path: Strin
 			file += 1
 		end
 	end
-	return load_package_project_sources_with_tests(config_path, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), names, owners, packages, require_entry, interactive, tests)
+	mut state := load_package_project_sources_with_tests(config_path, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), names, owners, packages, require_entry, interactive, tests)
+	if !has_diagnostic(state) && find_module(state, "trb/jobs/index") >= 0
+		prepare_native_jobs(state, config.jobs_configuration)
+	end
+	return state
 end
 
 def load_project_sources(config_path: String, source_root: String, bundle: CompilerProjectSources): CompilerState

@@ -18,8 +18,13 @@ def visit_module_component(mut state: CompilerState, source: Integer, mut indice
 	mut self_edge := false
 	mut binding := load_integer(state.module_graph.module_import_starts, source)
 	finish := binding + load_integer(state.module_graph.module_import_counts, source)
-	while binding < finish
-		target := load_integer(state.module_graph.import_targets, binding)
+	while binding <= finish
+		mut target := -1
+		if binding < finish
+			target = load_integer(state.module_graph.import_targets, binding)
+		else
+			target = sparse_integer_at(state.module_graph.module_generated_dependencies, source) - 1
+		end
 		if target >= 0
 			if target == source
 				self_edge = true
