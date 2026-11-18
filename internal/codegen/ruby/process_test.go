@@ -3,6 +3,7 @@
 package ruby
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 )
@@ -31,9 +32,14 @@ before = Dir.children("/dev/fd").length
   end
 end
 raise "process descriptors leaked" unless Dir.children("/dev/fd").length == before
+ENV["RUBYOPT"] = "-r/type-rb-unused-rubyopt-probe"
+stdout, _stderr, status = TrbProcessRuntime.capture("/bin/sh", ["-c", 'printf "%s:%s" "$TRB_PROCESS_HOST_BYTE_PROBE" "$RUBYOPT"'])
+raise "process environment changed" unless status.success? && stdout == "\xFF:-r/type-rb-unused-rubyopt-probe".b
 puts "joined and closed"
 `
-	if output, err := exec.Command("ruby", "-e", source).CombinedOutput(); err != nil || string(output) != "joined and closed\n" {
+	command := exec.Command("ruby", "-e", source)
+	command.Env = append(os.Environ(), "TRB_PROCESS_HOST_BYTE_PROBE=\xff")
+	if output, err := command.CombinedOutput(); err != nil || string(output) != "joined and closed\n" {
 		t.Fatalf("cleanup: %v\n%s", err, output)
 	}
 }

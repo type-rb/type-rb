@@ -78,10 +78,7 @@ function openStreams() {
     } catch (error) { if (Reflect.get(error as object, "code") === "EBADF") return []; throw error; }
   }).sort();
 }
-__trbProcessCapture("/bin/sh", ["-c", "exit 0"]);
-assertOwnedPipesClosed(2);
-const before = JSON.stringify(openStreams());
-for (let index = 0; index < 12; index++) {
+function exercisePair() {
   const output = __trbProcessCapture("/bin/sh", ["-c", "printf $$"]);
   const pid = Number(new TextDecoder().decode(output.stdout));
   if (output.status !== 0 || !Number.isInteger(pid) || pid <= 0) throw new Error("missing child identity");
@@ -91,6 +88,11 @@ for (let index = 0; index < 12; index++) {
   catch (error) { if (!String(error).includes("cannot execute command")) throw error; }
   assertOwnedPipesClosed(4);
 }
+// Warm both outcomes and the child identity probe before comparing host
+// streams. The exact pipe checks also cover this first pair.
+exercisePair();
+const before = JSON.stringify(openStreams());
+for (let index = 0; index < 12; index++) exercisePair();
 const after = JSON.stringify(openStreams());
 if (after !== before) throw new Error("process streams leaked: " + before + " -> " + after);
 __trbProcessHelper = ` + strconv.Quote(nonblocking) + `;

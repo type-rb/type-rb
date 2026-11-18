@@ -12,7 +12,8 @@ begin
   gem "fiddle", "1.1.8"
   require "fiddle"
   payload = JSON.parse(STDIN.read)
-  ENV.replace(payload.fetch("environment"))
+  rubyopt = payload.fetch("rubyopt")
+  ENV["RUBYOPT"] = rubyopt.pack("C*") unless rubyopt.nil?
   command = payload.fetch("command")
   arguments = payload.fetch("arguments")
   error_pipe.close_on_exec = true
@@ -50,7 +51,9 @@ TRB_PROCESS_HELPER
     raise ArgumentError, "command or argument contains NUL" if [command, *arguments].any? { |value| value.include?("\0") }
     reader, writer = IO.pipe
     begin
-      payload = JSON.generate({command: command, arguments: arguments, environment: ENV.to_h})
+      # The OS inherits environment bytes directly. Only the option disabled
+      # for helper startup travels through the JSON protocol.
+      payload = JSON.generate({command: command, arguments: arguments, rubyopt: ENV["RUBYOPT"]&.bytes})
       output = Open3.capture3({"RUBYOPT" => nil}, RbConfig.ruby, "-e", HELPER, 3 => writer, stdin_data: payload, binmode: true)
       writer.close
       launch = reader.read
