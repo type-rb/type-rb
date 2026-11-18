@@ -1,3 +1,5 @@
+import { mir_adapter_set_sqlite_link } from mir/model/call_kinds
+import { sqlite_kind, sqlite_mutable, sqlite_names, sqlite_parameters, sqlite_result } from mir/model/sqlite_contract
 import { process_kind, process_mutable, process_names, process_parameters, process_result } from mir/model/process_contract
 import { mir_adapter_runtime_deadline } from mir/model/call_kinds
 import { mir_test_inspection_plan } from mir/analysis/test_inspection
@@ -20,6 +22,9 @@ import { mir_semantic_type_name, mir_semantic_value_type } from mir/model/types
 # The checked declaration owns the adapter. Source aliases and call-site spelling
 # never select a runtime operation, and the backend never resolves them again.
 def mir_runtime_adapter(name: String): Integer
+	if name == "compiler_set_sqlite_link"
+		return mir_adapter_set_sqlite_link()
+	end
 	if name == "compiler_set_oidc_link"
 		return mir_adapter_set_oidc_link()
 	end
@@ -78,6 +83,9 @@ def mir_call_symbol(signature: MirSignature): String
 	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_oidc_link()
 		return "trbn_set_oidc_link"
 	end
+	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_sqlite_link()
+		return "trbn_set_sqlite_link"
+	end
 	if signature.kind == mir_signature_standard() && oidc_kind(signature.adapter) >= 0
 		return "trbn_oidc_" + oidc_names()[oidc_kind(signature.adapter)]
 	end
@@ -106,6 +114,10 @@ def mir_call_symbol(signature: MirSignature): String
 		process := process_kind(signature.adapter)
 		if process >= 0
 			return "trbn_process_" + process_names()[process]
+		end
+		sqlite := sqlite_kind(signature.adapter)
+		if sqlite >= 0
+			return "trbn_sqlite_" + sqlite_names()[sqlite]
 		end
 		if signature.adapter == mir_adapter_runtime_fail()
 			return "trbn_runtime_fail"
@@ -206,10 +218,15 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 		mut parameters: Array<String> := []
 		mut result := ""
 		process := process_kind(signature.adapter)
+		sqlite := sqlite_kind(signature.adapter)
 		if process >= 0
 			name = "trb/internal/process." + process_names()[process]
 			parameters = process_parameters(process)
 			result = process_result(process)
+		elsif sqlite >= 0
+			name = "trb/internal/sqlite." + sqlite_names()[sqlite]
+			parameters = sqlite_parameters(sqlite)
+			result = sqlite_result(sqlite)
 		elsif signature.adapter == mir_adapter_sqrt()
 			name = "trb/std/math.sqrt"
 			parameters = ["Float"]
@@ -354,6 +371,8 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 			mut mutable := 0
 			if process >= 0
 				mutable = process_mutable(process, index)
+			elsif sqlite >= 0
+				mutable = sqlite_mutable(sqlite, index)
 			end
 			if signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
 				mutable = filesystem_mutable(signature.adapter - filesystem_adapter_start(), index)
@@ -387,7 +406,7 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 		end
 		return ""
 	end
-	if signature.kind != mir_signature_compiler_runtime() || adapter < mir_adapter_file_exists() || (adapter > mir_adapter_reset_temporary_storage() && adapter != mir_adapter_literal_byte() && adapter != mir_adapter_collect_package_files() && adapter != mir_adapter_collect_test_paths() && adapter != mir_adapter_set_network_link() && adapter != mir_adapter_set_compression_link() && adapter != mir_adapter_set_crypto_link() && adapter != mir_adapter_set_oidc_link())
+	if signature.kind != mir_signature_compiler_runtime() || adapter < mir_adapter_file_exists() || (adapter > mir_adapter_reset_temporary_storage() && adapter != mir_adapter_literal_byte() && adapter != mir_adapter_collect_package_files() && adapter != mir_adapter_collect_test_paths() && adapter != mir_adapter_set_network_link() && adapter != mir_adapter_set_compression_link() && adapter != mir_adapter_set_crypto_link() && adapter != mir_adapter_set_oidc_link() && adapter != mir_adapter_set_sqlite_link())
 		return "MIR external adapter is invalid"
 	end
 	if mir_runtime_adapter(signature.name) != adapter
@@ -412,7 +431,7 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 		end
 	elsif adapter == mir_adapter_eputs()
 		result = "Void"
-	elsif adapter == mir_adapter_set_oidc_link() || adapter == mir_adapter_set_network_link() || adapter == mir_adapter_set_compression_link() || adapter == mir_adapter_set_crypto_link()
+	elsif adapter == mir_adapter_set_oidc_link() || adapter == mir_adapter_set_network_link() || adapter == mir_adapter_set_compression_link() || adapter == mir_adapter_set_crypto_link() || adapter == mir_adapter_set_sqlite_link()
 		parameters = ["Boolean"]
 		result = "Void"
 	elsif adapter == mir_adapter_reset_temporary_storage()

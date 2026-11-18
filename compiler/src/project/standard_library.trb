@@ -1,4 +1,5 @@
-import { standard_source_internal_process, standard_source_process } from state/standard_source_kinds
+import { native_jobs_sql_source, native_sqlite_source } from project/official_catalog
+import { standard_source_internal_process, standard_source_jobs_sql, standard_source_process, standard_source_sqlite } from state/standard_source_kinds
 import { native_process_source, native_web_timeout_source, pinned_process_source } from project/official_catalog
 import { standard_source_web_timeout } from state/standard_source_kinds
 import { declare_test_signatures } from frontend/providers/test_declarations
@@ -43,6 +44,12 @@ import { sparse_integer_at, store_integer } from support/storage
 # Portable declarations use the same parser and nominal catalogs as authored
 # modules. Their owner tag is assigned only by this loader, never by spelling.
 def standard_source_kind(path: String): Integer
+	if path == "trb/internal/jobs/sql"
+		return standard_source_jobs_sql()
+	end
+	if path == "trb/internal/sqlite"
+		return standard_source_sqlite()
+	end
 	if path == "trb/std/process"
 		return standard_source_process()
 	elsif path == "trb/internal/process"
@@ -187,6 +194,12 @@ def standard_source_kind(path: String): Integer
 end
 
 def standard_source_name(kind: Integer): String
+	if kind == standard_source_jobs_sql()
+		return "trb/internal/jobs/sql/index"
+	end
+	if kind == standard_source_sqlite()
+		return "trb/internal/sqlite/index"
+	end
 	if kind == standard_source_process()
 		return "trb/std/process/index"
 	elsif kind == standard_source_internal_process()
@@ -331,6 +344,12 @@ def standard_source_name(kind: Integer): String
 end
 
 def standard_source_text(kind: Integer): String
+	if kind == standard_source_jobs_sql()
+		return native_jobs_sql_source()
+	end
+	if kind == standard_source_sqlite()
+		return native_sqlite_source()
+	end
 	if kind == standard_source_process()
 		return pinned_process_source()
 	elsif kind == standard_source_internal_process()
@@ -482,6 +501,14 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 		return -1
 	end
 	caller_kind := sparse_integer_at(state.standard_modules, state.module_graph.active_module[0])
+	if kind == standard_source_jobs_sql() && caller_kind != official_source_kind("trb/jobs/sql")
+		diagnostic(state, "TRBN4003", line, "internal Jobs SQL operations are reserved for the verified SQL adapter")
+		return -1
+	end
+	if kind == standard_source_sqlite() && caller_kind != standard_source_jobs_sql()
+		diagnostic(state, "TRBN4003", line, "internal SQLite operations are reserved for verified database adapters")
+		return -1
+	end
 	if kind == standard_source_internal_process() && caller_kind != standard_source_process()
 		diagnostic(state, "TRBN4003", line, "internal package imports are reserved for verified standard sources: trb/internal/process")
 		return -1

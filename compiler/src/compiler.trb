@@ -1,3 +1,4 @@
+import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
 import { emit_process_host_runtime } from backend/qbe/runtime/process
 import { mir_deadlines_enabled } from mir/model/deadlines
 import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines
@@ -68,6 +69,9 @@ record CompilerProjectSources
 end
 
 def compiler_set_oidc_link(_needed: Boolean)
+end
+
+def compiler_set_sqlite_link(_needed: Boolean)
 end
 
 def compiler_set_crypto_link(_needed: Boolean)
@@ -305,6 +309,12 @@ def emit_qbe(mut state: CompilerState): QbeOutput
 	emit_file_scope_runtime(state.scalar_mir, output)
 	emit_time_host_runtime(state.scalar_mir, output)
 	emit_process_host_runtime(state.scalar_mir, output)
+	sqlite_needed := sqlite_runtime_needed(state.scalar_mir)
+	compiler_set_sqlite_link(sqlite_needed)
+	if sqlite_needed
+		emit_sqlite_write_runtime(output)
+		emit_sqlite_error_runtime(output)
+	end
 	emit_entropy_runtime(state.scalar_mir, output)
 	emit_string_builder_runtime(state.scalar_mir, output)
 	compiler_set_oidc_link(oidc_runtime_needed(state.scalar_mir))

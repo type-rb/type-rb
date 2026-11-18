@@ -1,0 +1,94 @@
+import { EnqueueError, EnqueueErrorKind, EnqueueRequest, JobReference } from trb/jobs
+import { SQLAdapter, SQLDialect } from trb/jobs/sql
+import trb/internal/sqlite
+import trb/std/encoding/hex
+import trb/std/process
+import trb/std/result
+import trb/std/secure_random
+import { Duration, Instant, TimeZone } from trb/std/time
+
+module SQL
+end
+
+def _adapter_error(message: String): EnqueueError
+	return EnqueueError.new(kind: EnqueueErrorKind::Adapter, message: message)
+end
+
+def _database(adapter: SQLAdapter): Result<String, EnqueueError>
+	if adapter.dialect != SQLDialect::SQLite
+		return Result<String, EnqueueError>::Err(_adapter_error("Native SQL Jobs requires the SQLite dialect"))
+	end
+	environment := adapter.source_environment
+	if environment == nil
+		return Result<String, EnqueueError>::Ok(adapter.source)
+	end
+	value := Process.environment(environment)
+	if value == nil || value.strip() == ""
+		return Result<String, EnqueueError>::Err(_adapter_error("jobs database environment " + environment + " is not set or empty"))
+	end
+	return Result<String, EnqueueError>::Ok(value)
+end
+
+def _pad(value: Integer, width: Integer): String
+	mut text := value.to_s()
+	while text.size() < width
+		text = "0" + text
+	end
+	return text
+end
+
+def _run_at(value: Instant): String
+	local := value.to_datetime(TimeZone.utc())
+	return local.date().to_s() + " " + _pad(local.hour(), 2) + ":" + _pad(local.minute(), 2) + ":" + _pad(local.second(), 2) + "." + _pad(local.nanosecond() / 1000000, 3)
+end
+
+def _enqueue_statements(request: EnqueueRequest, identity: String, scheduled_at: Instant, maximum_attempts: Integer): Array<SQLite::WriteStatement>
+	return [
+		SQLite::WriteStatement.new(sql: "CREATE TABLE IF NOT EXISTS trb_jobs (id TEXT PRIMARY KEY, queue_name TEXT NOT NULL, job_name TEXT NOT NULL, payload TEXT NOT NULL, payload_version INTEGER NOT NULL, priority INTEGER NOT NULL, run_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL, maximum_attempts INTEGER NOT NULL, claimed_by TEXT, claimed_at TEXT, last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)", parameters: []),
+		SQLite::WriteStatement.new(sql: "CREATE INDEX IF NOT EXISTS trb_jobs_ready ON trb_jobs (state, priority, run_at, id)", parameters: []),
+		SQLite::WriteStatement.new(sql: "INSERT INTO trb_jobs (id, queue_name, job_name, payload, payload_version, priority, run_at, state, attempts, maximum_attempts, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)", parameters: [
+				SQLite::Parameter::Text(identity),
+				SQLite::Parameter::Text(request.queue_name),
+				SQLite::Parameter::Text(request.job_name),
+				SQLite::Parameter::Text(request.payload),
+				SQLite::Parameter::Integer(request.payload_version),
+				SQLite::Parameter::Integer(request.priority),
+				SQLite::Parameter::Text(_run_at(scheduled_at)),
+				SQLite::Parameter::Integer(maximum_attempts),
+			]),
+	]
+end
+
+def _enqueue(adapter: SQLAdapter, request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
+	source := _database(adapter) catch |error|
+		return Result<JobReference, EnqueueError>::Err(error)
+	end
+	mut attempts := adapter.default_maximum_attempts
+	requested := request.maximum_attempts
+	if requested != nil && requested > 0
+		attempts = requested
+	end
+	identity := Hex.encode(SecureRandom.bytes(16))
+	case SQLite.execute_writes(source, _enqueue_statements(request, identity, scheduled_at, attempts), true, 0)
+	when Result::Ok(_changes)
+		return Result<JobReference, EnqueueError>::Ok(JobReference.new(id: identity, job_name: request.job_name))
+	when Result::Err(error)
+		return Result<JobReference, EnqueueError>::Err(_adapter_error(error.message))
+	end
+end
+
+def enqueue_at(adapter: SQLAdapter, request: EnqueueRequest, scheduled_at: Instant): Result<JobReference, EnqueueError>
+	now := Instant.now()
+	if scheduled_at.before?(now)
+		return _enqueue(adapter, request, now)
+	end
+	remainder := scheduled_at.nanosecond() % 1000000
+	if remainder != 0
+		return _enqueue(adapter, request, scheduled_at.add(Duration.new(0, 1000000 - remainder)))
+	end
+	return _enqueue(adapter, request, scheduled_at)
+end
+
+def enqueue(adapter: SQLAdapter, request: EnqueueRequest): Result<JobReference, EnqueueError>
+	return _enqueue(adapter, request, Instant.now())
+end

@@ -1,0 +1,42 @@
+def sqlite_adapter_start(): Integer
+	return 84
+end
+
+def sqlite_names(): Array<String>
+	return ["write", "error_message"]
+end
+
+def sqlite_kind(adapter: Integer): Integer
+	if adapter >= sqlite_adapter_start() && adapter < sqlite_adapter_start() + sqlite_names().size()
+		return adapter - sqlite_adapter_start()
+	end
+	return -1
+end
+
+def sqlite_parameter_names(kind: Integer): Array<String>
+	if kind == 0
+		return ["source", "statements", "offsets", "kinds", "words", "reals", "buffers", "transactional", "busy_milliseconds", "changes"]
+	end
+	return ["status"]
+end
+
+def sqlite_parameters(kind: Integer): Array<String>
+	if kind == 0
+		return ["String", "Array<String>", "Array<Integer>", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>", "Boolean", "Integer", "Array<Integer>"]
+	end
+	return ["Integer"]
+end
+
+def sqlite_mutable(kind: Integer, index: Integer): Integer
+	if kind == 0 && index == 9
+		return 1
+	end
+	return 0
+end
+
+def sqlite_result(kind: Integer): String
+	if kind == 0
+		return "Integer"
+	end
+	return "String"
+end
