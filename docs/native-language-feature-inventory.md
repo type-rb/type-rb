@@ -4,6 +4,7 @@ Each count describes registered probes, not language coverage percentages.
 
 | Family | Phase | Probes with differences | Uncovered contracts | Reference syntax nodes |
 | --- | --- | --- | --- | --- |
+| Portable Process operations | packages | 0 / 1 | Complete source output and release host qualification |  |
 | Source text and lexical forms | basic | 0 / 64 | Invalid UTF-8 source and diagnostic positions; CRLF and source normalization; Remaining reserved contexts and malformed literal contracts | CommentStatement, BlankStatement, Identifier |
 | Strings and UTF-8 | basic | 2 / 182 | Reference output-mode Unicode case differences (TypeRB #791); Embedded-expression boundaries beyond the reviewed interpolation probes | Literal, InterpolatedString |
 | Immutable Bytes | basic | 0 / 22 | Bytes values across remaining nominal wrappers and imported declarations |  |

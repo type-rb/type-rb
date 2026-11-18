@@ -5,7 +5,7 @@ import { builder_method, builder_mutates, builder_parameters } from mir/model/st
 import { mir_builder_call } from frontend/checking/builtins/string_builder
 import { checked_enum_puts } from frontend/checking/nominal/enums
 import { mir_array_mutate_unshift, mir_convert_boolean_to_string, mir_convert_float_to_string, mir_convert_integer_to_string, mir_convert_string_to_float, mir_convert_string_to_integer } from mir/model/operation_modes
-import { checked_category_function, checked_category_initializer, checked_category_math, checked_category_system, checked_category_value } from frontend/types/value_categories
+import { checked_category_function, checked_category_initializer, checked_category_math, checked_category_value } from frontend/types/value_categories
 import { mir_state_enabled_slot } from state/local_slots
 import { array_method_concat, array_method_include, array_method_join, array_method_none, array_method_shift, array_method_sort, array_method_unshift, bytes_method_none, float_method_none, integer_method_none, range_method_to_array, result_method_float, result_method_integer, result_method_key, result_method_slice, string_method_none, string_method_replace_all } from frontend/types/method_kinds
 import { mir_op_array_mutate, mir_op_array_push, mir_op_array_size, mir_op_scalar_conversion, mir_op_string_replace, mir_op_string_size } from mir/model/instructions
@@ -36,7 +36,7 @@ import { mir_checked_callable_call } from mir/lowering/callables
 import { mir_binding_read } from mir/build/bindings
 import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
 import { find_enum_type } from frontend/types/enum_types
-import { ArgumentBindings, argument_binding_slot, argument_bindings, function_argument_bindings, record_argument_bindings } from frontend/resolution/argument_binding
+import { argument_binding_slot, function_argument_bindings, record_argument_bindings } from frontend/resolution/argument_binding
 import { mir_checked_record_new } from mir/lowering/records
 import { mir_checked_array_operation } from mir/lowering/arrays
 import { check_expected, type_diagnostic } from frontend/checking/body/types
@@ -85,13 +85,6 @@ def checked_puts_type(state: CompilerState, type_name: String): Boolean
 	return true
 end
 
-def checked_call_bindings(state: CompilerState, function: Integer, callee_category: Integer): ArgumentBindings
-	if callee_category == checked_category_system()
-		return argument_bindings([], [])
-	end
-	return function_argument_bindings(state, function)
-end
-
 def check_call(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, callee_category: Integer, callee_name: String, target: Integer, mut receiver: Integer, bound: Boolean): CheckedValue
 	origin := position[0]
 	line := load_integer(state.source_tokens.token_lines, origin)
@@ -107,7 +100,7 @@ def check_call(mut state: CompilerState, mut position: Array<Integer>, mut local
 	end
 	mut parameter_start := 0
 	mut result_type := "Void"
-	if (callee_name == "puts" && encoded == 0) || callee_category == checked_category_system() || callee_category == checked_category_math()
+	if (callee_name == "puts" && encoded == 0) || callee_category == checked_category_math()
 		function = -1
 	elsif function >= 0
 		parameter_start = load_integer(state.declarations.function_parameter_starts, function)
@@ -116,7 +109,7 @@ def check_call(mut state: CompilerState, mut position: Array<Integer>, mut local
 		return type_diagnostic(state, line, "value is not callable")
 	end
 	mut concurrent_borrowed := false
-	mut bindings := checked_call_bindings(state, function, callee_category)
+	mut bindings := function_argument_bindings(state, function)
 	if function >= 0 && sparse_string_at(state.nominal.function_receivers, function) != ""
 		if !bound
 			self_slot := local_find(locals, "self")
@@ -130,9 +123,7 @@ def check_call(mut state: CompilerState, mut position: Array<Integer>, mut local
 		bindings.provided[0] = true
 		bindings.position[0] = 1
 	end
-	if callee_category == checked_category_system()
-		result_type = "Array<String>"
-	elsif callee_category == checked_category_math()
+	if callee_category == checked_category_math()
 		result_type = "Float"
 	end
 	saved_mir := locals.mir_state[mir_state_enabled_slot()]
@@ -195,8 +186,8 @@ def check_call(mut state: CompilerState, mut position: Array<Integer>, mut local
 	if (callee_name == "puts" && encoded == 0)
 		return mir_checked_puts(state, locals, bindings.values, origin)
 	end
-	if callee_category == checked_category_system() || callee_category == checked_category_math()
-		return mir_checked_standard_call(state, locals, callee_category, bindings.values, result_type, origin)
+	if callee_category == checked_category_math()
+		return mir_checked_standard_call(state, locals, bindings.values, result_type, origin)
 	end
 	if callee_category == checked_category_initializer()
 		value := mir_checked_object_new(state, locals, receiver, object_instance_type(state, receiver), origin)

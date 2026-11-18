@@ -165,7 +165,7 @@
         "Mapping covers declared members, not all semantics. Qualify descendant exit and descriptor cleanup, working-directory host failure and launch permissions with independent observers.",
         "Observe every required output on all four contract hosts. A matching selected scenario is not a passing release cell.",
         "Review native and source-output diagnostics, retained interactive state and any cross-mode differences before enabling canonical qualificationReady.",
-        "Reference Ruby signaled-child success violates its Boolean contract; tracked by https://github.com/type-rb/type-rb/issues/855. Preserve the false expectation and the unsuccessful observation until corrected."
+        "Retain the historical Ruby signal observation in https://github.com/type-rb/type-rb/issues/855. The accepted reference correction is https://github.com/type-rb/type-rb/pull/856. Compare status -1 and success false on each required output and host."
       ]
     }
   ],
@@ -305,7 +305,7 @@
       "body": "Process.environment(1)",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "argument[^\\n]*(?:type|expected)[^\\n]*String"
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*String|error\\[TRBN4004\\]: expected String, found Integer$)"
     },
     {
       "id": "process-reject-run-arguments",
@@ -314,7 +314,7 @@
       "body": "Process.run(\"unused\", [1])",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "argument[^\\n]*(?:type|expected)[^\\n]*Array<String>"
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*Array<String>|error\\[TRBN4004\\]: expected String, found Integer$)"
     },
     {
       "id": "process-reject-directory-arity",
@@ -341,7 +341,7 @@
       "body": "Process.argv()",
       "kind": "rejected",
       "stdout": "",
-      "diagnostic": "package trb/internal/process is internal"
+      "diagnostic": "(?m)(?:package trb/internal/process is internal|error\\[TRBN4003\\]: internal package imports are reserved for verified standard sources: trb/internal/process$)"
     }
   ]
 }

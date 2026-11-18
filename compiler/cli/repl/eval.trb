@@ -1,3 +1,5 @@
+import { standard_process } from frontend/resolution/process_intrinsics
+import { repl_process_call } from repl/process
 import { repl_file_acquisition, repl_filesystem_call } from repl/filesystem
 import { standard_filesystem_host } from frontend/resolution/filesystem_intrinsics
 import { scoped_resource_name } from frontend/types/resource_types
@@ -92,6 +94,10 @@ import { repl_scalar_string, repl_binding_value, repl_assign_binding, repl_rende
 def repl_call(mut state: CompilerState, function: Integer, arguments: Array<Integer>, mut store: ReplStore): Integer
 	if repl_failed(store)
 		return 0
+	end
+	process := standard_process(state, function)
+	if process >= 0
+		return repl_process_call(store, process, arguments)
 	end
 	filesystem := standard_filesystem_host(state, function)
 	if filesystem >= 0

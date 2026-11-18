@@ -1,3 +1,4 @@
+import { emit_process_host_runtime } from backend/qbe/runtime/process
 import { mir_deadlines_enabled } from mir/model/deadlines
 import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines
 import { append_native_test_runner } from project/test_runner
@@ -303,6 +304,7 @@ def emit_qbe(mut state: CompilerState): QbeOutput
 	emit_bytes_runtime(state.scalar_mir, output)
 	emit_file_scope_runtime(state.scalar_mir, output)
 	emit_time_host_runtime(state.scalar_mir, output)
+	emit_process_host_runtime(state.scalar_mir, output)
 	emit_entropy_runtime(state.scalar_mir, output)
 	emit_string_builder_runtime(state.scalar_mir, output)
 	compiler_set_oidc_link(oidc_runtime_needed(state.scalar_mir))

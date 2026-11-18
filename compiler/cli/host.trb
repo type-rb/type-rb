@@ -1,3 +1,20 @@
+# The interpreter keeps immutable captured Bytes in its raw text storage.
+def native_cli_process_environment(_name: String, mut _value: Array<String>): Boolean
+	return false
+end
+
+def native_cli_process_cwd(mut _path: Array<String>): Integer
+	return 0
+end
+
+def native_cli_process_capture(_command: String, _args: Array<String>, mut _streams: Array<String>, mut _status: Array<Integer>): Integer
+	return 0
+end
+
+def native_cli_process_error_message(_status: Integer): String
+	return ""
+end
+
 # The interpreter callback is synchronous. Its descriptor is private interpreter
 # state; authored File values retain their checked nominal resource type.
 def native_cli_file_scope(_path: String, _mode: Integer, _body: (Integer) -> Integer, mut _phase: Array<Integer>): Integer

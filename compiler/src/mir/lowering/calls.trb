@@ -1,6 +1,8 @@
+import { standard_process } from frontend/resolution/process_intrinsics
+import { process_adapter, process_names } from mir/model/process_contract
 import { concurrent_source_call } from frontend/checking/body/concurrency
 import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
-import { mir_adapter_runtime_deadline } from mir/model/call_kinds
+import { mir_adapter_runtime_deadline, mir_adapter_sqrt } from mir/model/call_kinds
 import { standard_test_capture, standard_test_equal, standard_test_fail, standard_test_finish, standard_test_inspect, standard_test_scalar_kind } from frontend/resolution/test_intrinsics
 import { test_adapter_capture, test_adapter_equal, test_adapter_fail, test_adapter_finish, test_adapter_inspect, test_adapter_scalar_kind } from mir/model/test_contract
 import { filesystem_adapter_start, filesystem_names } from mir/model/filesystem_contract
@@ -21,7 +23,7 @@ import { mir_adapter_entropy } from mir/model/call_kinds
 import { standard_time_host } from frontend/resolution/time_intrinsics
 import { mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment } from mir/model/call_kinds
 import { standard_runtime_fail, standard_runtime_recover } from frontend/resolution/standard_intrinsics
-import { checked_category_math, checked_category_value } from frontend/types/value_categories
+import { checked_category_value } from frontend/types/value_categories
 import { mir_state_enabled_slot } from state/local_slots
 import { mir_adapter_host, mir_adapter_none, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
 import { mir_function_fixture } from mir/model/control
@@ -123,6 +125,12 @@ def mir_declare_signatures(mut state: CompilerState)
 			adapter = test_adapter_fail()
 			name = "trb/internal/test.fail"
 		end
+		process := standard_process(state, index)
+		if process >= 0
+			kind = mir_signature_standard()
+			adapter = process_adapter(process)
+			name = "trb/internal/process." + process_names()[process]
+		end
 		filesystem := standard_filesystem_host(state, index)
 		if filesystem >= 0
 			kind = mir_signature_standard()
@@ -208,15 +216,12 @@ end
 
 # The resolver has already bound the package identity, including import aliases.
 # Standard APIs have their own signature kind, separate from compiler privileges.
-def mir_checked_standard_call(mut state: CompilerState, mut locals: CheckedLocals, category: Integer, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
-	if category == checked_category_math()
-		resource_unknown_call(state, locals)
-	end
+def mir_checked_standard_call(mut state: CompilerState, mut locals: CheckedLocals, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
+	resource_unknown_call(state, locals)
 	if locals.mir_state[mir_state_enabled_slot()] == 0
 		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
 	end
-	# Process/Math categories 4/5 select the argv/sqrt adapters 10/11.
-	adapter := category + 6
+	adapter := mir_adapter_sqrt()
 	mut callee := state.declarations.function_count[0]
 	while callee < state.scalar_mir.signatures.size()
 		if state.scalar_mir.signatures[callee].kind == mir_signature_standard() && state.scalar_mir.signatures[callee].adapter == adapter
@@ -225,16 +230,8 @@ def mir_checked_standard_call(mut state: CompilerState, mut locals: CheckedLocal
 		callee += 1
 	end
 	if callee == state.scalar_mir.signatures.size()
-		mut name := "trb/std/process.argv"
-		mut parameters: Array<String> := []
-		mut mutable: Array<Integer> := []
-		if category == checked_category_math()
-			name = "trb/std/math.sqrt"
-			parameters = ["Float"]
-			mutable = [0]
-		end
 		mir_semantic_type_id(state.scalar_mir, result_type)
-		state.scalar_mir.signatures.push(MirSignature.new(id: callee, kind: mir_signature_standard(), name: name, adapter: adapter, source_id: state.module_graph.active_module[0], line: load_integer(state.source_tokens.token_lines, origin), parameter_types: parameters, parameter_mutable: mutable, result_type: result_type))
+		state.scalar_mir.signatures.push(MirSignature.new(id: callee, kind: mir_signature_standard(), name: "trb/std/math.sqrt", adapter: adapter, source_id: state.module_graph.active_module[0], line: load_integer(state.source_tokens.token_lines, origin), parameter_types: ["Float"], parameter_mutable: [0], result_type: result_type))
 	end
 	return mir_checked_call(state, locals, callee, arguments, result_type, origin)
 end
