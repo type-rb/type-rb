@@ -1,5 +1,4 @@
-import { standard_source_file, standard_source_filesystem_host, standard_source_web_server } from state/standard_source_kinds
-import { standard_source_internal_process, standard_source_process } from state/standard_source_kinds
+import { standard_source_file, standard_source_filesystem_host, standard_source_internal_process, standard_source_process, standard_source_web_server } from state/standard_source_kinds
 import { official_source_kind } from project/official_catalog
 import { standard_source_base64, standard_source_hex, standard_source_internal_base64, standard_source_internal_hex, standard_source_internal_json, standard_source_internal_url, standard_source_json, standard_source_jsonc, standard_source_time, standard_source_time_host, standard_source_url } from state/standard_source_kinds
 import { CompilerState, diagnostic } from state/state
