@@ -16,13 +16,14 @@ def expand_quoted_token(mut state: CompilerState, origin: Integer, interpolation
 	mut cursor := [0]
 	outer_column := state.source_tokens.lexer_column[0]
 	column := load_integer(state.source_tokens.token_columns, origin)
+	source_length := raw.size()
 	state.source_tokens.lexer_column[0] = 1
-	scan_string(state, raw, cursor, line, interpolation)
+	scan_string(state, raw, source_length, cursor, line, interpolation)
 	state.source_tokens.lexer_column[0] = outer_column
 	if has_diagnostic(state)
 		return false
 	end
-	if cursor[0] != raw.size()
+	if cursor[0] != source_length
 		diagnostic(state, "TRBN4001", line, "invalid quoted Symbol literal")
 		return false
 	end

@@ -74,13 +74,14 @@ end
 def scan_identifier(
 		mut state: CompilerState,
 		source: String,
+		source_length: Integer,
 		mut position: Array<Integer>,
 		line: Integer,
 	)
 	start := position[0]
 	mut scanning := true
 	while scanning
-		if position[0] >= source.size()
+		if position[0] >= source_length
 			scanning = false
 		else
 			if character_in(
@@ -93,7 +94,7 @@ def scan_identifier(
 			end
 		end
 	end
-	if position[0] < source.size()
+	if position[0] < source_length
 		if !character_in(source[start], "ABCDEFGHIJKLMNOPQRSTUVWXYZ") && !unicode_identifier_upper(source[start])
 			if source[position[0]] == "?" || source[position[0]] == "!"
 				position[0] += 1
@@ -111,13 +112,14 @@ end
 def scan_number(
 		mut state: CompilerState,
 		source: String,
+		source_length: Integer,
 		mut position: Array<Integer>,
 		line: Integer,
 	)
 	start := position[0]
 	mut scanning := true
 	while scanning
-		if position[0] >= source.size()
+		if position[0] >= source_length
 			scanning = false
 		else
 			if number_character(source[position[0]])
@@ -127,13 +129,13 @@ def scan_number(
 			end
 		end
 	end
-	if position[0] + 1 < source.size()
+	if position[0] + 1 < source_length
 		if source[position[0]] == "."
 			if character_in(source[position[0] + 1], "0123456789")
 				position[0] += 1
 				scanning = true
 				while scanning
-					if position[0] >= source.size()
+					if position[0] >= source_length
 						scanning = false
 					else
 						if number_character(source[position[0]])
@@ -151,12 +153,12 @@ def scan_number(
 end
 
 # Locate embedded expressions without treating quoted braces as delimiters.
-def interpolation_end(source: String, mut index: Integer): Integer
+def interpolation_end(source: String, source_length: Integer, mut index: Integer): Integer
 	mut depth := 1
-	while index < source.size()
+	while index < source_length
 		character := source[index]
 		if character == "\"" || character == "'"
-			index = interpolation_quote_end(source, index + 1, character)
+			index = interpolation_quote_end(source, source_length, index + 1, character)
 			if index < 0
 				return -1
 			end
@@ -171,18 +173,7 @@ def interpolation_end(source: String, mut index: Integer): Integer
 				end
 			end
 			if character == "#"
-				mut comment := true
-				while comment
-					if index >= source.size()
-						comment = false
-					else
-						if source[index] == "\n"
-							comment = false
-						else
-							index += 1
-						end
-					end
-				end
+				index = skip_comment(source, source_length, index)
 			end
 		end
 		index += 1
@@ -190,8 +181,8 @@ def interpolation_end(source: String, mut index: Integer): Integer
 	return -1
 end
 
-def interpolation_quote_end(source: String, mut index: Integer, quote: String): Integer
-	while index < source.size()
+def interpolation_quote_end(source: String, source_length: Integer, mut index: Integer, quote: String): Integer
+	while index < source_length
 		character := source[index]
 		if character == "\\"
 			index += 1
@@ -204,9 +195,9 @@ def interpolation_quote_end(source: String, mut index: Integer, quote: String): 
 				opening = false
 			end
 			if opening
-				if index + 1 < source.size()
+				if index + 1 < source_length
 					if source[index + 1] == "{"
-						index = interpolation_end(source, index + 2)
+						index = interpolation_end(source, source_length, index + 2)
 						if index < 0
 							return -1
 						end
@@ -224,6 +215,7 @@ end
 def scan_string(
 		mut state: CompilerState,
 		source: String,
+		source_length: Integer,
 		mut position: Array<Integer>,
 		mut line: Integer,
 		interpolation: Boolean,
@@ -237,7 +229,7 @@ def scan_string(
 	mut scanning := true
 	mut closed := false
 	while scanning
-		if position[0] >= source.size()
+		if position[0] >= source_length
 			scanning = false
 		else
 			current := source[position[0]]
@@ -254,7 +246,7 @@ def scan_string(
 					if current == "\\"
 						text += compiler_source_slice(source, chunk_start, position[0])
 						position[0] += 1
-						if position[0] >= source.size()
+						if position[0] >= source_length
 							diagnostic(state, "TRBN4001", line, "unterminated String escape")
 							scanning = false
 						else
@@ -275,13 +267,13 @@ def scan_string(
 						end
 					else
 						if current == "#"
-							if position[0] + 1 < source.size()
+							if position[0] + 1 < source_length
 								mut opening := source[position[0] + 1] == "{"
 								if opening
 									opening = interpolation
 								end
 								if opening
-									finish := interpolation_end(source, position[0] + 2)
+									finish := interpolation_end(source, source_length, position[0] + 2)
 									if finish < 0
 										diagnostic(state, "TRBN4001", line, "unterminated String interpolation")
 										scanning = false
@@ -395,13 +387,13 @@ end
 # A quoted Symbol contains literal interpolation spelling. Preserve ambiguous
 # quotes until the expression parser chooses String or Symbol interpretation.
 # Ordinary quotes without interpolation retain the existing literal token.
-def scan_quoted_token(mut state: CompilerState, source: String, mut position: Array<Integer>, line: Integer): Integer
+def scan_quoted_token(mut state: CompilerState, source: String, source_length: Integer, mut position: Array<Integer>, line: Integer): Integer
 	if source[position[0]] == "'"
-		return scan_string(state, source, position, line, false)
+		return scan_string(state, source, source_length, position, line, false)
 	end
-	finish := interpolation_quote_end(source, position[0] + 1, "\"")
+	finish := interpolation_quote_end(source, source_length, position[0] + 1, "\"")
 	if finish < 0
-		return scan_string(state, source, position, line, true)
+		return scan_string(state, source, source_length, position, line, true)
 	end
 	mut index := position[0] + 1
 	mut deferred := false
@@ -421,7 +413,7 @@ def scan_quoted_token(mut state: CompilerState, source: String, mut position: Ar
 		position[0] = finish + 1
 		return lines
 	end
-	return scan_string(state, source, position, line, true)
+	return scan_string(state, source, source_length, position, line, true)
 end
 
 def two_character_symbol(pair: String): Boolean
@@ -443,18 +435,19 @@ end
 def scan_symbol(
 		mut state: CompilerState,
 		source: String,
+		source_length: Integer,
 		mut position: Array<Integer>,
 		line: Integer,
 	)
 	character := source[position[0]]
 	mut symbol := character
-	if position[0] + 2 < source.size()
+	if position[0] + 2 < source_length
 		triple := compiler_source_slice(source, position[0], position[0] + 3)
 		if triple == "..." || triple == "<=>" || triple == "**=" || triple == "&&=" || triple == "||="
 			symbol = triple
 		end
 	end
-	if symbol.size() == 1 && position[0] + 1 < source.size()
+	if symbol.size() == 1 && position[0] + 1 < source_length
 		pair := compiler_source_slice(source, position[0], position[0] + 2)
 		if two_character_symbol(pair)
 			symbol = pair
@@ -473,20 +466,11 @@ def scan_symbol(
 	return
 end
 
-def skip_comment(source: String, mut position: Array<Integer>)
-	mut scanning := true
-	while scanning
-		if position[0] >= source.size()
-			scanning = false
-		else
-			if source[position[0]] == "\n"
-				scanning = false
-			else
-				position[0] += 1
-			end
-		end
+def skip_comment(source: String, source_length: Integer, mut index: Integer): Integer
+	while index < source_length && source[index] != "\n"
+		index += 1
 	end
-	return
+	return index
 end
 
 def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer): Boolean
@@ -495,11 +479,12 @@ def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer)
 		push_token(state, terminal_kind, "", 1)
 		return false
 	end
+	source_length := source.size()
 	mut position := [0]
 	mut line := 1
 	mut column := 1
 	mut character := ""
-	while position[0] < source.size()
+	while position[0] < source_length
 		start := position[0]
 		start_line := line
 		state.source_tokens.lexer_column[0] = column
@@ -521,21 +506,21 @@ def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer)
 						position[0] += 1
 					else
 						if character == "#"
-							skip_comment(source, position)
+							position[0] = skip_comment(source, source_length, position[0])
 						else
 							if character_in(
 									character,
 									"fretnmoidupglsavchbyxkwqzjABCDEFGHIJKLMNOPQRSTUVWXYZ_@",
 								) || unicode_identifier_start(character)
-								scan_identifier(state, source, position, line)
+								scan_identifier(state, source, source_length, position, line)
 							else
 								if character_in(character, "0123456789")
-									scan_number(state, source, position, line)
+									scan_number(state, source, source_length, position, line)
 								else
 									if character == "\"" || character == "'"
-										line += scan_quoted_token(state, source, position, line)
+										line += scan_quoted_token(state, source, source_length, position, line)
 									else
-										scan_symbol(state, source, position, line)
+										scan_symbol(state, source, source_length, position, line)
 									end
 								end
 							end

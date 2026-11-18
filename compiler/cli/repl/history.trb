@@ -21,7 +21,7 @@ def repl_history_load(path: String): Array<String>
 		mut position := [1]
 		while position[0] < source.size()
 			if source[position[0]] == "\""
-				scan_string(state, source, position, 1, false)
+				scan_string(state, source, source.size(), position, 1, false)
 			else
 				position[0] += 1
 			end
