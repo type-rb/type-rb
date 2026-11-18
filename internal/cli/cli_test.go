@@ -6461,6 +6461,9 @@ func TestRunCompilerOwnedProcessAcrossAvailableBackends(t *testing.T) {
 			}
 		}
 		root := t.TempDir()
+		if mode == "typescript" {
+			installProcessAdapter(t, root)
+		}
 		config := project.New(root, mode)
 		config.SourceDir = "src"
 		if config.Go != nil {

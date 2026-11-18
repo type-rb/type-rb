@@ -955,6 +955,21 @@ The command is a literal executable name or path, even with an empty argument
 array. Spaces and shell metacharacters are never interpreted as a command line;
 paths containing spaces and literal argument values remain supported.
 
+An unsupported executable format is a launch error. There is no implicit shell
+fallback: scripts must have an OS-supported `#!` interpreter or be passed to an
+explicit interpreter, for example `Process.run("/bin/sh", ["script"])`.
+Captured output uses the same UTF-8 decoding as `Bytes#to_s()`, independently of
+read boundaries, and preserves a leading U+FEFF. A child that exits with status
+127 is still `Ok`; signal termination has status `-1` and `success: false`.
+
+On Linux and macOS, Ruby output uses Fiddle 1.1.8 and TypeScript output uses
+Koffi 3.3.7 to call the OS execution API without a shell fallback. Importing
+Process adds the selected adapter to managed host dependencies; run `trb install`
+before executing the generated program. Externally managed projects declare
+the same dependency in their Gemfile or package.json. Standalone TypeScript
+programs use dependencies already installed alongside their source or an
+ancestor directory. Go output and the typed-IR REPL need no additional adapter.
+
 ## JSON and JSONC
 
 `trb/std/json` provides an explicit JSON value enum plus typed record codecs:

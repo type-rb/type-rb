@@ -443,6 +443,11 @@
     "source": ".github/workflows/pages.yml"
   },
   {
+    "id": "delivery:.github/workflows/process-conformance.yml",
+    "kind": "delivery",
+    "source": ".github/workflows/process-conformance.yml"
+  },
+  {
     "id": "delivery:.github/workflows/release.yml",
     "kind": "delivery",
     "source": ".github/workflows/release.yml"
@@ -6726,9 +6731,14 @@
       "TestPlainEnumRawMembersRejectedAcrossTargetsAndREPL (internal/cli/enum_call_contract_test.go)",
       "TestPlaygroundModeSelection (internal/cli/cli_test.go)",
       "TestPortableArraySortKeepsNaNsLastAcrossExecutionPaths (internal/cli/array_sort_nan_test.go)",
+      "TestPortableProcessCaptureAndInputBoundaries (internal/cli/process_runtime_test.go)",
       "TestPortableProcessExitOutcomes (internal/cli/process_runtime_test.go)",
+      "TestPortableProcessExplicitInterpreters (internal/cli/process_runtime_test.go)",
       "TestPortableProcessLiteralCommands (internal/cli/process_runtime_test.go)",
+      "TestPortableProcessOutputDecoding (internal/cli/process_runtime_test.go)",
       "TestPortableTimeAcrossAvailableBackendsAndREPL (internal/cli/time_conformance_test.go)",
+      "TestProcessImportsSelectHostDependencies (internal/cli/process_runtime_test.go)",
+      "TestProcessManagedAndStandaloneDependencies (internal/cli/process_runtime_test.go)",
       "TestProjectWalkSkipsTypeRBPackageCache (internal/cli/package_system_test.go)",
       "TestQualifiedClassConstantOwnersAcrossTargetsAndREPL (internal/cli/qualified_class_execution_test.go)",
       "TestQualifiedClassConstantsKeepLexicalOwnersAndCaptures (internal/cli/qualified_class_execution_test.go)",
@@ -7068,7 +7078,8 @@
       "TestHostPathCompositionBothGrammars (internal/codegen/ruby/path_test.go)",
       "TestNamespaceImportedCollidingFunctionUsesModuleScopedName (internal/codegen/ruby/ruby_test.go)",
       "TestORMRuntimeKeepsSequelBehindTypeRBOwnedQueryBoundary (internal/codegen/ruby/orm_test.go)",
-      "TestPrivateTopLevelFunctionsUseModuleScopedNames (internal/codegen/ruby/ruby_test.go)"
+      "TestPrivateTopLevelFunctionsUseModuleScopedNames (internal/codegen/ruby/ruby_test.go)",
+      "TestProcessAdapterCleanup (internal/codegen/ruby/process_test.go)"
     ]
   },
   {
@@ -7087,6 +7098,7 @@
       "TestORMRuntimeKeepsBunSQLBehindTypeRBOwnedQueryBoundary (internal/codegen/typescript/orm_test.go)",
       "TestORMTransactionSuspendsEvenWhenItsBlockIsPure (internal/codegen/typescript/suspension_test.go)",
       "TestOidcUnicode17Conformance (internal/codegen/typescript/oidc_hostname_test.go)",
+      "TestProcessAdapterCleanup (internal/codegen/typescript/process_test.go)",
       "TestPureTypeScriptFunctionsRemainSynchronous (internal/codegen/typescript/suspension_test.go)",
       "TestSuspendingResultLambdaUsesPortableBoundaryWithoutRequiringNativeBridge (internal/codegen/typescript/suspension_test.go)",
       "TestSuspensionPropagatesOnlyThroughTypeScriptProjectGeneration (internal/codegen/typescript/suspension_test.go)",

@@ -317,8 +317,8 @@ func (e *Evaluator) intrinsicCall(name string, arguments []evaluatedArgument, ty
 		}
 		fields := map[string]Value{
 			"status":  {Type: types.FromName("Integer"), Data: status},
-			"stdout":  {Type: types.FromName("String"), Data: strings.ToValidUTF8(stdout.String(), "�")},
-			"stderr":  {Type: types.FromName("String"), Data: strings.ToValidUTF8(stderr.String(), "�")},
+			"stdout":  {Type: types.FromName("String"), Data: utf8WithReplacement(stdout.Bytes())},
+			"stderr":  {Type: types.FromName("String"), Data: utf8WithReplacement(stderr.Bytes())},
 			"success": {Type: types.FromName("Boolean"), Data: status == 0},
 		}
 		value := Value{Type: types.FromName("Process::Output"), Data: &recordInstance{Definition: definition, Fields: fields}}

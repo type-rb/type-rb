@@ -97,6 +97,24 @@ func createStandaloneGeneratedWorkspace(projectRoot, kind string) (*generatedWor
 	return workspace, nil
 }
 
+// Standalone generated files live outside the source tree. Preserve the
+// source's existing host-package lookup without installing or copying modules.
+func linkStandaloneTypeScriptDependencies(sourceRoot, generatedRoot string) error {
+	for directory := sourceRoot; ; directory = filepath.Dir(directory) {
+		modules := filepath.Join(directory, "node_modules")
+		info, err := os.Stat(modules)
+		if err == nil && info.IsDir() {
+			return os.Symlink(modules, filepath.Join(generatedRoot, "node_modules"))
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if directory == filepath.Dir(directory) {
+			return nil
+		}
+	}
+}
+
 func (w *generatedWorkspace) Path() string { return w.path }
 
 func (w *generatedWorkspace) Keep() { w.retain = true }
