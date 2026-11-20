@@ -1,58 +1,33 @@
 import { QbeOutput, qbe_output_line } from backend/qbe/output
 
-# ASCII bytes at both separator edges prevent UTF-8 sequences from crossing
-# either boundary, even for invalid fragments. Stored code-point counts then
-# add exactly. Other separators retain ordinary joining and decoding.
-def emit_string_join_size_runtime(mut output: QbeOutput)
-	qbe_output_line(output, "\nfunction l $trbn_string_join_size(l %storage, l %count, l %separator) {\n@start\n %empty =w ceql %count, 0\n jnz %empty, @empty, @nonempty\n@empty\n ret 0\n")
-	qbe_output_line(output, "@nonempty\n %single =w ceql %count, 1\n jnz %single, @single, @separator\n@single\n %only =l loadl %storage\n %only_points_address =l add %only, 16\n %only_points =l loadl %only_points_address\n ret %only_points\n")
-	qbe_output_line(output, "@separator\n %separator_length_address =l add %separator, 8\n %separator_length =l loadl %separator_length_address\n %no_separator =w ceql %separator_length, 0\n jnz %no_separator, @fallback, @edges\n")
-	qbe_output_line(output, "@edges\n %separator_data =l add %separator, 24\n %first =w loadub %separator_data\n %last_offset =l sub %separator_length, 1\n %last_address =l add %separator_data, %last_offset\n %last =w loadub %last_address\n %edge_bits =w or %first, %last\n %ascii_edges =w cultw %edge_bits, 128\n jnz %ascii_edges, @prepare, @fallback\n")
-	qbe_output_line(output, "@prepare\n %separator_points_address =l add %separator, 16\n %separator_points =l loadl %separator_points_address\n jmp @measure\n")
-	# Match ordinary join's item-then-separator byte checks. Point counts cannot
-	# overflow independently: every decoded point consumes at least one byte.
-	qbe_output_line(output, "@measure\n %index =l phi @prepare 0, @measured %next_index\n %size =l phi @prepare 0, @measured %next_size\n %points =l phi @prepare 0, @measured %next_points\n %done =w ceql %index, %count\n jnz %done, @finish, @element\n")
-	qbe_output_line(output, "@element\n %offset =l shl %index, 3\n %slot =l add %storage, %offset\n %item =l loadl %slot\n %length_address =l add %item, 8\n %length =l loadl %length_address\n %room =l sub 9007199254740991, %size\n %overflow =w cugtl %length, %room\n jnz %overflow, @fail, @add_item\n")
-	qbe_output_line(output, "@add_item\n %with_item =l add %size, %length\n %item_points_address =l add %item, 16\n %item_points =l loadl %item_points_address\n %with_item_points =l add %points, %item_points\n %initial =w ceql %index, 0\n jnz %initial, @without_separator, @separator_size\n")
-	qbe_output_line(output, "@separator_size\n %separator_room =l sub 9007199254740991, %with_item\n %separator_overflow =w cugtl %separator_length, %separator_room\n jnz %separator_overflow, @fail, @add_separator\n")
-	qbe_output_line(output, "@add_separator\n %with_separator =l add %with_item, %separator_length\n %with_separator_points =l add %with_item_points, %separator_points\n jmp @measured\n@without_separator\n jmp @measured\n")
-	qbe_output_line(output, "@measured\n %next_size =l phi @without_separator %with_item, @add_separator %with_separator\n %next_points =l phi @without_separator %with_item_points, @add_separator %with_separator_points\n %next_index =l add %index, 1\n jmp @measure\n@finish\n ret %points\n")
-	qbe_output_line(output, "@fallback\n %joined =l call $trbn_string_join(l %storage, l %count, l %separator)\n %joined_points_address =l add %joined, 16\n %joined_points =l loadl %joined_points_address\n ret %joined_points\n@fail\n call $trbn_fatal(l $trbn_allocation_error, l 25)\n hlt\n}\n")
-end
-
-# The verified operands stay rooted across one allocation. No callbacks can
-# mutate the retained Array during sizing or copying in this single-mutator ABI.
-# For Unicode fragments without a separator, reuse the concatenation runtime
-# and its cached point counts and boundary checks. ASCII joins keep the compact
-# copy-and-count loop. Both paths perform the same portable byte-limit checks.
-# Empty separators need no copy; one-byte fragments avoid a dynamic-size call.
 def emit_array_join_runtime(mut output: QbeOutput)
-	emit_string_join_size_runtime(output)
 	qbe_output_line(output, "\nfunction l $trbn_array_join(l %array, l %separator) {\n")
-	qbe_output_line(output, "@start\n %count_address =l add %array, 8\n %count =l loadl %count_address\n %storage_address =l add %array, 24\n %storage =l loadl %storage_address\n %result =l call $trbn_string_join(l %storage, l %count, l %separator)\n ret %result\n}\n\nfunction l $trbn_string_join(l %storage, l %count, l %separator) {\n")
-	qbe_output_line(output, "@start\n %separator_length_address =l add %separator, 8\n %separator_length =l loadl %separator_length_address\n %separator_data =l add %separator, 24\n jmp @measure\n")
-	qbe_output_line(output, "@measure\n %index =l phi @start 0, @measured %next_index\n %size =l phi @start 0, @measured %next_size\n %done =w ceql %index, %count\n jnz %done, @choose_copy, @element\n")
-	qbe_output_line(output, "@element\n %offset =l mul %index, 8\n %slot =l add %storage, %offset\n %item =l loadl %slot\n %item_length_address =l add %item, 8\n %item_length =l loadl %item_length_address\n %room =l sub 9007199254740991, %size\n %item_overflow =w cugtl %item_length, %room\n jnz %item_overflow, @fail, @add_item\n")
-	qbe_output_line(output, "@add_item\n %with_item =l add %size, %item_length\n %first =w ceql %index, 0\n jnz %first, @without_separator, @separator_size\n")
-	qbe_output_line(output, "@separator_size\n %separator_room =l sub 9007199254740991, %with_item\n %separator_overflow =w cugtl %separator_length, %separator_room\n jnz %separator_overflow, @fail, @add_separator\n")
-	qbe_output_line(output, "@add_separator\n %with_separator =l add %with_item, %separator_length\n jmp @measured\n")
-	qbe_output_line(output, "@without_separator\n jmp @measured\n")
-	qbe_output_line(output, "@measured\n %next_size =l phi @without_separator %with_item, @add_separator %with_separator\n %next_index =l add %index, 1\n jmp @measure\n")
-	qbe_output_line(output, "@choose_copy\n %single =w ceql %count, 1\n jnz %single, @single, @multiple\n")
-	qbe_output_line(output, "@single\n %only =l loadl %storage\n ret %only\n")
-	qbe_output_line(output, "@multiple\n %nonempty =w csgtl %count, 1\n %no_separator =w ceql %separator_length, 0\n %can_concatenate =w and %nonempty, %no_separator\n jnz %can_concatenate, @first_fragment, @allocate\n")
-	qbe_output_line(output, "@first_fragment\n %head =l loadl %storage\n %head_length_address =l add %head, 8\n %head_points_address =l add %head, 16\n %head_length =l loadl %head_length_address\n %head_points =l loadl %head_points_address\n %unicode =w cugtl %head_length, %head_points\n jnz %unicode, @concatenate, @allocate\n")
-	qbe_output_line(output, "@concatenate\n %joined =l call $trbn_string_concat_many(l %storage, l %count)\n ret %joined\n")
-	qbe_output_line(output, "@allocate\n %payload =l add %size, 17\n %result =l call $trbn_string_alloc(l %payload)\n %result_length_address =l add %result, 8\n storel %size, %result_length_address\n %data =l add %result, 24\n jmp @copy\n")
-	qbe_output_line(output, "@copy\n %position =l phi @allocate 0, @copied %next_position\n %cursor =l phi @allocate %data, @copied %next_cursor\n %finished =w ceql %position, %count\n jnz %finished, @finish, @copy_start\n")
+	qbe_output_line(output, "@start\n %count_address =l add %array, 8\n %count =l loadl %count_address\n %storage_address =l add %array, 24\n %storage =l loadl %storage_address\n %result =l call $trbn_string_join(l %storage, l %count, l %separator)\n ret %result\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_string_join(l %storage, l %count, l %separator) {\n")
+	qbe_output_line(output, "@start\n %value =l call $trbn_join_fragments(l %storage, l %count, l %separator, w 0)\n ret %value\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_string_join_size(l %storage, l %count, l %separator) {\n@start\n %points =l call $trbn_join_fragments(l %storage, l %count, l %separator, w 1)\n ret %points\n}\n")
+	# Empty and singleton joins have no boundary between fragments.
+	qbe_output_line(output, "data $trbn_join_empty = align 8 { l 0, l 0, l 0, b 0 }\nfunction l $trbn_join_fragments(l %storage, l %count, l %separator, w %size_only) {\n@start\n %empty =w ceql %count, 0\n jnz %empty, @empty, @first\n@empty\n jnz %size_only, @zero_points, @empty_string\n@zero_points\n ret 0\n@empty_string\n ret $trbn_join_empty\n")
+	qbe_output_line(output, "@first\n %head =l loadl %storage\n %head_length_slot =l add %head, 8\n %head_length =l loadl %head_length_slot\n %head_overflow =w cugtl %head_length, 9007199254740991\n jnz %head_overflow, @fail, @head_count\n@head_count\n %head_points_slot =l add %head, 16\n %head_points =l loadl %head_points_slot\n %single =w ceql %count, 1\n jnz %single, @single, @prepare\n@single\n jnz %size_only, @head_size, @head_string\n@head_size\n ret %head_points\n@head_string\n ret %head\n")
+	# Decoding can change at a join only if the following span begins with a
+	# continuation byte. Empty spans have a readable NUL terminator.
+	qbe_output_line(output, "@prepare\n %separator_length_slot =l add %separator, 8\n %separator_length =l loadl %separator_length_slot\n %separator_points_slot =l add %separator, 16\n %separator_points =l loadl %separator_points_slot\n %separator_data =l add %separator, 24\n %separator_byte =w loadub %separator_data\n %separator_prefix =w and %separator_byte, 192\n %separator_continues =w ceqw %separator_prefix, 128\n jmp @measure\n")
+	qbe_output_line(output, "@measure\n %index =l phi @prepare 1, @advance %next\n %size =l phi @prepare %head_length, @advance %next_size\n %points =l phi @prepare %head_points, @advance %next_points\n %item_continues =w phi @prepare 0, @advance %next_continues\n %done =w ceql %index, %count\n jnz %done, @measured, @item\n")
+	# Check item then separator before summing their code-point counts.
+	qbe_output_line(output, "@item\n %offset =l shl %index, 3\n %slot =l add %storage, %offset\n %item =l loadl %slot\n %length_slot =l add %item, 8\n %length =l loadl %length_slot\n %room =l sub 9007199254740991, %size\n %overflow =w cugtl %length, %room\n jnz %overflow, @fail, @separator\n@separator\n %with_item =l add %size, %length\n %separator_room =l sub 9007199254740991, %with_item\n %separator_overflow =w cugtl %separator_length, %separator_room\n jnz %separator_overflow, @fail, @advance\n")
+	qbe_output_line(output, "@advance\n %next_size =l add %with_item, %separator_length\n %points_slot =l add %item, 16\n %item_points =l loadl %points_slot\n %with_points =l add %points, %item_points\n %next_points =l add %with_points, %separator_points\n %item_data =l add %item, 24\n %first_byte =w loadub %item_data\n %prefix =w and %first_byte, 192\n %continues =w ceqw %prefix, 128\n %next_continues =w or %item_continues, %continues\n %next =l add %index, 1\n jmp @measure\n")
+	# If every following fragment and separator is empty, the first String is the result.
+	qbe_output_line(output, "@measured\n %only_head =w ceql %size, %head_length\n jnz %only_head, @single, @check_edges\n")
+	# An ASCII separator end isolates even an invalid leading byte in the next item.
+	qbe_output_line(output, "@check_edges\n %no_separator =w ceql %separator_length, 0\n jnz %separator_continues, @boundary_possible, @item_edges\n@item_edges\n jnz %item_continues, @separator_end, @safe\n@separator_end\n jnz %no_separator, @boundary_possible, @last_byte\n@last_byte\n %last_offset =l sub %separator_length, 1\n %last_address =l add %separator_data, %last_offset\n %last_byte =w loadub %last_address\n %ascii_end =w cultw %last_byte, 128\n jnz %ascii_end, @safe, @boundary_possible\n@boundary_possible\n jmp @allocate\n@safe\n jnz %size_only, @return_points, @allocate\n@return_points\n ret %points\n")
+	qbe_output_line(output, "@allocate\n %decode =w phi @boundary_possible 1, @safe 0\n %payload =l add %size, 17\n %result =l call $trbn_string_alloc(l %payload)\n %result_length_address =l add %result, 8\n storel %size, %result_length_address\n %data =l add %result, 24\n jmp @copy\n")
+	qbe_output_line(output, "@copy\n %position =l phi @allocate 0, @copy_advance %next_position\n %cursor =l phi @allocate %data, @copy_advance %next_cursor\n %finished =w ceql %position, %count\n jnz %finished, @finish, @copy_start\n")
 	qbe_output_line(output, "@copy_start\n %initial =w ceql %position, 0\n %skip_separator =w or %initial, %no_separator\n jnz %skip_separator, @copy_initial, @copy_separator\n")
 	qbe_output_line(output, "@copy_separator\n call $memcpy(l %cursor, l %separator_data, l %separator_length)\n %after_separator =l add %cursor, %separator_length\n jmp @copy_element\n")
 	qbe_output_line(output, "@copy_initial\n jmp @copy_element\n")
 	qbe_output_line(output, "@copy_element\n %target =l phi @copy_initial %cursor, @copy_separator %after_separator\n %item_offset =l mul %position, 8\n %item_slot =l add %storage, %item_offset\n %text =l loadl %item_slot\n %text_length_address =l add %text, 8\n %text_length =l loadl %text_length_address\n %text_data =l add %text, 24\n %single_byte =w ceql %text_length, 1\n jnz %single_byte, @copy_byte, @copy_span")
 	qbe_output_line(output, "\n@copy_byte\n %byte =w loadub %text_data\n storeb %byte, %target\n jmp @copy_advance")
 	qbe_output_line(output, "\n@copy_span\n call $memcpy(l %target, l %text_data, l %text_length)\n jmp @copy_advance")
-	qbe_output_line(output, "\n@copy_advance\n %next_cursor =l add %target, %text_length\n %next_position =l add %position, 1\n jmp @copied\n")
-	qbe_output_line(output, "@copied\n jmp @copy\n")
-	qbe_output_line(output, "@finish\n storeb 0, %cursor\n %points =l call $trbn_utf8_count(l %data, l %size)\n %points_address =l add %result, 16\n storel %points, %points_address\n ret %result\n")
-	qbe_output_line(output, "@fail\n call $trbn_fatal(l $trbn_allocation_error, l 25)\n hlt\n}\n")
+	qbe_output_line(output, "\n@copy_advance\n %next_cursor =l add %target, %text_length\n %next_position =l add %position, 1\n jmp @copy\n")
+	qbe_output_line(output, "@finish\n storeb 0, %cursor\n jnz %decode, @recount, @store\n@recount\n %decoded =l call $trbn_utf8_count(l %data, l %size)\n jnz %size_only, @return_decoded, @store\n@return_decoded\n ret %decoded\n@store\n %total_points =l phi @finish %points, @recount %decoded\n %points_address =l add %result, 16\n storel %total_points, %points_address\n ret %result\n@fail\n call $trbn_fatal(l $trbn_allocation_error, l 25)\n hlt\n}\n")
 end

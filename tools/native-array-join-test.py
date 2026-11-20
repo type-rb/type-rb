@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='native-array-join-') as temporary:
     source.write_text(body + '\ndef main()\n(0...20).each { |_index| exercise() }\nend\n')
     emitted = run([binary, '--internal-driver', 'emit-qbe', source])
     marker = ' %result =l call $trbn_string_alloc(l %payload)'
-    start = emitted.stdout.index('function l $trbn_string_join(')
+    start = emitted.stdout.index('function l $trbn_join_fragments(')
     end = emitted.stdout.index('\n}', start) + 2
     runtime = emitted.stdout[start:end]
     assert runtime.count(marker) == 1
@@ -62,8 +62,7 @@ with tempfile.TemporaryDirectory(prefix='native-array-join-') as temporary:
     assert measured['collections'] >= 300, measured
     assert measured['peak-heap-bytes'] < 4 * 1024 * 1024, measured
 
-    # Empty-separator Unicode joins reuse the concatenation constructor. Force
-    # collection in its allocation path too, including malformed boundaries and
+    # Force collection with empty separators, including malformed boundaries and
     # empty fragments; decoded counts must describe the completed bytes.
     literals = repository / 'compiler/conformance/valid/array-join-literal-storage'
     emitted = run([binary, '--internal-driver', 'emit-qbe', literals.with_suffix('.trb')])
@@ -73,6 +72,23 @@ with tempfile.TemporaryDirectory(prefix='native-array-join-') as temporary:
     result = run([program], stats=True)
     assert result.stdout == literals.with_suffix('.out').read_text(), result
     assert statistics(result)['collections'] > 0
+
+    # Heap-created fragments heal across an empty separator. Run a collection
+    # at the allocating size fallback and verify that it actually executes.
+    source.write_text(r"""def main()
+mut index := 100
+while index < 110
+    first := index.to_s() + "\xc2"
+    last := "\xa2" + (index + 1).to_s()
+    puts([first, last].join("").size())
+    index += 1
+end
+end
+""")
+    emitted = run([binary, '--internal-driver', 'emit-qbe', source]).stdout
+    assert emitted.count(marker) == 1
+    forced = emitted.replace(marker, ' call $putchar(w 33)\n call $trbn_gc_collect(w 0)\n' + marker)
+    assert run([compile_il(forced)]).stdout == '!7\n' * 10
 
     # One-byte and empty fragments must preserve raw bytes with either copy
     # path. Cover every octet, NUL and a long span after a healed UTF-8 seam.
@@ -102,6 +118,68 @@ end
     raw.stderr = raw.stderr.decode()
     assert statistics(raw)['collections'] > 0
 
+    # Cross-check both paths against a decoder independent of the runtime.
+    # Each malformed byte counts separately, including around the separator.
+    fragments = [b'', b'a', b'\0', b'\xc2', b'\xa2', b'\xc2\xa2', b'\xe2',
+                 b'\x82\xac', b'\xf0\x9f', b'\x98\x80', b'\xff', b'/\xc2\xa2/']
+    values = ', '.join('"' + ''.join('\\x%02x' % byte for byte in span) + '"'
+                       for span in fragments)
+    source.write_text('''def joined(a: String, b: String, sep: String): String
+return [a, b].join(sep)
+end
+def count_joined(a: String, b: String, sep: String): Integer
+return [a, b].join(sep).size()
+end
+def main()
+values := [''' + values + ''']
+values.each do |a|
+    values.each do |b|
+        values.each do |sep|
+            puts(joined(a, b, sep).size())
+            puts(count_joined(a, b, sep))
+        end
+    end
+end
+end
+''')
+    program = root / 'counts'
+    run([binary, 'build', '--compile', source, '--outfile', program])
+    expected_counts = [len((a + sep + b).decode('utf-8', 'surrogateescape'))
+                       for a in fragments for b in fragments for sep in fragments]
+    assert list(map(int, run([program]).stdout.splitlines())) == [
+        value for count in expected_counts for value in (count, count)]
+
+    # These joins use the runtime size entry point. Fail if it constructs a
+    # temporary String even when the separator isolates a malformed fragment.
+    source.write_text(r"""def count_only(a: String, b: String, sep: String): Integer
+return [a, b].join(sep).size()
+end
+def main()
+puts(count_only("β", "😀", ""))
+puts(count_only("\xc2", "\xa2", "aβz"))
+end
+""")
+    emitted = run([binary, '--internal-driver', 'emit-qbe', source]).stdout
+    assert 'call $trbn_string_join_size(l %join_fragments' in emitted
+    assert emitted.count(marker) == 1
+    guarded = emitted.replace(marker, ' call $exit(w 42)\n' + marker)
+    assert run([compile_il(guarded)]).stdout == '2\n5\n'
+
+    # Trailing empty fields contribute no bytes. Reuse a large first String
+    # even when its bytes are Unicode, and preserve ordinary empty content.
+    source.write_text('''def join_padded(head: String): String
+return [head, "", ""].join("")
+end
+def main()
+puts(join_padded("雪😀"))
+puts(join_padded(""))
+end
+''')
+    emitted = run([binary, '--internal-driver', 'emit-qbe', source]).stdout
+    assert emitted.count(marker) == 1
+    guarded = emitted.replace(marker, ' call $exit(w 42)\n' + marker)
+    assert run([compile_il(guarded)]).stdout == '雪😀\n\n'
+
     # Bound total copying/allocation without a wall-clock performance assertion.
     source.write_text('''def main()
 mut values: Array<String> := []
@@ -114,15 +192,15 @@ end
     assert result.stdout == '20479\n', result
     assert statistics(result)['allocated-bytes'] < 512 * 1024, result.stderr
 
-    # A reduced test-only capacity exercises both overflow exits before copy.
-    for expression in ('["aaaa", "bbb"].join("")', '["aa", "bb"].join("---")'):
+    # A reduced capacity exercises first-fragment, later-fragment and separator overflow.
+    for expression in ('["1234567"].join("")', '["aaaa", "bbb"].join("")', '["aa", "bb"].join("---")'):
         source.write_text('def main()\nputs(' + expression + ')\nend\n')
         emitted = run([binary, '--internal-driver', 'emit-qbe', source])
-        start = emitted.stdout.index('function l $trbn_string_join(')
+        start = emitted.stdout.index('function l $trbn_join_fragments(')
         end = emitted.stdout.index('\n}', start) + 2
         runtime = emitted.stdout[start:end]
-        assert runtime.count('sub 9007199254740991,') == 2
-        limited = runtime.replace('sub 9007199254740991,', 'sub 6,')
+        assert runtime.count('9007199254740991') == 3
+        limited = runtime.replace('9007199254740991', '6')
         program = compile_il(emitted.stdout[:start] + limited + emitted.stdout[end:])
         failed = run([program], code=2)
         assert failed.stdout == '' and failed.stderr == 'panic: allocation failed\n', failed

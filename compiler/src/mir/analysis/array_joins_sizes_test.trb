@@ -145,17 +145,17 @@ describe("MIR joined String size") do
 		end
 	end
 
-	test("retains heap fragments during the allocating fallback") do
+	test("reads joined size without allocating for clean heap fragments") do
 		mut state := logical_checked_source("def main()\nmut index := 100\nwhile index < 110\nfirst := index.to_s()\nlast := (index + 1).to_s()\nputs([first, first, last].join(\"\").size())\nindex += 1\nend\nend\n")
 		expect(check(state)).to_be_true()
 		output := control_test_output(emit_qbe(state))
 		marker := " %result =l call $trbn_string_alloc(l %payload)"
 		parts := output.split(marker)
 		expect(parts.size()).to_equal(2)
-		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		guarded := parts[0] + "\tcall $exit(w 42)\n" + marker + parts[1]
 		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
 		if qbe != nil
-			case logical_run_qbe(qbe, forced)
+			case logical_run_qbe(qbe, guarded)
 			when Result::Ok(actual)
 				expect(actual).to_equal("9\n9\n9\n9\n9\n9\n9\n9\n9\n9\n")
 			when Result::Err(error)
