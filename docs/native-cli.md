@@ -166,6 +166,23 @@ A discovered configuration selects the project. `--config PATH` explicitly
 selects one. `--mode` may select a standalone mode; it cannot override a
 configured build. `repl --mode trb` can explicitly select a REPL mode.
 
+### SQLite models
+
+Native projects can declare a class derived from the official `Model` and
+configure `packageOptions.trb/orm` with the SQLite adapter, database source and
+committed schema lock. Checking and compilation read the lock offline. A
+compiled application opens its configured SQLite database when it runs a model
+operation.
+
+A model with one primary key and Integer or String columns can use
+`Report.create(title: "draft")`, `Report.find(id)` and `report.delete()`.
+Use the actual column names from the lock. Omitting an optional column lets
+SQLite apply its default. Passing `nil` to a nullable column stores SQL NULL.
+A missing key returns `Ok(nil)`. Deleting a loaded model returns `Ok(true)`
+when it removes a row and `Ok(false)` when the row has already been deleted.
+Models can also use `count()`. These operations use the same pinned SQLite
+bundle as SQLite Jobs.
+
 ### SQLite Jobs
 
 Use `trbn jobs start` from a Native project with `jobs.configuration` and a

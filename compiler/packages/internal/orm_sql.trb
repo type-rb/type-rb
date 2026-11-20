@@ -6,14 +6,87 @@ import trb/std/process
 module OrmSql
 end
 
-def _orm_count(database: String, environment: String, statement: String): Result<Integer, DbError>
-	mut source := database
-	if environment != ""
-		configured := Process.environment(environment)
-		if configured == nil || configured == ""
-			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+def _orm_database(database: String, environment: String): Result<String, DbError>
+	if environment == ""
+		return Result<String, DbError>::Ok(database)
+	end
+	configured := Process.environment(environment)
+	if configured == nil || configured == ""
+		return Result<String, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+	end
+	return Result<String, DbError>::Ok(configured)
+end
+
+def delete_row(database: String, environment: String, statement: String, key: SQLite::Parameter): Result<Boolean, DbError>
+	source := _orm_database(database, environment) catch |error|
+		return Result<Boolean, DbError>::Err(error)
+	end
+	request := SQLite::WriteStatement.new(sql: statement, parameters: [key])
+	case SQLite.execute_writes(source, [request], false, 0)
+	when Result::Ok(changes)
+		return Result<Boolean, DbError>::Ok(changes > 0)
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
-		source = configured
+	end
+	return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database delete failed"))
+end
+
+def insert_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, projection: String, width: Integer): Result<Array<SQLite::Parameter>, DbError>
+	source := _orm_database(database, environment) catch |error|
+		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
+	end
+	mut statement := "INSERT INTO " + table
+	if columns.size() == 0
+		statement += " DEFAULT VALUES"
+	else
+		mut parameters: Array<String> := []
+		columns.each do |_column|
+			parameters.push("?")
+		end
+		statement += " (" + columns.join(", ") + ") VALUES (" + parameters.join(", ") + ")"
+	end
+	statement += " RETURNING " + projection
+	case SQLite.query_one(source, statement, values, _row_shape(width), SQLite::QueryMode::WriteReturning, 0)
+	when Result::Ok(row)
+		if row != nil
+			return Result<Array<SQLite::Parameter>, DbError>::Ok(row)
+		end
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database insert failed"))
+end
+
+def _row_shape(width: Integer): Array<Integer>
+	mut shape: Array<Integer> := []
+	while shape.size() < width
+		shape.push(0)
+	end
+	return shape
+end
+
+def lookup(database: String, environment: String, statement: String, key: SQLite::Parameter, width: Integer): Result<Array<SQLite::Parameter>?, DbError>
+	source := _orm_database(database, environment) catch |error|
+		return Result<Array<SQLite::Parameter>?, DbError>::Err(error)
+	end
+	case SQLite.query_one(source, statement, [key], _row_shape(width), SQLite::QueryMode::ReadOrCreate, 0)
+	when Result::Ok(row)
+		return Result<Array<SQLite::Parameter>?, DbError>::Ok(row)
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
+end
+
+def _orm_count(database: String, environment: String, statement: String): Result<Integer, DbError>
+	source := _orm_database(database, environment) catch |error|
+		return Result<Integer, DbError>::Err(error)
 	end
 	case SQLite.query_one(source, statement, [], [1], SQLite::QueryMode::ReadOrCreate, 0)
 	when Result::Ok(row)
