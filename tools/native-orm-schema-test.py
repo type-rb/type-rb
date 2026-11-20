@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 import subprocess
@@ -27,271 +28,12 @@ def expect_output(binary, root, environment, expected):
 
 def check_model_rows(cli, reference, root, config, environment):
     src = root / "src"
-    (src / "models.trb").write_text("import { Model } from trb/orm\nclass Report < Model\nend\nclass Tag < Model\nend\n")
-    (root / "application.schema.json").write_text(json.dumps({
-        "formatVersion": 1, "adapter": "sqlite", "tables": {
-            "tags": {"columns": {"code": {"type": "String", "primaryKey": True}},
-                     "uniqueConstraints": {"primary:code": {"primary": True, "columns": ["code"]}}},
-            "reports": {
-                "columns": {"id": {"type": "Integer", "primaryKey": True, "generated": True},
-                            "note": {"type": "String", "nullable": True, "hasDefault": True},
-                            "title": {"type": "String"}},
-                "uniqueConstraints": {"primary:id": {"primary": True, "columns": ["id"]}}}}}))
-    (src / "transactions.trb").write_text("""import { Report } from models
-import { Database, DbResult } from trb/orm
-
-def committed(label: String): DbResult<Integer>
-    return Database.transaction() do |tx|
-        reports := Report.using(tx)
-        first := try reports.create(title: label)
-        puts(try Report.count())
-        puts(try reports.count())
-        inner_value := tx.transaction() do |inner|
-            nested := Report.using(inner)
-            _created := try nested.create(title: "discard")
-            _duplicate := try nested.create(title: "discard")
-            1
-        end catch |error|
-            puts(error.message)
-            0
-        end
-        puts(inner_value)
-        puts(try reports.count())
-        nested_count := try tx.transaction() do |inner|
-            row := try Report.using(inner).create(title: "kept")
-            temporary := try Report.using(inner).create(title: "temporary")
-            puts(try temporary.delete())
-            row.id
-        end
-        puts(nested_count)
-        _changed := try first.update(note: "saved")
-        try reports.count()
-    end
-end
-
-def rolled_back(): DbResult<Integer>
-    return Database.transaction() do |tx|
-        scoped := Report.using(tx)
-        _discard := try scoped.create(title: "outer discard")
-        inner := try tx.transaction() do |nested|
-            _created := try Report.using(nested).create(title: "kept")
-            7
-        end
-        inner
-    end
-end
-
-def exercise_transactions()
-    count := committed("root") catch |error|
-        puts(error.message)
-        return
-    end
-    puts(count)
-    observed := rolled_back() catch |error|
-        puts(error.message)
-        0
-    end
-    puts(observed)
-end
-""")
-    source = """import { exercise_transactions } from transactions
-import { Report, Tag } from models
-import { DbErrorKind, DbResult } from trb/orm
-import trb/std/process
-
-def change_report()
-    original := Report.find(1) catch |error|
-        puts(error.message)
-        return
-    end
-    if original == nil
-        return
-    end
-    pending := original.with(title: "ready")
-    changed := original.update(note: "separate edit") catch |error|
-        puts(error.message)
-        return
-    end
-    puts(changed.title)
-    saved := pending.save() catch |error|
-        puts(error.message)
-        return
-    end
-    puts(saved.title)
-    note := saved.note
-    if note != nil
-        puts(note)
-    end
-    again := pending.save() catch |error|
-        puts(error.message)
-        return
-    end
-    puts(again.id)
-    cleared := saved.update(note: nil) catch |error|
-        puts(error.message)
-        return
-    end
-    puts(cleared.note == nil)
-    puts(original.title)
-    case original.update()
-    when DbResult::Err(error)
-        puts(error.message)
-    when DbResult::Ok(_unexpected)
-        puts("unexpected update")
-    end
-end
-
-def save_missing_report()
-    original := Report.find(1) catch |error|
-        puts(error.message)
-        return
-    end
-    if original == nil
-        return
-    end
-    pending := original.with(note: "after deletion")
-    _deleted := original.delete() catch |error|
-        puts(error.message)
-        return
-    end
-    case pending.save()
-    when DbResult::Err(error)
-        case error.kind
-        when DbErrorKind::InvalidData
-            puts("InvalidData")
-        else
-            puts("unexpected")
-        end
-        puts(error.message)
-    when DbResult::Ok(_unexpected)
-        puts("unexpected update")
-    end
-end
-
-def create_reports()
-    first := Report.create(title: "first") catch |error|
-        puts(error.message)
-        return
-    end
-    puts(first.id)
-    puts(first.title)
-    note := first.note
-    if note != nil
-        puts(note)
-    end
-    second := Report.create(note: nil, title: "second", id: 42) catch |error|
-        puts(error.message)
-        return
-    end
-    puts(second.id)
-    puts(second.note == nil)
-    case Report.create(id: 42, title: "duplicate", note: "text")
-    when DbResult::Ok(_unexpected)
-        puts("unexpected insert")
-    when DbResult::Err(error)
-        case error.kind
-        when DbErrorKind::Constraint
-            puts("Constraint")
-        else
-            puts("unexpected error")
-        end
-        puts(error.message)
-    end
-end
-
-def remove_tag()
-    tag := Tag.find("reader's copy") catch |error|
-        puts(error.message)
-        return
-    end
-    if tag == nil
-        puts("missing tag")
-        return
-    end
-    puts(tag.code)
-    first := tag.delete() catch |error|
-        case error.kind
-        when DbErrorKind::Constraint
-            puts("Constraint")
-        else
-            puts("unexpected")
-        end
-        puts(error.message)
-        return
-    end
-    puts(first)
-    again := tag.delete() catch |error|
-        puts(error.message)
-        return
-    end
-    puts(again)
-end
-
-def show(id: Integer)
-    case Report.find(id)
-    when DbResult::Ok(item)
-        if item == nil
-            puts("missing")
-            return
-        end
-        puts(item.id)
-        puts(item.title)
-        note := item.note
-        if note != nil
-            puts(note)
-        end
-    when DbResult::Err(error)
-        case error.kind
-        when DbErrorKind::Connection
-            puts("Connection")
-        when DbErrorKind::InvalidData
-            puts("InvalidData")
-        when DbErrorKind::Query
-            puts("Query")
-        else
-            puts("unexpected")
-        end
-        puts(error.message)
-    end
-end
-
-def main()
-    operation := Process.environment("ORM_TEST_OPERATION")
-    if operation != nil
-        if operation == "transactions"
-            exercise_transactions()
-            return
-        end
-        if operation == "update"
-            change_report()
-            return
-        end
-        if operation == "save_missing"
-            save_missing_report()
-            return
-        end
-        if operation == "insert"
-            create_reports()
-            return
-        end
-        if operation == "delete"
-            remove_tag()
-            return
-        end
-        if operation == "empty"
-            report := Report.new()
-            puts(report.id)
-            puts(report.title)
-            return
-        end
-    end
-    show(1)
-    show(2)
-    show(3)
-end
-"""
+    fixture = Path(__file__).resolve().parents[1] / "fixtures/projects/sqlite-model-operations"
+    for module in (fixture / "src").glob("*.trb"):
+        shutil.copyfile(module, src / module.name)
+    shutil.copyfile(fixture / "application.schema.json", root / "application.schema.json")
+    source = (src / "main.trb").read_text()
     entry = src / "main.trb"
-    entry.write_text(source)
     database = root / "lookup.sqlite"
     environment = dict(environment, DATABASE_URL=str(database))
     environment.pop("ORM_TEST_OPERATION", None)
@@ -320,6 +62,25 @@ end
     for app in binaries:
         expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
+        times = root / (app.name + "-times.sqlite")
+        with sqlite3.connect(times) as connection:
+            connection.execute("CREATE TABLE events(id INTEGER PRIMARY KEY, on_date DATE NOT NULL, at_time TIME NOT NULL,"
+                               " local_at DATETIME NOT NULL, exact_at TIMESTAMPTZ NOT NULL, optional_at DATETIME)")
+        expect_output(app, root, dict(environment, DATABASE_URL=str(times), ORM_TEST_OPERATION="times"),
+                      "true\n2025-03-08\n12:34:56.123456\n2025-03-08T12:34:56.123456\n"
+                      "2025-03-08T03:34:56.123456789Z\n2025-03-10T04:05:06.000007\ntrue\n1\n")
+        with sqlite3.connect(times) as connection:
+            assert connection.execute("SELECT on_date, at_time, local_at, exact_at, optional_at FROM events").fetchone() == (
+                "2025-03-08", "12:34:56.123456", "2025-03-08 12:34:56.123456", "2025-03-08 03:34:56.123456789 +0000 UTC", None)
+        metrics = root / (app.name + "-metrics.sqlite")
+        with sqlite3.connect(metrics) as connection:
+            connection.execute("CREATE TABLE metrics(id INTEGER PRIMARY KEY, passed BOOLEAN DEFAULT 1, rating REAL, payload BLOB)")
+            connection.execute("INSERT INTO metrics VALUES(42, 'True', 4, X'FF0080')")
+        expect_output(app, root, dict(environment, DATABASE_URL=str(metrics), ORM_TEST_OPERATION="metrics"),
+                      "true\ntrue\nfalse\n2.75\n4\n0\n255\ntrue\ntrue\ntrue\n43\n")
+        with sqlite3.connect(metrics) as connection:
+            assert connection.execute("SELECT passed, rating, payload FROM metrics ORDER BY id").fetchall() == [
+                ("True", 4.0, None), (0, 2.75, b"A\x00" + "β".encode())]
         transactions = root / (app.name + "-transactions.sqlite")
         with sqlite3.connect(transactions) as connection:
             connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL UNIQUE, note TEXT)")
@@ -328,6 +89,14 @@ end
         with sqlite3.connect(transactions) as connection:
             assert connection.execute("SELECT id, title, note FROM reports ORDER BY id").fetchall() == [
                 (1, "root", "saved"), (2, "kept", None)]
+        blocked = dict(environment, DATABASE_URL=str(transactions), ORM_TEST_OPERATION="blocked_commit")
+        with sqlite3.connect(transactions) as reader:
+            reader.execute("BEGIN")
+            assert reader.execute("SELECT count(*) FROM reports").fetchone() == (2,)
+            expect_output(app, root, blocked, "database transaction failed to commit\n")
+            reader.rollback()
+            assert reader.execute("SELECT count(*) FROM reports").fetchone() == (2,)
+        expect_output(app, root, blocked, "3\n")
         inserts = root / (app.name + "-creates.sqlite")
         with sqlite3.connect(inserts) as connection:
             connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL, note TEXT DEFAULT 'from database')")
@@ -586,7 +355,7 @@ end
                           "Connection\ndatabase connection failed\n")
         check_model_rows(cli, reference, root, config, environment)
         check_model_worker(cli, reference, root / "worker-project")
-    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, deferred saves, transaction isolation, nested rollback, runtime errors and worker updates passed")
+    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, nine column types, deferred saves, transaction isolation, nested rollback, failed commit cleanup and worker updates passed")
 
 
 if __name__ == "__main__":

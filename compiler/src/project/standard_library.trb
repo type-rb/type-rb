@@ -1,3 +1,4 @@
+import { declare_orm_transaction } from frontend/providers/orm_lookup
 import { native_jobs_sql_source, native_orm_sql_source, native_sqlite_source } from project/official_catalog
 import { standard_source_internal_process, standard_source_jobs_sql, standard_source_jobs_worker, standard_source_orm_sql, standard_source_process, standard_source_sqlite } from state/standard_source_kinds
 import { native_process_source, native_web_timeout_source, pinned_process_source } from project/official_catalog
@@ -640,9 +641,6 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 	if kind == standard_source_web_server()
 		source += web_dispatch_source(state, true)
 	end
-	if kind == official_source_kind("trb/orm")
-		source = source.replace_all("class Transaction\nend", "class Transaction\nreadonly @_orm_lease: OrmSql::Lease?\ndef initialize(lease: OrmSql::Lease? = nil)\n@_orm_lease = lease\nend\nend")
-	end
 	if kind == official_source_kind("trb/web")
 		source += "\nimport { serve as serve_network } from trb/internal/web_server\nmodule Web\ndef self.serve(config: ServerConfig = ServerConfig.new())\nserve_network(config)\nreturn\nend\nend\n"
 	end
@@ -655,7 +653,7 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 		append_web_route_imports(state, owner)
 	end
 	if kind == official_source_kind("trb/orm") && !has_diagnostic(state)
-		# Generated model methods run in this adapter's scope.
+		declare_orm_transaction(state, owner)
 		binding := append_import(state, "trb/internal/orm/sql", "OrmSql", "OrmSql", import_kind_named(), 1)
 		store_integer(state.module_graph.import_used, binding, 1)
 		store_integer(state.module_graph.module_import_counts, owner, load_integer(state.module_graph.module_import_counts, owner) + 1)

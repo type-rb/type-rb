@@ -174,9 +174,12 @@ committed schema lock. Checking and compilation read the lock offline. A
 compiled application opens its configured SQLite database when it runs a model
 operation.
 
-A model with one primary key and Integer or String columns can use
+A model with one primary key can use
 `Report.create(title: "draft")`, `Report.find(id)` and `report.delete()`.
-Use the actual column names from the lock. Omitting an optional column lets
+The lock can declare Integer, String, Boolean, Float, Bytes, Date, TimeOfDay,
+DateTime and Instant columns. Temporal values retain fractional seconds, and
+Instant values round-trip in UTC. Use `create` or `find` to obtain models
+with required temporal columns. Omitting an optional column lets
 SQLite apply its default. Passing `nil` to a nullable column stores SQL NULL.
 A missing key returns `Ok(nil)`. Deleting a loaded model returns `Ok(true)`
 when it removes a row and `Ok(false)` when the row has already been deleted.

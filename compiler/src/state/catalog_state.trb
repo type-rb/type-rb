@@ -24,6 +24,7 @@ end
 # Parsed module and import catalogs. Generic specialization shares source facts
 # but owns its active-module cursor and import-use facts.
 record CompilerModuleGraph
+	orm_model_modules: Array<Integer>
 	web_routes: Array<ProjectWebRoute>
 	web_middlewares: Array<ProjectWebRoute>
 	web_endpoints: Array<ProjectWebEndpoint>
@@ -113,7 +114,7 @@ end
 
 def compiler_module_graph_new(capacity: Integer): CompilerModuleGraph
 	return CompilerModuleGraph.new(
-		web_routes: [], web_middlewares: [], web_endpoints: [],
+		orm_model_modules: [], web_routes: [], web_middlewares: [], web_endpoints: [],
 		module_names: string_storage(capacity),
 		module_files: string_storage(capacity),
 		module_count: [0],
@@ -137,7 +138,7 @@ end
 
 def compiler_module_graph_fork(graph: CompilerModuleGraph, active_module: Array<Integer>): CompilerModuleGraph
 	return CompilerModuleGraph.new(
-		web_routes: graph.web_routes, web_middlewares: graph.web_middlewares, web_endpoints: graph.web_endpoints,
+		orm_model_modules: graph.orm_model_modules, web_routes: graph.web_routes, web_middlewares: graph.web_middlewares, web_endpoints: graph.web_endpoints,
 		module_names: graph.module_names,
 		module_files: graph.module_files,
 		module_count: graph.module_count,

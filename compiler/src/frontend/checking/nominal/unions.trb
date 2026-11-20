@@ -1,3 +1,5 @@
+import { orm_provider_pattern } from frontend/resolution/body_resolution
+import { resolve_type_name } from frontend/resolution/type_resolution
 import { binding_use_pattern } from state/binding_kinds
 import { mir_op_union_extract } from mir/model/instructions
 import { UnionPattern, union_parts } from frontend/types/union_types
@@ -24,8 +26,10 @@ def check_union_patterns(mut state: CompilerState, control: ControlSyntax, selec
 		end
 		mut position := [branch.condition]
 		line := load_integer(state.source_tokens.token_lines, branch.condition)
-		type_name := parse_type(state, position)
-		if type_name != "Integer" && type_name != "Float" && type_name != "Boolean" && type_name != "String"
+		mut type_name := parse_type(state, position)
+		if orm_provider_pattern(state, type_name)
+			type_name = resolve_type_name(state, state.module_graph.active_module[0], type_name, false)
+		elsif type_name != "Integer" && type_name != "Float" && type_name != "Boolean" && type_name != "String"
 			diagnostic(state, "TRBN4004", line, "union type pattern requires a non-nullable scalar type")
 			return false
 		end

@@ -433,14 +433,14 @@
         "tools/native-worker-lifecycle-test.py",
         "tools/native-orm-schema-test.py"
       ],
-      "next": "Extend model operations to additional column types. Qualify immutable release artifacts and the remaining Jobs behavior.",
+      "next": "Qualify immutable release artifacts and the remaining ORM query and Jobs behavior.",
       "requiredBy": [
         "package.jobs",
         "package.orm",
         "0086 M3c",
         "0086 M5"
       ],
-      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. Check and compile models from the schema lock offline, then use bound values at runtime. Check returned rows, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, transaction isolation and nested savepoint rollback against the reference.",
+      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. Check and compile models from the schema lock offline, then use bound values at runtime. Check returned rows, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, binary payloads, portable times, transaction isolation and nested savepoint rollback against the reference.",
       "decision": "retain",
       "pin": "sqlite"
     },

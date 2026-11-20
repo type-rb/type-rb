@@ -19,6 +19,26 @@ record OrmWriteSource
 	scoped_create: String
 end
 
+def orm_time_column(type_name: String): Boolean
+	if type_name == "Date" || type_name == "DateTime" || type_name == "TimeOfDay" || type_name == "Instant"
+		return true
+	end
+	return false
+end
+
+def orm_sql_parameter(type_name: String, value: String): String
+	if orm_time_column(type_name)
+		return "SQLite::Parameter::Text(OrmSql.time_parameter(" + value + ".to_s(), " + web_dispatch_quote(type_name) + "))"
+	elsif type_name == "Boolean"
+		return "SQLite::Parameter::Integer(" + value + " ? 1 : 0)"
+	elsif type_name == "Bytes"
+		return "SQLite::Parameter::Blob(" + value + ")"
+	elsif type_name == "String"
+		return "SQLite::Parameter::Text(" + value + ")"
+	end
+	return "SQLite::Parameter::" + type_name + "(" + value + ")"
+end
+
 # A private omitted value keeps an explicitly supplied SQL NULL distinct from
 # an omitted column, for which SQLite evaluates the column's declared default.
 def orm_write_arguments(table: OrmTable, updating: Boolean): OrmWriteArguments
@@ -38,10 +58,6 @@ def orm_write_arguments(table: OrmTable, updating: Boolean): OrmWriteArguments
 			return OrmWriteArguments.new(valid: false, named: "", parameters: "", forwarding: "", setup: "")
 		end
 		slot := "v" + integer_string(index)
-		mut kind := "Text"
-		if col.type_name == "Integer"
-			kind = "Integer"
-		end
 		mut signature := col.type_name
 		add_column := "columns.push(" + web_dispatch_quote("\"" + col.name + "\"") + ")\n"
 		if updating || col.generated || col.has_default || col.nullable
@@ -50,13 +66,13 @@ def orm_write_arguments(table: OrmTable, updating: Boolean): OrmWriteArguments
 				signature += "?"
 				setup += "if " + slot + " == nil\n" + add_column + "values.push(SQLite::Parameter::Null)\nelse\n"
 			end
-			setup += "case " + slot + "\nwhen " + col.type_name + "(value)\n" + add_column + "values.push(SQLite::Parameter::" + kind + "(value))\nelse\nend\n"
+			setup += "case " + slot + "\nwhen " + col.type_name + "(value)\n" + add_column + "values.push(" + orm_sql_parameter(col.type_name, "value") + ")\nelse\nend\n"
 			if col.nullable
 				setup += "end\n"
 			end
 			optional.push(col.name + ": " + signature + " = OrmMissing.new()")
 		else
-			setup += add_column + "values.push(SQLite::Parameter::" + kind + "(" + slot + "))\n"
+			setup += add_column + "values.push(" + orm_sql_parameter(col.type_name, slot) + ")\n"
 			required.push(col.name + ": " + signature)
 		end
 		parameters.push(slot + ": " + signature)
@@ -78,7 +94,14 @@ def orm_write_source(table: OrmTable, connection: String, projection: String, ke
 		return OrmWriteSource.new(declarations: "", create_method: "", with_method: "", update_method: "", scoped_create: "")
 	end
 	result := "Result<OrmModelType, DbError>"
-	mut declarations := "record OrmMissing\nend\nalias OrmOptionalInteger = Integer | OrmMissing\nalias OrmOptionalString = String | OrmMissing\n"
+	mut declarations := "record OrmMissing\nend\n"
+	mut aliases: Hash<String, Integer> := {}
+	table.columns.each do |column|
+		if !aliases.key?(column.type_name)
+			aliases[column.type_name] = 1
+			declarations += "alias OrmOptional" + column.type_name + " = " + column.type_name + " | OrmMissing\n"
+		end
+	end
 	table_argument := web_dispatch_quote("\"" + table.name + "\"")
 	returning := web_dispatch_quote(projection) + ", " + integer_string(table.columns.size())
 	declarations += "def orm_insert(scope: Integer, " + insert.parameters + "): " + result + "\n" + insert.setup
