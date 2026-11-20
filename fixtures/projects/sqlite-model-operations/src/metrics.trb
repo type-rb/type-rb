@@ -1,0 +1,28 @@
+import { Metric } from models
+import { DbResult } from trb/orm
+
+def exercise_metrics(): DbResult<Integer>
+	created := try Metric.create(rating: 1.5)
+	puts(created.passed)
+	puts(created.payload == nil)
+	saved := try created.with(passed: false, rating: 2.75, payload: "A\x00β".to_bytes()).save()
+	puts(saved.passed)
+	puts(saved.rating)
+	value := saved.payload
+	if value != nil
+		puts(value.size())
+		puts(value.at(1))
+	end
+	seeded := try Metric.find(42)
+	if seeded != nil
+		bytes := seeded.payload
+		if bytes != nil
+			puts(bytes.at(0))
+		end
+		puts(seeded.rating > 3.0)
+		puts(seeded.passed)
+		cleared := try seeded.update(payload: nil)
+		puts(cleared.payload == nil)
+	end
+	return DbResult<Integer>::Ok(created.id)
+end

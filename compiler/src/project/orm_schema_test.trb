@@ -1,0 +1,28 @@
+import { orm_sqlite_schema } from project/orm_schema
+import { describe, expect, test } from trb/std/test
+
+def orm_schema_fixture(table: String): String
+	return "{\"formatVersion\":1,\"adapter\":\"sqlite\",\"tables\":{\"items\":" + table + "}}"
+end
+
+describe("SQLite ORM schema locks") do
+	test("reads ordered columns and persistence metadata") do
+		schema := orm_sqlite_schema(orm_schema_fixture("{\"columns\":{\"name\":{\"type\":\"String\",\"nullable\":true},\"id\":{\"type\":\"Integer\",\"primaryKey\":true,\"generated\":true,\"hasDefault\":true}},\"uniqueConstraints\":{\"primary:id\":{\"primary\":true,\"columns\":[\"id\"]}}}"))
+		expect(schema.error).to_equal("")
+		expect(schema.tables[0].columns[0].name).to_equal("id")
+		expect(schema.tables[0].columns[0].generated).to_be_true()
+		expect(schema.tables[0].columns[0].primary_key).to_be_true()
+		expect(schema.tables[0].columns[0].has_default).to_be_true()
+		expect(schema.tables[0].columns[1].nullable).to_be_true()
+	end
+
+	test("rejects invalid column flags, constraints and foreign targets") do
+		column := "\"columns\":{\"id\":{\"type\":\"Integer\"}}"
+		["{}", "{\"columns\":{\"id\":{\"type\":\"Blob\"}}}", "{\"columns\":{\"id\":{\"type\":\"Integer\",\"nullable\":1}}}", "{" + column + ",\"uniqueConstraints\":{\"primary:id\":{\"columns\":[\"id\"]}}}", "{" + column + ",\"foreignKeys\":{\"id->missing.id\":{\"column\":\"id\",\"referencedTable\":\"missing\",\"referencedColumn\":\"id\"}}}"].each do |table|
+			expect(orm_sqlite_schema(orm_schema_fixture(table)).error.empty?()).to_be_false()
+		end
+		["{}", "", "[]", "{\"formatVersion\":2,\"adapter\":\"sqlite\",\"tables\":{}}"].each do |source|
+			expect(orm_sqlite_schema(source).error.empty?()).to_be_false()
+		end
+	end
+end

@@ -166,6 +166,48 @@ A discovered configuration selects the project. `--config PATH` explicitly
 selects one. `--mode` may select a standalone mode; it cannot override a
 configured build. `repl --mode trb` can explicitly select a REPL mode.
 
+### SQLite models
+
+Native projects can declare a class derived from the official `Model` and
+configure `packageOptions.trb/orm` with the SQLite adapter, database source and
+committed schema lock. Checking and compilation read the lock offline. A
+compiled application opens its configured SQLite database when it runs a model
+operation.
+
+A model with one primary key can use
+`Report.create(title: "draft")`, `Report.find(id)` and `report.delete()`.
+The lock can declare Integer, String, Boolean, Float, Bytes, Date, TimeOfDay,
+DateTime and Instant columns. Temporal values retain fractional seconds, and
+Instant values round-trip in UTC. Use `create` or `find` to obtain models
+with required temporal columns. Omitting an optional column lets
+SQLite apply its default. Passing `nil` to a nullable column stores SQL NULL.
+A missing key returns `Ok(nil)`. Deleting a loaded model returns `Ok(true)`
+when it removes a row and `Ok(false)` when the row has already been deleted.
+Use `report.update(title: "ready")` to write immediately, or prepare changes
+with `report.with(title: "ready")` and call `save()` later. Each update writes
+only the supplied columns and returns the refreshed model. Saving changes
+after the target row has been deleted returns an `InvalidData` error.
+Models can also use `count()`. These operations use the same pinned SQLite
+bundle as SQLite Jobs.
+
+Use `Model.using(tx)` inside a transaction to keep operations on its
+connection. A successful block commits its final value. A propagated database
+error rolls back before the caller's `catch` runs.
+
+```trb
+def publish(title: String): DbResult<Integer>
+    return Database.transaction() do |tx|
+        reports := Report.using(tx)
+        report := try reports.create(title: title)
+        report.id
+    end
+end
+```
+
+A nested `tx.transaction() do |inner| ... end` uses a savepoint. Catching an
+inner failure lets the outer transaction continue with its earlier changes.
+Unscoped model calls use their own connection.
+
 ### SQLite Jobs
 
 Use `trbn jobs start` from a Native project with `jobs.configuration` and a

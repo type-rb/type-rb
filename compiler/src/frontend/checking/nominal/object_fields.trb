@@ -1,3 +1,4 @@
+import { standard_source_orm_sql } from state/standard_source_kinds
 import { concurrent_active, concurrent_capture, concurrent_mutation, concurrent_value } from frontend/checking/body/concurrency
 import { checked_category_value } from frontend/types/value_categories
 import { mir_state_function_slot } from state/local_slots
@@ -10,7 +11,7 @@ import { mir_control_active, mir_control_prepare } from mir/build/control
 import { find_object_type, object_field_index, object_initializer_owner } from frontend/types/object_types
 import { CompilerState, diagnostic } from state/state
 import { CheckedLocals, local_find } from state/local_state
-import { load_integer, load_string } from support/storage
+import { load_integer, load_string, sparse_integer_at } from support/storage
 import { binary_operator_id } from frontend/syntax/syntax_forms
 import { token_is } from frontend/syntax/syntax_tokens
 
@@ -28,7 +29,7 @@ def checked_object_field(mut state: CompilerState, mut locals: CheckedLocals, re
 		if object_initializer_owner(state, locals.mir_state[mir_state_function_slot()]) == owner
 			readonly = false
 		end
-	elsif row.name.size() > 1 && row.name[1] == "_"
+	elsif row.name.size() > 1 && row.name[1] == "_" && !(row.name == "@_orm_lease" && sparse_integer_at(state.standard_modules, state.module_graph.active_module[0]) == standard_source_orm_sql())
 		diagnostic(state, "TRBN4004", row.line, "private class field cannot be accessed externally")
 	end
 	assignment := token_is(state, next_token, "=")

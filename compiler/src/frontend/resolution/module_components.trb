@@ -1,4 +1,4 @@
-import { standard_source_file, standard_source_filesystem_host, standard_source_internal_process, standard_source_jobs_sql, standard_source_process, standard_source_web_server } from state/standard_source_kinds
+import { standard_source_file, standard_source_filesystem_host, standard_source_internal_process, standard_source_jobs_sql, standard_source_orm_sql, standard_source_process, standard_source_web_server } from state/standard_source_kinds
 import { official_source_kind } from project/official_catalog
 import { standard_source_base64, standard_source_hex, standard_source_internal_base64, standard_source_internal_hex, standard_source_internal_json, standard_source_internal_url, standard_source_json, standard_source_jsonc, standard_source_time, standard_source_time_host, standard_source_url } from state/standard_source_kinds
 import { CompilerState, diagnostic } from state/state
@@ -129,11 +129,15 @@ def compilation_unit_owner(state: CompilerState, source: Integer, owners: Array<
 	if owned == standard_source_process() || owned == standard_source_internal_process()
 		process_service = true
 	end
+	mut orm_service := false
+	if owned == official_source_kind("trb/orm") || owned == standard_source_orm_sql()
+		orm_service = true
+	end
 	mut jobs_sql_service := false
 	if owned == official_source_kind("trb/jobs/sql") || owned == standard_source_jobs_sql()
 		jobs_sql_service = true
 	end
-	if owned == standard_source_hex() || owned == standard_source_internal_hex() || owned == standard_source_base64() || owned == standard_source_internal_base64() || owned == standard_source_url() || owned == standard_source_internal_url() || owned == standard_source_json() || owned == standard_source_jsonc() || owned == standard_source_internal_json() || time_service || file_service || process_service || jobs_sql_service
+	if owned == standard_source_hex() || owned == standard_source_internal_hex() || owned == standard_source_base64() || owned == standard_source_internal_base64() || owned == standard_source_url() || owned == standard_source_internal_url() || owned == standard_source_json() || owned == standard_source_jsonc() || owned == standard_source_internal_json() || time_service || file_service || process_service || jobs_sql_service || orm_service
 		mut owner := owners.size() + state.module_graph.module_count[0] + 1
 		mut index := 0
 		while index < owners.size()
@@ -156,6 +160,8 @@ def compilation_unit_owner(state: CompilerState, source: Integer, owners: Array<
 			owner += 6
 		elsif jobs_sql_service
 			owner += 7
+		elsif orm_service
+			owner += 8
 		end
 		return owner
 	end

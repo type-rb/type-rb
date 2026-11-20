@@ -1,4 +1,5 @@
 import { concurrent_mutation, concurrent_value } from frontend/checking/body/concurrency
+import { check_orm_transaction } from frontend/checking/body/orm_transactions
 import { check_file_acquisition } from frontend/checking/body/file_acquisition
 import { scoped_resource_name } from frontend/types/resource_types
 import { nominal_application_end } from frontend/syntax/generic_syntax
@@ -41,7 +42,7 @@ import { mir_checked_string_operation } from mir/lowering/strings
 import { mir_control_branch, mir_control_enter, mir_control_jump } from mir/build/control
 import { binary_operator_id, parse_argument_label, syntax_iteration_suffix } from frontend/syntax/syntax_forms
 import { array_element_type, find_field, find_record_type, resolve_type_name, type_display } from frontend/resolution/type_resolution
-import { CompilerState, has_diagnostic } from state/state
+import { CompilerState, find_module, has_diagnostic } from state/state
 import { CheckedLocals } from state/local_state
 import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
 import { check_expression } from frontend/checking/body/expressions
@@ -487,6 +488,16 @@ def check_object_member(mut state: CompilerState, mut position: Array<Integer>, 
 		return type_diagnostic(state, line, "unknown class field or missing method call")
 	end
 	class_member := receiver.category == checked_category_object()
+	if member == "transaction" && definition.source_id == find_module(state, "trb/orm/index") && ((class_member && definition.name == "Database") || (!class_member && definition.name == "Transaction"))
+		if method_arguments.size() > 1
+			return type_diagnostic(state, line, "transaction accepts one result type argument")
+		end
+		mut declared := ""
+		if method_arguments.size() == 1
+			declared = method_arguments[0]
+		end
+		return check_orm_transaction(state, position, locals, receiver, class_member, declared)
+	end
 	if class_member && member == "open" && scoped_resource_name(state, receiver.type_name) == "File"
 		if method_arguments.size() > 1
 			return type_diagnostic(state, line, "File.open accepts one result type argument")

@@ -53,23 +53,36 @@ end
 # The resource parameter comes from a resolved acquisition owner. This routine
 # never accepts a user-supplied callable signature or produces a closure value.
 def analyze_file_body(mut state: CompilerState, mut parent: CheckedLocals, syntax: CallBlockSyntax, resource_type: String, declared: String): Integer
+	return analyze_scoped_body(state, parent, syntax, resource_type, declared, false)
+end
+
+def analyze_scoped_body(mut state: CompilerState, mut parent: CheckedLocals, syntax: CallBlockSyntax, resource_type: String, declared: String, transaction: Boolean): Integer
 	line := load_integer(state.source_tokens.token_lines, syntax.origin)
-	if scoped_resource_name(state, resource_type) != "File" || syntax.parameters.size() != 1
-		diagnostic(state, "TRBN4004", line, "File.open requires one immutable File block parameter")
+	mut label := "File.open"
+	mut error_name := "FileSystemError"
+	mut parameter_error := "File.open requires one immutable File block parameter"
+	if transaction
+		label = "transaction"
+		error_name = "DbError"
+		parameter_error = "transaction requires one immutable Transaction block parameter"
+	end
+	if (!transaction && scoped_resource_name(state, resource_type) != "File") || syntax.parameters.size() != 1
+		diagnostic(state, "TRBN4004", line, parameter_error)
 		return -1
 	end
 	# This provisional success type is used only to check try's error channel.
 	# The completed body must still yield an explicit value; Unit is not inserted.
 	unit_source := load_standard_source(state, standard_source_unit(), 1)
 	unit := record_type(find_record_in_module(state, unit_source, "Unit"))
-	boundary := builtin_result_type(state, unit, "FileSystemError")
+	boundary := builtin_result_type(state, unit, error_name)
 	mut locals := captured_body_locals(state, parent)
 	locals.value_block[0] = parent.value_block[0]
-	locals.file_body[0] = true
+	locals.file_body[0] = !transaction
+	locals.transaction_body[0] = transaction
 	locals.lambda_result.push(boundary)
 	parameter := syntax.parameters[0]
 	if parameter.mutable != 0 || parameter.type_name != ""
-		diagnostic(state, "TRBN4004", line, "File.open requires one immutable File block parameter")
+		diagnostic(state, "TRBN4004", line, parameter_error)
 		return -1
 	end
 	if local_add(state, locals, parameter.name, resource_type, 0, load_integer(state.source_tokens.token_lines, parameter.origin))
@@ -93,11 +106,11 @@ def analyze_file_body(mut state: CompilerState, mut parent: CheckedLocals, synta
 		binding_scope_check(state, locals, locals.capture_parents.size())
 		if !has_diagnostic(state)
 			if position[0] != syntax.body_finish
-				diagnostic(state, "TRBN4004", line, "checker did not consume the complete File block")
+				diagnostic(state, "TRBN4004", line, "checker did not consume the complete " + label + " block")
 			elsif contained_scoped_resource(state, value.type_name) != ""
-				diagnostic(state, "TRBN4004", line, "scoped resource cannot be yielded from a File block")
+				diagnostic(state, "TRBN4004", line, "scoped resource cannot be yielded from a " + label + " block")
 			elsif value.type_name == "Void" || !file_body_has_result(state, syntax)
-				diagnostic(state, "TRBN4004", line, "File.open block must end with a result expression")
+				diagnostic(state, "TRBN4004", line, label + " block must end with a result expression")
 			else
 				yielded = value.type_name
 				if declared != ""
@@ -111,12 +124,16 @@ def analyze_file_body(mut state: CompilerState, mut parent: CheckedLocals, synta
 	if has_diagnostic(state)
 		return -1
 	end
-	captures := lambda_captures(state, parent, locals, syntax.origin, true)
-	result_type := builtin_result_type(state, yielded, "FileSystemError")
+	captures := lambda_captures(state, parent, locals, syntax.origin, !transaction)
+	result_type := builtin_result_type(state, yielded, error_name)
 	if has_diagnostic(state)
 		return -1
 	end
-	function := declare_captured_body(state, "$file_body", syntax.origin, syntax.body_start, syntax.body_finish, body, captures, syntax.parameters, [resource_type], result_type)
+	mut name := "$file_body"
+	if transaction
+		name = "$transaction_body"
+	end
+	function := declare_captured_body(state, name, syntax.origin, syntax.body_start, syntax.body_finish, body, captures, syntax.parameters, [resource_type], result_type)
 	checked := CheckedFileBody.new(origin: syntax.origin, resource_type: resource_type, result_type: result_type, yield_type: yielded, body: body, inherited_count: locals.capture_parents.size(), function: [function], captures: captures)
 	state.callables.file_bodies.push(checked)
 	state.callables.checked[0].file_bodies.push(checked)
@@ -130,7 +147,8 @@ def file_body_bind_captures(mut state: CompilerState, mut locals: CheckedLocals,
 		return 0
 	end
 	body := state.callables.file_bodies[encoded - 1]
-	locals.file_body[0] = true
+	locals.file_body[0] = scoped_resource_name(state, body.resource_type) == "File"
+	locals.transaction_body[0] = !locals.file_body[0]
 	return bind_captured_body(state, locals, function, body.inherited_count, body.captures, body.result_type)
 end
 

@@ -1,6 +1,12 @@
 import trb/std/result
 
 module SQLite
+	enum QueryMode
+		ReadOnly
+		WriteReturning
+		ReadOrCreate
+	end
+
 	enum Parameter
 		Null
 		Integer(value: Integer)
@@ -45,6 +51,9 @@ end
 def worker_log(message: String): Integer
 end
 
+def transaction(operation: Integer, source: String, scope: Integer): Integer
+end
+
 def query(
 		source: String,
 		statement: String,
@@ -52,12 +61,13 @@ def query(
 		words: Array<Integer>,
 		reals: Array<Float>,
 		buffers: Array<Bytes>,
-		write: Boolean,
+		mode: Integer,
 		busy_milliseconds: Integer,
 		mut row_kinds: Array<Integer>,
 		mut row_words: Array<Integer>,
 		mut row_reals: Array<Float>,
 		mut row_buffers: Array<Bytes>,
+		scope: Integer,
 	): Integer
 end
 
@@ -129,8 +139,9 @@ def query_one(
 		statement: String,
 		parameters: Array<SQLite::Parameter>,
 		shape: Array<Integer>,
-		write: Boolean,
+		mode: SQLite::QueryMode,
 		busy_milliseconds: Integer,
+		scope: Integer = 0,
 	): Result<Array<SQLite::Parameter>?, SQLite::Error>
 	width := shape.size()
 	if width <= 0 || width > 32767
@@ -154,7 +165,15 @@ def query_one(
 		row_buffers.push(empty)
 		index += 1
 	end
-	status := query(source, statement, kinds, words, reals, buffers, write, busy_milliseconds, row_kinds, row_words, row_reals, row_buffers)
+	mut open_mode := 0
+	case mode
+	when SQLite::QueryMode::ReadOnly
+	when SQLite::QueryMode::WriteReturning
+		open_mode = 1
+	when SQLite::QueryMode::ReadOrCreate
+		open_mode = 2
+	end
+	status := query(source, statement, kinds, words, reals, buffers, open_mode, busy_milliseconds, row_kinds, row_words, row_reals, row_buffers, scope)
 	if status == 101
 		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(nil)
 	elsif status != 0

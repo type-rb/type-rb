@@ -1,0 +1,108 @@
+{
+  "formatVersion": 1,
+  "adapter": "sqlite",
+  "tables": {
+    "events": {
+      "columns": {
+        "id": {
+          "type": "Integer",
+          "primaryKey": true,
+          "generated": true
+        },
+        "on_date": {
+          "type": "Date"
+        },
+        "at_time": {
+          "type": "TimeOfDay"
+        },
+        "local_at": {
+          "type": "DateTime"
+        },
+        "exact_at": {
+          "type": "Instant"
+        },
+        "optional_at": {
+          "type": "DateTime",
+          "nullable": true
+        }
+      },
+      "uniqueConstraints": {
+        "primary:id": {
+          "primary": true,
+          "columns": [
+            "id"
+          ]
+        }
+      }
+    },
+    "metrics": {
+      "columns": {
+        "id": {
+          "type": "Integer",
+          "primaryKey": true,
+          "generated": true
+        },
+        "passed": {
+          "type": "Boolean",
+          "hasDefault": true
+        },
+        "rating": {
+          "type": "Float"
+        },
+        "payload": {
+          "type": "Bytes",
+          "nullable": true
+        }
+      },
+      "uniqueConstraints": {
+        "primary:id": {
+          "primary": true,
+          "columns": [
+            "id"
+          ]
+        }
+      }
+    },
+    "tags": {
+      "columns": {
+        "code": {
+          "type": "String",
+          "primaryKey": true
+        }
+      },
+      "uniqueConstraints": {
+        "primary:code": {
+          "primary": true,
+          "columns": [
+            "code"
+          ]
+        }
+      }
+    },
+    "reports": {
+      "columns": {
+        "id": {
+          "type": "Integer",
+          "primaryKey": true,
+          "generated": true
+        },
+        "note": {
+          "type": "String",
+          "nullable": true,
+          "hasDefault": true
+        },
+        "title": {
+          "type": "String"
+        }
+      },
+      "uniqueConstraints": {
+        "primary:id": {
+          "primary": true,
+          "columns": [
+            "id"
+          ]
+        }
+      }
+    }
+  }
+}

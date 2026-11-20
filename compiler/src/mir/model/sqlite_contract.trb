@@ -3,7 +3,7 @@ def sqlite_adapter_start(): Integer
 end
 
 def sqlite_names(): Array<String>
-	return ["write", "error_message", "query", "worker_control", "worker_log"]
+	return ["write", "error_message", "query", "worker_control", "worker_log", "transaction"]
 end
 
 def sqlite_kind(adapter: Integer): Integer
@@ -17,11 +17,13 @@ def sqlite_parameter_names(kind: Integer): Array<String>
 	if kind == 0
 		return ["source", "statements", "offsets", "kinds", "words", "reals", "buffers", "transactional", "busy_milliseconds", "changes"]
 	elsif kind == 2
-		return ["source", "statement", "kinds", "words", "reals", "buffers", "write", "busy_milliseconds", "row_kinds", "row_words", "row_reals", "row_buffers"]
+		return ["source", "statement", "kinds", "words", "reals", "buffers", "mode", "busy_milliseconds", "row_kinds", "row_words", "row_reals", "row_buffers", "scope"]
 	elsif kind == 3
 		return ["operation", "value"]
 	elsif kind == 4
 		return ["message"]
+	elsif kind == 5
+		return ["operation", "source", "scope"]
 	end
 	return ["status"]
 end
@@ -30,17 +32,19 @@ def sqlite_parameters(kind: Integer): Array<String>
 	if kind == 0
 		return ["String", "Array<String>", "Array<Integer>", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>", "Boolean", "Integer", "Array<Integer>"]
 	elsif kind == 2
-		return ["String", "String", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>", "Boolean", "Integer", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>"]
+		return ["String", "String", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>", "Integer", "Integer", "Array<Integer>", "Array<Integer>", "Array<Float>", "Array<Bytes>", "Integer"]
 	elsif kind == 3
 		return ["Integer", "Integer"]
 	elsif kind == 4
 		return ["String"]
+	elsif kind == 5
+		return ["Integer", "String", "Integer"]
 	end
 	return ["Integer"]
 end
 
 def sqlite_mutable(kind: Integer, index: Integer): Integer
-	if (kind == 0 && index == 9) || (kind == 2 && index >= 8)
+	if (kind == 0 && index == 9) || (kind == 2 && index >= 8 && index < 12)
 		return 1
 	end
 	return 0

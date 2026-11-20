@@ -49,6 +49,7 @@ record ProjectConfig
 	out_dir: String
 	copy_files: Boolean
 	jobs_configuration: String
+	orm_options: String
 	package_management: String
 	go_config: ProjectGoConfig
 	packages: Array<ProjectPackageRequirement>
@@ -256,6 +257,7 @@ def parse_project_database(
 		mut line: Array<Integer>,
 		mut error: Array<String>,
 		mut error_line: Array<Integer>,
+		orm: Boolean,
 	): ProjectDatabaseSection
 	mut adapter := ""
 	mut schema := ""
@@ -272,9 +274,9 @@ def parse_project_database(
 		if !done[0]
 			if key == "adapter"
 				adapter = project_json_string(source, position, line, error, error_line)
-			elsif key == "schema"
+			elsif !orm && key == "schema"
 				schema = project_json_string(source, position, line, error, error_line)
-			elsif key == "lock"
+			elsif(!orm && key == "lock") || (orm && key == "schemaLock")
 				lock = project_json_string(source, position, line, error, error_line)
 			elsif key == "database"
 				if project_json_literal_at(source, position[0], "null")
@@ -299,8 +301,11 @@ def parse_project_database(
 							project_json_object_after_value(source, position, line, error, error_line, "db.database")
 						end
 					end
+					if orm && project_config_blank(environment)
+						project_json_set_error(error, error_line, "database.environment is required", key_line[0])
+					end
 				end
-			elsif key == "sqldef"
+			elsif !orm && key == "sqldef"
 				project_json_object_open(source, position, line, error, error_line)
 				mut sqldef_seen: Array<String> := []
 				mut sqldef_done := [false]
@@ -643,6 +648,7 @@ def parse_project_config(source: String): ProjectConfig
 	mut ruby_loader := ""
 	mut typescript_runtime := ""
 	mut database_present := false
+	mut orm_options := ""
 	mut database := ProjectDatabaseSection.new(adapter: "", schema: "", lock: "", source_present: false, value: "", environment: "")
 	mut jobs_present := false
 	mut jobs_configuration := ""
@@ -688,9 +694,17 @@ def parse_project_config(source: String): ProjectConfig
 				mut option_done := [false]
 				mut option_key_line := [0]
 				while !option_done[0]
-					project_json_object_key(source, position, line, error, error_line, option_seen, "packageOptions", false, option_done, option_key_line)
+					option := project_json_object_key(source, position, line, error, error_line, option_seen, "packageOptions", false, option_done, option_key_line)
 					if !option_done[0]
+						mut start := position[0]
 						project_json_skip_value(source, position, line, error, error_line)
+						if option == "trb/orm"
+							orm_options = ""
+							while start < position[0]
+								orm_options += source[start]
+								start += 1
+							end
+						end
 						project_json_object_after_value(source, position, line, error, error_line, "packageOptions")
 					end
 				end
@@ -704,7 +718,7 @@ def parse_project_config(source: String): ProjectConfig
 				typescript_runtime = typescript[2]
 			elsif key == "db"
 				database_present = true
-				database = parse_project_database(source, position, line, error, error_line)
+				database = parse_project_database(source, position, line, error, error_line, false)
 			elsif key == "jobs"
 				jobs_present = true
 				jobs := parse_project_string_section(source, position, line, error, error_line, "jobs", ["configuration"], "")
@@ -860,6 +874,7 @@ def parse_project_config(source: String): ProjectConfig
 		out_dir: out_dir,
 		copy_files: copy_files,
 		jobs_configuration: jobs_configuration,
+		orm_options: orm_options,
 		package_management: package_management,
 		go_config: go_config,
 		packages: packages,

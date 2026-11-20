@@ -114,6 +114,19 @@ def is_typed_local_declaration(state: CompilerState, index: Integer): Boolean
 	return false
 end
 
+# Optional model writes use an internal omitted-value alternative. Only the
+# generated model modules may unpack their non-scalar column alternatives.
+def orm_provider_pattern(state: CompilerState, type_name: String): Boolean
+	if type_name == "Bytes" || type_name == "Date" || type_name == "TimeOfDay" || type_name == "DateTime" || type_name == "Instant"
+		state.module_graph.orm_model_modules.each do |owner|
+			if owner == state.module_graph.active_module[0]
+				return true
+			end
+		end
+	end
+	return false
+end
+
 def resolve_body_names(mut state: CompilerState, body_start: Integer, body_finish: Integer, mut locals: ResolutionLocals): Boolean
 	module_index := state.module_graph.active_module[0]
 	if !resolve_lambda_headers(state, body_start, body_finish)
@@ -155,7 +168,7 @@ def resolve_body_names(mut state: CompilerState, body_start: Integer, body_finis
 				if branch.condition >= 0
 					pattern_name = load_string(state.source_tokens.token_texts, branch.condition)
 				end
-				if branch.condition >= 0 && (pattern_name == "Integer" || pattern_name == "Float" || pattern_name == "Boolean" || pattern_name == "String") && token_is(state, branch.condition + 1, "(")
+				if branch.condition >= 0 && (pattern_name == "Integer" || pattern_name == "Float" || pattern_name == "Boolean" || pattern_name == "String" || orm_provider_pattern(state, pattern_name)) && token_is(state, branch.condition + 1, "(")
 					type_patterns[integer_string(branch.condition)] = branch.condition_finish
 					mut binding := branch.condition + 2
 					while binding < branch.condition_finish

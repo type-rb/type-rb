@@ -401,5 +401,12 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["backend/qbe/runtime/sqlite_link", "\\\"TRBN_SQLITE_LIB_DIR\\\"", "\\\"TRBN_SQLITE_LIB_DIR~\\\""],
 		["backend/qbe/runtime/sqlite_query", "%same_width =w ceqw %actual, %columns", "%same_width =w cnew %actual, %columns"],
 		["frontend/providers/jobs_wrappers", "\"Job\"", "\"Job~\""],
+		["frontend/providers/orm_models", "\"ies\"", "\"ies~\""],
+		["project/orm_schema", "\" must be a boolean\"", "\" must be a boolean~\""],
+		["support/unicode_lower_data", "0000c00000e00000c10000e1", "0000c00000e10000c10000e1"],
+		["frontend/providers/orm_lookup", "\"Result<OrmModelType?, DbError>\"", "\"Result<OrmModelType?, DbError>~\""],
+		["frontend/providers/orm_writes", "\"try\"", "\"try~\""],
+		["backend/qbe/runtime/sqlite_transactions", "\\\"SAVEPOINT trbn_orm_nested\\\"", "\\\"SAVEPOINT trbn_orm_nested~\\\""],
+		["frontend/checking/body/orm_transactions", "\"transaction requires a structured block\"", "\"transaction requires a structured block~\""],
 	]
 end
