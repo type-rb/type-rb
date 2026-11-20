@@ -6564,6 +6564,8 @@
       "TestDatabaseCheckReportsSchemaDrift (internal/cli/database_test.go)",
       "TestDatabaseLockAndCheckAreModeIndependent (internal/cli/database_test.go)",
       "TestDatabaseLockLetsORMCompileWithoutLiveDatabase (internal/cli/database_test.go)",
+      "TestDatabaseLockMatchesSQLitePrimaryKeyGeneration (internal/cli/database_test.go)",
+      "TestDatabaseOfflineLockMatchesSQLiteConstraintMetadata (internal/cli/database_test.go)",
       "TestDatabasePlanApplyAndExportUsePinnedExternalCommand (internal/cli/database_test.go)",
       "TestDatabasePlanReportsMissingAndMismatchedSqldef (internal/cli/database_test.go)",
       "TestDiscoveredJobsInitializeAfterEntryValues (internal/cli/module_initialization_test.go)",
@@ -8735,6 +8737,7 @@
       "TestParseSQLAcceptsPortableDateTimeTypes (internal/schemalock/lock_test.go)",
       "TestParseSQLAcceptsSqldefExportShapes (internal/schemalock/lock_test.go)",
       "TestParseSQLProducesDeterministicPortableLock (internal/schemalock/lock_test.go)",
+      "TestParseSQLRecognizesOnlyTopLevelConstraintKeywords (internal/schemalock/lock_test.go)",
       "TestSchemaLockRoundTripsAndRejectsUnknownFields (internal/schemalock/lock_test.go)"
     ]
   },

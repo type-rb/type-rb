@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "dd76069c4ed2c0194a8b22ec62dd594a2ee5d1cb",
-  "catalogSHA256": "c2a0bbdcecea88b12a9835ac5b885f00523c520e2093cac66b859e2a8f897f57",
+  "sourceRevision": "c782ced6b948862edcb2cb6e561b5c70d3367945",
+  "catalogSHA256": "fbe85074ddd593f65a76e2f6bfcd36a4fa6630f2e44a9d3c29937dd419f44acb",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
