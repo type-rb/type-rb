@@ -82,7 +82,7 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/types/global_model", "\tsource_id: Integer\n\tline: Integer", "\tline: Integer\n\tsource_id: Integer"],
 		["frontend/resolution/namespace_references", "private module member ", "inaccessible module member "],
 		["frontend/types/namespace_model", "\tsource_id: Integer\n\tline: Integer", "\tline: Integer\n\tsource_id: Integer"],
-		["backend/qbe/runtime/array_join", "%first =w ceql %index, 0", "%first =w ceql %index, 1"],
+		["backend/qbe/runtime/array_join", "%initial =w ceql %position, 0", "%initial =w ceql %position, 1"],
 		["frontend/checking/builtins/range_methods", "next_position := scalar_mir_binary(state, locals, \"+\", position, one, \"Integer\", origin)", "next_position := scalar_mir_binary(state, locals, \"-\", position, one, \"Integer\", origin)"],
 		["frontend/checking/builtins/array_queries", "\"Float\"", "\"Float~\""],
 		["backend/qbe/runtime/array_mutations", "%shifting =w ceqw %mode, 2", "%shifting =w ceqw %mode, 1"],

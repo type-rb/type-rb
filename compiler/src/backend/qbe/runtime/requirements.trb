@@ -57,7 +57,6 @@ def qbe_runtime_needs(native_module: MirModule, complete: Boolean): QbeRuntimeNe
 			copies = true
 		elsif kind == mir_op_array_join()
 			join = true
-			concat_many = true
 		elsif kind == mir_op_string_trim()
 			trimming = true
 		elsif kind == mir_op_string_split() || kind == mir_op_string_replace()

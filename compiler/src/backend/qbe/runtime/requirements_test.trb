@@ -39,10 +39,10 @@ describe("QBE runtime requirements") do
 		expect(ordered.include?("$trbn_string_split")).to_be_false()
 	end
 
-	test("retains the shared concatenation constructor for Array joins") do
+	test("omits the concatenation constructor for Array joins") do
 		qbe := runtime_requirements_output("def joined(values: Array<String>): String\nreturn values.join(\"\")\nend\ndef main()\nputs(joined([\"a\", \"b\"]))\nend\n")
-		expect(qbe.include?("function l $trbn_string_concat_many(")).to_be_true()
-		expect(qbe.include?("call $trbn_string_concat_many(")).to_be_true()
+		expect(qbe.include?("function l $trbn_join_fragments(")).to_be_true()
+		expect(qbe.include?("$trbn_string_concat_many")).to_be_false()
 	end
 
 	test("includes requirements from uncalled bodies and nested callable bodies") do
