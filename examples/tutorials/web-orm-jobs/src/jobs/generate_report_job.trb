@@ -10,6 +10,9 @@ class GenerateReportJob < Job
 		report := Report.find(report_id) catch |error|
 			return JobResult::Err(JobError.new(message: "report lookup failed: " + error.message))
 		end
+		if report == nil
+			return JobResult::Err(JobError.new(message: "report not found"))
+		end
 		_saved := report.with(status: "ready").save() catch |error|
 			return JobResult::Err(JobError.new(message: "report update failed: " + error.message))
 		end

@@ -25,4 +25,16 @@ describe("Report API") do
 		show_response := dispatch(show_request)
 		expect(show_response.status).to_equal(200)
 	end
+
+	test("returns 404 for a missing report") do
+		request := Request.new(
+			method: HttpMethod.get(),
+			path: "/reports/999999",
+			query_string: "",
+			headers: Headers.new([]),
+			body: Body.empty(),
+		)
+		response := dispatch(request)
+		expect(response.status).to_equal(404)
+	end
 end
