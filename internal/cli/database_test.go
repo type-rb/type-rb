@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/type-rb/type-rb/internal/project"
+	"github.com/type-rb/type-rb/internal/schemalock"
 )
 
 func runTestSqldefHelper() {
@@ -82,6 +83,90 @@ func TestDatabaseLockAndCheckAreModeIndependent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDatabaseOfflineLockMatchesSQLiteConstraintMetadata(t *testing.T) {
+	schema := `CREATE TABLE sqlitebooks (id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE identity (id INTEGER PRIMARY KEY);
+CREATE TABLE notes (
+  id INTEGER PRIMARY KEY,
+  key TEXT,
+  identity_id INTEGER REFERENCES identity(id),
+  checksum TEXT,
+  unique_label TEXT,
+  note TEXT DEFAULT 'it''s NOT NULL and UNIQUE and GENERATED here',
+  caption TEXT DEFAULT 'example REFERENCES ghosts(id)',
+  positive INTEGER CHECK (positive IS NOT NULL OR positive IS NULL),
+  owner INTEGER REFERENCES sqlitebooks(id) ON DELETE SET DEFAULT,
+  required TEXT/* SQL comment */NOT NULL
+);
+CREATE UNIQUE INDEX "index ON captions" ON notes(caption);`
+	lockAndCheckSQLiteSchema(t, schema)
+}
+
+func TestDatabaseLockMatchesSQLitePrimaryKeyGeneration(t *testing.T) {
+	const schema = `CREATE TABLE ordinary (id INTEGER PRIMARY KEY);
+CREATE TABLE indexed_desc (id INTEGER PRIMARY KEY DESC NOT NULL);
+CREATE TABLE table_desc (id INTEGER, PRIMARY KEY(id DESC));
+CREATE TABLE composite (id INTEGER NOT NULL, part INTEGER NOT NULL, PRIMARY KEY(id, part));
+CREATE TABLE no_rowid (id INTEGER PRIMARY KEY) WITHOUT ROWID;
+CREATE TABLE explicit_default (id INTEGER PRIMARY KEY DEFAULT 17) WITHOUT ROWID;`
+	lock, database := lockAndCheckSQLiteSchema(t, schema)
+	for _, tc := range []struct {
+		table                string
+		generated, defaulted bool
+		id                   int
+	}{
+		{"ordinary", true, true, 1}, {"indexed_desc", false, false, 0},
+		{"table_desc", true, true, 1}, {"composite", false, false, 0},
+		{"no_rowid", false, false, 0}, {"explicit_default", false, true, 17},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			id := lock.Tables[tc.table].Columns["id"]
+			if !id.PrimaryKey || id.Generated != tc.generated || id.HasDefault != tc.defaulted {
+				t.Fatalf("unexpected key metadata: %#v", id)
+			}
+			var assigned int
+			err := database.QueryRow("INSERT INTO " + tc.table + " DEFAULT VALUES RETURNING id").Scan(&assigned)
+			if tc.defaulted {
+				if err != nil || assigned != tc.id {
+					t.Fatalf("insert returned %d, %v", assigned, err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "NOT NULL") {
+				t.Fatalf("expected an explicit key to be required, got %v", err)
+			}
+		})
+	}
+}
+
+func lockAndCheckSQLiteSchema(t *testing.T, schema string) (*schemalock.Lock, *sql.DB) {
+	t.Helper()
+	root := databaseTestProject(t, "go")
+	if err := os.WriteFile(filepath.Join(root, "db", "schema.sql"), []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(root, project.ConfigName)
+	var stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: &stderr}
+	if code := command.Run([]string{"db", "lock", "--config", config}); code != 0 {
+		t.Fatalf("lock failed: %s", stderr.String())
+	}
+	lock, err := schemalock.Read(filepath.Join(root, "db", "schema.lock.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", filepath.Join(root, "db", "development.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	if _, err := database.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	if code := command.Run([]string{"db", "check", "--from-db", "--config", config}); code != 0 {
+		t.Fatalf("database and offline schema metadata differ: %s", stderr.String())
+	}
+	return lock, database
 }
 
 func TestDatabaseLockLetsORMCompileWithoutLiveDatabase(t *testing.T) {
