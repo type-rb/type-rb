@@ -309,7 +309,7 @@ jobs:
         run: |
           python3 tools/build-sqlite-dependencies.py --output bin/sqlite
           python3 tools/native-worker-lifecycle-test.py --native bin/trbn --report "$RUNNER_TEMP/jobs-lifecycle.json"
-      - name: Verify offline SQLite model builds and runtime counts
+      - name: Verify offline SQLite model builds and runtime CRUD
         run: python3 tools/native-orm-schema-test.py --native bin/trbn
       - name: Retain SQLite Jobs lifecycle and archive observations
         if: always()

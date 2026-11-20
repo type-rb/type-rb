@@ -405,5 +405,6 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["project/orm_schema", "\" must be a boolean\"", "\" must be a boolean~\""],
 		["support/unicode_lower_data", "0000c00000e00000c10000e1", "0000c00000e10000c10000e1"],
 		["frontend/providers/orm_lookup", "\"Result<OrmModelType?, DbError>\"", "\"Result<OrmModelType?, DbError>~\""],
+		["frontend/providers/orm_writes", "\"try\"", "\"try~\""],
 	]
 end

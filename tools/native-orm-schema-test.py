@@ -41,6 +41,75 @@ def check_model_rows(cli, reference, root, config, environment):
 import { DbErrorKind, DbResult } from trb/orm
 import trb/std/process
 
+def change_report()
+    original := Report.find(1) catch |error|
+        puts(error.message)
+        return
+    end
+    if original == nil
+        return
+    end
+    pending := original.with(title: "ready")
+    changed := original.update(note: "separate edit") catch |error|
+        puts(error.message)
+        return
+    end
+    puts(changed.title)
+    saved := pending.save() catch |error|
+        puts(error.message)
+        return
+    end
+    puts(saved.title)
+    note := saved.note
+    if note != nil
+        puts(note)
+    end
+    again := pending.save() catch |error|
+        puts(error.message)
+        return
+    end
+    puts(again.id)
+    cleared := saved.update(note: nil) catch |error|
+        puts(error.message)
+        return
+    end
+    puts(cleared.note == nil)
+    puts(original.title)
+    case original.update()
+    when DbResult::Err(error)
+        puts(error.message)
+    when DbResult::Ok(_unexpected)
+        puts("unexpected update")
+    end
+end
+
+def save_missing_report()
+    original := Report.find(1) catch |error|
+        puts(error.message)
+        return
+    end
+    if original == nil
+        return
+    end
+    pending := original.with(note: "after deletion")
+    _deleted := original.delete() catch |error|
+        puts(error.message)
+        return
+    end
+    case pending.save()
+    when DbResult::Err(error)
+        case error.kind
+        when DbErrorKind::InvalidData
+            puts("InvalidData")
+        else
+            puts("unexpected")
+        end
+        puts(error.message)
+    when DbResult::Ok(_unexpected)
+        puts("unexpected update")
+    end
+end
+
 def create_reports()
     first := Report.create(title: "first") catch |error|
         puts(error.message)
@@ -129,19 +198,30 @@ def show(id: Integer)
 end
 
 def main()
-    if Process.environment("CREATE_REPORTS") != nil
-        create_reports()
-        return
-    end
-    if Process.environment("REMOVE_TAG") != nil
-        remove_tag()
-        return
-    end
-    if Process.environment("EMPTY_MODEL") != nil
-        report := Report.new()
-        puts(report.id)
-        puts(report.title)
-        return
+    operation := Process.environment("ORM_TEST_OPERATION")
+    if operation != nil
+        if operation == "update"
+            change_report()
+            return
+        end
+        if operation == "save_missing"
+            save_missing_report()
+            return
+        end
+        if operation == "insert"
+            create_reports()
+            return
+        end
+        if operation == "delete"
+            remove_tag()
+            return
+        end
+        if operation == "empty"
+            report := Report.new()
+            puts(report.id)
+            puts(report.title)
+            return
+        end
     end
     show(1)
     show(2)
@@ -152,6 +232,7 @@ end
     entry.write_text(source)
     database = root / "lookup.sqlite"
     environment = dict(environment, DATABASE_URL=str(database))
+    environment.pop("ORM_TEST_OPERATION", None)
     binaries = []
     for mode, tool in [("trb", cli), ("go", reference)]:
         if not tool:
@@ -163,6 +244,7 @@ end
         for original, invalid in [
                 ('Report.create(title: "first")', 'Report.create(title: "first", id: nil)'),
                 ('Report.create(title: "first")', 'Report.create()'),
+                ('original.with(title: "ready")', 'original.with(id: 7)'),
                 ('Tag.find("reader\'s copy")', 'Tag.find(1)'),
                 ('report := Report.new()', 'report := Report.new(1, "title")')]:
             entry.write_text(source.replace(original, invalid))
@@ -174,22 +256,30 @@ end
         binaries.append(app)
     assert not database.exists()
     for app in binaries:
-        expect_output(app, root, dict(environment, EMPTY_MODEL="1"), "0\n\n")
+        expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
         inserts = root / (app.name + "-creates.sqlite")
         with sqlite3.connect(inserts) as connection:
             connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL, note TEXT DEFAULT 'from database')")
-        expect_output(app, root, dict(environment, DATABASE_URL=str(inserts), CREATE_REPORTS="1"),
+        expect_output(app, root, dict(environment, DATABASE_URL=str(inserts), ORM_TEST_OPERATION="insert"),
                       "1\nfirst\nfrom database\n42\ntrue\nConstraint\ndatabase insert failed\n")
         with sqlite3.connect(inserts) as connection:
             assert connection.execute("SELECT id, title, note FROM reports ORDER BY id").fetchall() == [
                 (1, "first", "from database"), (42, "second", None)]
+        expect_output(app, root, dict(environment, DATABASE_URL=str(inserts), ORM_TEST_OPERATION="update"),
+                      "first\nready\nseparate edit\n1\ntrue\nfirst\ndatabase update requires at least one value\n")
+        with sqlite3.connect(inserts) as connection:
+            assert connection.execute("SELECT title, note FROM reports WHERE id = 1").fetchone() == ("ready", None)
+        expect_output(app, root, dict(environment, DATABASE_URL=str(inserts), ORM_TEST_OPERATION="save_missing"),
+                      "InvalidData\ndatabase update target was not found\n")
+        with sqlite3.connect(inserts) as connection:
+            assert connection.execute("SELECT id FROM reports").fetchall() == [(42,)]
         path = root / (app.name + "-tags.sqlite")
         with sqlite3.connect(path) as connection:
             connection.executescript("CREATE TABLE tags(code TEXT PRIMARY KEY);"
                                      "CREATE TRIGGER protect_tag BEFORE DELETE ON tags BEGIN SELECT RAISE(ABORT, 'protected'); END;")
             connection.executemany("INSERT INTO tags VALUES (?)", [("reader's copy",), ("spare",)])
-        remove = dict(environment, DATABASE_URL=str(path), REMOVE_TAG="1")
+        remove = dict(environment, DATABASE_URL=str(path), ORM_TEST_OPERATION="delete")
         expect_output(app, root, remove, "reader's copy\nConstraint\ndatabase delete failed\n")
         with sqlite3.connect(path) as connection:
             assert connection.execute("SELECT COUNT(*) FROM tags").fetchone() == (2,)
@@ -216,12 +306,91 @@ end
         expect_output(app, root, no_url, "Connection\ndatabase connection failed\n" * 3)
 
 
+def check_model_worker(cli, reference, root):
+    src = root / "src"
+    (src / "config").mkdir(parents=True)
+    (src / "models.trb").write_text("import { Model } from trb/orm\nclass Report < Model\nend\n")
+    (src / "config/jobs.trb").write_text("""import { JobAdapter } from trb/jobs
+import { SQLAdapter } from trb/jobs/sql
+JOBS_ADAPTER: JobAdapter := SQLAdapter.new(source_environment: "QUEUE_DB")
+""")
+    (src / "publish.trb").write_text("""import { Report } from models
+import { Job, JobResult, JobError } from trb/jobs
+import trb/std/unit
+
+class PublishJob < Job
+    def perform(id: Integer): JobResult
+        report := Report.find(id) catch |error|
+            return JobResult::Err(JobError.new(message: error.message))
+        end
+        if report == nil
+            return JobResult::Err(JobError.new(message: "report missing"))
+        end
+        _ready := report.with(status: "ready").save() catch |error|
+            return JobResult::Err(JobError.new(message: error.message))
+        end
+        return JobResult::Ok(Unit.new())
+    end
+end
+""")
+    (src / "main.trb").write_text("""import { Report } from models
+import { PublishJob } from publish
+
+def main()
+    report := Report.create(status: "pending") catch |error|
+        puts(error.message)
+        return
+    end
+    receipt := PublishJob.perform_later(report.id) catch |error|
+        puts(error.message)
+        return
+    end
+    puts(receipt.id)
+end
+""")
+    schema = {"formatVersion": 1, "adapter": "sqlite", "tables": {"reports": {
+        "columns": {"id": {"type": "Integer", "primaryKey": True, "generated": True},
+                    "status": {"type": "String"}},
+        "uniqueConstraints": {"primary:id": {"primary": True, "columns": ["id"]}}}}}
+    (root / "lock.json").write_text(json.dumps(schema))
+    for mode, tool in [("trb", cli), ("go", reference)]:
+        if not tool:
+            continue
+        queue = root / (mode + "-queue.sqlite")
+        data = root / (mode + "-data.sqlite")
+        environment = dict(os.environ, QUEUE_DB=str(queue), DATABASE_URL=str(data))
+        config = {"name": "worker-model", "mode": mode, "sourceDir": "src",
+                  "db": {"adapter": "sqlite"}, "jobs": {"configuration": "config/jobs"},
+                  "packageOptions": {"trb/orm": {"adapter": "sqlite", "schemaLock": "lock.json",
+                                                 "database": {"environment": "DATABASE_URL"}}}}
+        if mode == "go":
+            config["go"] = {"module": "example.com/worker-model"}
+        (root / "trbconfig.jsonc").write_text(json.dumps(config))
+        binary = root / ("submit-" + mode)
+        run([str(tool), "check"], root, environment)
+        run([str(tool), "build", "--compile", "--outfile", str(binary)], root, environment)
+        assert not data.exists() and not queue.exists()
+        with sqlite3.connect(data) as connection:
+            connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, status TEXT NOT NULL)")
+        job = run([str(binary)], root, environment).strip()
+        with sqlite3.connect(queue) as connection:
+            assert connection.execute("SELECT state FROM trb_jobs WHERE id = ?", (job,)).fetchone() == ("ready",)
+        with sqlite3.connect(data) as connection:
+            assert connection.execute("SELECT id, status FROM reports").fetchall() == [(1, "pending")]
+        run([str(tool), "jobs", "start", "--once"], root, environment)
+        with sqlite3.connect(data) as connection:
+            assert connection.execute("SELECT id, status FROM reports").fetchall() == [(1, "ready")]
+        with sqlite3.connect(queue) as connection:
+            assert connection.execute("SELECT state FROM trb_jobs WHERE id = ?", (job,)).fetchone() is None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", required=True, type=Path)
     parser.add_argument("--reference", type=Path)
     args = parser.parse_args()
     cli = str(args.native.resolve())
+    reference = str(args.reference.resolve()) if args.reference else None
     with tempfile.TemporaryDirectory(prefix="trbn-orm-lock-") as directory:
         root = Path(directory)
         src = root / "src"
@@ -315,8 +484,7 @@ end
         assert not database.exists()
         assert b"TRBN-SQLITE-V1\0" in binary.read_bytes(), "missing pinned SQLite build identity"
         binaries = [binary]
-        if args.reference:
-            reference = str(args.reference.resolve())
+        if reference:
             reference_config = dict(config, mode="go", go={"module": "example.com/orm-lock"})
             (root / "trbconfig.jsonc").write_text(json.dumps(reference_config))
             go_binary = root / "go-sample"
@@ -346,8 +514,9 @@ end
             unavailable = root / "missing-directory" / "database.sqlite"
             expect_output(app, root, dict(environment, DATABASE_URL=str(unavailable)),
                           "Connection\ndatabase connection failed\n")
-        check_model_rows(cli, args.reference, root, config, environment)
-    print("SQLite ORM lock-only builds, typed counts, create/find/delete and runtime errors passed")
+        check_model_rows(cli, reference, root, config, environment)
+        check_model_worker(cli, reference, root / "worker-project")
+    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, deferred saves, runtime errors and worker updates passed")
 
 
 if __name__ == "__main__":

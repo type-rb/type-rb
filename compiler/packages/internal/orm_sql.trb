@@ -48,15 +48,42 @@ def insert_row(database: String, environment: String, table: String, columns: Ar
 		statement += " (" + columns.join(", ") + ") VALUES (" + parameters.join(", ") + ")"
 	end
 	statement += " RETURNING " + projection
+	return _returning(source, statement, values, width, false)
+end
+
+def update_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, predicate: String, key: SQLite::Parameter, projection: String, width: Integer): Result<Array<SQLite::Parameter>, DbError>
+	if columns.size() == 0
+		return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update requires at least one value"))
+	end
+	source := _orm_database(database, environment) catch |error|
+		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
+	end
+	mut assignments: Array<String> := []
+	columns.each do |column|
+		assignments.push(column + " = ?")
+	end
+	mut parameters: Array<SQLite::Parameter> := []
+	values.each { |value| parameters.push(value) }
+	parameters.push(key)
+	statement := "UPDATE " + table + " SET " + assignments.join(", ") + " WHERE " + predicate + " = ? RETURNING " + projection
+	return _returning(source, statement, parameters, width, true)
+end
+
+def _returning(source: String, statement: String, values: Array<SQLite::Parameter>, width: Integer, updating: Boolean): Result<Array<SQLite::Parameter>, DbError>
 	case SQLite.query_one(source, statement, values, _row_shape(width), SQLite::QueryMode::WriteReturning, 0)
 	when Result::Ok(row)
 		if row != nil
 			return Result<Array<SQLite::Parameter>, DbError>::Ok(row)
+		elsif updating
+			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update target was not found"))
 		end
 	when Result::Err(error)
 		if error.code == 14
 			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
+	end
+	if updating
+		return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database update failed"))
 	end
 	return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database insert failed"))
 end

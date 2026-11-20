@@ -308,7 +308,7 @@ end
 
 def standard_source_function(kind: Integer, name: String): Boolean
 	if kind == standard_source_orm_sql()
-		if name == "::lookup" || name == "::delete_row" || name == "::insert_row"
+		if name == "::lookup" || name == "::delete_row" || name == "::insert_row" || name == "::update_row"
 			return true
 		end
 		return false

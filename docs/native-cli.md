@@ -180,6 +180,10 @@ Use the actual column names from the lock. Omitting an optional column lets
 SQLite apply its default. Passing `nil` to a nullable column stores SQL NULL.
 A missing key returns `Ok(nil)`. Deleting a loaded model returns `Ok(true)`
 when it removes a row and `Ok(false)` when the row has already been deleted.
+Use `report.update(title: "ready")` to write immediately, or prepare changes
+with `report.with(title: "ready")` and call `save()` later. Each update writes
+only the supplied columns and returns the refreshed model. Saving changes
+after the target row has been deleted returns an `InvalidData` error.
 Models can also use `count()`. These operations use the same pinned SQLite
 bundle as SQLite Jobs.
 
