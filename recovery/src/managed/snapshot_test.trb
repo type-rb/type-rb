@@ -85,10 +85,10 @@ describe("Managed recovery snapshot v4") do
 	test("bounds compiler recovery bytes separately from ordinary snapshots") do
 		base := _recovery_function_count_snapshot(1)
 		mut padding := " "
-		while padding.size() < 218103809
+		while padding.size() < 222298113
 			padding += padding
 		end
-		[4194304, 4194305, 134217729, 167772161, 201326592, 201326593, 218103808, 218103809].each do |size|
+		[4194304, 4194305, 134217729, 167772161, 201326592, 201326593, 218103808, 218103809, 222298112, 222298113].each do |size|
 			source := base + padding.slice(0...(size - base.size()))
 			case decode_recovery_managed_snapshot(source)
 			when Result::Ok(_module)
@@ -99,10 +99,10 @@ describe("Managed recovery snapshot v4") do
 			end
 			case decode_bootstrap_snapshot(source)
 			when Result::Ok(_module)
-				expect(size <= 218103808).to_be_true()
+				expect(size <= 222298112).to_be_true()
 			when Result::Err(diagnostic)
-				expect(size).to_equal(218103809)
-				expect(diagnostic.message).to_equal("snapshot exceeds the Native bootstrap 208 MiB input limit")
+				expect(size).to_equal(222298113)
+				expect(diagnostic.message).to_equal("snapshot exceeds the Native bootstrap 212 MiB input limit")
 			end
 		end
 	end

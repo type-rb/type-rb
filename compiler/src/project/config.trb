@@ -257,7 +257,7 @@ def parse_project_database(
 		mut line: Array<Integer>,
 		mut error: Array<String>,
 		mut error_line: Array<Integer>,
-		orm: Boolean = false,
+		orm: Boolean,
 	): ProjectDatabaseSection
 	mut adapter := ""
 	mut schema := ""
@@ -718,7 +718,7 @@ def parse_project_config(source: String): ProjectConfig
 				typescript_runtime = typescript[2]
 			elsif key == "db"
 				database_present = true
-				database = parse_project_database(source, position, line, error, error_line)
+				database = parse_project_database(source, position, line, error, error_line, false)
 			elsif key == "jobs"
 				jobs_present = true
 				jobs := parse_project_string_section(source, position, line, error, error_line, "jobs", ["configuration"], "")

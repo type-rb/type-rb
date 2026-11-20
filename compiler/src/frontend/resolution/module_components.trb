@@ -129,7 +129,10 @@ def compilation_unit_owner(state: CompilerState, source: Integer, owners: Array<
 	if owned == standard_source_process() || owned == standard_source_internal_process()
 		process_service = true
 	end
-	orm_service := owned == official_source_kind("trb/orm") || owned == standard_source_orm_sql()
+	mut orm_service := false
+	if owned == official_source_kind("trb/orm") || owned == standard_source_orm_sql()
+		orm_service = true
+	end
 	mut jobs_sql_service := false
 	if owned == official_source_kind("trb/jobs/sql") || owned == standard_source_jobs_sql()
 		jobs_sql_service = true
