@@ -2143,13 +2143,16 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 		g.b.WriteByte('\n')
 	}
 
+	writePresenceStatement := func() {
+		g.line("projection := \"1\"; if query.distinct { projection = " + strconv.Quote(strings.Join(columns, ", ")) + " }")
+		g.line("statement, arguments := " + goORMStatement(model) + "(query, projection)")
+	}
 	integerType := types.FromName("Integer")
 	g.line("func " + goORMCount(model) + "(query " + queryType + ") " + g.ormResultType(integerType) + " {")
 	g.indent++
 	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(integerType, "*databaseError") + " }")
-	g.line("projection := \"1\"; if query.distinct { projection = " + strconv.Quote(strings.Join(columns, ", ")) + " }")
-	g.line("statement, arguments := " + goORMStatement(model) + "(query, projection)")
+	writePresenceStatement()
 	g.line("row := database.QueryRow(\"SELECT COUNT(*) FROM (\"+statement+\") AS trb_count\", arguments...)")
 	g.line("var count int")
 	g.line("if err := row.Scan(&count); err != nil { return " + g.ormResultErr(integerType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database count failed\")") + " }")
@@ -2164,7 +2167,7 @@ func (g *generator) ormModelRuntime(manifest *ormintegration.Manifest, adapter o
 	g.indent++
 	g.line("database, databaseError := trbOrmExecutorForQuery(query.scope, query.transaction, query.lock)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
-	g.line("statement, arguments := " + goORMStatement(model) + "(query, \"1\")")
+	writePresenceStatement()
 	g.line("row := database.QueryRow(\"SELECT EXISTS(\"+statement+\")\", arguments...)")
 	g.line("var exists bool")
 	g.line("if err := row.Scan(&exists); err != nil { return " + g.ormResultErr(booleanType, "trbOrmError(err, "+g.ormErrorKind("Query")+", \"database existence query failed\")") + " }")

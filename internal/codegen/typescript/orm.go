@@ -891,16 +891,34 @@ export async function all(source: TrbOrmQuery): Promise<DbResult<any[]>> {
     return resultOk(values);
   } catch (error) { return databaseError<any[]>(error, "database query failed"); }
 }
+function firstPage(source: TrbOrmQuery): TrbOrmQuery {
+  return source.limit === 0 ? source : limit(source, 1);
+}
+function rowPresenceProjection(source: TrbOrmQuery): string {
+  const owner = model(source.model);
+  return source.distinct ? owner.columns.map(column => quote(owner.table) + "." + quote(column.name)).join(", ") : "1";
+}
+async function aggregateValue(source: TrbOrmQuery, selection: string, expression: string): Promise<any> {
+  const args: unknown[] = [];
+  const inner = statement(source, selection, args);
+  const rows = await unsafe(source, "SELECT " + expression + " AS trb_value FROM (" + inner + ") AS trb_aggregate", args);
+  return rows[0].trb_value;
+}
 export async function first(source: TrbOrmQuery): Promise<DbResult<any | null>> {
-  const loaded = await all(limit(source, 1));
+  const loaded = await all(firstPage(source));
   return loaded.kind === "Err" ? loaded : resultOk(loaded.value[0] ?? null);
 }
 export async function count(source: TrbOrmQuery): Promise<DbResult<number>> {
-  try { const args: unknown[] = []; const rows = await unsafe(source, statement(source, "COUNT(*) AS trb_count", args), args); return resultOk(portableInteger(rows[0]?.trb_count ?? 0, "database Integer is outside the portable range")); }
+  try { const value = await aggregateValue(source, rowPresenceProjection(source), "COUNT(*)"); return resultOk(portableInteger(value, "database Integer is outside the portable range")); }
   catch (error) { return databaseError<number>(error, "database count failed"); }
 }
 export async function exists(source: TrbOrmQuery): Promise<DbResult<boolean>> {
-  const value = await count(limit(source, 1)); return value.kind === "Err" ? value : resultOk(value.value > 0);
+  try {
+    const args: unknown[] = [];
+    const sql = statement(firstPage(source), rowPresenceProjection(source), args);
+    const rows = await unsafe(source, sql, args);
+    return resultOk(rows.length > 0);
+  } catch (error) { return databaseError<boolean>(error, "database existence query failed"); }
 }
 export async function explain(source: TrbOrmQuery): Promise<DbResult<string>> {
   try { const args: unknown[] = []; const prefix = __trbOrmAdapter === "sqlite" ? "EXPLAIN QUERY PLAN " : (__trbOrmAdapter === "mysql" ? "EXPLAIN FORMAT=JSON " : "EXPLAIN "); const rows = await unsafe(source, prefix + statement(source, projection(model(source.model)), args), args); return resultOk(JSON.stringify(rows)); }
@@ -911,15 +929,20 @@ export async function pluck(source: TrbOrmQuery, columnName: string): Promise<Db
   catch (error) { return databaseError<any[]>(error, "database projection query failed"); }
 }
 export async function pick(source: TrbOrmQuery, columnName: string): Promise<DbResult<any | null>> {
-  const values = await pluck(limit(source, 1), columnName); return values.kind === "Err" ? values : resultOk(values.value[0] ?? null);
+  const values = await pluck(firstPage(source), columnName); return values.kind === "Err" ? values : resultOk(values.value[0] ?? null);
 }
 export async function aggregate(source: TrbOrmQuery, operation: string, columnName: string): Promise<DbResult<any>> {
   try {
     const sqlOperation = operation === "average" ? "AVG" : (operation === "minimum" ? "MIN" : (operation === "maximum" ? "MAX" : operation.toUpperCase()));
-    const column = model(source.model).columns.find(item => item.name === columnName); let expression = operation === "sum" ? "COALESCE(SUM(" + quote(columnName) + "), 0)" : sqlOperation + "(" + quote(columnName) + ")"; if ((operation === "minimum" || operation === "maximum") && column !== undefined) expression = readColumn(column, expression);
-    const args: unknown[] = []; const rows = await unsafe(source, statement(source, expression + " AS trb_aggregate", args), args); const value = rows[0]?.trb_aggregate ?? null;
-		const normalized = value === null || column === undefined ? value : normalizeColumn(column, value);
-		return resultOk(operation === "average" && normalized !== null ? Number(normalized) : normalized);
+    const owner = model(source.model);
+    const column = owner.columns.find(item => item.name === columnName);
+    const selection = quote(owner.table) + "." + quote(columnName);
+    let expression = sqlOperation + "(" + quote(columnName) + ")";
+    if (operation === "sum") expression = "COALESCE(" + expression + ", 0)";
+    if ((operation === "minimum" || operation === "maximum") && column !== undefined) expression = readColumn(column, expression);
+    const value = await aggregateValue(source, selection, expression);
+    if (operation === "average") return resultOk(value === null ? null : Number(value));
+    return resultOk(value === null || column === undefined ? value : normalizeColumn(column, value));
   } catch (error) { return databaseError<any>(error, "database aggregate query failed"); }
 }
 export async function groupedAggregate(source: TrbOrmGroupedQuery, operation: string, target?: string): Promise<DbResult<Record<string, any>>> {

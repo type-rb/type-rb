@@ -66,6 +66,9 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 						"first_exact_at()",
 						`TrbReplConformanceProduct.update_all(name: "Updated")`,
 						`TrbReplConformanceProduct.where(name: "Updated").count()`,
+						"create_repl_product()",
+						"TrbReplConformanceProduct.distinct().order(id: :asc).offset(1).exists?()",
+						"TrbReplConformanceProduct.limit(0).exists?()",
 						"TrbReplConformanceProduct.delete_all()",
 						"TrbReplConformanceProduct.count()",
 						":quit",
@@ -75,7 +78,18 @@ func TestReplORMConformanceAcrossModesAndDatabases(t *testing.T) {
 					if status := command.Run([]string{"repl", "--config", config.Path}); status != 0 {
 						t.Fatalf("status=%d stderr=%s", status, stderr.String())
 					}
-					const want = "DbResult::Ok(value: true) : DbResult<Boolean>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: \"2025-03-08T03:34:56.123456Z\") : DbResult<String>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 1) : DbResult<Integer>\nDbResult::Ok(value: 0) : DbResult<Integer>\n"
+					const want = `DbResult::Ok(value: true) : DbResult<Boolean>
+DbResult::Ok(value: 1) : DbResult<Integer>
+DbResult::Ok(value: 1) : DbResult<Integer>
+DbResult::Ok(value: "2025-03-08T03:34:56.123456Z") : DbResult<String>
+DbResult::Ok(value: 1) : DbResult<Integer>
+DbResult::Ok(value: 1) : DbResult<Integer>
+DbResult::Ok(value: true) : DbResult<Boolean>
+DbResult::Ok(value: true) : DbResult<Boolean>
+DbResult::Ok(value: false) : DbResult<Boolean>
+DbResult::Ok(value: 2) : DbResult<Integer>
+DbResult::Ok(value: 0) : DbResult<Integer>
+`
 					if stdout.String() != want || stderr.Len() != 0 {
 						t.Fatalf("unexpected %s/%s ORM REPL output: stdout=%q stderr=%q", mode, adapter, stdout.String(), stderr.String())
 					}
