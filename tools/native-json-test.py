@@ -567,6 +567,7 @@ end
         assert 'internal encoding and entropy sources are reserved for verified standard sources' in result.stderr, result
 
     for declarations in ('import trb/internal/json as Hidden\n',
+                         'import { _next_token_byte } from trb/internal/json\n',
                          'module JSON\nend\nimport trb/internal/json as Hidden\n'):
         main.write_text(declarations + 'def main()\nputs("unreachable")\nend\n')
         result = run([binary, 'check', main], success=False)

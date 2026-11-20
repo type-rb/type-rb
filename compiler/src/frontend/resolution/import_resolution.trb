@@ -338,7 +338,7 @@ def validate_import_bindings(mut state: CompilerState): Boolean
 			root := standard_source_root(owned)
 			mut provider_import := false
 			if owned == standard_source_internal_json() && (caller == standard_source_oidc() || caller == standard_source_oidc_json())
-				if declaration == "JsonNode" || declaration == "JsonParser" || declaration == "_byte" || declaration == "_node" || declaration == "_space" || declaration == "_string"
+				if declaration == "JsonNode" || declaration == "JsonParser" || declaration == "_next_token_byte" || declaration == "_node" || declaration == "_string"
 					provider_import = true
 				end
 			end
