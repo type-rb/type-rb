@@ -5,6 +5,7 @@ package orm
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -72,7 +73,6 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			return Table{}, fmt.Errorf("table %s column %s: %w", name, columnName, err)
 		}
 		nullable := notNull == 0 && primaryKey == 0
-		generated := primaryKey != 0 && strings.EqualFold(strings.TrimSpace(databaseType), "integer")
 		typ.Nullable = nullable
 		table.Columns = append(table.Columns, Column{
 			Name:         columnName,
@@ -80,8 +80,7 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 			Type:         typ,
 			Nullable:     nullable,
 			PrimaryKey:   primaryKey != 0,
-			HasDefault:   defaultValue != nil || generated,
-			Generated:    generated,
+			HasDefault:   defaultValue != nil,
 			Position:     position,
 		})
 	}
@@ -102,6 +101,16 @@ func inspectSQLiteTable(database *sql.DB, name string) (Table, error) {
 		return Table{}, err
 	}
 	table.UniqueConstraints = uniqueConstraints
+	// Only an actual rowid alias lacks its own SQLite primary-key index.
+	if !slices.ContainsFunc(uniqueConstraints, func(key UniqueConstraint) bool { return key.Primary }) {
+		for i := range table.Columns {
+			column := &table.Columns[i]
+			if column.PrimaryKey && strings.EqualFold(strings.TrimSpace(column.DatabaseType), "integer") {
+				column.Generated = true
+				column.HasDefault = true
+			}
+		}
+	}
 	completeUniqueConstraints(&table)
 	return table, nil
 }

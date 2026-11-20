@@ -103,6 +103,7 @@ func parseCreateTable(adapter, statement string) (string, Table, error) {
 	}
 	table := Table{Columns: map[string]Column{}, ForeignKeys: map[string]ForeignKey{}, UniqueConstraints: map[string]UniqueConstraint{}}
 	var constraints []string
+	allowRowID := adapter == "sqlite" && keywordIndex(rest[close+1:], "WITHOUT") < 0
 	for _, item := range splitSQL(rest[open+1:close], ',') {
 		item = strings.TrimSpace(item)
 		if item == "" {
@@ -124,23 +125,42 @@ func parseCreateTable(adapter, statement string) (string, Table, error) {
 			return "", Table{}, fmt.Errorf("table %s contains duplicate column %s", name, columnName)
 		}
 		table.Columns[columnName] = column
+		if allowRowID && column.PrimaryKey && sqliteDescendingInlineKey(definition) {
+			allowRowID = false
+		}
 	}
 	for _, constraint := range constraints {
 		if err := applyTableConstraint(name, constraint, &table); err != nil {
 			return "", Table{}, err
 		}
 	}
-	for columnName, column := range table.Columns {
-		if column.PrimaryKey {
-			column.Nullable = false
-			if adapter == "sqlite" && strings.EqualFold(column.DatabaseType, "integer") {
-				column.Generated = true
-				column.HasDefault = true
+	if allowRowID {
+		for _, key := range table.UniqueConstraints {
+			if key.Primary && len(key.Columns) == 1 {
+				name := key.Columns[0]
+				column := table.Columns[name]
+				if column.DatabaseType == "integer" {
+					column.Generated = true
+					column.HasDefault = true
+					table.Columns[name] = column
+				}
 			}
-			table.Columns[columnName] = column
 		}
 	}
 	return name, table, nil
+}
+
+// SQLite treats an inline INTEGER PRIMARY KEY DESC as an indexed key.
+// The same DESC in a table-level primary key still permits a rowid alias.
+func sqliteDescendingInlineKey(definition string) bool {
+	var before, previous string
+	for _, word := range topLevelSQLWords(definition) {
+		if before == "PRIMARY" && previous == "KEY" && word == "DESC" {
+			return true
+		}
+		before, previous = previous, word
+	}
+	return false
 }
 
 func parseColumn(adapter, tableName, columnName, definition string, table *Table) (Column, error) {
@@ -221,7 +241,7 @@ func applyTableConstraint(tableName, definition string, table *Table) error {
 	}
 	switch leadingSQLWord(definition) {
 	case "PRIMARY":
-		columns, err := parenthesizedIdentifiers(definition)
+		columns, err := parenthesizedIdentifiers(definition, true)
 		if err != nil {
 			return fmt.Errorf("table %s primary key: %w", tableName, err)
 		}
@@ -236,13 +256,13 @@ func applyTableConstraint(tableName, definition string, table *Table) error {
 		}
 		addUnique(table, true, columns)
 	case "UNIQUE":
-		columns, err := parenthesizedIdentifiers(definition)
+		columns, err := parenthesizedIdentifiers(definition, true)
 		if err != nil {
 			return fmt.Errorf("table %s unique constraint: %w", tableName, err)
 		}
 		addUnique(table, false, columns)
 	case "FOREIGN":
-		columns, err := parenthesizedIdentifiers(definition)
+		columns, err := parenthesizedIdentifiers(definition, false)
 		if err != nil {
 			return fmt.Errorf("table %s foreign key: %w", tableName, err)
 		}
@@ -278,7 +298,7 @@ func parseUniqueIndex(statement string, lock *Lock) error {
 	if close < 0 {
 		return fmt.Errorf("CREATE UNIQUE INDEX on %s is missing )", tableName)
 	}
-	columns := identifiers(target[open+1 : close])
+	columns := identifiers(target[open+1:close], true)
 	addUnique(&table, false, columns)
 	lock.Tables[tableName] = table
 	return nil
@@ -473,7 +493,7 @@ func constraintStart(definition string) int {
 	return len(definition)
 }
 
-func parenthesizedIdentifiers(value string) ([]string, error) {
+func parenthesizedIdentifiers(value string, allowOrder bool) ([]string, error) {
 	open := topLevelIndex(value, '(')
 	if open < 0 {
 		return nil, errorsForSchema("missing (")
@@ -482,7 +502,7 @@ func parenthesizedIdentifiers(value string) ([]string, error) {
 	if close < 0 {
 		return nil, errorsForSchema("missing )")
 	}
-	columns := identifiers(value[open+1 : close])
+	columns := identifiers(value[open+1:close], allowOrder)
 	if len(columns) == 0 {
 		return nil, errorsForSchema("column list is empty")
 	}
@@ -503,14 +523,21 @@ func referenceClause(value string) (string, []string, bool) {
 	if close < 0 {
 		return "", nil, false
 	}
-	return normalizeIdentifier(strings.TrimSpace(rest[:open])), identifiers(rest[open+1 : close]), true
+	return normalizeIdentifier(strings.TrimSpace(rest[:open])), identifiers(rest[open+1:close], false), true
 }
 
-func identifiers(value string) []string {
+func identifiers(value string, allowOrder bool) []string {
 	parts := splitSQL(value, ',')
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if name := normalizeIdentifier(strings.TrimSpace(part)); name != "" {
+		name := normalizeIdentifier(strings.TrimSpace(part))
+		if allowOrder {
+			column, order := leadingIdentifier(part)
+			if strings.EqualFold(order, "ASC") || strings.EqualFold(order, "DESC") {
+				name = column
+			}
+		}
+		if name != "" {
 			result = append(result, name)
 		}
 	}
