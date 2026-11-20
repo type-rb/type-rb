@@ -108,12 +108,12 @@ end
         lock.unlink()
         run(check, root, environment, "schema lock")
         assert not database.exists()
-        schema["tables"]["é_categories"] = schema["tables"].pop("others")
+        schema["tables"]["cé_categories"] = schema["tables"].pop("others")
         lock.write_text(json.dumps(schema, ensure_ascii=False))
-        entry.write_text(source.replace("Category", "ÉCategory").replace(
+        entry.write_text(source.replace("Category", "CÉCategory").replace(
             "import { Model }", "import { DbErrorKind, DbResult, Model }").replace(
             '    puts("locked")',
-            '    case ÉCategory.count()\n    when DbResult::Ok(value)\n        puts(value)\n'
+            '    case CÉCategory.count()\n    when DbResult::Ok(value)\n        puts(value)\n'
             '    when DbResult::Err(error)\n        case error.kind\n'
             '        when DbErrorKind::Connection\n            puts("Connection")\n'
             '        when DbErrorKind::Query\n            puts("Query")\n'
@@ -134,16 +134,16 @@ end
             assert not database.exists()
             binaries.append(go_binary)
         with sqlite3.connect(database) as connection:
-            connection.executescript("CREATE TABLE é_categories(id INTEGER PRIMARY KEY, name TEXT, price REAL, updated_at DATETIME);"
-                                     "INSERT INTO é_categories(name) VALUES ('one'), ('two')")
+            connection.executescript("CREATE TABLE cé_categories(id INTEGER PRIMARY KEY, name TEXT, price REAL, updated_at DATETIME);"
+                                     "INSERT INTO cé_categories(name) VALUES ('one'), ('two')")
         for app in binaries:
             expect_output(app, root, environment, "2\n")
         with sqlite3.connect(database) as connection:
-            connection.execute("DELETE FROM é_categories")
+            connection.execute("DELETE FROM cé_categories")
         for app in binaries:
             expect_output(app, root, environment, "0\n")
         with sqlite3.connect(database) as connection:
-            connection.execute("DROP TABLE é_categories")
+            connection.execute("DROP TABLE cé_categories")
         for app in binaries:
             expect_output(app, root, environment, "Query\ndatabase count failed\n")
         for app in binaries:
