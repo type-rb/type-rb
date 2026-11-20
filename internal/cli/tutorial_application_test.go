@@ -48,6 +48,36 @@ func TestWebORMJobsTutorialAcrossBackends(t *testing.T) {
 			}
 			assertTutorialReportStatus(t, applicationDatabase, "ready")
 			assertTutorialQueueEmpty(t, jobsDatabase)
+
+			// Enqueue another report through the application and delete its row
+			// before the worker sees it.
+			if status := command.Run([]string{"test", "--config", configPath}); status != 0 {
+				t.Fatalf("second request status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			appDB, err := sql.Open("sqlite", applicationDatabase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer appDB.Close()
+			if _, err := appDB.Exec("DELETE FROM reports"); err != nil {
+				t.Fatal(err)
+			}
+			if status := command.Run([]string{"jobs", "start", "--once", "--config", configPath}); status != 0 {
+				t.Fatalf("missing report worker status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			queue, err := sql.Open("sqlite", jobsDatabase)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer queue.Close()
+			var state, message string
+			var attempts int
+			if err := queue.QueryRow("SELECT state, attempts, last_error FROM trb_jobs").Scan(&state, &attempts, &message); err != nil {
+				t.Fatal(err)
+			}
+			if state != "ready" || attempts != 1 || message != "report not found" {
+				t.Fatalf("missing report state=%q attempts=%d last_error=%q", state, attempts, message)
+			}
 		})
 	}
 }

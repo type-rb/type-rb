@@ -153,6 +153,9 @@ class GenerateReportJob < Job
 		report := Report.find(report_id) catch |error|
 			return JobResult::Err(JobError.new(message: "report lookup failed: " + error.message))
 		end
+		if report == nil
+			return JobResult::Err(JobError.new(message: "report not found"))
+		end
 		_saved := report.with(status: "ready").save() catch |error|
 			return JobResult::Err(JobError.new(message: "report update failed: " + error.message))
 		end
@@ -301,7 +304,7 @@ end
 
 <!-- trb-doc-file: examples/tutorials/web-orm-jobs/src/routes/reports/[id].trb -->
 ```trb
-import { database_error_response, endpoint_input_error_response } from http/errors
+import { ErrorResponse, database_error_response, endpoint_input_error_response } from http/errors
 import models/report
 import { Context, Response } from trb/web
 
@@ -325,6 +328,9 @@ def get(context: Context): Response
 	end
 	report := Report.find(input.params.id) catch |error|
 		return database_error_response(error)
+	end
+	if report == nil
+		return Response.json(ErrorResponse.new(code: "not_found", message: "report not found"), 404)
 	end
 	return Response.json(ReportResponse.new(id: report.id, status: report.status, title: report.title))
 end
@@ -416,6 +422,18 @@ describe("Report API") do
 		)
 		show_response := dispatch(show_request)
 		expect(show_response.status).to_equal(200)
+	end
+
+	test("returns 404 for a missing report") do
+		request := Request.new(
+			method: HttpMethod.get(),
+			path: "/reports/999999",
+			query_string: "",
+			headers: Headers.new([]),
+			body: Body.empty(),
+		)
+		response := dispatch(request)
+		expect(response.status).to_equal(404)
 	end
 end
 ```
