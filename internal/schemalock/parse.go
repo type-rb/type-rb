@@ -2,6 +2,7 @@ package schemalock
 
 import (
 	"fmt"
+	"iter"
 	"regexp"
 	"sort"
 	"strings"
@@ -107,7 +108,7 @@ func parseCreateTable(adapter, statement string) (string, Table, error) {
 		if item == "" {
 			continue
 		}
-		if tableConstraint(item) {
+		if tableConstraint(adapter, item) {
 			constraints = append(constraints, item)
 			continue
 		}
@@ -153,13 +154,45 @@ func parseColumn(adapter, tableName, columnName, definition string, table *Table
 	if err != nil {
 		return Column{}, fmt.Errorf("table %s column %s: %w", tableName, columnName, err)
 	}
-	upper := strings.ToUpper(constraints)
 	column := Column{
-		DatabaseType: normalizeDatabaseType(databaseType), Type: portableType,
-		Nullable:   !containsWords(upper, "NOT NULL"),
-		PrimaryKey: containsWords(upper, "PRIMARY KEY"),
-		HasDefault: containsWord(upper, "DEFAULT"),
-		Generated:  containsWord(upper, "GENERATED") || containsWord(upper, "IDENTITY") || containsWord(upper, "AUTO_INCREMENT") || strings.Contains(strings.ToLower(databaseType), "serial"),
+		DatabaseType: normalizeDatabaseType(databaseType), Type: portableType, Nullable: true,
+		Generated: strings.Contains(strings.ToLower(databaseType), "serial"),
+	}
+	var previous string
+	var unique, takesArgument bool
+	previousEnd := 0
+	for start, word := range topLevelSQLWords(constraints) {
+		gap := strings.TrimSpace(constraints[previousEnd:start])
+		previousEnd = start + len(word)
+		isArgument := takesArgument && gap == "" || gap == "."
+		takesArgument = false
+		if isArgument {
+			previous = ""
+			continue
+		}
+		switch word {
+		case "NULL":
+			if previous == "NOT" {
+				column.Nullable = false
+			}
+		case "KEY":
+			if previous == "PRIMARY" {
+				column.PrimaryKey = true
+			}
+		case "DEFAULT":
+			// SET DEFAULT is a foreign-key action, not a column default.
+			if previous != "SET" {
+				column.HasDefault = true
+				takesArgument = true
+			}
+		case "COLLATE", "CONSTRAINT", "REFERENCES":
+			takesArgument = true
+		case "UNIQUE":
+			unique = true
+		case "GENERATED", "IDENTITY", "AUTO_INCREMENT":
+			column.Generated = true
+		}
+		previous = word
 	}
 	if column.Generated {
 		column.HasDefault = true
@@ -167,7 +200,7 @@ func parseColumn(adapter, tableName, columnName, definition string, table *Table
 	if column.PrimaryKey {
 		column.Nullable = false
 		addUnique(table, true, []string{columnName})
-	} else if containsWord(upper, "UNIQUE") {
+	} else if unique {
 		addUnique(table, false, []string{columnName})
 	}
 	if referencedTable, referencedColumns, ok := referenceClause(constraints); ok {
@@ -182,13 +215,12 @@ func parseColumn(adapter, tableName, columnName, definition string, table *Table
 
 func applyTableConstraint(tableName, definition string, table *Table) error {
 	definition = strings.TrimSpace(definition)
-	if hasPrefixWord(definition, "CONSTRAINT") {
+	if leadingSQLWord(definition) == "CONSTRAINT" {
 		_, rest := leadingIdentifier(strings.TrimSpace(definition[len("CONSTRAINT"):]))
 		definition = strings.TrimSpace(rest)
 	}
-	upper := strings.ToUpper(definition)
-	switch {
-	case strings.HasPrefix(upper, "PRIMARY KEY"):
+	switch leadingSQLWord(definition) {
+	case "PRIMARY":
 		columns, err := parenthesizedIdentifiers(definition)
 		if err != nil {
 			return fmt.Errorf("table %s primary key: %w", tableName, err)
@@ -203,13 +235,13 @@ func applyTableConstraint(tableName, definition string, table *Table) error {
 			table.Columns[name] = column
 		}
 		addUnique(table, true, columns)
-	case strings.HasPrefix(upper, "UNIQUE"):
+	case "UNIQUE":
 		columns, err := parenthesizedIdentifiers(definition)
 		if err != nil {
 			return fmt.Errorf("table %s unique constraint: %w", tableName, err)
 		}
 		addUnique(table, false, columns)
-	case strings.HasPrefix(upper, "FOREIGN KEY"):
+	case "FOREIGN":
 		columns, err := parenthesizedIdentifiers(definition)
 		if err != nil {
 			return fmt.Errorf("table %s foreign key: %w", tableName, err)
@@ -228,12 +260,11 @@ func applyTableConstraint(tableName, definition string, table *Table) error {
 
 func parseUniqueIndex(statement string, lock *Lock) error {
 	rest := createUniqueIndexPattern.ReplaceAllString(statement, "")
-	upper := strings.ToUpper(rest)
-	on := strings.Index(upper, " ON ")
+	on := keywordIndex(rest, "ON")
 	if on < 0 {
 		return errorsForSchema("CREATE UNIQUE INDEX is missing ON")
 	}
-	target := strings.TrimSpace(rest[on+4:])
+	target := strings.TrimSpace(rest[on+len("ON"):])
 	open := topLevelIndex(target, '(')
 	if open < 0 {
 		return errorsForSchema("CREATE UNIQUE INDEX is missing a column list")
@@ -346,40 +377,82 @@ func normalizeDatabaseType(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 
-func tableConstraint(value string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(value))
-	return strings.HasPrefix(upper, "CONSTRAINT ") || strings.HasPrefix(upper, "PRIMARY KEY") || strings.HasPrefix(upper, "UNIQUE") || strings.HasPrefix(upper, "FOREIGN KEY") || strings.HasPrefix(upper, "CHECK") || strings.HasPrefix(upper, "KEY ") || strings.HasPrefix(upper, "INDEX ")
+func tableConstraint(adapter, value string) bool {
+	switch leadingSQLWord(value) {
+	case "CONSTRAINT", "PRIMARY", "UNIQUE", "FOREIGN", "CHECK":
+		return true
+	case "KEY", "INDEX":
+		return adapter == "mysql"
+	}
+	return false
+}
+
+func leadingSQLWord(value string) string {
+	value = strings.TrimSpace(value)
+	for start, word := range topLevelSQLWords(value) {
+		if start == 0 {
+			return word
+		}
+		break
+	}
+	return ""
+}
+
+// Yield whole unquoted words outside expressions, with byte offsets in the original SQL.
+func topLevelSQLWords(value string) iter.Seq2[int, string] {
+	return func(yield func(int, string) bool) {
+		var quote rune
+		depth, start := 0, -1
+		for index, r := range value {
+			if quote != 0 {
+				if r == quote {
+					quote = 0
+				}
+				continue
+			}
+			if depth == 0 && (unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsMark(r) || r == '_' || r == '$') {
+				if start < 0 {
+					start = index
+				}
+				continue
+			}
+			if start >= 0 {
+				if !yield(start, foldSQLWord(value[start:index])) {
+					return
+				}
+				start = -1
+			}
+			switch r {
+			case '\'', '"', '`':
+				quote = r
+			case '(':
+				depth++
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+		if start >= 0 {
+			yield(start, foldSQLWord(value[start:]))
+		}
+	}
+}
+
+// SQL keywords are ASCII. A Unicode identifier such as unıque is distinct.
+func foldSQLWord(word string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' {
+			return r - ('a' - 'A')
+		}
+		return r
+	}, word)
 }
 
 func keywordIndex(value, keyword string) int {
-	upper := strings.ToUpper(value)
-	quote := byte(0)
-	depth := 0
-	for index := 0; index < len(value); index++ {
-		character := value[index]
-		if quote != 0 {
-			if character == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch character {
-		case '\'', '"', '`':
-			quote = character
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		default:
-			if depth == 0 && strings.HasPrefix(upper[index:], keyword) {
-				before := index == 0 || unicode.IsSpace(rune(value[index-1]))
-				after := index+len(keyword) == len(value) || unicode.IsSpace(rune(value[index+len(keyword)]))
-				if before && after {
-					return index
-				}
-			}
+	for start, word := range topLevelSQLWords(value) {
+		if word == keyword {
+			return start
 		}
 	}
 	return -1
@@ -392,45 +465,9 @@ var columnConstraintWords = map[string]bool{
 }
 
 func constraintStart(definition string) int {
-	quote := rune(0)
-	depth := 0
-	for index := 0; index < len(definition); {
-		character := rune(definition[index])
-		if quote != 0 {
-			if character == quote {
-				if index+1 < len(definition) && rune(definition[index+1]) == quote {
-					index += 2
-					continue
-				}
-				quote = 0
-			}
-			index++
-			continue
-		}
-		switch character {
-		case '\'', '"', '`':
-			quote = character
-			index++
-		case '(':
-			depth++
-			index++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-			index++
-		default:
-			if depth == 0 && (unicode.IsLetter(character) || character == '_') {
-				start := index
-				for index < len(definition) && (unicode.IsLetter(rune(definition[index])) || definition[index] == '_') {
-					index++
-				}
-				if columnConstraintWords[strings.ToUpper(definition[start:index])] {
-					return start
-				}
-				continue
-			}
-			index++
+	for start, word := range topLevelSQLWords(definition) {
+		if columnConstraintWords[word] {
+			return start
 		}
 	}
 	return len(definition)
@@ -453,8 +490,7 @@ func parenthesizedIdentifiers(value string) ([]string, error) {
 }
 
 func referenceClause(value string) (string, []string, bool) {
-	upper := strings.ToUpper(value)
-	index := strings.Index(upper, "REFERENCES")
+	index := keywordIndex(value, "REFERENCES")
 	if index < 0 {
 		return "", nil, false
 	}
@@ -639,17 +675,6 @@ func matchingClose(value string, open int) int {
 	return -1
 }
 
-func hasPrefixWord(value, word string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(value))
-	return upper == word || strings.HasPrefix(upper, word+" ")
-}
-
-func containsWords(value, words string) bool {
-	return strings.Contains(" "+strings.Join(strings.Fields(value), " ")+" ", " "+words+" ")
-}
-
-func containsWord(value, word string) bool { return containsWords(value, word) }
-
 func stripSQLComments(value string) string {
 	var result strings.Builder
 	quote := byte(0)
@@ -684,6 +709,7 @@ func stripSQLComments(value string) string {
 			continue
 		}
 		if index+1 < len(value) && value[index:index+2] == "/*" {
+			result.WriteByte(' ')
 			index += 2
 			for index+1 < len(value) && value[index:index+2] != "*/" {
 				if value[index] == '\n' {

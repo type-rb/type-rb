@@ -84,6 +84,45 @@ func TestDatabaseLockAndCheckAreModeIndependent(t *testing.T) {
 	}
 }
 
+func TestDatabaseOfflineLockMatchesSQLiteConstraintMetadata(t *testing.T) {
+	root := databaseTestProject(t, "go")
+	schema := `CREATE TABLE sqlitebooks (id INTEGER PRIMARY KEY AUTOINCREMENT);
+CREATE TABLE identity (id INTEGER PRIMARY KEY);
+CREATE TABLE notes (
+  id INTEGER PRIMARY KEY,
+  key TEXT,
+  identity_id INTEGER REFERENCES identity(id),
+  checksum TEXT,
+  unique_label TEXT,
+  note TEXT DEFAULT 'it''s NOT NULL and UNIQUE and GENERATED here',
+  caption TEXT DEFAULT 'example REFERENCES ghosts(id)',
+  positive INTEGER CHECK (positive IS NOT NULL OR positive IS NULL),
+  owner INTEGER REFERENCES sqlitebooks(id) ON DELETE SET DEFAULT,
+  required TEXT/* SQL comment */NOT NULL
+);
+CREATE UNIQUE INDEX "index ON captions" ON notes(caption);`
+	if err := os.WriteFile(filepath.Join(root, "db", "schema.sql"), []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(root, project.ConfigName)
+	var stderr bytes.Buffer
+	command := &CLI{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: &stderr}
+	if code := command.Run([]string{"db", "lock", "--config", config}); code != 0 {
+		t.Fatalf("lock failed: %s", stderr.String())
+	}
+	database, err := sql.Open("sqlite", filepath.Join(root, "db", "development.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	if code := command.Run([]string{"db", "check", "--from-db", "--config", config}); code != 0 {
+		t.Fatalf("offline lock differs from SQLite metadata: %s", stderr.String())
+	}
+}
+
 func TestDatabaseLockLetsORMCompileWithoutLiveDatabase(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {

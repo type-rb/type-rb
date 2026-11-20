@@ -101,6 +101,42 @@ CREATE TABLE products (
 	}
 }
 
+func TestParseSQLRecognizesOnlyTopLevelConstraintKeywords(t *testing.T) {
+	for _, adapter := range []string{"sqlite", "mysql", "postgresql"} {
+		t.Run(adapter, func(t *testing.T) {
+			lock, err := ParseSQL(adapter, []byte(`CREATE TABLE parents (id INTEGER PRIMARY KEY);
+CREATE TABLE notes (
+	id INTEGER PRIMARY KEY,
+	unıque VARCHAR(32),
+	checksum VARCHAR(100) DEFAULT 'example NOT NULL and UNIQUE and IDENTITY here',
+	unique_label VARCHAR(100) CHECK (unique_label IS NOT NULL OR unique_label IS NULL),
+	owner INTEGER REFERENCES parents(id)
+);
+CREATE UNIQUE INDEX ı_label
+	ON notes(unique_label);`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			table := lock.Tables["notes"]
+			if col := table.Columns["unıque"]; col.Type != "String" || !col.Nullable {
+				t.Fatalf("Unicode identifier was treated as a keyword: %#v", col)
+			}
+			if col := table.Columns["checksum"]; col.Type != "String" || !col.Nullable || !col.HasDefault || col.PrimaryKey || col.Generated {
+				t.Fatalf("default text changed column flags: %#v", col)
+			}
+			if col := table.Columns["unique_label"]; col.Type != "String" || !col.Nullable || col.HasDefault {
+				t.Fatalf("CHECK expression changed column flags: %#v", col)
+			}
+			if _, ok := table.ForeignKeys["owner->parents.id"]; !ok || len(table.ForeignKeys) != 1 {
+				t.Fatalf("unexpected foreign keys: %#v", table.ForeignKeys)
+			}
+			if _, ok := table.UniqueConstraints["unique:unique_label"]; !ok || len(table.UniqueConstraints) != 2 {
+				t.Fatalf("unexpected unique constraints: %#v", table.UniqueConstraints)
+			}
+		})
+	}
+}
+
 func TestParseSQLAcceptsPortableDateTimeTypes(t *testing.T) {
 	for adapter, source := range map[string]string{
 		"sqlite":     "CREATE TABLE events (id INTEGER PRIMARY KEY, on_date DATE, at_time TIME, local_at DATETIME, exact_at TIMESTAMPTZ);",

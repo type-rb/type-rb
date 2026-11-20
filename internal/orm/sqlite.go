@@ -20,7 +20,7 @@ func (sqliteIntrospector) Inspect(config Config) (*Schema, error) {
 		return nil, err
 	}
 	defer database.Close()
-	rows, err := database.Query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := database.Query(`SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
