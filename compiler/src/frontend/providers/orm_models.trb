@@ -1,3 +1,6 @@
+import { parse_function } from frontend/syntax/declaration_syntax
+import { lex_module } from frontend/syntax/lexer
+import { compiler_reserve_source } from state/source_capacity
 import { orm_add_method, orm_lookup_methods } from frontend/providers/orm_lookup
 import { find_visible_declaration } from frontend/resolution/declaration_lookup
 import { escape_scalar } from frontend/syntax/string_escapes
@@ -112,7 +115,7 @@ end
 def orm_count_method(mut state: CompilerState, index: Integer, table: String, database: String, environment: String)
 	row := state.nominal.objects[index]
 	statement := "SELECT count(*) FROM \"" + table + "\""
-	source := "def self.count(): Result<Integer, DbError>\nreturn _orm_count(" + web_dispatch_quote(database) + ", " + web_dispatch_quote(environment) + ", " + web_dispatch_quote(statement) + ")\nend\n"
+	source := "def self.count(): Result<Integer, DbError>\nreturn count_rows(" + web_dispatch_quote(database) + ", " + web_dispatch_quote(environment) + ", " + web_dispatch_quote(statement) + ", 0)\nend\n"
 	runtime := find_module(state, "trb/internal/orm/sql/index")
 	if runtime < 0
 		diagnostic(state, "TRBN4003", row.line, "missing owned SQLite ORM runtime")
@@ -129,6 +132,14 @@ def prepare_orm_models(mut state: CompilerState, models: Array<Integer>, source:
 		return
 	end
 	previous := state.module_graph.active_module[0]
+	runtime := find_module(state, "trb/internal/orm/sql/index")
+	state.module_graph.active_module[0] = runtime
+	root := "def _orm_root<T>(action: (Transaction) -> Result<T, DbError>): Result<T, DbError>\nreturn _transact<T>(nil, " + web_dispatch_quote(database) + ", " + web_dispatch_quote(environment) + ", action)\nend\n"
+	compiler_reserve_source(state, root.size())
+	start := state.source_tokens.token_count[0]
+	lex_module(state, root, runtime)
+	mut cursor := [start]
+	parse_function(state, cursor, "", [], false, false)
 	models.each do |index|
 		if !has_diagnostic(state)
 			row := state.nominal.objects[index]

@@ -360,6 +360,9 @@ def check_transfer_value(mut state: CompilerState, mut position: Array<Integer>,
 			end
 		end
 	end
+	if token_is(state, origin, "return") && locals.transaction_body[0]
+		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a transaction block")
+	end
 	if token_is(state, origin, "return") && locals.file_body[0]
 		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a scoped File block")
 	end

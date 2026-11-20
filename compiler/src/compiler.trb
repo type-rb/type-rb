@@ -1,3 +1,4 @@
+import { emit_sqlite_transaction_runtime } from backend/qbe/runtime/sqlite_transactions
 import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
 import { emit_sqlite_query_runtime } from backend/qbe/runtime/sqlite_query
 import { orm_model_indices, prepare_orm_models } from frontend/providers/orm_models
@@ -318,6 +319,7 @@ def emit_qbe(mut state: CompilerState): QbeOutput
 		emit_sqlite_write_runtime(output)
 		emit_sqlite_error_runtime(output)
 		emit_sqlite_query_runtime(output)
+		emit_sqlite_transaction_runtime(output)
 	end
 	emit_entropy_runtime(state.scalar_mir, output)
 	emit_string_builder_runtime(state.scalar_mir, output)
@@ -1134,7 +1136,7 @@ def load_configured_sources_with_tests(config: ProjectConfig, config_path: Strin
 	mut state := load_package_project_sources_with_tests(config_path, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), names, owners, packages, require_entry, interactive, tests)
 	if !has_diagnostic(state) && find_module(state, "trb/orm/index") >= 0
 		models := orm_model_indices(state)
-		if models.size() > 0 && !has_diagnostic(state)
+		if (models.size() > 0 || config.orm_options != "") && !has_diagnostic(state)
 			if config.orm_options == ""
 				return project_error_state(config_path, 1, "trb/orm requires packageOptions.trb/orm")
 			end

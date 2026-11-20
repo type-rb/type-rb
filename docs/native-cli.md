@@ -187,6 +187,24 @@ after the target row has been deleted returns an `InvalidData` error.
 Models can also use `count()`. These operations use the same pinned SQLite
 bundle as SQLite Jobs.
 
+Use `Model.using(tx)` inside a transaction to keep operations on its
+connection. A successful block commits its final value. A propagated database
+error rolls back before the caller's `catch` runs.
+
+```trb
+def publish(title: String): DbResult<Integer>
+    return Database.transaction() do |tx|
+        reports := Report.using(tx)
+        report := try reports.create(title: title)
+        report.id
+    end
+end
+```
+
+A nested `tx.transaction() do |inner| ... end` uses a savepoint. Catching an
+inner failure lets the outer transaction continue with its earlier changes.
+Unscoped model calls use their own connection.
+
 ### SQLite Jobs
 
 Use `trbn jobs start` from a Native project with `jobs.configuration` and a

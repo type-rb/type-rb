@@ -37,7 +37,65 @@ def check_model_rows(cli, reference, root, config, environment):
                             "note": {"type": "String", "nullable": True, "hasDefault": True},
                             "title": {"type": "String"}},
                 "uniqueConstraints": {"primary:id": {"primary": True, "columns": ["id"]}}}}}))
-    source = """import { Report, Tag } from models
+    (src / "transactions.trb").write_text("""import { Report } from models
+import { Database, DbResult } from trb/orm
+
+def committed(label: String): DbResult<Integer>
+    return Database.transaction() do |tx|
+        reports := Report.using(tx)
+        first := try reports.create(title: label)
+        puts(try Report.count())
+        puts(try reports.count())
+        inner_value := tx.transaction() do |inner|
+            nested := Report.using(inner)
+            _created := try nested.create(title: "discard")
+            _duplicate := try nested.create(title: "discard")
+            1
+        end catch |error|
+            puts(error.message)
+            0
+        end
+        puts(inner_value)
+        puts(try reports.count())
+        nested_count := try tx.transaction() do |inner|
+            row := try Report.using(inner).create(title: "kept")
+            temporary := try Report.using(inner).create(title: "temporary")
+            puts(try temporary.delete())
+            row.id
+        end
+        puts(nested_count)
+        _changed := try first.update(note: "saved")
+        try reports.count()
+    end
+end
+
+def rolled_back(): DbResult<Integer>
+    return Database.transaction() do |tx|
+        scoped := Report.using(tx)
+        _discard := try scoped.create(title: "outer discard")
+        inner := try tx.transaction() do |nested|
+            _created := try Report.using(nested).create(title: "kept")
+            7
+        end
+        inner
+    end
+end
+
+def exercise_transactions()
+    count := committed("root") catch |error|
+        puts(error.message)
+        return
+    end
+    puts(count)
+    observed := rolled_back() catch |error|
+        puts(error.message)
+        0
+    end
+    puts(observed)
+end
+""")
+    source = """import { exercise_transactions } from transactions
+import { Report, Tag } from models
 import { DbErrorKind, DbResult } from trb/orm
 import trb/std/process
 
@@ -200,6 +258,10 @@ end
 def main()
     operation := Process.environment("ORM_TEST_OPERATION")
     if operation != nil
+        if operation == "transactions"
+            exercise_transactions()
+            return
+        end
         if operation == "update"
             change_report()
             return
@@ -258,6 +320,14 @@ end
     for app in binaries:
         expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
+        transactions = root / (app.name + "-transactions.sqlite")
+        with sqlite3.connect(transactions) as connection:
+            connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL UNIQUE, note TEXT)")
+        expect_output(app, root, dict(environment, DATABASE_URL=str(transactions), ORM_TEST_OPERATION="transactions"),
+                      "0\n1\ndatabase insert failed\n0\n1\ntrue\n2\n2\ndatabase insert failed\n0\n")
+        with sqlite3.connect(transactions) as connection:
+            assert connection.execute("SELECT id, title, note FROM reports ORDER BY id").fetchall() == [
+                (1, "root", "saved"), (2, "kept", None)]
         inserts = root / (app.name + "-creates.sqlite")
         with sqlite3.connect(inserts) as connection:
             connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL, note TEXT DEFAULT 'from database')")
@@ -516,7 +586,7 @@ end
                           "Connection\ndatabase connection failed\n")
         check_model_rows(cli, reference, root, config, environment)
         check_model_worker(cli, reference, root / "worker-project")
-    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, deferred saves, runtime errors and worker updates passed")
+    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, deferred saves, transaction isolation, nested rollback, runtime errors and worker updates passed")
 
 
 if __name__ == "__main__":

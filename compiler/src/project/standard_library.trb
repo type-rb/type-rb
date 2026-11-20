@@ -640,6 +640,9 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 	if kind == standard_source_web_server()
 		source += web_dispatch_source(state, true)
 	end
+	if kind == official_source_kind("trb/orm")
+		source = source.replace_all("class Transaction\nend", "class Transaction\nreadonly @_orm_lease: OrmSql::Lease?\ndef initialize(lease: OrmSql::Lease? = nil)\n@_orm_lease = lease\nend\nend")
+	end
 	if kind == official_source_kind("trb/web")
 		source += "\nimport { serve as serve_network } from trb/internal/web_server\nmodule Web\ndef self.serve(config: ServerConfig = ServerConfig.new())\nserve_network(config)\nreturn\nend\nend\n"
 	end

@@ -6,7 +6,7 @@ import { find_enum_type, find_enum_variant } from frontend/types/enum_types
 import { hash_key_type, hash_value_type } from frontend/types/hash_types
 import { load_standard_source } from project/standard_library
 import { array_element_type, instantiate_generic_nominal, record_type } from frontend/resolution/type_resolution
-import { CompilerState } from state/state
+import { CompilerState, find_module } from state/state
 import { load_integer, load_string } from support/storage
 
 def builtin_result_method(receiver: String, method: String): Integer
@@ -50,7 +50,12 @@ end
 
 def builtin_result_type(mut state: CompilerState, success: String, error: String): String
 	result_source := load_standard_source(state, standard_source_result(), 1)
-	error_source := load_standard_source(state, standard_source_errors(), 1)
+	mut error_source := -1
+	if error == "DbError"
+		error_source = find_module(state, "trb/orm/index")
+	else
+		error_source = load_standard_source(state, standard_source_errors(), 1)
+	end
 	definition := find_generic_in_module(state, result_source, "Result")
 	error_type := record_type(find_record_in_module(state, error_source, error))
 	return instantiate_generic_nominal(state, definition, [success, error_type])

@@ -16,6 +16,7 @@ record OrmWriteSource
 	create_method: String
 	with_method: String
 	update_method: String
+	scoped_create: String
 end
 
 # A private omitted value keeps an explicitly supplied SQL NULL distinct from
@@ -70,38 +71,38 @@ def orm_write_arguments(table: OrmTable, updating: Boolean): OrmWriteArguments
 	return OrmWriteArguments.new(valid: true, named: named, parameters: web_route_join(parameters, ", "), forwarding: web_route_join(arguments, ", "), setup: setup)
 end
 
-def orm_write_source(table: OrmTable, connection: String, projection: String, key: String, change_type: String): OrmWriteSource
+def orm_write_source(table: OrmTable, connection: String, projection: String, key: String, change_type: String, scope_field: String): OrmWriteSource
 	insert := orm_write_arguments(table, false)
 	change := orm_write_arguments(table, true)
 	if !insert.valid || !change.valid
-		return OrmWriteSource.new(declarations: "", create_method: "", with_method: "", update_method: "")
+		return OrmWriteSource.new(declarations: "", create_method: "", with_method: "", update_method: "", scoped_create: "")
 	end
 	result := "Result<OrmModelType, DbError>"
 	mut declarations := "record OrmMissing\nend\nalias OrmOptionalInteger = Integer | OrmMissing\nalias OrmOptionalString = String | OrmMissing\n"
 	table_argument := web_dispatch_quote("\"" + table.name + "\"")
 	returning := web_dispatch_quote(projection) + ", " + integer_string(table.columns.size())
-	declarations += "def orm_insert(" + insert.parameters + "): " + result + "\n" + insert.setup
-	declarations += "raw := OrmSql.insert_row(" + connection + ", " + table_argument + ", columns, values, " + returning + ") catch |error|\nreturn " + result + "::Err(error)\nend\n"
-	declarations += orm_written_model("database insert failed")
-	create_method := "def self.create(" + insert.named + "): " + result + "\nreturn orm_insert(" + insert.forwarding + ")\nend\n"
+	declarations += "def orm_insert(scope: Integer, " + insert.parameters + "): " + result + "\n" + insert.setup
+	declarations += "raw := OrmSql.insert_row(" + connection + ", " + table_argument + ", columns, values, " + returning + ", scope) catch |error|\nreturn " + result + "::Err(error)\nend\n"
+	declarations += orm_written_model("database insert failed", "scope")
+	create_method := "def self.create(" + insert.named + "): " + result + "\nreturn orm_insert(0, " + insert.forwarding + ")\nend\n"
 
-	declarations += "class " + change_type + "\nreadonly @_key: SQLite::Parameter\nreadonly @_columns: Array<String>\nreadonly @_values: Array<SQLite::Parameter>\n"
-	declarations += "def initialize(key: SQLite::Parameter, columns: Array<String>, values: Array<SQLite::Parameter>)\n@_key = key\n@_columns = columns\n@_values = values\nend\n"
-	declarations += "def save(): " + result + "\nraw := OrmSql.update_row(" + connection + ", " + table_argument + ", @_columns, @_values, " + web_dispatch_quote("\"" + key + "\"") + ", @_key, " + returning + ") catch |error|\nreturn " + result + "::Err(error)\nend\n"
-	declarations += orm_written_model("database update failed") + "end\n"
-	mut parameters := "model: OrmModelType"
-	mut forwarded := "self"
+	declarations += "class " + change_type + "\nreadonly @_scope: Integer\nreadonly @_key: SQLite::Parameter\nreadonly @_columns: Array<String>\nreadonly @_values: Array<SQLite::Parameter>\n"
+	declarations += "def initialize(scope: Integer, key: SQLite::Parameter, columns: Array<String>, values: Array<SQLite::Parameter>)\n@_scope = scope\n@_key = key\n@_columns = columns\n@_values = values\nend\n"
+	declarations += "def save(): " + result + "\nraw := OrmSql.update_row(" + connection + ", " + table_argument + ", @_columns, @_values, " + web_dispatch_quote("\"" + key + "\"") + ", @_key, " + returning + ", @_scope) catch |error|\nreturn " + result + "::Err(error)\nend\n"
+	declarations += orm_written_model("database update failed", "@_scope") + "end\n"
+	mut parameters := "scope: Integer, model: OrmModelType"
+	mut forwarded := "@" + scope_field + ", self"
 	if change.parameters != ""
 		parameters += ", " + change.parameters
 		forwarded += ", " + change.forwarding
 	end
-	declarations += "def orm_changes(" + parameters + "): " + change_type + "\n" + change.setup + "return " + change_type + ".new(orm_key(model), columns, values)\nend\n"
+	declarations += "def orm_changes(" + parameters + "): " + change_type + "\n" + change.setup + "return " + change_type + ".new(scope, orm_key(model), columns, values)\nend\n"
 	with_method := "def with(" + change.named + "): " + change_type + "\nreturn orm_changes(" + forwarded + ")\nend\n"
 	update_method := "def update(" + change.named + "): " + result + "\nreturn orm_changes(" + forwarded + ").save()\nend\n"
-	return OrmWriteSource.new(declarations: declarations, create_method: create_method, with_method: with_method, update_method: update_method)
+	return OrmWriteSource.new(declarations: declarations, create_method: create_method, with_method: with_method, update_method: update_method, scoped_create: "def create(" + insert.named + "): " + result + "\nreturn orm_insert(@_scope, " + insert.forwarding + ")\nend\n")
 end
 
-def orm_written_model(message: String): String
+def orm_written_model(message: String, scope: String): String
 	result := "Result<OrmModelType, DbError>"
-	return "item := orm_read(raw) catch |_error|\nreturn " + result + "::Err(DbError.new(kind: DbErrorKind::Constraint, message: " + web_dispatch_quote(message) + "))\nend\nreturn " + result + "::Ok(item)\nend\n"
+	return "item := orm_read(raw, " + scope + ") catch |_error|\nreturn " + result + "::Err(DbError.new(kind: DbErrorKind::Constraint, message: " + web_dispatch_quote(message) + "))\nend\nreturn " + result + "::Ok(item)\nend\n"
 end

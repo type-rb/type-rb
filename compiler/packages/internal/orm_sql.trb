@@ -1,12 +1,18 @@
-import { DbError, DbErrorKind } from trb/orm
+import { DbError, DbErrorKind, Transaction } from trb/orm
 import trb/std/result
 import trb/internal/sqlite
 import trb/std/process
 
 module OrmSql
+	record Lease
+		id: Integer
+	end
 end
 
-def _orm_database(database: String, environment: String): Result<String, DbError>
+def _orm_database(database: String, environment: String, scope: Integer = 0): Result<String, DbError>
+	if scope != 0
+		return Result<String, DbError>::Ok("")
+	end
 	if environment == ""
 		return Result<String, DbError>::Ok(database)
 	end
@@ -17,24 +23,29 @@ def _orm_database(database: String, environment: String): Result<String, DbError
 	return Result<String, DbError>::Ok(configured)
 end
 
-def delete_row(database: String, environment: String, statement: String, key: SQLite::Parameter): Result<Boolean, DbError>
-	source := _orm_database(database, environment) catch |error|
+def delete_row(database: String, environment: String, statement: String, key: SQLite::Parameter, scope: Integer): Result<Boolean, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Boolean, DbError>::Err(error)
 	end
-	request := SQLite::WriteStatement.new(sql: statement, parameters: [key])
-	case SQLite.execute_writes(source, [request], false, 0)
-	when Result::Ok(changes)
-		return Result<Boolean, DbError>::Ok(changes > 0)
+	case SQLite.query_one(source, statement + " RETURNING 1", [key], [1], SQLite::QueryMode::WriteReturning, 0, scope)
+	when Result::Ok(row)
+		return Result<Boolean, DbError>::Ok(row != nil)
 	when Result::Err(error)
-		if error.code == 14
+		if error.code == -1
+			return Result<Boolean, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
 			return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
 	return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database delete failed"))
 end
 
-def insert_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, projection: String, width: Integer): Result<Array<SQLite::Parameter>, DbError>
-	source := _orm_database(database, environment) catch |error|
+def _closed_transaction(): DbError
+	return DbError.new(kind: DbErrorKind::InvalidData, message: "database transaction is closed")
+end
+
+def insert_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, projection: String, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
 	end
 	mut statement := "INSERT INTO " + table
@@ -48,14 +59,14 @@ def insert_row(database: String, environment: String, table: String, columns: Ar
 		statement += " (" + columns.join(", ") + ") VALUES (" + parameters.join(", ") + ")"
 	end
 	statement += " RETURNING " + projection
-	return _returning(source, statement, values, width, false)
+	return _returning(source, statement, values, width, false, scope)
 end
 
-def update_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, predicate: String, key: SQLite::Parameter, projection: String, width: Integer): Result<Array<SQLite::Parameter>, DbError>
+def update_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, predicate: String, key: SQLite::Parameter, projection: String, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
 	if columns.size() == 0
 		return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update requires at least one value"))
 	end
-	source := _orm_database(database, environment) catch |error|
+	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
 	end
 	mut assignments: Array<String> := []
@@ -66,11 +77,11 @@ def update_row(database: String, environment: String, table: String, columns: Ar
 	values.each { |value| parameters.push(value) }
 	parameters.push(key)
 	statement := "UPDATE " + table + " SET " + assignments.join(", ") + " WHERE " + predicate + " = ? RETURNING " + projection
-	return _returning(source, statement, parameters, width, true)
+	return _returning(source, statement, parameters, width, true, scope)
 end
 
-def _returning(source: String, statement: String, values: Array<SQLite::Parameter>, width: Integer, updating: Boolean): Result<Array<SQLite::Parameter>, DbError>
-	case SQLite.query_one(source, statement, values, _row_shape(width), SQLite::QueryMode::WriteReturning, 0)
+def _returning(source: String, statement: String, values: Array<SQLite::Parameter>, width: Integer, updating: Boolean, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
+	case SQLite.query_one(source, statement, values, _row_shape(width), SQLite::QueryMode::WriteReturning, 0, scope)
 	when Result::Ok(row)
 		if row != nil
 			return Result<Array<SQLite::Parameter>, DbError>::Ok(row)
@@ -78,7 +89,9 @@ def _returning(source: String, statement: String, values: Array<SQLite::Paramete
 			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update target was not found"))
 		end
 	when Result::Err(error)
-		if error.code == 14
+		if error.code == -1
+			return Result<Array<SQLite::Parameter>, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
 			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
@@ -96,26 +109,28 @@ def _row_shape(width: Integer): Array<Integer>
 	return shape
 end
 
-def lookup(database: String, environment: String, statement: String, key: SQLite::Parameter, width: Integer): Result<Array<SQLite::Parameter>?, DbError>
-	source := _orm_database(database, environment) catch |error|
+def lookup(database: String, environment: String, statement: String, key: SQLite::Parameter, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>?, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Array<SQLite::Parameter>?, DbError>::Err(error)
 	end
-	case SQLite.query_one(source, statement, [key], _row_shape(width), SQLite::QueryMode::ReadOrCreate, 0)
+	case SQLite.query_one(source, statement, [key], _row_shape(width), SQLite::QueryMode::ReadOrCreate, 0, scope)
 	when Result::Ok(row)
 		return Result<Array<SQLite::Parameter>?, DbError>::Ok(row)
 	when Result::Err(error)
-		if error.code == 14
+		if error.code == -1
+			return Result<Array<SQLite::Parameter>?, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
 			return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
 	return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
 end
 
-def _orm_count(database: String, environment: String, statement: String): Result<Integer, DbError>
-	source := _orm_database(database, environment) catch |error|
+def count_rows(database: String, environment: String, statement: String, scope: Integer): Result<Integer, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Integer, DbError>::Err(error)
 	end
-	case SQLite.query_one(source, statement, [], [1], SQLite::QueryMode::ReadOrCreate, 0)
+	case SQLite.query_one(source, statement, [], [1], SQLite::QueryMode::ReadOrCreate, 0, scope)
 	when Result::Ok(row)
 		if row != nil
 			case row[0]
@@ -129,9 +144,58 @@ def _orm_count(database: String, environment: String, statement: String): Result
 			end
 		end
 	when Result::Err(error)
-		if error.code == 14
+		if error.code == -1
+			return Result<Integer, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
 			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
 	return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database count failed"))
+end
+
+def scope_id(tx: Transaction): Integer
+	lease := tx._orm_lease
+	if lease == nil
+		return -1
+	end
+	return lease.id
+end
+
+def _orm_nested<T>(parent: Transaction, action: (Transaction) -> Result<T, DbError>): Result<T, DbError>
+	return _transact<T>(parent, "", "", action)
+end
+
+def _transact<T>(parent: Transaction?, database: String, environment: String, action: (Transaction) -> Result<T, DbError>): Result<T, DbError>
+	mut scope := 0
+	mut name := "database transaction"
+	if parent == nil
+		source := _orm_database(database, environment) catch |error|
+			return Result<T, DbError>::Err(error)
+		end
+		scope = SQLite.transaction(0, source, 0)
+	else
+		name = "database savepoint"
+		scope = SQLite.transaction(1, "", scope_id(parent))
+	end
+	if scope <= 0
+		if scope == -21
+			return Result<T, DbError>::Err(_closed_transaction())
+		elsif scope == -14
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+		return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to begin"))
+	end
+	tx := Transaction.new(OrmSql::Lease.new(id: scope))
+	result := action(tx)
+	case result
+	when Result::Ok(_value)
+		if SQLite.transaction(2, "", scope) != 0
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to commit"))
+		end
+	when Result::Err(_error)
+		if SQLite.transaction(3, "", scope) != 0
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to roll back"))
+		end
+	end
+	return result
 end

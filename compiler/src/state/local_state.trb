@@ -26,6 +26,7 @@ record CheckedLocals
 	capture_uses: Array<Integer>
 	lambda_result: Array<String>
 	file_body: Array<Boolean>
+	transaction_body: Array<Boolean>
 	# Direct acquisition result context: statement-value origin and declaration/assignment/return.
 	file_value: Array<Integer>
 	# Source token and binding kind share one encoded obligation per active slot.
@@ -81,7 +82,7 @@ def locals_new(capacity: Integer): CheckedLocals
 	return CheckedLocals.new(
 		concurrent_scope: [-1], concurrent_function: [0], concurrent_borrowed: integer_storage(capacity),
 		binding_ids: integer_storage(capacity), binding_slots: [],
-		capture_parents: [], capture_uses: [], lambda_result: [], file_body: [false], file_value: [-1, 0],
+		capture_parents: [], capture_uses: [], lambda_result: [], file_body: [false], transaction_body: [false], file_value: [-1, 0],
 		binding_use_obligations: integer_storage(capacity), binding_use_counts: integer_storage(capacity),
 		nullable_facts: [],
 		nullable_state: [-1, 0],
