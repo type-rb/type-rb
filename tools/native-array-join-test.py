@@ -88,7 +88,9 @@ end
     emitted = run([binary, '--internal-driver', 'emit-qbe', source]).stdout
     assert emitted.count(marker) == 1
     forced = emitted.replace(marker, ' call $putchar(w 33)\n call $trbn_gc_collect(w 0)\n' + marker)
-    assert run([compile_il(forced)]).stdout == '!7\n' * 10
+    # libc may flush the markers after Native has written the size lines.
+    output = run([compile_il(forced)]).stdout
+    assert output.count('!') == 10 and output.replace('!', '') == '7\n' * 10, repr(output)
 
     # One-byte and empty fragments must preserve raw bytes with either copy
     # path. Cover every octet, NUL and a long span after a healed UTF-8 seam.
