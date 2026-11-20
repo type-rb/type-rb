@@ -1,0 +1,37 @@
+import { DbError, DbErrorKind } from trb/orm
+import trb/std/result
+import trb/internal/sqlite
+import trb/std/process
+
+module OrmSql
+end
+
+def _orm_count(database: String, environment: String, statement: String): Result<Integer, DbError>
+	mut source := database
+	if environment != ""
+		configured := Process.environment(environment)
+		if configured == nil || configured == ""
+			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+		source = configured
+	end
+	case SQLite.query_one(source, statement, [], [1], SQLite::QueryMode::ReadOrCreate, 0)
+	when Result::Ok(row)
+		if row != nil
+			case row[0]
+			when SQLite::Parameter::Integer(count)
+				if count > 9007199254740991
+					return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database Integer is outside the portable range"))
+				end
+				return Result<Integer, DbError>::Ok(count)
+			else
+				return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database count failed"))
+			end
+		end
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database count failed"))
+end

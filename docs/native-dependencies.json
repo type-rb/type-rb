@@ -423,21 +423,24 @@
       "name": "SQLite C API",
       "status": "current",
       "scope": "Application runtime",
-      "role": "Storage engine for the initial SQLite Jobs enqueue, claim, lease and acknowledgement paths.",
+      "role": "Storage engine for SQLite Jobs enqueue, claim, lease and acknowledgement and for ORM model counts.",
       "configuration": "SQLite 3.53.2 public-domain amalgamation, selectively linked as libsqlite3.a with embedded identity. Archives are built for Darwin and Linux on arm64 and amd64. Worker execution is exercised on the two ordinary arm64 CLI hosts.",
       "evidence": [
         "docs/decisions/0086-production-web-application-path.md",
         "https://www.sqlite.org/cintro.html",
         "tools/sqlite-dependencies.json",
         "tools/build-sqlite-dependencies.py",
-        "tools/native-worker-lifecycle-test.py"
+        "tools/native-worker-lifecycle-test.py",
+        "tools/native-orm-schema-test.py"
       ],
-      "next": "Qualify immutable release artifacts, broader Jobs behavior and the SQLite ORM adapter.",
+      "next": "Implement and qualify ORM row reads, writes and scoped transactions. Qualify immutable release artifacts and the remaining Jobs behavior.",
       "requiredBy": [
         "package.jobs",
-        "0086 M3c"
+        "package.orm",
+        "0086 M3c",
+        "0086 M5"
       ],
-      "referenceBehavior": "Use the same SQLite source release as the pinned modernc driver. Preserve SQLite Jobs payloads, queue selection, leases and acknowledgement.",
+      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. Check and compile models from the schema lock offline, then open SQLite at runtime and return the same counts and query or connection errors.",
       "decision": "retain",
       "pin": "sqlite"
     },

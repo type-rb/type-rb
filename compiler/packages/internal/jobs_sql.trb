@@ -147,7 +147,7 @@ def claim(source: String, worker: String, queue: String): Result<SQL::Claim?, SQ
 	end
 	selection += " ORDER BY priority ASC, run_at ASC, id ASC LIMIT 1"
 	statement := "UPDATE trb_jobs SET state = 'running', attempts = attempts + 1, claimed_by = ?, claimed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = (" + selection + ") AND state = 'ready' RETURNING id, job_name, payload, payload_version, attempts, maximum_attempts"
-	row := SQLite.query_one(source, statement, parameters, [3, 3, 3, 1, 1, 1], true, 0) catch |error|
+	row := SQLite.query_one(source, statement, parameters, [3, 3, 3, 1, 1, 1], SQLite::QueryMode::WriteReturning, 0) catch |error|
 		return Result<SQL::Claim?, SQLite::Error>::Err(error)
 	end
 	if row == nil
@@ -187,7 +187,7 @@ def recover_stale(source: String, lease: Duration): Result<Integer, SQLite::Erro
 end
 
 def _update_claim(source: String, statement: String, parameters: Array<SQLite::Parameter>, operation: String): Result<Unit, SQLite::Error>
-	row := SQLite.query_one(source, statement + " RETURNING id", parameters, [3], true, 0) catch |error|
+	row := SQLite.query_one(source, statement + " RETURNING id", parameters, [3], SQLite::QueryMode::WriteReturning, 0) catch |error|
 		return Result<Unit, SQLite::Error>::Err(error)
 	end
 	if row == nil

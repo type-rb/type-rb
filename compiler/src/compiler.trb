@@ -1,5 +1,6 @@
 import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
 import { emit_sqlite_query_runtime } from backend/qbe/runtime/sqlite_query
+import { orm_model_indices, prepare_orm_models } from frontend/providers/orm_models
 import { prepare_native_jobs } from frontend/providers/jobs_wrappers
 import { emit_process_host_runtime } from backend/qbe/runtime/process
 import { mir_deadlines_enabled } from mir/model/deadlines
@@ -54,7 +55,7 @@ import { integer_string } from support/literals
 import { mir_declare_signatures } from mir/lowering/calls
 import { parse_module, parse_module_with_tests } from frontend/syntax/parser
 import { path_basename, path_directory, path_join, path_normalize, string_ends_with, string_starts_with, string_without_suffix } from support/path
-import { ProjectConfig, parse_project_config } from project/config
+import { ProjectConfig, parse_project_config, parse_project_database, project_config_absolute, project_config_below_root, project_config_lower_ascii, project_config_trimmed } from project/config
 import { emit_record_descriptors, emit_static_strings } from backend/qbe/emit/constants
 import { QbeOutput, qbe_output_chunk, qbe_output_line, qbe_output_new } from backend/qbe/output
 import { emit_boolean_puts_runtime, emit_float_array_runtime, emit_float_to_integer_runtime, emit_process_runtime, emit_qbe_runtime_selected } from backend/qbe/runtime/system
@@ -1131,6 +1132,38 @@ def load_configured_sources_with_tests(config: ProjectConfig, config_path: Strin
 		end
 	end
 	mut state := load_package_project_sources_with_tests(config_path, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), names, owners, packages, require_entry, interactive, tests)
+	if !has_diagnostic(state) && find_module(state, "trb/orm/index") >= 0
+		models := orm_model_indices(state)
+		if models.size() > 0 && !has_diagnostic(state)
+			if config.orm_options == ""
+				return project_error_state(config_path, 1, "trb/orm requires packageOptions.trb/orm")
+			end
+			mut option_error := [""]
+			options := parse_project_database(config.orm_options, [0], [1], option_error, [0], true)
+			if option_error[0] != ""
+				return project_error_state(config_path, 1, "packageOptions.trb/orm: " + option_error[0])
+			end
+			if project_config_lower_ascii(project_config_trimmed(options.adapter)) != "sqlite" || !options.source_present
+				return project_error_state(config_path, 1, "trb/orm requires the SQLite adapter and a database source")
+			end
+			mut lock_path := project_config_trimmed(options.lock)
+			if !project_config_below_root(lock_path)
+				return project_error_state(config_path, 1, "trb/orm schemaLock must stay below the project root")
+			end
+			if lock_path == ""
+				lock_path = "db/schema.lock.json"
+			end
+			lock_path = project_join(path_directory(config_path), lock_path)
+			if !compiler_file_exists(lock_path)
+				return project_error_state(lock_path, 1, "trb/orm requires a readable SQLite schema lock")
+			end
+			mut database := project_config_trimmed(options.value)
+			if database != "" && !project_config_absolute(database)
+				database = project_join(path_directory(config_path), database)
+			end
+			prepare_orm_models(state, models, compiler_read_source(lock_path), database, project_config_trimmed(options.environment))
+		end
+	end
 	if !has_diagnostic(state) && find_module(state, "trb/jobs/index") >= 0
 		prepare_native_jobs(state, config.jobs_configuration)
 	end

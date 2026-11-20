@@ -1,0 +1,134 @@
+import { project_config_blank } from project/config
+import { project_json_has_key } from project/config_json
+import { json_array, json_boolean, json_null, json_number, json_object, json_string } from project/json_kinds
+import { PackageJson, package_json_fail, package_json_member, package_json_parse, package_json_string_field, package_name_less, package_sorted_indices } from project/package_json
+import { package_lock_fields } from project/package_lock
+
+record OrmColumn
+	name: String
+	type_name: String
+	nullable: Boolean
+	primary_key: Boolean
+	has_default: Boolean
+	generated: Boolean
+end
+
+record OrmTable
+	name: String
+	columns: Array<OrmColumn>
+end
+
+record OrmSchema
+	tables: Array<OrmTable>
+	error: String
+end
+
+def orm_boolean(mut document: PackageJson, object: Integer, key: String): Boolean
+	index := package_json_member(document, object, key)
+	if index < 0 || document.nodes[index].kind == json_null()
+		return false
+	end
+	if document.nodes[index].kind != json_boolean()
+		package_json_fail(document, key + " must be a boolean")
+	end
+	return document.nodes[index].text == "true"
+end
+
+def orm_column(mut document: PackageJson, name: String, id: Integer): OrmColumn
+	package_lock_fields(document, id, ["type", "nullable", "primaryKey", "hasDefault", "generated"])
+	type_name := package_json_string_field(document, id, "type")
+	if project_config_blank(name) || !project_json_has_key(["Boolean", "Bytes", "Date", "DateTime", "Float", "Instant", "Integer", "String", "TimeOfDay"], type_name)
+		package_json_fail(document, "invalid schema lock column " + name + " of type " + type_name)
+	end
+	return OrmColumn.new(name: name, type_name: type_name, nullable: orm_boolean(document, id, "nullable"), primary_key: orm_boolean(document, id, "primaryKey"), has_default: orm_boolean(document, id, "hasDefault"), generated: orm_boolean(document, id, "generated"))
+end
+
+def orm_schema_column(document: PackageJson, table: Integer, name: String): Integer
+	return package_json_member(document, package_json_member(document, table, "columns"), name)
+end
+
+def orm_check_keys(mut document: PackageJson, tables: Integer, table: Integer, field: String)
+	keys := package_json_member(document, table, field)
+	if keys < 0 || document.nodes[keys].kind == json_null()
+		return
+	end
+	if document.nodes[keys].kind != json_object()
+		package_json_fail(document, field + " must be an object")
+		return
+	end
+	document.nodes[keys].keys.each do |key|
+		entry := package_json_member(document, keys, key)
+		if field == "foreignKeys"
+			package_lock_fields(document, entry, ["column", "referencedTable", "referencedColumn"])
+			column := package_json_string_field(document, entry, "column")
+			target := package_json_string_field(document, entry, "referencedTable")
+			referenced := package_json_string_field(document, entry, "referencedColumn")
+			if key != column + "->" + target + "." + referenced || orm_schema_column(document, table, column) < 0 || orm_schema_column(document, package_json_member(document, tables, target), referenced) < 0
+				package_json_fail(document, "invalid schema lock foreign key " + key)
+			end
+		else
+			package_lock_fields(document, entry, ["columns", "primary"])
+			columns := package_json_member(document, entry, "columns")
+			mut canonical := "unique:"
+			if orm_boolean(document, entry, "primary")
+				canonical = "primary:"
+			end
+			if columns < 0 || document.nodes[columns].kind != json_array() || document.nodes[columns].children.size() == 0
+				package_json_fail(document, "invalid schema lock constraint " + key)
+			else
+				mut previous := ""
+				document.nodes[columns].children.each do |child|
+					node := document.nodes[child]
+					if node.kind != json_string() || orm_schema_column(document, table, node.text) < 0 || package_name_less(node.text, previous)
+						package_json_fail(document, "invalid schema lock constraint column " + node.text)
+					end
+					if previous != ""
+						canonical += ","
+					end
+					previous = node.text
+					canonical += node.text
+				end
+				if canonical != key
+					package_json_fail(document, "non-canonical schema lock constraint " + key)
+				end
+			end
+		end
+	end
+end
+
+def orm_sqlite_schema(source: String): OrmSchema
+	mut document := package_json_parse(source)
+	mut tables: Array<OrmTable> := []
+	package_lock_fields(document, 0, ["formatVersion", "adapter", "tables"])
+	version := package_json_member(document, 0, "formatVersion")
+	if version < 0 || document.nodes[version].kind != json_number() || document.nodes[version].text != "1"
+		package_json_fail(document, "unsupported schema lock formatVersion")
+	end
+	if package_json_string_field(document, 0, "adapter") != "sqlite"
+		package_json_fail(document, "expected SQLite schema lock")
+	end
+	root := package_json_member(document, 0, "tables")
+	if root < 0 || document.nodes[root].kind != json_object()
+		package_json_fail(document, "schema lock tables must be an object")
+	end
+	if document.error[0] == ""
+		package_sorted_indices(document.nodes[root].keys).each do |index|
+			name := document.nodes[root].keys[index]
+			entry := document.nodes[root].children[index]
+			package_lock_fields(document, entry, ["columns", "foreignKeys", "uniqueConstraints"])
+			fields := package_json_member(document, entry, "columns")
+			mut columns: Array<OrmColumn> := []
+			if project_config_blank(name) || fields < 0 || document.nodes[fields].kind != json_object() || document.nodes[fields].keys.size() == 0
+				package_json_fail(document, "schema lock table must have a name and columns")
+			else
+				package_sorted_indices(document.nodes[fields].keys).each do |position|
+					columns.push(orm_column(document, document.nodes[fields].keys[position], document.nodes[fields].children[position]))
+				end
+				orm_check_keys(document, root, entry, "foreignKeys")
+				orm_check_keys(document, root, entry, "uniqueConstraints")
+			end
+			tables.push(OrmTable.new(name: name, columns: columns))
+		end
+	end
+	return OrmSchema.new(tables: tables, error: document.error[0])
+end
