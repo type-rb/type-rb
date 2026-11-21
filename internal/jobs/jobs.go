@@ -65,6 +65,12 @@ func ManifestFrom(extensions []ir.Extension) *Manifest {
 	return nil
 }
 
+// HasCommandEntrypoint reports whether an application main dispatches Jobs
+// operations before it executes the user-defined body.
+func (m *Manifest) HasCommandEntrypoint(modulePath string) bool {
+	return m != nil && len(m.Jobs) > 0 && modulePath != "trb_test_main"
+}
+
 func (m *Manifest) Job(name string) (Job, bool) {
 	if m == nil {
 		return Job{}, false

@@ -2349,7 +2349,7 @@
     ]
   },
   {
-    "id": "flags:runProgramWithWorker",
+    "id": "flags:runProgramWithJobs",
     "kind": "cli",
     "source": "internal/cli/cli.go",
     "members": [
@@ -6653,6 +6653,7 @@
       "TestJobApplicationConformanceAcrossServerDatabases (internal/cli/jobs_database_conformance_test.go)",
       "TestJobEnqueueFromProjectREPLAcrossBackends (internal/cli/jobs_repl_conformance_test.go)",
       "TestJobResultControlsAcknowledgementAndRetryAcrossBackends (internal/cli/jobs_result_runtime_test.go)",
+      "TestJobsCommandsRequireADispatchableEntrypoint (internal/cli/jobs_command_test.go)",
       "TestJobsIdleWorkerStopsAfterAcknowledgement (internal/cli/jobs_shutdown_test.go)",
       "TestJobsWorkerForcedShutdownRetainsLease (internal/cli/jobs_shutdown_test.go)",
       "TestJobsWorkerShutdownAcrossBackends (internal/cli/jobs_shutdown_test.go)",

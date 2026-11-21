@@ -179,6 +179,10 @@ trb jobs retry JOB_ID
 trb jobs discard JOB_ID
 ```
 
+Jobs commands require an application entrypoint with a configured adapter and
+a discovered Job class. If the entrypoint cannot dispatch Jobs commands, the
+CLI reports an error before starting the application.
+
 One command process runs one worker. PostgreSQL and MySQL support multiple
 worker processes through short atomic claims. SQLite is for local and small
 single-worker use only. `--once` claims at most one ready Job and is useful for

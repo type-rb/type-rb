@@ -2,8 +2,8 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "c782ced6b948862edcb2cb6e561b5c70d3367945",
-  "catalogSHA256": "fbe85074ddd593f65a76e2f6bfcd36a4fa6630f2e44a9d3c29937dd419f44acb",
+  "sourceRevision": "aba7aa4fdcdefeec6818e5000541814dc652ec3b",
+  "catalogSHA256": "0ee81e80c6c431b68b99d1bd229003ad8cd81eb63c83c5a74a2a0337c2d334b9",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
@@ -2922,7 +2922,7 @@
       "failure": "Reject invalid types, visibility, arguments and unsupported target operations with the specified category/origin; retain defined runtime errors and cleanup. Known disagreements require a specification decision, not changed expectations.",
       "surfaces": [
         "command:run",
-        "flags:runProgramWithWorker"
+        "flags:runProgramWithJobs"
       ],
       "implementations": [
         "go",
@@ -3234,7 +3234,7 @@
       "id": "cli.jobs",
       "title": "Job administration",
       "contract": "Preserve worker start and job list/retry/discard, filtering, lease/status persistence and invalid-operation errors. Worker start joins the actual worker and generated-workspace cleanup before CLI completion; graceful stop succeeds, while repeated signals or an expired shutdown deadline fail explicitly.",
-      "failure": "Never release an executing claim merely because a launcher exited or the shutdown grace period expired. Forced termination retains the claim for stale-lease recovery; qualify worker absence, lease disposition, terminal and non-terminal signals, idle and active handlers, and temporary-workspace cleanup.",
+      "failure": "Reject Jobs commands before running application main when the entrypoint cannot dispatch them. Never release an executing claim merely because a launcher exited or the shutdown grace period expired. Forced termination retains the claim for stale-lease recovery; qualify worker absence, lease disposition, terminal and non-terminal signals, idle and active handlers, and temporary-workspace cleanup.",
       "surfaces": [
         "command:jobs",
         "command:jobs discard",

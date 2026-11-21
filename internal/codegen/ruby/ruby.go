@@ -147,7 +147,7 @@ func generate(program *ir.Program, projectNames *rubyProjectNames, execution *ef
 		if g.methodUsesExecutionScope(main) {
 			call = mainName + "(TrbExecutionScope.root)"
 		}
-		if g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+		if g.jobs.HasCommandEntrypoint(g.modulePath) {
 			g.line(call+" unless trb_jobs_run_worker_or_command", "")
 		} else {
 			g.line(call, "")
