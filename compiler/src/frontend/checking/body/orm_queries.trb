@@ -15,19 +15,33 @@ import { load_integer, load_string, sparse_integer_at } from support/storage
 # Quoted strings and symbol spellings may select schema members. A variable or
 # computed expression cannot introduce a column, comparison or SQL direction.
 def orm_query_literal(state: CompilerState, mut position: Array<Integer>): String
-	origin := position[0]
-	kind := load_integer(state.source_tokens.token_kinds, origin)
-	if token_is(state, origin, ":")
-		next_kind := load_integer(state.source_tokens.token_kinds, origin + 1)
-		if next_kind == token_kind_identifier() || next_kind == token_kind_symbol() || next_kind == token_kind_string()
-			position[0] = origin + 2
-			return load_string(state.source_tokens.token_texts, origin + 1)
-		end
-	elsif kind == token_kind_string() && sparse_integer_at(state.source_tokens.token_fused_literals, origin) == 0
+	mut depth := 0
+	while token_is(state, position[0], "(")
 		advance(position)
-		return load_string(state.source_tokens.token_texts, origin)
+		skip_newlines(state, position)
+		depth += 1
 	end
-	return ""
+	mut origin := position[0]
+	if token_is(state, origin, ":")
+		advance(position)
+		origin = position[0]
+		kind := load_integer(state.source_tokens.token_kinds, origin)
+		if kind != token_kind_identifier() && kind != token_kind_symbol() && kind != token_kind_string()
+			return ""
+		end
+	elsif load_integer(state.source_tokens.token_kinds, origin) != token_kind_string() || sparse_integer_at(state.source_tokens.token_fused_literals, origin) != 0
+		return ""
+	end
+	advance(position)
+	while depth > 0
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ")")
+			return ""
+		end
+		advance(position)
+		depth -= 1
+	end
+	return load_string(state.source_tokens.token_texts, origin)
 end
 
 def orm_query_string(mut state: CompilerState, mut locals: CheckedLocals, text: String, origin: Integer): Integer
