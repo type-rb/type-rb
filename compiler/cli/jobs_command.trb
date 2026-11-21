@@ -11,26 +11,37 @@ import { has_diagnostic } from state/state
 import { path_directory, path_join, string_starts_with } from support/path
 
 def cli_jobs_command(arguments: Array<String>): Integer
-	if arguments.size() < 2 || arguments[1] != "start"
-		return cli_error("expected jobs start [--config PATH] [--once] [--queue NAME]")
+	if arguments.size() < 2
+		return cli_error("jobs command requires a subcommand")
+	end
+	command := arguments[1]
+	if command != "start" && command != "list" && command != "retry" && command != "discard"
+		return cli_error("unknown jobs command " + command)
 	end
 	mut config := ""
 	mut queue := ""
-	mut once := ""
+	mut operand := ""
 	mut index := 2
+	if command == "retry" || command == "discard"
+		if index >= arguments.size()
+			return cli_error("jobs " + command + " requires a job ID")
+		end
+		operand = arguments[index]
+		index += 1
+	end
 	while index < arguments.size()
 		flag := arguments[index]
-		if flag == "--once"
-			once = "once"
-		elsif string_starts_with(flag, "--queue=")
+		if command == "start" && flag == "--once"
+			operand = "once"
+		elsif command == "start" && string_starts_with(flag, "--queue=")
 			queue = flag.slice(8...flag.size())
 			if queue.strip() == ""
 				return cli_error("jobs start --queue requires a queue name")
 			end
-		elsif flag == "--queue" || flag == "--config"
+		elsif flag == "--config" || (command == "start" && flag == "--queue")
 			index += 1
 			if index >= arguments.size() || arguments[index].strip() == "" || string_starts_with(arguments[index], "--")
-				return cli_error("jobs start " + flag + " requires a value")
+				return cli_error("jobs " + command + " " + flag + " requires a value")
 			end
 			if flag == "--config"
 				config = arguments[index]
@@ -38,7 +49,7 @@ def cli_jobs_command(arguments: Array<String>): Integer
 				queue = arguments[index]
 			end
 		else
-			return cli_error("unknown jobs start option " + flag)
+			return cli_error("unknown jobs " + command + " option " + flag)
 		end
 		index += 1
 	end
@@ -60,7 +71,7 @@ def cli_jobs_command(arguments: Array<String>): Integer
 		return cli_error(project.error)
 	end
 	if project.mode != "trb"
-		return cli_error("jobs start is not available for mode " + project.mode + " in this compiler")
+		return cli_error("jobs " + command + " is not available for mode " + project.mode + " in this compiler")
 	end
 	native_cli_package_signals()
 	profile := native_cli_target()
@@ -81,7 +92,7 @@ def cli_jobs_command(arguments: Array<String>): Integer
 		return cli_error("QBE is missing; place qbe beside trbn or set TRBN_QBE")
 	end
 	mut state := load_configured_project(config_source, config)
-	if !has_diagnostic(state) && append_jobs_worker(state, project.jobs_configuration)
+	if !has_diagnostic(state) && append_jobs_worker(state, project.jobs_configuration, command)
 		if resolve(state)
 			check(state)
 		end
@@ -118,7 +129,11 @@ def cli_jobs_command(arguments: Array<String>): Integer
 	end
 	if status == 0
 		if native_cli_interrupt(0) == 0
-			status = native_cli_execute([program, once, queue], 2)
+			mut launch_mode := 0
+			if command == "start"
+				launch_mode = 2
+			end
+			status = native_cli_execute([program, command, operand, queue], launch_mode)
 		else
 			status = 130
 		end

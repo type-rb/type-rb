@@ -320,6 +320,9 @@ def standard_source_function(kind: Integer, name: String): Boolean
 		if name == "::enqueue" || name == "::enqueue_at" || name == "::open_store" || name == "::claim" || name == "::recover_stale" || name == "::heartbeat" || name == "::acknowledge" || name == "::fail"
 			return true
 		end
+		if name == "::list_statuses" || name == "::retry_failed" || name == "::discard"
+			return true
+		end
 		return false
 	end
 	if kind == standard_source_sqlite()

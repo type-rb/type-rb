@@ -216,6 +216,18 @@ class Fixture:
     def release_handler(self):
         self.release.write_text("release")
 
+    def admin(self, *args, error=None, env=None, root=None):
+        scratch_before = set(self.scratch.iterdir())
+        result = subprocess.run([self.binary, "jobs", *args], cwd=root or self.root,
+                                env=self.env if env is None else env, capture_output=True,
+                                text=True, timeout=45)
+        if error is None:
+            assert (result.returncode, result.stderr) == (0, ""), (args, result)
+        else:
+            assert result.returncode != 0 and not result.stdout and error in result.stderr, (args, result)
+        assert set(self.scratch.iterdir()) == scratch_before
+        return result.stdout
+
     def once(self):
         checked([self.binary, "jobs", "start", "--once", "--queue", "mail"], self.root, self.env, timeout=45)
         assert not list(self.scratch.iterdir()), list(self.scratch.iterdir())
@@ -282,6 +294,58 @@ class Fixture:
         print(observation, flush=True)
 
 
+def verify_administration(fixture):
+    fixture.case("queue-administration", other=True)
+    with sqlite3.connect(fixture.database) as db:
+        db.execute("UPDATE trb_jobs SET created_at='2000-01-02', maximum_attempts=3")
+        db.execute("UPDATE trb_jobs SET id=?, state='failed', attempts=3, last_error='handler failed', "
+                   "claimed_by='old', claimed_at='2000-01-01', run_at='2099-01-01' WHERE id=?",
+                   ("failed'id", fixture.job))
+        db.execute("UPDATE trb_jobs SET id='ready' WHERE job_name='OtherJob'")
+        db.execute("INSERT INTO trb_jobs SELECT 'z-first',queue_name,job_name,payload,payload_version,"
+                   "priority,run_at,state,attempts,maximum_attempts,claimed_by,claimed_at,last_error,"
+                   "'2000-01-01',updated_at FROM trb_jobs WHERE id='ready'")
+    assert fixture.admin("list", "--config", str(fixture.root / "trbconfig.jsonc"), root=fixture.scratch) == (
+        "z-first\tready\tOtherJob\t0/3\t\n"
+        "failed'id\tfailed\tSampleJob\t3/3\thandler failed\n"
+        "ready\tready\tOtherJob\t0/3\t\n")
+    for command, diagnostic in (("retry", "failed job not found"),
+                                ("discard", "job not found or currently running")):
+        fixture.admin(command, error="requires a job ID")
+        fixture.admin(command, "absent", error=diagnostic)
+    fixture.admin("retry", "ready", error="failed job not found")
+    with sqlite3.connect(fixture.database) as db:
+        db.execute("CREATE TABLE discard_audit(id TEXT)")
+        db.execute("CREATE TRIGGER keep_ready BEFORE DELETE ON trb_jobs WHEN old.id='ready' "
+                   "BEGIN INSERT INTO discard_audit VALUES(old.id); SELECT RAISE(IGNORE); END")
+    fixture.admin("discard", "ready", error="job not found or currently running")
+    with sqlite3.connect(fixture.database) as db:
+        assert db.execute("SELECT id FROM discard_audit").fetchall() == [("ready",)]
+        db.execute("DROP TRIGGER keep_ready")
+    assert fixture.admin("discard", "ready") == ""
+    assert fixture.admin("discard", "z-first") == ""
+    assert fixture.admin("retry", "failed'id") == ""
+    with sqlite3.connect(fixture.database) as db:
+        assert db.execute("SELECT state, attempts, claimed_by, claimed_at, last_error, "
+                          "run_at <= CURRENT_TIMESTAMP, updated_at >= run_at FROM trb_jobs").fetchall() == [
+                              ("ready", 0, None, None, None, 1, 1)]
+    assert not fixture.marker.exists()
+    fixture.release_handler()
+    fixture.once()
+    assert fixture.marker.read_text() == "42:2.75:true"
+    assert fixture.admin("list") == ""
+    fresh_db = fixture.database.with_name("empty.sqlite")
+    assert fixture.admin("list", env=dict(fixture.env, JOBS_PROBE_DB=str(fresh_db),
+                                          TRB_JOBS_WORKER="1", TRB_JOBS_COMMAND="discard")) == ""
+    assert fresh_db.is_file()
+    fixture.admin("list", env=dict(fixture.env, JOBS_PROBE_DB=str(fixture.scratch)), error="open")
+    fixture.admin("list", "--once", error="unknown jobs list option")
+    fixture.admin("list", env=dict(fixture.env, JOBS_PROBE_DB=""), error="is not set or empty")
+    for command in (("list",), ("retry", "id"), ("discard", "id")):
+        fixture.admin(*command, root=fixture.root / "control", error="jobs.configuration")
+    fixture.passed("ordered queue listing, failed-job reset and execution, discard, and admin errors")
+
+
 def verify(fixture, quick):
     fixture.case("filtered-once", other=True)
     fixture.release_handler()
@@ -292,6 +356,8 @@ def verify(fixture, quick):
     fixture.passed("queue-filtered one-shot executed and acknowledged")
     if quick:
         return
+
+    verify_administration(fixture)
 
     for group in (False, True):
         fixture.case("foreground-stop" if group else "targeted-stop")
@@ -334,6 +400,12 @@ def verify(fixture, quick):
             current = fixture.row()
             return current and current[:2] == row[:2] and current[2] > row[2]
         poll(heartbeat, 5, "lease did not advance during the held handler")
+        listing = fixture.admin("list").rstrip("\n").split("\t")
+        assert listing[:3] == [fixture.job, "running", "SampleJob"] and listing[3].startswith("1/") and listing[4:] == [""], listing
+        fixture.admin("retry", fixture.job, error="failed job not found")
+        fixture.admin("discard", fixture.job, error="job not found or currently running")
+        current = fixture.row()
+        assert current[:2] == row[:2] and current[3] == 1
         assert process_table().get(handler) == worker and not fixture.release.exists()
         fixture.release_handler()
         cli.send_signal(signal.SIGTERM)
@@ -363,7 +435,13 @@ def verify(fixture, quick):
             "SELECT state, attempts, claimed_by, last_error FROM trb_jobs WHERE id=?", (fixture.job,)
         ).fetchone()
     assert failed == ("failed", 1, None, "fixture rejected 42:2.75"), failed
-    fixture.passed("typed JobResult failure was recorded after handler exit")
+    assert fixture.admin("list") == f"{fixture.job}\tfailed\tSampleJob\t1/1\tfixture rejected 42:2.75\n"
+    (fixture.root / "src/jobs/sample.trb").write_text(JOBS)
+    assert fixture.admin("retry", fixture.job) == ""
+    fixture.release_handler()
+    fixture.once()
+    assert fixture.row() is None and fixture.marker.read_text() == "42:2.75:true"
+    fixture.passed("typed JobResult failure was listed, retried and acknowledged by the repaired handler")
 
 
 def main():
