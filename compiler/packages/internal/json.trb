@@ -63,12 +63,21 @@ def _source_slice(mut parser: JsonParser, start: Integer, finish: Integer): Stri
 	return text
 end
 
-def _space(mut parser: JsonParser)
-	mut character := _byte(parser)
-	while character == 32 || character == 10 || character == 13 || character == 9
-		parser.position += 1
-		character = _byte(parser)
+# Leave the cursor on the next token and return the byte that stopped the scan.
+def _next_token_byte(mut parser: JsonParser): Integer
+	bytes := parser.bytes
+	finish := bytes.size()
+	mut position := parser.position
+	while position < finish
+		character := bytes.at(position)
+		if character != 32 && character != 10 && character != 13 && character != 9
+			parser.position = position
+			return character
+		end
+		position += 1
 	end
+	parser.position = position
+	return -1
 end
 
 def _error(kind: PublicJSON::ErrorKind, message: String, path: String): PublicJSON::Error
@@ -427,19 +436,21 @@ def _digits(mut parser: JsonParser)
 	parser.position = position
 end
 
-def _number(mut parser: JsonParser): JsonNode
+def _number(mut parser: JsonParser, first: Integer): JsonNode
 	start := parser.position
-	negative := _byte(parser) == 45
+	negative := first == 45
+	mut first_digit := first
 	if negative
 		parser.position += 1
-	end
-	if !_digit(_byte(parser))
-		_bad(parser, "in numeric literal")
-		return JsonNode::Null
+		first_digit = _byte(parser)
+		if !_digit(first_digit)
+			_bad(parser, "in numeric literal")
+			return JsonNode::Null
+		end
 	end
 	mut integer := 0
 	mut portable_integer := true
-	if _byte(parser) == 48
+	if first_digit == 48
 		parser.position += 1
 	else
 		bytes := parser.bytes
@@ -466,7 +477,8 @@ def _number(mut parser: JsonParser): JsonNode
 		end
 		parser.position = position
 	end
-	if _byte(parser) == 46
+	mut suffix := _byte(parser)
+	if suffix == 46
 		portable_integer = false
 		parser.position += 1
 		if !_digit(_byte(parser))
@@ -474,11 +486,13 @@ def _number(mut parser: JsonParser): JsonNode
 			return JsonNode::Null
 		end
 		_digits(parser)
+		suffix = _byte(parser)
 	end
-	if _byte(parser) == 101 || _byte(parser) == 69
+	if suffix == 101 || suffix == 69
 		portable_integer = false
 		parser.position += 1
-		if _byte(parser) == 43 || _byte(parser) == 45
+		sign := _byte(parser)
+		if sign == 43 || sign == 45
 			parser.position += 1
 		end
 		if !_digit(_byte(parser))
@@ -512,9 +526,7 @@ end
 # Nodes retain raw values; only reachable children are converted after syntax
 # and duplicate-key handling finish. Explicit stacks preserve the JSON depth
 # contract without consuming an evaluator call frame for each container.
-def _atom(mut parser: JsonParser, depth: Integer): Integer
-	_space(parser)
-	character := _byte(parser)
+def _atom(mut parser: JsonParser, depth: Integer, character: Integer): Integer
 	mut node := JsonNode::Null
 	if character == 34
 		node = JsonNode::String(_string(parser))
@@ -528,7 +540,7 @@ def _atom(mut parser: JsonParser, depth: Integer): Integer
 		_literal(parser, text)
 		node = JsonNode::Boolean(character == 116)
 	elsif character == 45 || _digit(character)
-		node = _number(parser)
+		node = _number(parser, character)
 	elsif character == 91 || character == 123
 		if depth >= 10000
 			_syntax(parser, "exceeded max depth", parser.position)
@@ -566,8 +578,8 @@ def _closing_byte(node: JsonNode): Integer
 	end
 end
 
-def _node(mut parser: JsonParser): Integer
-	root := _atom(parser, 0)
+def _node(mut parser: JsonParser, first: Integer): Integer
+	root := _atom(parser, 0, first)
 	if root < 0 || _closing_byte(parser.nodes[root]) < 0
 		return root
 	end
@@ -577,8 +589,7 @@ def _node(mut parser: JsonParser): Integer
 		top := frames.size() - 1
 		node := parser.nodes[frames[top]]
 		closing := _closing_byte(node)
-		_space(parser)
-		character := _byte(parser)
+		character := _next_token_byte(parser)
 		if phases[top] == 0 && character == closing
 			parser.position += 1
 			frames.pop()
@@ -587,20 +598,21 @@ def _node(mut parser: JsonParser): Integer
 		end
 		if phases[top] != 2
 			mut key := ""
+			mut value_byte := character
 			if closing == 125
 				if character != 34
 					_bad(parser, "looking for beginning of object key string")
 					return -1
 				end
 				key = _string(parser)
-				_space(parser)
-				if _byte(parser) != 58
+				if _next_token_byte(parser) != 58
 					_bad(parser, "after object key")
 					return -1
 				end
 				parser.position += 1
+				value_byte = _next_token_byte(parser)
 			end
-			child := _atom(parser, frames.size())
+			child := _atom(parser, frames.size(), value_byte)
 			if child < 0
 				return -1
 			end
@@ -825,18 +837,18 @@ end
 
 def parse(source: String): Result<PublicJSON::Value, PublicJSON::Error>
 	mut parser := JsonParser.new(source.to_bytes())
-	_space(parser)
-	if _byte(parser) < 0
+	first := _next_token_byte(parser)
+	if first < 0
 		return Result<PublicJSON::Value, PublicJSON::Error>::Err(_error(PublicJSON::ErrorKind::Syntax, "EOF", ""))
 	end
-	root := _node(parser)
+	root := _node(parser, first)
 	failure := parser.failure
 	if failure != nil
 		return Result<PublicJSON::Value, PublicJSON::Error>::Err(failure)
 	end
-	_space(parser)
-	if _byte(parser) >= 0
-		trailing := _node(parser)
+	trailing_byte := _next_token_byte(parser)
+	if trailing_byte >= 0
+		trailing := _node(parser, trailing_byte)
 		trailing_failure := parser.failure
 		if trailing_failure != nil
 			return Result<PublicJSON::Value, PublicJSON::Error>::Err(trailing_failure)
@@ -865,58 +877,78 @@ def parse(source: String): Result<PublicJSON::Value, PublicJSON::Error>
 	return _value(parser, root)
 end
 
-def parse_jsonc(source: String): Result<PublicJSON::Value, PublicJSON::Error>
-	# Comments become spaces per byte, preserving the reference decoder's
-	# filtered-source locations, including CR/LF and multibyte comments.
-	bytes := source.to_bytes()
-	mut fragments: Array<String> := []
-	mut mode := 0
-	mut escaped := false
-	mut index := 0
-	while index < bytes.size()
-		octet := bytes.at(index)
-		mut following := -1
-		if index + 1 < bytes.size()
-			following = bytes.at(index + 1)
+# Skip a quoted span without interpreting its contents. JSON.parse owns escape
+# validity and unterminated-string diagnostics.
+def _jsonc_string_end(bytes: Bytes, start: Integer, finish: Integer): Integer
+	mut position := start + 1
+	while position < finish
+		character := bytes.at(position)
+		position += 1
+		if character == 34
+			break
 		end
-		if mode == 1
-			fragments.push(Octets.octet(octet))
-			if escaped
-				escaped = false
-			elsif octet == 92
-				escaped = true
-			elsif octet == 34
-				mode = 0
-			end
-		elsif mode == 2 || mode == 3
-			if mode == 3 && octet == 42 && following == 47
-				fragments.push("  ")
-				index += 1
-				mode = 0
-			elsif octet == 10 || octet == 13
-				fragments.push(Octets.octet(octet))
-				if mode == 2 && octet == 10
-					mode = 0
-				end
-			else
-				fragments.push(" ")
-			end
-		elsif octet == 47 && (following == 47 || following == 42)
-			mode = 2
-			if following == 42
-				mode = 3
-			end
-			fragments.push("  ")
-			index += 1
-		else
-			fragments.push(Octets.octet(octet))
-			if octet == 34
-				mode = 1
-			end
+		if character == 92 && position < finish
+			position += 1
 		end
-		index += 1
 	end
-	return parse(fragments.join(""))
+	return position
+end
+
+# Mask one byte per comment byte so JSON diagnostics retain their original
+# offsets. Both comment forms preserve CR/LF; only LF ends a line comment.
+def _mask_jsonc_comment(mut builder: StringBuilder, bytes: Bytes, start: Integer, finish: Integer, block: Boolean): Integer
+	builder.append("  ")
+	mut position := start + 2
+	while position < finish
+		character := bytes.at(position)
+		position += 1
+		if block && character == 42 && position < finish && bytes.at(position) == 47
+			builder.append("  ")
+			return position + 1
+		end
+		if character == 10 || character == 13
+			builder.append_codepoint(character)
+			if !block && character == 10
+				break
+			end
+		else
+			builder.append(" ")
+		end
+	end
+	return position
+end
+
+def parse_jsonc(source: String): Result<PublicJSON::Value, PublicJSON::Error>
+	if !source.include?("/")
+		return parse(source)
+	end
+	bytes := source.to_bytes()
+	finish := bytes.size()
+	mut masked := StringBuilder.new()
+	mut span := 0
+	mut position := 0
+	while position < finish
+		character := bytes.at(position)
+		if character == 34
+			position = _jsonc_string_end(bytes, position, finish)
+			next
+		end
+		if character == 47 && position + 1 < finish
+			following := bytes.at(position + 1)
+			if following == 47 || following == 42
+				BuilderStorage.append_bytes(masked, bytes, span, position)
+				position = _mask_jsonc_comment(masked, bytes, position, finish, following == 42)
+				span = position
+				next
+			end
+		end
+		position += 1
+	end
+	if span == 0
+		return parse(source)
+	end
+	BuilderStorage.append_bytes(masked, bytes, span, finish)
+	return parse(masked.to_s())
 end
 
 # Most strings need only the surrounding quotes. Validate and scan bytes

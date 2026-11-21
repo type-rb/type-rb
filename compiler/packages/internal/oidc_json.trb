@@ -1,7 +1,7 @@
 module OidcJson
 end
 
-import { JsonNode, JsonParser, _byte, _node, _space, _string } from trb/internal/json
+import { JsonNode, JsonParser, _next_token_byte, _node, _string } from trb/internal/json
 import trb/std/encoding/base64
 import trb/std/result
 
@@ -32,38 +32,38 @@ def fold(value: String): String
 end
 
 def finish(mut parser: JsonParser): Boolean
-	_space(parser)
+	_next_token_byte(parser)
 	return parser.failure == nil && parser.position == parser.bytes.size()
 end
 
 def strings(mut parser: JsonParser, names: Array<String>): StringObject
 	mut fields: Hash<String, String> := {}
-	_space(parser)
-	if _byte(parser) == 110
-		identity := _node(parser)
+	first := _next_token_byte(parser)
+	if first == 110
+		identity := _node(parser, first)
 		return StringObject.new(valid: identity >= 0 && parser.failure == nil, fields: fields)
 	end
-	if _byte(parser) != 123
+	if first != 123
 		return StringObject.new(valid: false, fields: fields)
 	end
 	parser.position += 1
-	_space(parser)
-	if _byte(parser) == 125
+	mut key_byte := _next_token_byte(parser)
+	if key_byte == 125
 		parser.position += 1
 		return StringObject.new(valid: true, fields: fields)
 	end
 	mut valid := true
 	while parser.failure == nil
-		if _byte(parser) != 34
+		if key_byte != 34
 			return StringObject.new(valid: false, fields: fields)
 		end
 		name := fold(_string(parser))
-		_space(parser)
-		if _byte(parser) != 58
+		if _next_token_byte(parser) != 58
 			return StringObject.new(valid: false, fields: fields)
 		end
 		parser.position += 1
-		identity := _node(parser)
+		value_byte := _next_token_byte(parser)
+		identity := _node(parser, value_byte)
 		if identity < 0
 			return StringObject.new(valid: false, fields: fields)
 		end
@@ -77,16 +77,16 @@ def strings(mut parser: JsonParser, names: Array<String>): StringObject
 				valid = false
 			end
 		end
-		_space(parser)
-		if _byte(parser) == 125
+		delimiter := _next_token_byte(parser)
+		if delimiter == 125
 			parser.position += 1
 			return StringObject.new(valid: valid && parser.failure == nil, fields: fields)
 		end
-		if _byte(parser) != 44
+		if delimiter != 44
 			return StringObject.new(valid: false, fields: fields)
 		end
 		parser.position += 1
-		_space(parser)
+		key_byte = _next_token_byte(parser)
 	end
 	return StringObject.new(valid: false, fields: fields)
 end
@@ -99,17 +99,16 @@ end
 
 def key_array(mut parser: JsonParser): KeyDocument
 	mut keys: Array<Hash<String, String>> := []
-	_space(parser)
-	if _byte(parser) == 110
-		identity := _node(parser)
+	first := _next_token_byte(parser)
+	if first == 110
+		identity := _node(parser, first)
 		return KeyDocument.new(valid: identity >= 0 && parser.failure == nil, keys: keys)
 	end
-	if _byte(parser) != 91
+	if first != 91
 		return KeyDocument.new(valid: false, keys: keys)
 	end
 	parser.position += 1
-	_space(parser)
-	if _byte(parser) == 93
+	if _next_token_byte(parser) == 93
 		parser.position += 1
 		return KeyDocument.new(valid: true, keys: keys)
 	end
@@ -119,12 +118,12 @@ def key_array(mut parser: JsonParser): KeyDocument
 			return KeyDocument.new(valid: false, keys: keys)
 		end
 		keys.push(key.fields)
-		_space(parser)
-		if _byte(parser) == 93
+		delimiter := _next_token_byte(parser)
+		if delimiter == 93
 			parser.position += 1
 			return KeyDocument.new(valid: true, keys: keys)
 		end
-		if _byte(parser) != 44
+		if delimiter != 44
 			return KeyDocument.new(valid: false, keys: keys)
 		end
 		parser.position += 1
@@ -135,27 +134,26 @@ end
 def parse_keys(bytes: Bytes): KeyDocument
 	mut parser := JsonParser.new(bytes)
 	mut keys: Array<Hash<String, String>> := []
-	_space(parser)
-	if _byte(parser) == 110
-		identity := _node(parser)
+	first := _next_token_byte(parser)
+	if first == 110
+		identity := _node(parser, first)
 		return KeyDocument.new(valid: identity >= 0 && finish(parser), keys: keys)
 	end
-	if _byte(parser) != 123
+	if first != 123
 		return KeyDocument.new(valid: false, keys: keys)
 	end
 	parser.position += 1
-	_space(parser)
-	if _byte(parser) == 125
+	mut key_byte := _next_token_byte(parser)
+	if key_byte == 125
 		parser.position += 1
 		return KeyDocument.new(valid: finish(parser), keys: keys)
 	end
 	while parser.failure == nil
-		if _byte(parser) != 34
+		if key_byte != 34
 			return KeyDocument.new(valid: false, keys: keys)
 		end
 		name := fold(_string(parser))
-		_space(parser)
-		if _byte(parser) != 58
+		if _next_token_byte(parser) != 58
 			return KeyDocument.new(valid: false, keys: keys)
 		end
 		parser.position += 1
@@ -166,27 +164,29 @@ def parse_keys(bytes: Bytes): KeyDocument
 			end
 			keys = result.keys
 		else
-			if _node(parser) < 0
+			first_value_byte := _next_token_byte(parser)
+			if _node(parser, first_value_byte) < 0
 				return KeyDocument.new(valid: false, keys: keys)
 			end
 		end
-		_space(parser)
-		if _byte(parser) == 125
+		delimiter := _next_token_byte(parser)
+		if delimiter == 125
 			parser.position += 1
 			return KeyDocument.new(valid: finish(parser), keys: keys)
 		end
-		if _byte(parser) != 44
+		if delimiter != 44
 			return KeyDocument.new(valid: false, keys: keys)
 		end
 		parser.position += 1
-		_space(parser)
+		key_byte = _next_token_byte(parser)
 	end
 	return KeyDocument.new(valid: false, keys: keys)
 end
 
 def parse_claims(bytes: Bytes): JsonParser?
 	mut parser := JsonParser.new(bytes)
-	root := _node(parser)
+	first := _next_token_byte(parser)
+	root := _node(parser, first)
 	if root < 0 || !finish(parser)
 		return nil
 	end

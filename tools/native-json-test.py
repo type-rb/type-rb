@@ -156,6 +156,15 @@ with tempfile.TemporaryDirectory(prefix='native-json-') as temporary:
         literal = '"' + ''.join(f'\\x{octet:02x}' for octet in b'"' + raw + b'"') + '"'
         statements.append(f'parse_and_display({literal})')
         outputs.append(quoted(decoded))
+    # Exercise the original String and both copied spans around a masked comment.
+    for document, expected_value in [
+        (b'"\xe2\x82"', quoted('\ufffd\ufffd')),
+        (b'"/\xe2\x82"', quoted('/\ufffd\ufffd')),
+        (b'["\xe2\x82",/*\xff*/"\xed\xa0\x80"]', '["\ufffd\ufffd","\ufffd\ufffd\ufffd"]'),
+    ]:
+        literal = '"' + ''.join(f'\\x{octet:02x}' for octet in document) + '"'
+        statements.append(f'parse_jsonc_and_display({literal})')
+        outputs.append(expected_value)
     # Encoding raw String bytes must preserve the same replacement boundaries
     # without relying on the parser to have normalized invalid UTF-8 first.
     encoded_pairs = [(bytes([octet]), chr(octet) if octet < 128 else '\ufffd')
@@ -415,9 +424,20 @@ def main()
             cursor_documents.extend((number, 'true ' + number, '[' + number + ',]',
                                      '{"n":' + number + ',"n":3}',
                                      '{"n":3,"n":' + number + '}'))
-        cursor_source = declarations.replace('import trb/std/jsonc\n', '') + '''
-def report_cursor(text: String)
-case JSON.parse(text)
+        cursor_documents.extend([' \t\r\n', '[ \r\n 0 , \t -2E+3 \n ]', '{} []',
+                                 '{ \t "a" \r\n : \t [false, ]}', '[0, - ]'])
+        # The reference checks both parsed values and diagnostic positions after
+        # comment masking, including individual UTF-8 bytes, quotes and CR/LF.
+        comment_documents = [
+            '{"path":"/a//b/*c*/"}', '/*β😀*/{ "x": true } //end',
+            '[0,/*β😀\r\n more*/ X]', '[0,//β😀\r still a comment\n X]',
+            '[0,/*x*//**/false,]', '0/* unterminated', '/* only', '/x',
+            'true//x\rfalse', ' /*x*/ true false', '"unterminated //',
+            json.dumps('quoted " slash // and trailing backslash \\') + '/*ok*/',
+        ]
+        cursor_source = declarations + '''
+def report_cursor(result: Result<JSON::Value, JSON::Error>)
+case result
 when Result::Ok(value)
 display(value)
 when Result::Err(error)
@@ -438,8 +458,9 @@ end
 end
 end
 def main()
-''' + '\n'.join(f'report_cursor({json.dumps(text, ensure_ascii=False)})'
-                      for text in cursor_documents) + '\nend\n'
+''' + '\n'.join(f'report_cursor({module}.parse({json.dumps(text, ensure_ascii=False)}))'
+                      for module, documents in [('JSON', cursor_documents), ('JSONC', comment_documents)]
+                      for text in documents) + '\nend\n'
         main.write_text(cursor_source)
         expected_cursor = run([args.reference.resolve(), 'run', main]).stdout
         run([binary, 'build', '--compile', main, '--outfile', program])
@@ -546,6 +567,7 @@ end
         assert 'internal encoding and entropy sources are reserved for verified standard sources' in result.stderr, result
 
     for declarations in ('import trb/internal/json as Hidden\n',
+                         'import { _next_token_byte } from trb/internal/json\n',
                          'module JSON\nend\nimport trb/internal/json as Hidden\n'):
         main.write_text(declarations + 'def main()\nputs("unreachable")\nend\n')
         result = run([binary, 'check', main], success=False)
