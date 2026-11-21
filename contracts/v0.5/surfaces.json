@@ -6879,6 +6879,7 @@
       "TestRunNullableNarrowingAcrossAvailableBackends (internal/cli/cli_test.go)",
       "TestRunORMApplicationConformanceAcrossBackendsAndDatabases (internal/cli/orm_application_conformance_test.go)",
       "TestRunORMBackedWebJSONAcrossBackends (internal/cli/orm_application_conformance_test.go)",
+      "TestRunORMExpiredTransactionReturnsErrors (internal/cli/orm_result_transaction_runtime_test.go)",
       "TestRunORMResultStreamingAcrossBackends (internal/cli/orm_result_streaming_test.go)",
       "TestRunORMResultTransactionControlFlowAcrossBackends (internal/cli/orm_result_transaction_runtime_test.go)",
       "TestRunOfficialHTTPValuesAcrossAvailableBackends (internal/cli/cli_test.go)",

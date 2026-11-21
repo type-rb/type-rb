@@ -575,7 +575,17 @@ export function withScope<T>(signal: AbortSignal | undefined, callback: () => Pr
 }
 
 export class Transaction {
-  constructor(readonly sql: SQL | TransactionSQL) {}
+  constructor(private client: SQL | TransactionSQL | null, private readonly parent: Transaction | null) {}
+  get active(): boolean {
+    return this.client !== null && (this.parent === null || this.parent.active);
+  }
+  get sql(): SQL | TransactionSQL {
+    if (this.client === null || (this.parent !== null && !this.parent.active)) {
+      throw new TrbOrmExecutionError(DbErrorKind.Query, "database transaction scope is no longer active");
+    }
+    return this.client;
+  }
+  close(): void { this.client = null; }
 }
 export class Database {}
 
@@ -997,13 +1007,12 @@ export async function deleteAll(source: TrbOrmQuery): Promise<DbResult<number>> 
   try { const owner = model(source.model); const args: unknown[] = []; let sql = "DELETE FROM " + quote(owner.table); if (source.predicate !== null) sql += " WHERE " + predicateSQL(owner, source.predicate, args); const rows = await unsafe(source, sql, args); return resultOk(affectedRows(rows)); }
   catch (error) { return databaseError<number>(error, "database bulk delete failed"); }
 }
-export async function deleteValue(name: string, value: any): Promise<DbResult<boolean>> {
+export async function deleteValue(name: string, value: any, source = scopeFor(value, name)): Promise<DbResult<boolean>> {
   const owner = model(name); const primary = owner.columns.find(column => column.primary); if (primary === undefined) return resultErr(DbErrorKind.InvalidData, "model has no primary key");
-  const deleted = await deleteAll(where(scopeFor(value, name), [primary.name], ["="], [column(value, primary.name)])); return deleted.kind === "Err" ? deleted : resultOk(deleted.value > 0);
+  const deleted = await deleteAll(where(source, [primary.name], ["="], [column(value, primary.name)])); return deleted.kind === "Err" ? deleted : resultOk(deleted.value > 0);
 }
 async function destroyInTransaction(name: string, value: any, transactionValue: Transaction): Promise<DbResult<boolean>> {
   const owner = model(name);
-  __trbOrmScopes.set(value, using(name, transactionValue));
   for (const relation of owner.associations) {
     if (relation.dependent === "") continue;
     const related = associationQuery(value, name, relation.name, transactionValue);
@@ -1012,7 +1021,7 @@ async function destroyInTransaction(name: string, value: any, transactionValue: 
     if (relation.dependent === "nullify") { const changed = await updateAll(related, [relation.targetColumn], [null]); if (changed.kind === "Err") return changed; }
     if (relation.dependent === "destroy") { const loaded = await all(related); if (loaded.kind === "Err") return loaded; for (const item of loaded.value) { const removed = await destroyInTransaction(relation.target, item, transactionValue); if (removed.kind === "Err") return removed; } }
   }
-  return deleteValue(name, value);
+  return deleteValue(name, value, using(name, transactionValue));
 }
 export async function destroy(name: string, value: any): Promise<DbResult<boolean>> {
   const existing = scopeFor(value, name).transaction;
@@ -1073,7 +1082,18 @@ export async function loadAssociation(value: any, name: string, reload: boolean,
 class TrbOrmRollback extends Error { constructor(readonly result: DbResult<any>) { super("TypeRB ORM rollback"); } }
 export async function transaction<T>(parent: Transaction | null, callback: (transaction: Transaction) => Promise<DbResult<T>>): Promise<DbResult<T>> {
   try {
-    const run = async (client: SQL | TransactionSQL): Promise<T> => { if (__trbOrmAdapter === "mysql" && parent === null) await client.unsafe("SET SESSION time_zone = '+00:00'", []); const result = await callback(new Transaction(client)); if (result.kind === "Err") throw new TrbOrmRollback(result); return result.value; };
+    if (parent !== null && !parent.active) return resultErr(DbErrorKind.InvalidData, "parent transaction scope is no longer active");
+    const run = async (client: SQL | TransactionSQL): Promise<T> => {
+      if (__trbOrmAdapter === "mysql" && parent === null) await client.unsafe("SET SESSION time_zone = '+00:00'", []);
+      const handle = new Transaction(client, parent);
+      try {
+        const result = await callback(handle);
+        if (result.kind === "Err") throw new TrbOrmRollback(result);
+        return result.value;
+      } finally {
+        handle.close();
+      }
+    };
     const value = parent === null
       ? await (__trbOrmAdapter === "sqlite" ? database().begin("immediate", run) : database().begin(run))
       : await (parent.sql as TransactionSQL).savepoint(run);

@@ -304,6 +304,11 @@ after rollback completes. The block's final successful value becomes the
 transaction's `Ok` payload. An authored `return` cannot cross the transaction
 boundary.
 
+A transaction handle is valid for the duration of its block. A query built with
+`using(transaction)` returns a database error if executed after that block
+ends. The same rule applies to a nested transaction whose savepoint has ended,
+even while the outer transaction can still execute queries.
+
 Model classes and filtered relations both support `update_all()`, `delete_all()`,
 and `destroy_all()`. Direct deletes skip lifecycle behavior; destroy operations
 run the configured `dependent: destroy`, `delete`, `nullify`, or `restrict` rule.

@@ -165,7 +165,7 @@ module TrbOrmRuntime
 		end
 
 		def active?
-			@active
+			@active && (@parent.nil? || @parent.active?)
 		end
 
 		def close
@@ -290,7 +290,6 @@ module TrbOrmRuntime
 		end
 
 		def using(value)
-			TrbOrmRuntime.invalid!("database transaction scope is no longer active") unless value.is_a?(Transaction) && value.active?
 			copy(transaction: value)
 		end
 
@@ -547,8 +546,14 @@ module TrbOrmRuntime
 			}
 		end
 
+		def check_transaction!(transaction)
+			if !transaction.nil? && !transaction.active?
+				raise Failure.new(db_error("Query", "database transaction scope is no longer active"))
+			end
+		end
+
 		def transaction_result(parent = nil)
-			invalid!("parent transaction scope is no longer active") if !parent.nil? && !parent.active?
+			return Result::Err.new(db_error("InvalidData", "parent transaction scope is no longer active")) if !parent.nil? && !parent.active?
 			transaction = Transaction.new(parent)
 			value = nil
 			begin
@@ -721,6 +726,7 @@ module TrbOrmRuntime
 		end
 
 		def select_sql(query, execution:)
+			check_transaction!(query.transaction) if execution
 			arguments = []
 			selection = query.selections
 			columns = if selection.empty?
@@ -932,7 +938,7 @@ module TrbOrmRuntime
 				query = query_by_name(association.target).where([[association.target_column, "=", model.instance_variable_get("@" + association.source_column)]])
 			end
 			transaction = model.instance_variable_get(:@__trb_orm_transaction)
-			query = query.using(transaction) if transaction&.active?
+			query = query.using(transaction) unless transaction.nil?
 			association_target_query(association, query)
 		end
 
@@ -1014,6 +1020,7 @@ module TrbOrmRuntime
 
 		def save_draft_result(draft)
 			result do
+				check_transaction!(draft.query.transaction)
 				validate_values(draft.metadata, draft.values)
 				columns = draft.values.keys
 				values = columns.map { |column| database_value(draft.metadata, column, draft.values.fetch(column)) }
@@ -1125,6 +1132,7 @@ module TrbOrmRuntime
 		end
 
 		def update_query(query, values)
+			check_transaction!(query.transaction)
 			validate_values(query.metadata, values, allow_primary_key: false)
 			invalid!("database update requires at least one value") if values.empty?
 			arguments = []
@@ -1146,6 +1154,7 @@ module TrbOrmRuntime
 		end
 
 		def delete_query(query)
+			check_transaction!(query.transaction)
 			arguments = []
 			where = query.predicate.nil? ? "" : " WHERE " + render_predicate(query.metadata, query.predicate, arguments, true)
 			execute_dui("DELETE FROM " + quote(query.metadata.table) + where, arguments)
