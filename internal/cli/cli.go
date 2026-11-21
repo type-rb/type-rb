@@ -1200,10 +1200,10 @@ func executableOutputPath(config *project.Config, outfile string) (string, error
 }
 
 func (c *CLI) runProgram(args []string) (resultErr error) {
-	return c.runProgramWithWorker(args, false)
+	return c.runProgramWithJobs(args, jobsInvocation{})
 }
 
-func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error) {
+func (c *CLI) runProgramWithJobs(args []string, invocation jobsInvocation) (resultErr error) {
 	flags := flag.NewFlagSet("run", flag.ContinueOnError)
 	flags.SetOutput(c.Stderr)
 	configPath := flags.String("config", "", "path to trbconfig.jsonc")
@@ -1276,6 +1276,21 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 	if err != nil {
 		return err
 	}
+	entrySource := filename
+	if entrySource == "" {
+		entrySource = mainSource(compiled)
+		if entrySource == "" {
+			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
+		}
+	}
+	if standalone && !artifactHasMain(compiled[entrySource]) {
+		return errors.New("standalone file has no top-level main(); define def main()")
+	}
+	if invocation.command != "" {
+		if err := invocation.validateEntrypoint(compiled[entrySource]); err != nil {
+			return err
+		}
+	}
 	relay := newCommandSignalRelay()
 	defer relay.Close()
 	var workspace *generatedWorkspace
@@ -1297,22 +1312,11 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 			return err
 		}
 	}
-	target := ""
-	entrySource := filename
-	if entrySource == "" {
-		entrySource = mainSource(compiled)
-		if entrySource == "" {
-			return errors.New("project has no top-level main(); define def main() or pass a .trb file explicitly")
-		}
-	}
-	if standalone && !artifactHasMain(compiled[entrySource]) {
-		return errors.New("standalone file has no top-level main(); define def main()")
-	}
 	generated, err := writeCompiledTree(config, compiled, runRoot, false)
 	if err != nil {
 		return err
 	}
-	target = generated[entrySource]
+	target := generated[entrySource]
 	if target == "" {
 		return fmt.Errorf("%s is outside configured sourceDir %s", entrySource, config.SourceDir)
 	}
@@ -1336,7 +1340,7 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 	case "ruby":
 		command = rubyRunCommand(target, programArgs)
 	case "go":
-		if worker {
+		if invocation.command == "start" {
 			// Supervise the generated worker itself. A `go run` launcher can
 			// exit on a signal while its worker still owns a running claim.
 			executable := filepath.Join(runRoot, ".jobs-worker")
@@ -1376,7 +1380,10 @@ func (c *CLI) runProgramWithWorker(args []string, worker bool) (resultErr error)
 	command.Stdin = c.Stdin
 	command.Stdout = c.Stdout
 	command.Stderr = c.Stderr
-	if worker {
+	if invocation.command != "" {
+		command.Env = append(command.Environ(), invocation.environment...)
+	}
+	if invocation.command == "start" {
 		relay.shutdownTimeout = jobsWorkerShutdownTimeout(compiled[entrySource])
 	}
 	return relay.Run(command)

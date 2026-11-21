@@ -1383,7 +1383,7 @@ func (g *generator) topLevelMethod(method *ir.Method) {
 	g.parameterDefaults(method.Parameters)
 	previousReturnType := g.returnType
 	g.returnType = method.ReturnType
-	if sourceName == "main" && g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+	if sourceName == "main" && g.jobs.HasCommandEntrypoint(g.modulePath) {
 		g.line("if trbJobsRunWorkerIfRequested() { return }")
 	}
 	cliMain := sourceName == "main" && g.cli != nil

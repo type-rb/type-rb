@@ -2,13 +2,29 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/type-rb/type-rb/internal/compiler"
+	"github.com/type-rb/type-rb/internal/jobs"
 	jobssql "github.com/type-rb/type-rb/internal/jobs/sqladapter"
 )
+
+type jobsInvocation struct {
+	command     string
+	environment []string
+}
+
+func (invocation jobsInvocation) validateEntrypoint(artifact *compiler.Artifact) error {
+	if artifactHasMain(artifact) {
+		program := artifact.IR
+		discovered := jobs.ManifestFrom(program.Extensions)
+		if discovered.HasCommandEntrypoint(program.ModulePath) && jobssql.ManifestFrom(program.Extensions) != nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("jobs %s requires an application entrypoint with a configured Jobs adapter and a discovered Job class", invocation.command)
+}
 
 func (c *CLI) runJobs(args []string) error {
 	if len(args) == 0 {
@@ -30,11 +46,10 @@ func (c *CLI) runJobs(args []string) error {
 }
 
 func (c *CLI) runJobsCommand(command, id string, args []string) error {
-	restoreCommand := temporaryEnvironment("TRB_JOBS_COMMAND", command)
-	defer restoreCommand()
-	restoreID := temporaryEnvironment("TRB_JOBS_ID", id)
-	defer restoreID()
-	return c.runProgram(args)
+	return c.runProgramWithJobs(args, jobsInvocation{
+		command:     command,
+		environment: []string{"TRB_JOBS_COMMAND=" + command, "TRB_JOBS_ID=" + id},
+	})
 }
 
 func (c *CLI) runJobsStart(args []string) error {
@@ -64,17 +79,14 @@ func (c *CLI) runJobsStart(args []string) error {
 		}
 		forwarded = append(forwarded, argument)
 	}
-	restoreWorker := temporaryEnvironment("TRB_JOBS_WORKER", "1")
-	defer restoreWorker()
+	environment := []string{"TRB_JOBS_WORKER=1", "TRB_JOBS_COMMAND="}
 	if once {
-		restoreOnce := temporaryEnvironment("TRB_JOBS_ONCE", "1")
-		defer restoreOnce()
+		environment = append(environment, "TRB_JOBS_ONCE=1")
 	}
 	if queue != "" {
-		restoreQueue := temporaryEnvironment("TRB_JOBS_QUEUE", queue)
-		defer restoreQueue()
+		environment = append(environment, "TRB_JOBS_QUEUE="+queue)
 	}
-	return c.runProgramWithWorker(forwarded, true)
+	return c.runProgramWithJobs(forwarded, jobsInvocation{command: "start", environment: environment})
 }
 
 // The worker owns the handler grace period. The CLI allows a bounded final
@@ -88,16 +100,4 @@ func jobsWorkerShutdownTimeout(artifact *compiler.Artifact) time.Duration {
 		}
 	}
 	return time.Duration(config.ShutdownTimeoutMilliseconds)*time.Millisecond + 5*time.Second
-}
-
-func temporaryEnvironment(name, value string) func() {
-	previous, existed := os.LookupEnv(name)
-	_ = os.Setenv(name, value)
-	return func() {
-		if existed {
-			_ = os.Setenv(name, previous)
-			return
-		}
-		_ = os.Unsetenv(name)
-	}
 }

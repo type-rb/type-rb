@@ -96,12 +96,15 @@ end
 
 	stdout.Reset()
 	stderr.Reset()
-	if status := command.Run([]string{"jobs", "start", "--once", "--queue", "mail", "--config", config.Path}); status != 0 {
-		t.Fatalf("worker status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
-	}
-	if stdout.String() != "performed 42 for ada@example.test\n" {
-		t.Fatalf("unexpected worker output %q stderr=%s", stdout.String(), stderr.String())
-	}
+	t.Run("explicit start takes precedence over an inherited Jobs command", func(t *testing.T) {
+		t.Setenv("TRB_JOBS_COMMAND", "list")
+		if status := command.Run([]string{"jobs", "start", "--once", "--queue", "mail", "--config", config.Path}); status != 0 {
+			t.Fatalf("worker status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+		}
+		if stdout.String() != "performed 42 for ada@example.test\n" {
+			t.Fatalf("unexpected worker output %q stderr=%s", stdout.String(), stderr.String())
+		}
+	})
 	database, err = sql.Open("sqlite", databaseSource)
 	if err != nil {
 		t.Fatal(err)

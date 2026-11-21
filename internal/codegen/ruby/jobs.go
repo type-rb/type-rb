@@ -186,7 +186,7 @@ func (g *generator) jobsWorker(_ *jobs.Manifest, config jobssql.Config) {
 	g.line("def trb_jobs_run_worker_or_command", "")
 	g.indent++
 	g.line("command = ENV[\"TRB_JOBS_COMMAND\"]", "")
-	g.line("if command", "")
+	g.line("unless command.to_s.empty?", "")
 	g.indent++
 	g.line("id = ENV[\"TRB_JOBS_ID\"]", "")
 	g.line("case command; when \"list\"; TrbJobsRuntime.list.each { |row| puts [row[:id], row[:state], row[:job_name], \"#{row[:attempts]}/#{row[:maximum_attempts]}\", row[:last_error]].join(\"\\t\") }; when \"retry\"; unless TrbJobsRuntime.retry_job(id); warn \"trb jobs retry: failed job not found\"; exit(1); end; when \"discard\"; unless TrbJobsRuntime.discard(id); warn \"trb jobs discard: job not found or currently running\"; exit(1); end; end", "")

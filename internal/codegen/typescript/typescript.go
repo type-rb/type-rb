@@ -275,7 +275,7 @@ func generate(program *ir.Program, suspension *SuspensionPlan, execution *effect
 		if method != nil && suspension.Methods[method] {
 			call = "await " + call
 		}
-		if g.modulePath != "trb_test_main" && g.jobs != nil && len(g.jobs.Jobs) > 0 {
+		if g.jobs.HasCommandEntrypoint(g.modulePath) {
 			g.line("if (!(await trbJobsRunWorkerOrCommand())) { " + call + "; }")
 		} else {
 			g.line(call + ";")
