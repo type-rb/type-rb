@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
-  "sourceRevision": "ee16ebd6d2e597458d8d9681156860f361ea7326",
+  "sourceRevision": "62dbb11e18a09318f667c47fd8f7daf3641b6e50",
   "catalogSHA256": "6b73cfdc348113df98335d4434a4422ec2b5888a57ff8ce23869f466c6ac1252",
   "hosts": [
     "darwin-amd64",
