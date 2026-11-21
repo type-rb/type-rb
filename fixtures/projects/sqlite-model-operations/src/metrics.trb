@@ -32,8 +32,10 @@ def scan_metrics(): DbResult<Integer>
 	mut checksum := 0
 	rows.each do |row|
 		payload := row.payload
-		if payload != nil && payload.size() > 0
-			checksum += payload.at(0) + payload.size()
+		if payload != nil
+			if payload.size() > 0
+				checksum += payload.at(0) + payload.size()
+			end
 		end
 	end
 	puts(rows.size())
