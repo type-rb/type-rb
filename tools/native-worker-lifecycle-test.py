@@ -435,7 +435,13 @@ def verify(fixture, quick):
             "SELECT state, attempts, claimed_by, last_error FROM trb_jobs WHERE id=?", (fixture.job,)
         ).fetchone()
     assert failed == ("failed", 1, None, "fixture rejected 42:2.75"), failed
-    fixture.passed("typed JobResult failure was recorded after handler exit")
+    assert fixture.admin("list") == f"{fixture.job}\tfailed\tSampleJob\t1/1\tfixture rejected 42:2.75\n"
+    (fixture.root / "src/jobs/sample.trb").write_text(JOBS)
+    assert fixture.admin("retry", fixture.job) == ""
+    fixture.release_handler()
+    fixture.once()
+    assert fixture.row() is None and fixture.marker.read_text() == "42:2.75:true"
+    fixture.passed("typed JobResult failure was listed, retried and acknowledged by the repaired handler")
 
 
 def main():
