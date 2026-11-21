@@ -415,7 +415,13 @@ func (g *generator) ormDeleteRuntime(adapter ormintegration.Adapter, model ormin
 	modelName := goIdentifier(model.Name, true)
 	g.line("func " + goORMDelete(model) + "(value *" + modelName + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
-	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".scope, value." + goORMQueryScopeField() + ".transaction)")
+	g.line("return " + goORMDelete(model) + "InTransaction(value, value." + goORMQueryScopeField() + ".transaction)")
+	g.indent--
+	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func " + goORMDelete(model) + "InTransaction(value *" + modelName + ", transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) " + g.ormResultType(booleanType) + " {")
+	g.indent++
+	g.line("database, databaseError := trbOrmExecutorForTransaction(value." + goORMQueryScopeField() + ".scope, transaction)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
 	statement := "DELETE FROM " + adapter.QuoteIdentifier(model.Table) + " WHERE " + adapter.QuoteIdentifier(primaryKey.Name) + " = "
 	g.line("deleted, err := database.Exec(" + strconv.Quote(statement) + "+trbOrmPlaceholder(1), value." + goORMColumnGetter(primaryKey.Name) + "())")
@@ -440,7 +446,6 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 	g.line("if transaction := value." + goORMQueryScopeField() + ".transaction; transaction != nil { return " + core + "(value, transaction) }")
 	g.line("transaction, databaseError := " + g.ormLifecycleAlias() + ".TrbOrmBeginTransaction(value." + goORMQueryScopeField() + ".scope)")
 	g.line("if databaseError != nil { return " + g.ormResultErr(booleanType, "*databaseError") + " }")
-	g.line("value." + goORMQueryScopeField() + ".transaction = transaction")
 	g.line("result := " + core + "(value, transaction)")
 	g.line("if result.Kind == " + g.ormPackageAlias() + ".DbResultErrTag { _ = transaction.Rollback(); return result }")
 	g.line("if commitError := transaction.Commit(); commitError != nil { return " + g.ormResultErr(booleanType, "*commitError") + " }")
@@ -451,7 +456,6 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 
 	g.line("func " + core + "(value *" + modelName + ", transaction " + transactionType + ") " + g.ormResultType(booleanType) + " {")
 	g.indent++
-	g.line("value." + goORMQueryScopeField() + ".transaction = transaction")
 	for _, association := range model.Associations {
 		if association.Dependent == "" {
 			continue
@@ -487,7 +491,7 @@ func (g *generator) ormDestroyRuntime(model ormintegration.Model) {
 			g.line("}")
 		}
 	}
-	g.line("return " + goORMDelete(model) + "(value)")
+	g.line("return " + goORMDelete(model) + "InTransaction(value, transaction)")
 	g.indent--
 	g.line("}")
 	g.b.WriteByte('\n')

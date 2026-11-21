@@ -1940,7 +1940,8 @@ def restrict_team(): DbResult<Boolean>
 	when DbResult::Ok(_)
 		return DbResult<Boolean>::Ok(false)
 	when DbResult::Err(error)
-		return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint)
+		updated := try team.update(name: "still available")
+		return DbResult<Boolean>::Ok(error.kind == DbErrorKind::Constraint && updated.name == "still available")
 	end
 end
 
