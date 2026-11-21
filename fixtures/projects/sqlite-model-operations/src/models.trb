@@ -7,3 +7,7 @@ class Metric < Model
 end
 class Event < Model
 end
+class Reading < Model
+end
+class Vote < Model
+end

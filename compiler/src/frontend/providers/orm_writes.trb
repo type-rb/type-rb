@@ -88,6 +88,9 @@ def orm_write_arguments(table: OrmTable, updating: Boolean): OrmWriteArguments
 end
 
 def orm_write_source(table: OrmTable, connection: String, projection: String, key: String, change_type: String, scope_field: String): OrmWriteSource
+	if key == ""
+		return OrmWriteSource.new(declarations: "", create_method: "", with_method: "", update_method: "", scoped_create: "")
+	end
 	insert := orm_write_arguments(table, false)
 	change := orm_write_arguments(table, true)
 	if !insert.valid || !change.valid

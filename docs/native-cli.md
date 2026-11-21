@@ -207,7 +207,8 @@ end
 Build a read query from the model or its transaction scope. Equality filters
 accept named scalar columns, including `nil` for nullable columns. The
 three-argument form checks the column, operator and value against the lock.
-Text columns also support SQLite `LIKE`. Each modifier returns a new query.
+Text columns also support SQLite `LIKE`. Each modifier returns a new query. Table reads also work when the locked
+schema has no primary key or has a composite primary key.
 
 ```trb
 def recent_reports(): DbResult<Array<Report>>

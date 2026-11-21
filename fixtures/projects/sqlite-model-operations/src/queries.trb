@@ -1,4 +1,4 @@
-import { Report } from models
+import { Reading, Report, Vote } from models
 import { Database, DbError, DbErrorKind, DbResult, Transaction } from trb/orm
 
 def list_rows(): DbResult<Integer>
@@ -112,5 +112,18 @@ def exercise_queries()
 		print_query_error(error)
 	when DbResult::Ok(_count)
 		puts("unexpected count in expired transaction")
+	end
+end
+
+def read_without_single_key(): DbResult<Integer>
+	readings := try Reading.where(label: "level").order(score: :desc).all()
+	readings.each { |reading| puts(reading.score) }
+	return Database.transaction() do |tx|
+		votes := Vote.using(tx).where(reader: "sam").order(points: :desc)
+		first := try votes.first()
+		if first != nil
+			puts(first.topic)
+		end
+		try votes.count()
 	end
 end

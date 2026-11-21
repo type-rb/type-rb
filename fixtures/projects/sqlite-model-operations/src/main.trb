@@ -1,4 +1,4 @@
-import { exercise_queries } from queries
+import { exercise_queries, read_without_single_key } from queries
 import { exercise_times } from events
 import { exercise_metrics, scan_metrics } from metrics
 import { commit_under_reader, exercise_transactions } from transactions
@@ -165,6 +165,15 @@ end
 def main()
 	operation := Process.environment("ORM_TEST_OPERATION")
 	if operation != nil
+		if operation == "without_single_key"
+			case read_without_single_key()
+			when DbResult::Ok(count)
+				puts(count)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
 		if operation == "queries"
 			exercise_queries()
 			return

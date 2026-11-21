@@ -62,6 +62,10 @@ def check_model_rows(cli, reference, root, config, environment):
                         'base.order(missing: :asc)', 'base.order(id: :sideways)']:
             queries.write_text(query_source.replace('base.where("id", ">", 1)', invalid))
             run([str(tool), "check"], root, environment, "error[")
+        for invalid in ['Reading.find(1)', 'Vote.find("sam")']:
+            queries.write_text(query_source.replace('Reading.where(label: "level").order(score: :desc).all()', invalid))
+            run([str(tool), "check"], root, environment,
+                "unknown class method find" if mode == "trb" else "has no member find")
         queries.write_text(query_source)
         run([str(tool), "check"], root, environment)
         app = root / ("lookup-" + mode)
@@ -86,6 +90,14 @@ def check_model_rows(cli, reference, root, config, environment):
             assert connection.execute("SELECT count(*) FROM reports").fetchone() == (5,)
             connection.execute("DROP TABLE reports")
         expect_output(app, root, query_env, "Query\ndatabase query failed\n")
+        keyless = root / (app.name + "-without-single-key.sqlite")
+        with sqlite3.connect(keyless) as connection:
+            connection.executescript("CREATE TABLE readings(label TEXT, score INTEGER);"
+                                     "INSERT INTO readings VALUES ('level', 2), ('other', 9), ('level', 4);"
+                                     "CREATE TABLE votes(reader TEXT, topic TEXT, points INTEGER, PRIMARY KEY(reader, topic));"
+                                     "INSERT INTO votes VALUES ('sam', 'one', 1), ('sam', 'two', 3), ('lee', 'two', 8);")
+        expect_output(app, root, dict(environment, DATABASE_URL=str(keyless), ORM_TEST_OPERATION="without_single_key"),
+                      "4\n2\ntwo\n2\n")
         scan = root / (app.name + "-scan.sqlite")
         scan_env = dict(environment, DATABASE_URL=str(scan), ORM_TEST_OPERATION="scan")
         payloads = [None if i % 4 == 0 else bytes([i % 251]) * (0 if i % 4 == 1 else 2048)
