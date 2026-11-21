@@ -40,7 +40,7 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["backend/qbe/runtime/failure_recovery", "$trbn_runtime_recover_l", "$trbn_runtime_recover_l_mutation"],
 		["backend/qbe/runtime/unicode_case_data", "w 97, w 65", "w 97, w 66"],
 		["backend/qbe/runtime/string_case", "%equal =w ceql %key, %point", "%equal =w cnel %key, %point"],
-		["backend/qbe/runtime/string_transforms", "%next =l add %end, %width", "%next =l add %end, 1"],
+		["backend/qbe/runtime/string_transforms", "\" ret \"", "\" ret ~\""],
 		["frontend/checking/builtins/results", "method == \"try_fetch\"", "method == \"try_fetch_changed\""],
 		["frontend/checking/builtins/number_parsing", "\"OutOfRange\"", "\"OutOfRange~\""],
 		["backend/qbe/runtime/number_parsing", "%integer_valid =w cultw %integer_digit, 10", "%integer_valid =w cultw %integer_digit, 9"],
@@ -408,5 +408,6 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/providers/orm_writes", "\"try\"", "\"try~\""],
 		["backend/qbe/runtime/sqlite_transactions", "\\\"SAVEPOINT trbn_orm_nested\\\"", "\\\"SAVEPOINT trbn_orm_nested~\\\""],
 		["frontend/checking/body/orm_transactions", "\"transaction requires a structured block\"", "\"transaction requires a structured block~\""],
+		["mir/analysis/split_fields", ">= 0", ">= 1"],
 	]
 end

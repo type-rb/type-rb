@@ -1,0 +1,81 @@
+import { mir_array_forwarding_safe } from mir/analysis/array_local
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_aliases, mir_flow_position } from mir/analysis/flow
+import { mir_live_add, mir_live_before } from mir/analysis/liveness
+import { mir_scalar_literal } from mir/analysis/ranges
+import { mir_op_array_load, mir_op_array_size, mir_op_scalar_literal } from mir/model/instructions
+import { MirFunction, MirModule, MirStringSplit, MirValue } from mir/model/module
+
+# Reuse the same incoming-edge and instruction operand checks as local Array
+# analysis. A merge with another owner, even on just one edge, can expose a
+# field through an alias we could no longer follow.
+def mir_observed_split_fields(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, values: Array<MirValue>, split: Integer, mut plans: Array<MirStringSplit>)
+	owner := native_module.instructions[split].result
+	mut names: Array<Integer> := []
+	values.each do |value|
+		if mir_flow_alias(aliases, value.id) == owner
+			mir_live_add(names, value.id)
+		end
+	end
+	mut first_field := -1
+	mut last_field := -1
+	mut at := function.block_start
+	while at < function.block_start + function.block_count
+		block := native_module.blocks[at]
+		if mir_flow_alias(aliases, block.return_value) == owner || mir_flow_alias(aliases, block.condition) == owner
+			return
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.first_target, block.first_argument_start, block.first_argument_count)
+			return
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.second_target, block.second_argument_start, block.second_argument_count)
+			return
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			use := native_module.instructions[index]
+			if mir_live_before(native_module, names, use, []).size() > 0
+				if mir_flow_alias(aliases, use.first) != owner
+					return
+				end
+				if use.kind == mir_op_array_load()
+					definition := mir_flow_position(flow, mir_flow_alias(aliases, use.second))
+					if definition < 0
+						return
+					end
+					literal := native_module.instructions[definition]
+					if literal.kind != mir_op_scalar_literal() || literal.payload < 0 || literal.payload >= native_module.literal_texts.size()
+						return
+					end
+					field := mir_scalar_literal(native_module.literal_texts[literal.payload])
+					if field < 0
+						return
+					end
+					if first_field < 0 || first_field > field
+						first_field = field
+					end
+					if field > last_field
+						last_field = field
+					end
+				elsif use.kind != mir_op_array_size()
+					return
+				end
+			end
+			index += 1
+		end
+		at += 1
+	end
+	if first_field >= 0
+		plans.push(MirStringSplit.new(instruction: split, fragments: [], first_field: first_field, last_field: last_field))
+	end
+end
+
+def mir_add_observed_split_fields(native_module: MirModule, function: MirFunction, flow: MirFlow, values: Array<MirValue>, sites: Array<Integer>, mut plans: Array<MirStringSplit>)
+	# Bound whole-function use scans independently of the number of split sites.
+	if sites.size() == 0 || sites.size() > 8 || flow.entry < 0 || flow.predecessors[flow.entry].size() > 0
+		return
+	end
+	aliases := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+	sites.each do |site|
+		mir_observed_split_fields(native_module, function, flow, aliases, values, site, plans)
+	end
+end

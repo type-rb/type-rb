@@ -220,7 +220,7 @@ def emit_control_mir(state: CompilerState, function_index: Integer, result_type:
 				end
 				emit_integer_array_push(operands[instruction.first], operands[instruction.second], reserved, branch_roots, branch_root_prefix, lazy_capacity, operands, context, output)
 			elsif selected_split >= 0
-				value = emit_mir_string_split(function.id, splits[selected_split], context, output)
+				value = emit_mir_string_split(function.id, splits[selected_split], operands[instruction.first], operands[instruction.second], context, output)
 			elsif selected_join >= 0
 				value = emit_mir_array_join(state.scalar_mir, joins[selected_join], operands[instruction.second], operands, context, output)
 			elsif hash_concat >= 0

@@ -170,8 +170,12 @@ def emit_utf8_runtime(mut output: QbeOutput)
 end
 
 # The canonical split safe point retains its normal roots and fresh result.
-def emit_mir_string_split(function: Integer, plan: MirStringSplit, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+def emit_mir_string_split(function: Integer, plan: MirStringSplit, source: String, separator: String, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
 	result := emit_temporary(context)
+	if plan.first_field >= 0
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_split_fields(l " + source + ", l " + separator + ", l " + integer_string(plan.first_field) + ", l " + integer_string(plan.last_field) + ")")
+		return emitted_value(result, "Array<String>")
+	end
 	name := "$trbn_split_" + integer_string(function) + "_" + integer_string(plan.instruction)
 	qbe_output_line(output, "\t" + result + " =l call $trbn_literal_split(l " + name + ", l " + integer_string(plan.fragments.size()) + ")")
 	return emitted_value(result, "Array<String>")

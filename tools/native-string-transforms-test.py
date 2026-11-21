@@ -40,13 +40,16 @@ with tempfile.TemporaryDirectory(prefix='native-string-transforms-') as temporar
         run(['/usr/bin/cc', root / 'program.s', '-lm', '-o', root / 'program'])
         return root / 'program'
 
-    def compile_source(source, *, split_only=False):
+    def compile_source(source, *, split_only=False, selected_fields=False):
         il = emit(source)
         checks = [
             (b'trbn_string_split', (b'trbn_string_from_bytes', b'trbn_split_fragment', b'trbn_array_push_paced')),
             (b'trbn_split_pair', (b'trbn_split_fragment', b'trbn_array_push_paced')),
             (b'trbn_split_fragment', (b'trbn_string_alloc',)),
         ]
+        if selected_fields:
+            assert b'call $trbn_string_split_fields(' in il
+            checks.append((b'trbn_string_split_fields', (b'trbn_string_from_bytes', b'trbn_split_fragment', b'trbn_array_push_paced')))
         if not split_only:
             checks += [(b'trbn_string_replace', (b'trbn_string_alloc',)),
                        (b'trbn_string_case', (b'trbn_string_alloc',))]
@@ -169,6 +172,31 @@ end
     measured = statistics(result)
     assert measured['collections'] >= 4096 and measured['peak-heap-bytes'] < 2 * 1024 * 1024, measured
     assert measured['allocated-bytes'] < 1024 * 1024, measured
+
+    # A projected split still owns each visible String after later allocations.
+    # Force collection inside the runtime, including when a field was skipped.
+    program = compile_source('''import trb/std/process
+def main()
+args := Process.argv()
+fields := args[0].split(args[1])
+puts(fields.size())
+puts(fields[1])
+puts(fields[2])
+end
+''', split_only=True, selected_fields=True)
+    for source, separator in [(b",,x,", b","), (b",a,b,c,d,e,f,", b","),
+                              ("α///β////δ".encode(), b"//"), (b"x\xf0\x9fX\xf0\x9fY", b"\x9f")]:
+        pieces = source.split(separator)
+        result = run([program, source, separator], stats=True)
+        assert result.stdout == str(len(pieces)).encode() + b"\n" + b"\n".join(pieces[1:3]) + b"\n", result
+        assert statistics(result)['collections'] >= len(pieces)
+
+    for source, separator, before_error, diagnostic in [
+        (b"one", b",", b"1\n", b"panic: index is out of bounds\n"),
+        (b"a,b,c", b"", b"", b"panic: String split separator is empty\n"),
+    ]:
+        failure = subprocess.run([program, source, separator], capture_output=True, env=env, cwd=root, timeout=30)
+        assert (failure.returncode, failure.stdout, failure.stderr) == (2, before_error, diagnostic), failure
 
     # All byte values, split boundaries and owned fragment lifetimes use the
     # dynamic path. Invalid bytes each count as one decoding unit, while valid

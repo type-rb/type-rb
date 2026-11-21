@@ -387,9 +387,13 @@ end
 
 # A split keeps its canonical operation and fresh mutable result. Only the
 # immutable fragment bytes are precomputed; verification derives them anew.
+# Literal splits store their complete fragments. Dynamic splits carry the
+# inclusive range observable through the fresh Array's checked element reads.
 record MirStringSplit
 	instruction: Integer
 	fragments: Array<MirLiteralData>
+	first_field: Integer
+	last_field: Integer
 end
 
 record MirEnumScalar

@@ -1,6 +1,6 @@
 import { qbe_runtime_static_strings_slot } from backend/qbe/runtime_slots
 import { mir_op_range_new, mir_op_singleton_literal, mir_op_string_literal } from mir/model/instructions
-import { emit_literal_split_runtime } from backend/qbe/runtime/string_transforms
+import { emit_literal_split_runtime, emit_string_split_runtime } from backend/qbe/runtime/string_transforms
 import { emit_object_descriptors } from backend/qbe/emit/objects
 import { mir_string_literal_data } from mir/analysis/literal_data
 import { MirLiteralData, MirModule } from mir/model/module
@@ -240,7 +240,7 @@ def emit_static_strings(
 		end
 		string_index += 1
 	end
-	emit_static_split_fragments(state.scalar_mir, output)
+	emit_split_support(state.scalar_mir, output)
 	if compressed_tokens.size() > 0
 		emit_static_string_decoder(output, compressed_tokens, compressed_sizes, decoded_sizes)
 	end
@@ -310,10 +310,15 @@ def emit_flat_string_data(name: String, data: MirLiteralData, mut output: QbeOut
 	qbe_output_line(output, "\tb 0 }")
 end
 
-def emit_static_split_fragments(native_module: MirModule, mut output: QbeOutput)
+def emit_split_support(native_module: MirModule, mut output: QbeOutput)
 	mut used := false
+	mut selected_fields := false
 	native_module.string_splits.each.with_index do |plans, function|
 		plans.each do |plan|
+			if plan.first_field >= 0
+				selected_fields = true
+				next
+			end
 			used = true
 			name := "trbn_split_" + integer_string(native_module.functions[function].id) + "_" + integer_string(plan.instruction)
 			mut table := "data $" + name + " = align 8 {"
@@ -330,5 +335,8 @@ def emit_static_split_fragments(native_module: MirModule, mut output: QbeOutput)
 	end
 	if used
 		emit_literal_split_runtime(output)
+	end
+	if selected_fields
+		emit_string_split_runtime(output, true)
 	end
 end
