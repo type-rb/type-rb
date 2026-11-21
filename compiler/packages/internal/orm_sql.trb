@@ -1,6 +1,7 @@
 import { DbError, DbErrorKind, Transaction } from trb/orm
 import trb/std/result
 import trb/internal/sqlite
+import trb/internal/runtime as Runtime
 import trb/std/process
 
 module OrmSql
@@ -126,11 +127,11 @@ def lookup(database: String, environment: String, statement: String, key: SQLite
 	return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
 end
 
-def count_rows(database: String, environment: String, statement: String, scope: Integer): Result<Integer, DbError>
+def count_rows(database: String, environment: String, statement: String, scope: Integer, values: Array<SQLite::Parameter> = []): Result<Integer, DbError>
 	source := _orm_database(database, environment, scope) catch |error|
 		return Result<Integer, DbError>::Err(error)
 	end
-	case SQLite.query_one(source, statement, [], [1], SQLite::QueryMode::ReadOrCreate, 0, scope)
+	case SQLite.query_one(source, statement, values, [1], SQLite::QueryMode::ReadOrCreate, 0, scope)
 	when Result::Ok(row)
 		if row != nil
 			case row[0]
@@ -144,13 +145,91 @@ def count_rows(database: String, environment: String, statement: String, scope: 
 			end
 		end
 	when Result::Err(error)
-		if error.code == -1
-			return Result<Integer, DbError>::Err(_closed_transaction())
-		elsif error.code == 14
+		if error.code == 14
 			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
 	return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database count failed"))
+end
+
+# Each chain owns a new query description. Shared parameter arrays are read-only.
+module OrmSql
+	record Selection
+		scope: Integer
+		predicate: String
+		values: Array<SQLite::Parameter>
+		ordering: String
+		row_limit: Integer?
+		row_offset: Integer?
+	end
+end
+
+def selection(scope: Integer): OrmSql::Selection
+	return OrmSql::Selection.new(scope: scope, predicate: "", values: [], ordering: "", row_limit: nil, row_offset: nil)
+end
+
+def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
+	mut predicate := query.predicate
+	predicate += predicate.empty?() ? " WHERE " : " AND "
+	mut values := query.values.dup()
+	case value
+	when SQLite::Parameter::Null
+		predicate += column + (operator == "!=" ? " IS NOT NULL" : " IS NULL")
+	else
+		predicate += column + " " + operator + " ?"
+		values.push(value)
+	end
+	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def ordered(query: OrmSql::Selection, column: String, direction: String): OrmSql::Selection
+	ordering := query.ordering + (query.ordering.empty?() ? " ORDER BY " : ", ") + column + (direction == "asc" ? " ASC" : " DESC")
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def limited(query: OrmSql::Selection, count: Integer): OrmSql::Selection
+	if count < 0
+		return Runtime.fail<OrmSql::Selection>("ORM limit must be non-negative")
+	end
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: query.ordering, row_limit: count, row_offset: query.row_offset)
+end
+
+def skipped(query: OrmSql::Selection, count: Integer): OrmSql::Selection
+	if count < 0
+		return Runtime.fail<OrmSql::Selection>("ORM offset must be non-negative")
+	end
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: query.ordering, row_limit: query.row_limit, row_offset: count)
+end
+
+def read_statement(query: OrmSql::Selection, project: String, first: Boolean): String
+	mut sql := project + query.predicate + query.ordering
+	mut cap := query.row_limit
+	if first && (cap == nil || cap > 1)
+		cap = 1
+	end
+	offset := query.row_offset
+	if cap != nil
+		sql += " LIMIT " + cap.to_s()
+	elsif offset != nil
+		sql += " LIMIT -1"
+	end
+	if offset != nil
+		sql += " OFFSET " + offset.to_s()
+	end
+	return sql
+end
+
+def read_rows(database: String, environment: String, query: OrmSql::Selection, projection: String, width: Integer, first: Boolean): Result<Array<Array<SQLite::Parameter>>, DbError>
+	source := try _orm_database(database, environment, query.scope)
+	case SQLite.query_rows(source, read_statement(query, projection, first), query.values, width, query.scope)
+	when Result::Ok(rows)
+		return Result<Array<Array<SQLite::Parameter>>, DbError>::Ok(rows)
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
 end
 
 # The reference SQLite driver binds UTC instants using Go's time.Time form.

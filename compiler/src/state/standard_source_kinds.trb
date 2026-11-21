@@ -308,6 +308,9 @@ end
 
 def standard_source_function(kind: Integer, name: String): Boolean
 	if kind == standard_source_orm_sql()
+		if name == "::selection" || name == "::filter" || name == "::ordered" || name == "::limited" || name == "::skipped" || name == "::read_statement" || name == "::read_rows"
+			return true
+		end
 		if name == "::time_text" || name == "::time_parameter" || name == "::boolean_value" || name == "::count_rows" || name == "::scope_id" || name == "::lookup" || name == "::delete_row" || name == "::insert_row" || name == "::update_row"
 			return true
 		end
@@ -320,7 +323,7 @@ def standard_source_function(kind: Integer, name: String): Boolean
 		return false
 	end
 	if kind == standard_source_sqlite()
-		if name == "::execute_writes" || name == "::query_one" || name == "::transaction" || name == "::worker_control" || name == "::worker_log"
+		if name == "::execute_writes" || name == "::query_one" || name == "::query_rows" || name == "::transaction" || name == "::worker_control" || name == "::worker_log"
 			return true
 		end
 		return false

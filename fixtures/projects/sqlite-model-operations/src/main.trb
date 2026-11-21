@@ -1,5 +1,6 @@
+import { exercise_queries } from queries
 import { exercise_times } from events
-import { exercise_metrics } from metrics
+import { exercise_metrics, scan_metrics } from metrics
 import { commit_under_reader, exercise_transactions } from transactions
 import { Report, Tag } from models
 import { DbErrorKind, DbResult } from trb/orm
@@ -164,10 +165,23 @@ end
 def main()
 	operation := Process.environment("ORM_TEST_OPERATION")
 	if operation != nil
+		if operation == "queries"
+			exercise_queries()
+			return
+		end
 		if operation == "times"
 			case exercise_times()
 			when DbResult::Ok(id)
 				puts(id)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "scan"
+			case scan_metrics()
+			when DbResult::Ok(checksum)
+				puts(checksum)
 			when DbResult::Err(error)
 				puts(error.message)
 			end

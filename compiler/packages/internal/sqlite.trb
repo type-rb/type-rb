@@ -143,9 +143,28 @@ def query_one(
 		busy_milliseconds: Integer,
 		scope: Integer = 0,
 	): Result<Array<SQLite::Parameter>?, SQLite::Error>
+	rows := try _query_rows(source, statement, parameters, shape, mode, busy_milliseconds, scope, false)
+	if rows.empty?()
+		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(nil)
+	end
+	return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(rows[0])
+end
+
+def query_rows(source: String, statement: String, parameters: Array<SQLite::Parameter>, width: Integer, scope: Integer): Result<Array<Array<SQLite::Parameter>>, SQLite::Error>
+	mut shape: Array<Integer> := []
+	if width < 1 || width > 32767
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: 21, message: "invalid SQLite row width"))
+	end
+	while shape.size() < width
+		shape.push(0)
+	end
+	return _query_rows(source, statement, parameters, shape, SQLite::QueryMode::ReadOrCreate, 0, scope, true)
+end
+
+def _query_rows(source: String, statement: String, parameters: Array<SQLite::Parameter>, shape: Array<Integer>, mode: SQLite::QueryMode, busy_milliseconds: Integer, scope: Integer, many: Boolean): Result<Array<Array<SQLite::Parameter>>, SQLite::Error>
 	width := shape.size()
 	if width <= 0 || width > 32767
-		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Err(SQLite::Error.new(code: 21, message: "invalid SQLite row width"))
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: 21, message: "invalid SQLite row width"))
 	end
 	mut kinds: Array<Integer> := []
 	mut words: Array<Integer> := []
@@ -173,28 +192,39 @@ def query_one(
 	when SQLite::QueryMode::ReadOrCreate
 		open_mode = 2
 	end
+	if many
+		open_mode = 3
+	end
 	status := query(source, statement, kinds, words, reals, buffers, open_mode, busy_milliseconds, row_kinds, row_words, row_reals, row_buffers, scope)
+	mut rows: Array<Array<SQLite::Parameter>> := []
 	if status == 101
-		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(nil)
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Ok(rows)
 	elsif status != 0
-		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Err(SQLite::Error.new(code: status, message: error_message(status)))
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: status, message: error_message(status)))
 	end
-	mut row: Array<SQLite::Parameter> := []
 	index = 0
-	while index < width
-		kind := row_kinds[index]
-		if kind == 1
-			row.push(SQLite::Parameter::Integer(row_words[index]))
-		elsif kind == 2
-			row.push(SQLite::Parameter::Float(row_reals[index]))
-		elsif kind == 3
-			row.push(SQLite::Parameter::Text(row_buffers[index].to_s()))
-		elsif kind == 4
-			row.push(SQLite::Parameter::Blob(row_buffers[index]))
-		else
-			row.push(SQLite::Parameter::Null)
-		end
-		index += 1
+	if many
+		index = width
 	end
-	return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(row)
+	while index < row_kinds.size()
+		mut row: Array<SQLite::Parameter> := []
+		finish := index + width
+		while index < finish
+			kind := row_kinds[index]
+			if kind == 1
+				row.push(SQLite::Parameter::Integer(row_words[index]))
+			elsif kind == 2
+				row.push(SQLite::Parameter::Float(row_reals[index]))
+			elsif kind == 3
+				row.push(SQLite::Parameter::Text(row_buffers[index].to_s()))
+			elsif kind == 4
+				row.push(SQLite::Parameter::Blob(row_buffers[index]))
+			else
+				row.push(SQLite::Parameter::Null)
+			end
+			index += 1
+		end
+		rows.push(row)
+	end
+	return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Ok(rows)
 end

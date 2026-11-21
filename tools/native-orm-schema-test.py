@@ -54,6 +54,15 @@ def check_model_rows(cli, reference, root, config, environment):
             entry.write_text(source.replace(original, invalid))
             run([str(tool), "check"], root, environment, "error[")
         entry.write_text(source)
+        queries = src / "queries.trb"
+        query_source = queries.read_text()
+        for invalid in ['base.where("missing", ">", 1)', 'base.where("id", ">", "one")',
+                        'base.where("title", "unknown", "x")', 'base.where("id", "LIKE", "1")',
+                        'base.where("note", ">", nil)', 'base.where(id: "x")',
+                        'base.order(missing: :asc)', 'base.order(id: :sideways)']:
+            queries.write_text(query_source.replace('base.where("id", ">", 1)', invalid))
+            run([str(tool), "check"], root, environment, "error[")
+        queries.write_text(query_source)
         run([str(tool), "check"], root, environment)
         app = root / ("lookup-" + mode)
         run([str(tool), "build", "--compile", "--outfile", str(app)], root, environment)
@@ -62,6 +71,30 @@ def check_model_rows(cli, reference, root, config, environment):
     for app in binaries:
         expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
+        pages = root / (app.name + "-pages.sqlite")
+        query_env = dict(environment, DATABASE_URL=str(pages), ORM_TEST_OPERATION="queries")
+        with sqlite3.connect(pages) as connection:
+            connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL, note TEXT)")
+            connection.executemany("INSERT INTO reports VALUES (?, ?, ?)", [
+                (1, "reader's copy", None), (2, "else", None), (3, "reader's copy", "ok"),
+                (4, "reader's copy", None), (5, "reader's copy", "ok")])
+        expect_output(app, root, query_env,
+                      "5\n4\n1\n1\ntrue\n4\n3\n4\n0\ntrue\n0\ntrue\n0\n2\n4\n5\n4\n"
+                      "4\n2\n1\n5\n3\n2\n2\n2\n1\n0\ndatabase insert failed\n0\n"
+                      "Query\ndatabase query failed\nQuery\ndatabase query failed\nQuery\ndatabase count failed\n")
+        with sqlite3.connect(pages) as connection:
+            assert connection.execute("SELECT count(*) FROM reports").fetchone() == (5,)
+            connection.execute("DROP TABLE reports")
+        expect_output(app, root, query_env, "Query\ndatabase query failed\n")
+        scan = root / (app.name + "-scan.sqlite")
+        scan_env = dict(environment, DATABASE_URL=str(scan), ORM_TEST_OPERATION="scan")
+        payloads = [None if i % 4 == 0 else bytes([i % 251]) * (0 if i % 4 == 1 else 2048)
+                    for i in range(512)]
+        with sqlite3.connect(scan) as connection:
+            connection.execute("CREATE TABLE metrics(id INTEGER PRIMARY KEY, passed BOOLEAN, rating REAL, payload BLOB)")
+            connection.executemany("INSERT INTO metrics VALUES(?, 1, 1.25, ?)", enumerate(payloads, 1))
+        checksum = sum(len(payload) + payload[0] for payload in payloads if payload)
+        expect_output(app, root, scan_env, f"512\n{checksum}\n")
         times = root / (app.name + "-times.sqlite")
         with sqlite3.connect(times) as connection:
             connection.execute("CREATE TABLE events(id INTEGER PRIMARY KEY, on_date DATE NOT NULL, at_time TIME NOT NULL,"

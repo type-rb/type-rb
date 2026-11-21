@@ -204,6 +204,24 @@ def publish(title: String): DbResult<Integer>
 end
 ```
 
+Build a read query from the model or its transaction scope. Equality filters
+accept named scalar columns, including `nil` for nullable columns. The
+three-argument form checks the column, operator and value against the lock.
+Text columns also support SQLite `LIKE`. Each modifier returns a new query.
+
+```trb
+def recent_reports(): DbResult<Array<Report>>
+    base := Report.where(title: "published")
+    return base.where("id", ">", 10).order(id: :desc).limit(20).offset(5).all()
+end
+```
+
+`order` accepts one or more named columns with `:asc` or `:desc` in priority
+order. Use an explicit order when row identity matters. `first()` returns a
+nullable model. `count()` counts the selected page, including its limit and
+offset. A zero limit gives an empty array, a missing first row and a count of
+zero. These reads also work through `Report.using(tx)`.
+
 A nested `tx.transaction() do |inner| ... end` uses a savepoint. Catching an
 inner failure lets the outer transaction continue with its earlier changes.
 Unscoped model calls use their own connection.
