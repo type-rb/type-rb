@@ -17,7 +17,7 @@ func TestRunORMResultTransactionControlFlowAcrossBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireORMApplicationRuntime(t, mode, "sqlite")
-			config := prepareORMResultTransactionProject(t, mode)
+			config := prepareORMResultTransactionProject(t, mode, ormResultTransactionApplicationSource)
 
 			var stdout, stderr bytes.Buffer
 			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
@@ -36,7 +36,7 @@ func TestReplORMResultTransactionControlFlowAcrossBackends(t *testing.T) {
 	for _, mode := range []string{"go", "ruby", "typescript"} {
 		t.Run(mode, func(t *testing.T) {
 			requireORMApplicationRuntime(t, mode, "sqlite")
-			config := prepareORMResultTransactionProject(t, mode)
+			config := prepareORMResultTransactionProject(t, mode, ormResultTransactionApplicationSource)
 			input := "import { exercise } from main\nexercise()\n:quit\n"
 
 			var stdout, stderr bytes.Buffer
@@ -52,7 +52,25 @@ func TestReplORMResultTransactionControlFlowAcrossBackends(t *testing.T) {
 	}
 }
 
-func prepareORMResultTransactionProject(t *testing.T, mode string) *project.Config {
+func TestRunORMExpiredTransactionReturnsErrors(t *testing.T) {
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			requireORMApplicationRuntime(t, mode, "sqlite")
+			config := prepareORMResultTransactionProject(t, mode, ormExpiredScopeSource)
+			var stdout, stderr bytes.Buffer
+			command := &CLI{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr}
+			if status := command.Run([]string{"run", "--config", config.Path}); status != 0 {
+				t.Fatalf("run status=%d stdout=%s stderr=%s", status, stdout.String(), stderr.String())
+			}
+			const want = "read rejected\ninsert rejected\nupdate rejected\ndelete rejected\nnested rejected\nsavepoint rejected\n1\n1\n1\n"
+			if stdout.String() != want {
+				t.Fatalf("want %q, got %q, stderr=%s", want, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func prepareORMResultTransactionProject(t *testing.T, mode, source string) *project.Config {
 	t.Helper()
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "application.sqlite3")
@@ -88,7 +106,7 @@ func prepareORMResultTransactionProject(t *testing.T, mode string) *project.Conf
 	if err := os.MkdirAll(config.SourcePath(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(ormResultTransactionApplicationSource), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(config.SourcePath(), "main.trb"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return config
@@ -191,4 +209,76 @@ const ormResultTransactionApplicationOutput = `11
 0
 0
 1
+`
+
+const ormExpiredScopeSource = `import { Database, DbErrorKind, DbResult, Model, Transaction } from trb/orm
+
+class ResultTransactionItem < Model
+end
+
+def closed_scope(): DbResult<Transaction>
+	return Database.transaction() do |tx|
+		tx
+	end
+end
+
+def closed_savepoint(): DbResult<Integer>
+	return Database.transaction() do |parent|
+		closed := try parent.transaction() do |inner|
+			inner
+		end
+		case ResultTransactionItem.using(closed).where(name: "kept").delete_all()
+		when DbResult::Err(_error)
+			puts("savepoint rejected")
+		when DbResult::Ok(_count)
+		end
+		try ResultTransactionItem.using(parent).count()
+	end
+end
+
+def exercise(): DbResult<Integer>
+	_seed := try ResultTransactionItem.create(name: "kept")
+	tx := try closed_scope()
+	scope := ResultTransactionItem.using(tx)
+	query := scope.where(name: "kept")
+	case query.pluck(:name)
+	when DbResult::Err(error)
+		if error.kind == DbErrorKind::Query
+			puts("read rejected")
+		end
+	when DbResult::Ok(_rows)
+	end
+	case scope.create(name: "unexpected")
+	when DbResult::Err(_error)
+		puts("insert rejected")
+	when DbResult::Ok(_item)
+	end
+	case query.update_all(name: "updated")
+	when DbResult::Err(_error)
+		puts("update rejected")
+	when DbResult::Ok(_count)
+	end
+	case query.delete_all()
+	when DbResult::Err(_error)
+		puts("delete rejected")
+	when DbResult::Ok(_count)
+	end
+	value := tx.transaction() do |_inner|
+		"unexpected"
+	end catch |_error|
+		"nested rejected"
+	end
+	puts(value)
+	puts(try closed_savepoint())
+	puts(try ResultTransactionItem.where(name: "kept").count())
+	return ResultTransactionItem.count()
+end
+
+def main()
+	value := exercise() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(value)
+end
 `
