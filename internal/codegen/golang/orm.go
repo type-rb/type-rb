@@ -1097,6 +1097,9 @@ func (g *generator) ormRuntime(manifest *ormintegration.Manifest) {
 		g.b.WriteByte('\n')
 		g.line("func trbOrmExecutorForTransaction(scope trbcontext.Context, transaction *" + g.ormLifecycleAlias() + ".TrbOrmTransaction) (trbOrmExecutor, *" + g.goType(types.FromName("DbError")) + ") {")
 		g.indent++
+		// A released savepoint still points at the parent's live connection.
+		// A root transaction owns its sql.Tx or sql.Conn, which rejects use after close.
+		g.line("if transaction != nil && transaction.ReleasedSavepoint() { value := " + g.ormErrorValue("Query", "database transaction scope is no longer active") + "; return trbOrmExecutor{}, &value }")
 		g.line("if transaction != nil { return trbOrmExecutor{target: transaction, scope: scope}, nil }")
 		g.line("database, err := " + g.ormPackageAlias() + ".TrbOrmDatabase()")
 		g.line("if err != nil { value := trbOrmError(err, " + g.ormErrorKind("Connection") + ", \"database connection failed\"); return trbOrmExecutor{}, &value }")
@@ -1429,6 +1432,8 @@ func (g *generator) ormPoolRuntime(manifest *ormintegration.Manifest, adapter or
 	g.line("return true")
 	g.indent--
 	g.line("}")
+	g.b.WriteByte('\n')
+	g.line("func (transaction *TrbOrmTransaction) ReleasedSavepoint() bool { return transaction.parent != nil && !transaction.active() }")
 	g.b.WriteByte('\n')
 	g.line("func (transaction *TrbOrmTransaction) Commit() *DbError {")
 	g.indent++
