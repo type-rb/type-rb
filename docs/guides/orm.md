@@ -187,6 +187,11 @@ def recent_posts(): DbResult<Array<Post>>
 end
 ```
 
+An ordered query with `limit` and `offset` describes one page. Its
+`count()` returns the number of rows on that page, and its numeric aggregates
+use those rows. With `limit(0)`, `first()` and `pick(:id)` return `Ok(nil)`,
+`exists?()` returns `Ok(false)`, and `count()` returns `Ok(0)`.
+
 The three-argument form supports typed comparison operators. String columns
 also accept `LIKE`; `%` matches any sequence and `_` matches one character.
 The pattern is passed as a bound value, while matching and case sensitivity

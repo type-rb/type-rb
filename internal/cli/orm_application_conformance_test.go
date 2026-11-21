@@ -330,6 +330,32 @@ def exercise(): DbResult<Integer>
 	paged_products := try TrbConformanceProduct.order(id: :asc).limit(1).offset(1).all()
 	puts(paged_products.size())
 
+	ordered := TrbConformanceProduct.where(category_id: category.id).order(id: :asc)
+	empty := ordered.limit(0)
+	puts("page boundaries")
+	puts((try empty.first()) == nil)
+	puts((try empty.pick(:name)) == nil)
+	puts(try empty.exists?())
+	puts(try empty.count())
+	puts(try empty.sum(:price))
+	puts((try empty.average(:price)) == nil)
+	page := ordered.limit(1).offset(1)
+	puts(try page.count())
+	puts(try page.exists?())
+	puts(try page.pick(:name))
+	puts(try page.sum(:price))
+	puts(try page.minimum(:price))
+	puts(try page.maximum(:price))
+	puts(try page.average(:price))
+	average_id := try ordered.average(:id)
+	if average_id != nil
+		puts(average_id == product.id.to_f() + 0.5)
+	end
+	puts(try ordered.offset(9).exists?())
+	puts(try TrbConformanceCategory.join(:trb_conformance_products).distinct().count())
+	puts(try ordered.distinct().offset(1).exists?())
+	puts("end pages")
+
 	user := try TrbConformanceUser.create(name: "Ada")
 	primary := try TrbConformanceProject.create(name: "TypeRB")
 	secondary := try TrbConformanceProject.create(name: "Other")
@@ -454,6 +480,25 @@ true
 true
 1
 1
+page boundaries
+true
+true
+false
+0
+0.0
+true
+1
+true
+second
+3.0
+3.0
+3.0
+3.0
+true
+false
+1
+true
+end pages
 1
 1
 1

@@ -1698,7 +1698,7 @@ func (e *Evaluator) ormFirstResult(typ types.Type, query *ormQueryValue) (Value,
 }
 
 func (e *Evaluator) ormExists(query *ormQueryValue) (bool, *ormFailure) {
-	statement, arguments, err := e.ormStatement(query, "1")
+	statement, arguments, err := e.ormPresenceStatement(query)
 	if err != nil {
 		return false, &ormFailure{kind: "InvalidData", message: err.Error()}
 	}
@@ -1718,12 +1718,16 @@ func (e *Evaluator) ormExists(query *ormQueryValue) (bool, *ormFailure) {
 	return true, nil
 }
 
-func (e *Evaluator) ormCount(query *ormQueryValue) (int64, *ormFailure) {
+func (e *Evaluator) ormPresenceStatement(query *ormQueryValue) (string, []any, error) {
 	projection := "1"
 	if query.distinct {
 		projection = e.ormModelProjection(query.model)
 	}
-	statement, arguments, err := e.ormStatement(query, projection)
+	return e.ormStatement(query, projection)
+}
+
+func (e *Evaluator) ormCount(query *ormQueryValue) (int64, *ormFailure) {
+	statement, arguments, err := e.ormPresenceStatement(query)
 	if err != nil {
 		return 0, &ormFailure{kind: "InvalidData", message: err.Error()}
 	}

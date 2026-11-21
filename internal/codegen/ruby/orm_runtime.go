@@ -330,7 +330,7 @@ module TrbOrmRuntime
 
 		def first_result
 			TrbOrmRuntime.result do
-				rows = TrbOrmRuntime.select_rows(copy(row_limit: 1))
+				rows = TrbOrmRuntime.select_rows(first_page)
 				value = rows.empty? ? nil : TrbOrmRuntime.instantiate(@metadata, rows.fetch(0), @transaction)
 				TrbOrmRuntime.apply_preloads([value].compact, @preloads)
 				value
@@ -338,11 +338,19 @@ module TrbOrmRuntime
 		end
 
 		def count_result
-			TrbOrmRuntime.result { TrbOrmRuntime.portable_integer(TrbOrmRuntime.scalar(self, "COUNT(*)")) }
+			TrbOrmRuntime.result { TrbOrmRuntime.portable_integer(TrbOrmRuntime.scalar(row_presence_query, "COUNT(*)")) }
 		end
 
 		def exists_result
-			TrbOrmRuntime.result { !TrbOrmRuntime.select_rows(select_columns(["1"]).copy(row_limit: 1)).empty? }
+			TrbOrmRuntime.result { !TrbOrmRuntime.select_rows(row_presence_query.first_page).empty? }
+		end
+
+		def first_page
+			@row_limit == 0 ? self : copy(row_limit: 1)
+		end
+
+		def row_presence_query
+			select_columns(@distinct ? [] : ["1"])
 		end
 
 		def to_sql
@@ -375,7 +383,7 @@ module TrbOrmRuntime
 		end
 
 		def pick_result(columns)
-			result = pluck_result(columns)
+			result = first_page.pluck_result(columns)
 			return result if result.is_a?(Result::Err)
 			Result::Ok.new(result.value.fetch(0, nil))
 		end
@@ -388,13 +396,14 @@ module TrbOrmRuntime
 		def aggregate_result(operation, column)
 			TrbOrmRuntime.result do
 				function = { "sum" => "SUM", "average" => "AVG", "minimum" => "MIN", "maximum" => "MAX" }.fetch(operation)
-				value = TrbOrmRuntime.scalar(self, function + "(" + TrbOrmRuntime.qualified(@metadata.table, column) + ")")
-				if operation == "average" && !value.nil?
-					value.to_f
-				elsif operation == "minimum" || operation == "maximum"
-					TrbOrmRuntime.application_value(TrbOrmRuntime.column!(@metadata, column), value)
+				expression = function + "(" + TrbOrmRuntime.quote(column) + ")"
+				expression = "COALESCE(" + expression + ", 0)" if operation == "sum"
+				value = TrbOrmRuntime.scalar(select_columns([column]), expression)
+				column_info = TrbOrmRuntime.column!(@metadata, column)
+				if operation == "average" || column_info.kind == "float"
+					value&.to_f
 				else
-					TrbOrmRuntime.application_value(TrbOrmRuntime.column!(@metadata, column), value)
+					TrbOrmRuntime.application_value(column_info, value)
 				end
 			end
 		end
@@ -711,9 +720,9 @@ module TrbOrmRuntime
 			["and", [left, right]]
 		end
 
-		def select_sql(query, execution:, override_selection: nil)
+		def select_sql(query, execution:)
 			arguments = []
-			selection = override_selection || query.selections
+			selection = query.selections
 			columns = if selection.empty?
 				query.metadata.columns.map { |column| qualified(query.metadata.table, column.name) }
 			else
@@ -846,8 +855,9 @@ module TrbOrmRuntime
 		end
 
 		def scalar(query, expression)
-			row = fetch_rows(*select_sql(query, execution: true, override_selection: [RawSelection.new(expression, "__trb_value")])).fetch(0, nil)
-			row.nil? ? nil : row_value(row, "__trb_value")
+			statement, arguments = select_sql(query, execution: true)
+			row = fetch_rows("SELECT " + expression + " AS __trb_value FROM (" + statement + ") AS trb_aggregate", arguments).fetch(0)
+			row_value(row, "__trb_value")
 		end
 
 		def instantiate(metadata, row, transaction)
