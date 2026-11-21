@@ -61,6 +61,7 @@ def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut 
 	mut query := mir_checked_call(state, locals, root, arguments, query_type, origin)
 	advance(position)
 	skip_newlines(state, position)
+	first := position[0]
 	mut seen: Hash<String, Integer> := {}
 	while !token_is(state, position[0], ")") && !has_diagnostic(state)
 		at := position[0]
@@ -69,7 +70,7 @@ def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut 
 		mut operator := "="
 		mut prefix := "$eq:"
 		if positional
-			if member == "order" || seen.size() != 0
+			if member == "order" || at != first
 				return type_diagnostic(state, line, member + " expects named columns")
 			end
 			column = orm_query_literal(state, position)
