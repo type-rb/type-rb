@@ -45,14 +45,18 @@ def orm_cell_reader(column: OrmColumn, slot: String, type_name: String, variant:
 	reader := "orm_read_" + slot
 	cell_result := "Result<" + type_name + ", DbError>"
 	invalid := "return " + cell_result + "::Err(DbError.new(kind: DbErrorKind::InvalidData, message: invalid_message))\n"
-	mut source := "def " + reader + "(raw: SQLite::Parameter, invalid_message: String): " + cell_result + "\n"
+	mut errors := "invalid_message: String = \"database row was invalid\""
+	if column.type_name == "Integer"
+		errors += ", overflow_message: String = \"database row was invalid\""
+	end
+	mut source := "def " + reader + "(raw: SQLite::Parameter, " + errors + "): " + cell_result + "\n"
 	mut decoded_type := type_name
 	if orm_time_column(column.type_name) && !column.nullable
 		decoded_type += "?"
 	end
 	source += "mut " + slot + ": " + decoded_type + " := " + zero + "\ncase raw\nwhen SQLite::Parameter::" + variant + "(value)\n"
 	if column.type_name == "Integer"
-		source += "if value < -9007199254740991 || value > 9007199254740991\n" + invalid + "end\n"
+		source += "if value < -9007199254740991 || value > 9007199254740991\nreturn " + cell_result + "::Err(DbError.new(kind: DbErrorKind::InvalidData, message: overflow_message))\nend\n"
 	end
 	if orm_time_column(column.type_name)
 		parser := column.type_name + ".try_parse(OrmSql.time_text("
@@ -162,7 +166,7 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 		initialize += "@" + column.name + " = values." + slot + "\n"
 		readers += orm_cell_reader(column, slot, type_name, variant, zero)
 		readers += orm_project_column(table.name, column, connection, slot, type_name)
-		decode += slot + " := try orm_read_" + slot + "(raw[" + integer_string(position) + "], \"database row was invalid\")\n"
+		decode += slot + " := try orm_read_" + slot + "(raw[" + integer_string(position) + "])\n"
 		position += 1
 	end
 	if primary_columns != 1

@@ -16,7 +16,11 @@ def orm_project_column(table: String, column: OrmColumn, connection: String, slo
 	mut source := "def orm_project_" + slot + "(query: OrmSql::Selection, first: Boolean): " + result + "\n"
 	source += "rows := try OrmSql.read_rows(" + connection + ", query, " + statement + ", 1, first, \"database projection query failed\")\n"
 	source += "mut values: Array<" + element + "> := []\nmut i := 0\nwhile i < rows.size()\n"
-	source += "value := try orm_read_" + slot + "(rows[i][0], first ? \"database projection value was invalid\" : \"database projection row was invalid\")\n"
+	mut errors := "first ? \"database projection value was invalid\" : \"database projection row was invalid\""
+	if column.type_name == "Integer"
+		errors += ", \"database Integer is outside the portable range\""
+	end
+	source += "value := try orm_read_" + slot + "(rows[i][0], " + errors + ")\n"
 	return source + "values.push(value)\ni += 1\nend\nreturn " + result + "::Ok(values)\nend\n"
 end
 

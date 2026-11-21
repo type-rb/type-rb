@@ -116,11 +116,11 @@ def check_model_rows(cli, reference, root, config, environment):
                 CREATE TABLE metrics(id INTEGER PRIMARY KEY, passed BOOLEAN, rating REAL, payload BLOB);
                 INSERT INTO metrics VALUES (1,'invalid',1.0,NULL),(2,'invalid',1.0,X''),(3,'invalid',1.0,X'FF00');
                 CREATE TABLE events(id INTEGER PRIMARY KEY, on_date TEXT);
-                INSERT INTO events VALUES (1,'2024-02-29'),(2,'invalid-date');
+                INSERT INTO events VALUES (1,'2024-02-29'),(9007199254740992,'invalid-date');
             """)
         expect_output(app, root, dict(environment, DATABASE_URL=str(projected), ORM_TEST_OPERATION="projections"),
                       "NULL\nlast\ntrue\n3\n4\ntrue\nfalse\ntrue\nfalse\n3\ntrue\nz\na\nfalse\n"
-                      "NULL\n0\n2\n255\n0\n1\ntrue\ntrue\ntrue\n1\ntemporary\n1\ntrue\ntrue\nfalse\n" + "Query\n" * 5 + "2\n")
+                      "NULL\n0\n2\n255\n0\n1\ntrue\ntrue\ntrue\ndatabase Integer is outside the portable range\ntrue\n1\ntemporary\n1\ntrue\ntrue\nfalse\n" + "Query\n" * 5 + "2\n")
         with sqlite3.connect(projected) as connection:
             assert connection.execute("SELECT code FROM tags ORDER BY code").fetchall() == [("a",), ("z",)]
         missing_table = root / (app.name + "-no-tag-table.sqlite")

@@ -89,6 +89,13 @@ def projected_values(): DbResult<Integer>
 	when DbResult::Ok(_day)
 		puts("invalid date accepted")
 	end
+	case days.ids()
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::InvalidData)
+		puts(error.message)
+	when DbResult::Ok(_values)
+		puts("out-of-range primary key accepted")
+	end
 	puts(try days.offset(1).exists?())
 	_rolled_back := rolled_back_projection() catch |_error|
 		0
