@@ -423,7 +423,7 @@
       "name": "SQLite C API",
       "status": "current",
       "scope": "Application runtime",
-      "role": "Storage engine for SQLite Jobs enqueue, claim, lease and acknowledgement and for schema-derived ORM counts, primary-key lookups, inserts, updates, deletes and scoped transactions.",
+      "role": "Storage engine for SQLite Jobs enqueue, claim, lease and acknowledgement and for schema-derived ORM filtering, ordering, pagination, counts, primary-key lookups, inserts, updates, deletes and scoped transactions.",
       "configuration": "SQLite 3.53.2 public-domain amalgamation, selectively linked as libsqlite3.a with embedded identity. Archives are built for Darwin and Linux on arm64 and amd64. Worker execution is exercised on the two ordinary arm64 CLI hosts.",
       "evidence": [
         "docs/decisions/0086-production-web-application-path.md",
@@ -440,7 +440,7 @@
         "0086 M3c",
         "0086 M5"
       ],
-      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. Check and compile models from the schema lock offline, then use bound values at runtime. Check returned rows, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, binary payloads, portable times, transaction isolation and nested savepoint rollback against the reference.",
+      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. Check and compile models from the schema lock offline, then use bound values at runtime. Check ordered pages, nullable first rows, page counts, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, binary payloads, portable times, transaction isolation and nested savepoint rollback against the reference.",
       "decision": "retain",
       "pin": "sqlite"
     },

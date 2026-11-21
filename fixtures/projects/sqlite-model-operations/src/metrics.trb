@@ -26,3 +26,18 @@ def exercise_metrics(): DbResult<Integer>
 	end
 	return DbResult<Integer>::Ok(created.id)
 end
+
+def scan_metrics(): DbResult<Integer>
+	rows := try Metric.where(passed: true).where("rating", ">", 0.5).order(id: :asc).all()
+	mut checksum := 0
+	rows.each do |row|
+		payload := row.payload
+		if payload != nil
+			if payload.size() > 0
+				checksum += payload.at(0) + payload.size()
+			end
+		end
+	end
+	puts(rows.size())
+	return DbResult<Integer>::Ok(checksum)
+end

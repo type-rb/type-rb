@@ -1,0 +1,66 @@
+import { orm_sql_parameter, orm_time_column } from frontend/providers/orm_writes
+import { OrmTable } from project/orm_schema
+import { web_dispatch_quote } from project/web_dispatch_source
+import { integer_string } from support/literals
+
+record OrmQueryMethod
+	name: String
+	source: String
+end
+
+def orm_query_type(table: OrmTable, connection: String, projection: String): String
+	select_rows := web_dispatch_quote("SELECT " + projection + " FROM \"" + table.name + "\"")
+	count_rows := web_dispatch_quote("SELECT 1 FROM \"" + table.name + "\"")
+	args := connection + ", @_query, " + select_rows + ", " + integer_string(table.columns.size())
+	mut source := "class OrmQuery\nreadonly @_query: OrmSql::Selection\ndef initialize(query: OrmSql::Selection)\n@_query = query\nend\n"
+	source += "def limit(count: Integer): OrmQuery\nreturn OrmQuery.new(OrmSql.limited(@_query, count))\nend\n"
+	source += "def offset(count: Integer): OrmQuery\nreturn OrmQuery.new(OrmSql.skipped(@_query, count))\nend\n"
+	source += "def all(): Result<Array<OrmModelType>, DbError>\nrows := try OrmSql.read_rows(" + args + ", false)\nmut items: Array<OrmModelType> := []\nmut i := 0\nwhile i < rows.size()\nitem := try orm_read(rows[i], @_query.scope)\nitems.push(item)\ni += 1\nend\nreturn Result<Array<OrmModelType>, DbError>::Ok(items)\nend\n"
+	source += "def first(): Result<OrmModelType?, DbError>\nrows := try OrmSql.read_rows(" + args + ", true)\nif rows.size() == 0\nreturn Result<OrmModelType?, DbError>::Ok(nil)\nend\nitem := try orm_read(rows[0], @_query.scope)\nreturn Result<OrmModelType?, DbError>::Ok(item)\nend\n"
+	source += "def count(): Result<Integer, DbError>\npage := OrmSql.read_statement(@_query, " + count_rows + ", false)\nreturn OrmSql.count_rows(" + connection + ", \"SELECT count(*) FROM (\" + page + \") AS trb_page\", @_query.scope, @_query.values)\nend\nend\n"
+	return source
+end
+
+def orm_query_roots(scope: String, prefix: String): Array<OrmQueryMethod>
+	root := "OrmQuery.new(OrmSql.selection(" + scope + "))"
+	mut methods: Array<OrmQueryMethod> := []
+	["all", "first", "limit", "offset"].each do |name|
+		mut result := "OrmQuery"
+		mut param := ""
+		mut arg := ""
+		if name == "all"
+			result = "Result<Array<OrmModelType>, DbError>"
+		elsif name == "first"
+			result = "Result<OrmModelType?, DbError>"
+		else
+			param = "count: Integer"
+			arg = "count"
+		end
+		methods.push(OrmQueryMethod.new(name: name, source: "def " + prefix + name + "(" + param + "): " + result + "\nreturn " + root + "." + name + "(" + arg + ")\nend\n"))
+	end
+	methods.push(OrmQueryMethod.new(name: "$orm_query", source: "def " + prefix + "orm_query_root(): OrmQuery\nreturn " + root + "\nend\n"))
+	return methods
+end
+
+# These nominal method keys cannot be named in user source. The call checker
+# selects a signature from the locked schema before it evaluates the value.
+def orm_query_columns(table: OrmTable): Array<OrmQueryMethod>
+	mut methods := [OrmQueryMethod.new(name: "$orm_query", source: "def orm_query_root(): OrmQuery\nreturn self\nend\n")]
+	table.columns.each do |col|
+		column := web_dispatch_quote("\"" + col.name + "\"")
+		mut type_name := col.type_name
+		mut parameter := orm_sql_parameter(type_name, "value")
+		mut setup := ""
+		if col.nullable
+			type_name += "?"
+			setup = "if value == nil\nreturn OrmQuery.new(OrmSql.filter(@_query, " + column + ", operator, SQLite::Parameter::Null))\nend\n"
+		end
+		mut body := "return OrmQuery.new(OrmSql.filter(@_query, " + column + ", operator, " + parameter + "))\nend\n"
+		methods.push(OrmQueryMethod.new(name: "$eq:" + col.name, source: "def orm_eq_" + col.name + "(operator: String, value: " + type_name + "): OrmQuery\n" + setup + body))
+		if orm_time_column(col.type_name) || col.type_name == "Integer" || col.type_name == "Float" || col.type_name == "String"
+			methods.push(OrmQueryMethod.new(name: "$cmp:" + col.name, source: "def orm_cmp_" + col.name + "(operator: String, value: " + col.type_name + "): OrmQuery\n" + body))
+		end
+		methods.push(OrmQueryMethod.new(name: "$sort:" + col.name, source: "def orm_sort_" + col.name + "(direction: String): OrmQuery\nreturn OrmQuery.new(OrmSql.ordered(@_query, " + column + ", direction))\nend\n"))
+	end
+	return methods
+end
