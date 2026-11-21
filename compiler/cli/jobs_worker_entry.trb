@@ -84,10 +84,10 @@ def worker_dispatch_start(): String
 	return "\ndef worker_float(value: JSON::Value): Result<Float, JSON::Error>\ncase value\nwhen JSON::Value::Integer(integer)\nreturn Result<Float, JSON::Error>::Ok(integer.to_f())\nelse\nreturn JSON.as_float(value)\nend\nend\ndef dispatch_job(job: SQL::Claim): JobResult\nif job.payload_version != 1\nreturn JobResult::Err(JobError.new(message: \"unsupported job payload version \" + job.payload_version.to_s()))\nend\nparsed := JSON.parse(job.payload) catch |error|\nreturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\nend\nvalues := JSON.as_array(parsed) catch |error|\nreturn JobResult::Err(JobError.new(message: \"decode job payload: \" + error.message))\nend\ncase job.job_name\n"
 end
 
-def append_jobs_worker(mut state: CompilerState, configuration: String): Boolean
+def append_jobs_worker(mut state: CompilerState, configuration: String, command: String): Boolean
 	config := find_module(state, configuration)
 	if configuration == "" || config < 0
-		diagnostic(state, "TRBN4003", 1, "jobs start requires an existing jobs.configuration module")
+		diagnostic(state, "TRBN4003", 1, "jobs " + command + " requires an existing jobs.configuration module")
 		return false
 	end
 	adapter := jobs_worker_adapter(state, config)
@@ -127,7 +127,7 @@ def append_jobs_worker(mut state: CompilerState, configuration: String): Boolean
 		index += 1
 	end
 	if jobs.size() == 0
-		diagnostic(state, "TRBN4003", 1, "jobs start requires a Job class")
+		diagnostic(state, "TRBN4003", 1, "jobs " + command + " requires a Job class")
 		return false
 	end
 	source += "else\nreturn JobResult::Err(JobError.new(message: \"unknown job \" + job.job_name))\nend\nend\n"

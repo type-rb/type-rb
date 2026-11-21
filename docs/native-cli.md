@@ -235,6 +235,18 @@ SQLite `JOBS_ADAPTER`. `--config PATH` selects the project explicitly,
 one eligible job. The initial worker dispatches Integer, String, Float and
 Boolean payload arguments to `perform` and records its outcome in SQLite.
 
+Use the same project and SQLite adapter to manage its persistent queue:
+
+| Command | Effect |
+| --- | --- |
+| `trbn jobs list` | Lists jobs by creation time, then ID. Each line contains the ID, state, job name, attempts/maximum attempts and last error, separated by tabs. An empty queue prints nothing. |
+| `trbn jobs retry ID` | Makes a failed job eligible immediately and clears its attempts, claim and last error. A worker picks it up on a subsequent poll. |
+| `trbn jobs discard ID` | Removes a job in any state except running. |
+
+All three commands accept `--config PATH`. A missing or ineligible ID gives a
+nonzero exit status. The administration commands leave running handlers and
+their leases intact.
+
 The worker updates the active lease while the handler runs in a child process.
 The first interrupt or termination request stops acquisition and gives the
 handler 30 seconds to finish. A repeated request or grace expiry terminates
