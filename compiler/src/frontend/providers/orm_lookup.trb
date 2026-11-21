@@ -1,11 +1,11 @@
-import { orm_query_columns, orm_query_roots, orm_query_type } from frontend/providers/orm_queries
+import { orm_project_column, orm_query_columns, orm_query_roots, orm_query_type } from frontend/providers/orm_queries
 import { find_object_in_module } from frontend/types/object_types
 import { orm_sql_parameter, orm_time_column, orm_write_source } from frontend/providers/orm_writes
 import { parse_function } from frontend/syntax/declaration_syntax
 import { character_in, lex_module } from frontend/syntax/lexer
 import { append_import, parse_module } from frontend/syntax/parser
 import { ObjectField, ObjectMethod } from frontend/types/object_model
-import { OrmTable } from project/orm_schema
+import { OrmColumn, OrmTable } from project/orm_schema
 import { web_dispatch_quote } from project/web_dispatch_source
 import { web_route_join } from project/web_route_paths
 import { import_kind_named } from state/import_kinds
@@ -40,6 +40,50 @@ def orm_add_method(mut state: CompilerState, index: Integer, source: String, nam
 	state.global_bindings.declaration_owner[0] = previous_owner
 end
 
+# Model reads and scalar projections must decode a stored value identically.
+def orm_cell_reader(column: OrmColumn, slot: String, type_name: String, variant: String, zero: String): String
+	reader := "orm_read_" + slot
+	cell_result := "Result<" + type_name + ", DbError>"
+	invalid := "return " + cell_result + "::Err(DbError.new(kind: DbErrorKind::InvalidData, message: invalid_message))\n"
+	mut source := "def " + reader + "(raw: SQLite::Parameter, invalid_message: String): " + cell_result + "\n"
+	mut decoded_type := type_name
+	if orm_time_column(column.type_name) && !column.nullable
+		decoded_type += "?"
+	end
+	source += "mut " + slot + ": " + decoded_type + " := " + zero + "\ncase raw\nwhen SQLite::Parameter::" + variant + "(value)\n"
+	if column.type_name == "Integer"
+		source += "if value < -9007199254740991 || value > 9007199254740991\n" + invalid + "end\n"
+	end
+	if orm_time_column(column.type_name)
+		parser := column.type_name + ".try_parse(OrmSql.time_text("
+		finish := ", " + web_dispatch_quote(column.type_name) + ")) catch |_error|\n" + invalid + "end\n"
+		source += slot + " = " + parser + "value" + finish
+		source += "when SQLite::Parameter::Blob(value)\n" + slot + " = " + parser + "value.to_s()" + finish
+	elsif column.type_name == "Boolean"
+		source += "if value != 0 && value != 1\n" + invalid + "end\n" + slot + " = value == 1\n"
+	else
+		source += slot + " = value\n"
+	end
+	if column.type_name == "Float"
+		source += "when SQLite::Parameter::Integer(value)\n" + slot + " = value.to_f()\n"
+	elsif column.type_name == "Boolean"
+		text_bool := "if parsed == nil\n" + invalid + "end\n" + slot + " = parsed\n"
+		source += "when SQLite::Parameter::Text(value)\nparsed := OrmSql.boolean_value(value)\n" + text_bool
+		source += "when SQLite::Parameter::Blob(value)\nparsed := OrmSql.boolean_value(value.to_s())\n" + text_bool
+	elsif column.type_name == "Bytes"
+		source += "when SQLite::Parameter::Text(value)\n" + slot + " = value.to_bytes()\n"
+	end
+	if column.nullable
+		source += "when SQLite::Parameter::Null\n"
+	end
+	source += "else\n" + invalid + "end\n"
+	if orm_time_column(column.type_name) && !column.nullable
+		source += "if " + slot + " == nil\n" + invalid + "end\n"
+	end
+	source += "return " + cell_result + "::Ok(" + slot + ")\nend\n"
+	return source
+end
+
 def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable, database: String, environment: String)
 	row := state.nominal.objects[index]
 	mut key := ""
@@ -54,9 +98,10 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 	mut columns: Array<String> := []
 	mut initialize := ""
 	mut decode := ""
+	mut readers := ""
+	connection := web_dispatch_quote(database) + ", " + web_dispatch_quote(environment)
 	result := "Result<OrmModelType?, DbError>"
 	model_result := "Result<OrmModelType, DbError>"
-	invalid := "return " + model_result + "::Err(DbError.new(kind: DbErrorKind::InvalidData, message: \"database row was invalid\"))\n"
 	row.methods.each do |method|
 		if !method.class_member && method.name == "initialize"
 			return
@@ -115,40 +160,9 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 		arguments.push(slot + ": " + slot)
 		columns.push("\"" + column.name + "\"")
 		initialize += "@" + column.name + " = values." + slot + "\n"
-		mut decoded_type := type_name
-		if orm_time_column(column.type_name) && !column.nullable
-			decoded_type += "?"
-		end
-		decode += "mut " + slot + ": " + decoded_type + " := " + zero + "\ncase raw[" + integer_string(position) + "]\nwhen SQLite::Parameter::" + variant + "(value)\n"
-		if column.type_name == "Integer"
-			decode += "if value < -9007199254740991 || value > 9007199254740991\n" + invalid + "end\n"
-		end
-		if orm_time_column(column.type_name)
-			parser := column.type_name + ".try_parse(OrmSql.time_text("
-			finish := ", " + web_dispatch_quote(column.type_name) + ")) catch |_error|\n" + invalid + "end\n"
-			decode += slot + " = " + parser + "value" + finish
-			decode += "when SQLite::Parameter::Blob(value)\n" + slot + " = " + parser + "value.to_s()" + finish
-		elsif column.type_name == "Boolean"
-			decode += "if value != 0 && value != 1\n" + invalid + "end\n" + slot + " = value == 1\n"
-		else
-			decode += slot + " = value\n"
-		end
-		if column.type_name == "Float"
-			decode += "when SQLite::Parameter::Integer(value)\n" + slot + " = value.to_f()\n"
-		elsif column.type_name == "Boolean"
-			text_bool := "if parsed == nil\n" + invalid + "end\n" + slot + " = parsed\n"
-			decode += "when SQLite::Parameter::Text(value)\nparsed := OrmSql.boolean_value(value)\n" + text_bool
-			decode += "when SQLite::Parameter::Blob(value)\nparsed := OrmSql.boolean_value(value.to_s())\n" + text_bool
-		elsif column.type_name == "Bytes"
-			decode += "when SQLite::Parameter::Text(value)\n" + slot + " = value.to_bytes()\n"
-		end
-		if column.nullable
-			decode += "when SQLite::Parameter::Null\n"
-		end
-		decode += "else\n" + invalid + "end\n"
-		if orm_time_column(column.type_name) && !column.nullable
-			decode += "if " + slot + " == nil\n" + invalid + "end\n"
-		end
+		readers += orm_cell_reader(column, slot, type_name, variant, zero)
+		readers += orm_project_column(table.name, column, connection, slot, type_name)
+		decode += slot + " := try orm_read_" + slot + "(raw[" + integer_string(position) + "], \"database row was invalid\")\n"
 		position += 1
 	end
 	if primary_columns != 1
@@ -167,10 +181,9 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 	end
 	state.nominal.objects[index].fields.push(ObjectField.new(name: "@" + scope_field, type_name: "Integer", line: row.line, origin: row.origin, readonly: true, default_start: -1, default_finish: -1))
 	initialize += "@" + scope_field + " = values.scope\n"
-	fields += "end\n"
+	fields += "end\n" + readers
 	fields += "def orm_read(raw: Array<SQLite::Parameter>, scope: Integer): " + model_result + "\n" + decode
 	fields += "return " + model_result + "::Ok(OrmModelType.new(OrmRowValues.new(" + web_route_join(arguments, ", ") + ")))\nend\n"
-	connection := web_dispatch_quote(database) + ", " + web_dispatch_quote(environment)
 	writes := orm_write_source(table, connection, web_route_join(columns, ", "), key, row.name + "Changes", scope_field)
 	fields += writes.declarations
 	fields += orm_query_type(table, connection, web_route_join(columns, ", "))
@@ -224,7 +237,7 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 	end
 	query_type := find_object_in_module(state, generated, "OrmQuery")
 	scope_type := find_object_in_module(state, generated, "OrmScope")
-	orm_query_columns(table).each do |method|
+	orm_query_columns(table, key).each do |method|
 		orm_add_method(state, query_type, method.source, method.name, "OrmQuery")
 	end
 	orm_query_roots("@_scope", "").each do |method|

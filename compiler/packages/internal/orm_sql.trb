@@ -219,7 +219,7 @@ def read_statement(query: OrmSql::Selection, project: String, first: Boolean): S
 	return sql
 end
 
-def read_rows(database: String, environment: String, query: OrmSql::Selection, projection: String, width: Integer, first: Boolean): Result<Array<Array<SQLite::Parameter>>, DbError>
+def read_rows(database: String, environment: String, query: OrmSql::Selection, projection: String, width: Integer, first: Boolean, failure: String = "database query failed"): Result<Array<Array<SQLite::Parameter>>, DbError>
 	source := try _orm_database(database, environment, query.scope)
 	case SQLite.query_rows(source, read_statement(query, projection, first), query.values, width, query.scope)
 	when Result::Ok(rows)
@@ -229,7 +229,7 @@ def read_rows(database: String, environment: String, query: OrmSql::Selection, p
 			return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
 		end
 	end
-	return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
+	return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: failure))
 end
 
 # The reference SQLite driver binds UTC instants using Go's time.Time form.

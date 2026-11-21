@@ -1,0 +1,105 @@
+import { Event, Metric, Reading, Report, Tag } from models
+import { Database, DbErrorKind, DbResult } from trb/orm
+import { expired_transaction } from queries
+
+def projection_error<T>(result: DbResult<T>): String
+	case result
+	when DbResult::Err(error)
+		case error.kind
+		when DbErrorKind::Connection
+			return "Connection"
+		when DbErrorKind::Query
+			return "Query"
+		else
+			return "unexpected error kind"
+		end
+	when DbResult::Ok(_value)
+		return "unexpected success"
+	end
+end
+
+def print_projection_errors()
+	tags := Tag.order(code: :asc)
+	puts(projection_error<Array<String>>(tags.pluck(:code)))
+	puts(projection_error<String?> (tags.pick(:code)))
+	puts(projection_error<Array<String>>(tags.ids()))
+	puts(projection_error<Boolean>(tags.exists?()))
+	puts(projection_error<Tag?> (tags.find_by(code: "missing")))
+end
+
+def rolled_back_projection(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		tags := Tag.using(tx)
+		_inserted := try tags.create(code: "temporary")
+		q := tags.where(code: "temporary")
+		puts((try q.pluck(:code)).size())
+		puts(try q.pick(:code))
+		puts((try q.ids()).size())
+		puts(try q.exists?())
+		found := try q.find_by(code: "temporary")
+		puts(found != nil)
+		_duplicate := try tags.create(code: "temporary")
+		0
+	end
+end
+
+def projected_values(): DbResult<Integer>
+	page := Report.where(title: "release").order(id: :asc).offset(1).limit(2)
+	notes := try page.pluck(:note)
+	notes.each { |note| puts(note == nil ? "NULL" : note) }
+	puts((try page.pick("note")) == nil)
+	(try page.ids()).each { |id| puts(id) }
+	puts(try page.exists?())
+	puts(try page.limit(0).exists?())
+	puts((try page.limit(0).pick(:id)) == nil)
+	puts(try page.offset(99).exists?())
+	found := try Report.find_by(id: 3, title: "release")
+	if found != nil
+		puts(found.id)
+	end
+	puts((try page.limit(0).find_by(title: "release")) == nil)
+	(try Tag.order(code: :desc).ids()).each { |key| puts(key) }
+	puts(try Reading.exists?(label: "empty"))
+	payloads := try Metric.order(id: :asc).pluck(:payload)
+	payloads.each do |value|
+		if value == nil
+			puts("NULL")
+		else
+			puts(value.size())
+			if value.size() > 0
+				puts(value.at(0))
+			end
+		end
+	end
+	picked := try Metric.order(id: :asc).offset(1).pick(:payload)
+	if picked != nil
+		puts(picked.size())
+	end
+	days := Event.order(id: :asc)
+	puts((try days.limit(1).pluck(:on_date)).size())
+	case days.pluck(:on_date)
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::InvalidData)
+	when DbResult::Ok(_values)
+		puts("invalid date accepted")
+	end
+	case days.offset(1).pick(:on_date)
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::InvalidData)
+	when DbResult::Ok(_day)
+		puts("invalid date accepted")
+	end
+	puts(try days.offset(1).exists?())
+	_rolled_back := rolled_back_projection() catch |_error|
+		0
+	end
+	puts(try Tag.exists?(code: "temporary"))
+	expired := try expired_transaction()
+	retired := Tag.using(expired)
+	puts(projection_error<Array<String>>(retired.pluck(:code)))
+	puts(projection_error<String?> (retired.pick(:code)))
+	puts(projection_error<Array<String>>(retired.ids()))
+	puts(projection_error<Boolean>(retired.exists?()))
+	puts(projection_error<Tag?> (retired.find_by(code: "a")))
+	return DbResult<Integer>::Ok(notes.size())
+end

@@ -223,6 +223,25 @@ nullable model. `count()` counts the selected page, including its limit and
 offset. A zero limit gives an empty array, a missing first row and a count of
 zero. These reads also work through `Report.using(tx)`.
 
+Use `pluck(:column)` to read one typed column and `pick(:column)` to
+read its first value. Both preserve the ordering and bounds on the query.
+A nullable column keeps its SQL NULL values, and an empty page gives
+`pick` a nil result. `ids()` returns the declared type of the primary key
+on models with a single key. These operations select only the requested
+column, so other fields do not need to be decoded.
+
+```trb
+def recent_titles(): DbResult<Array<String>>
+    return Report.order(id: :desc).limit(20).pluck(:title)
+end
+```
+
+`Report.exists?(status: "published")` checks whether a matching row exists.
+On a transaction scope or a derived query, add the conditions with `where`
+and call `exists?()`. `find_by` accepts one or more named column filters
+and returns the first matching model or nil. Each terminal runs on the
+connection selected by `using(tx)`.
+
 A nested `tx.transaction() do |inner| ... end` uses a savepoint. Catching an
 inner failure lets the outer transaction continue with its earlier changes.
 Unscoped model calls use their own connection.

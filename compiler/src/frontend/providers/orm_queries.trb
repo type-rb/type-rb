@@ -1,11 +1,23 @@
 import { orm_sql_parameter, orm_time_column } from frontend/providers/orm_writes
-import { OrmTable } from project/orm_schema
+import { OrmColumn, OrmTable } from project/orm_schema
 import { web_dispatch_quote } from project/web_dispatch_source
 import { integer_string } from support/literals
 
 record OrmQueryMethod
 	name: String
 	source: String
+end
+
+# Select only the requested storage column. Model reads and column projections
+# share the same schema decoder, including nullable binary and temporal values.
+def orm_project_column(table: String, column: OrmColumn, connection: String, slot: String, element: String): String
+	statement := web_dispatch_quote("SELECT \"" + column.name + "\" FROM \"" + table + "\"")
+	result := "Result<Array<" + element + ">, DbError>"
+	mut source := "def orm_project_" + slot + "(query: OrmSql::Selection, first: Boolean): " + result + "\n"
+	source += "rows := try OrmSql.read_rows(" + connection + ", query, " + statement + ", 1, first, \"database projection query failed\")\n"
+	source += "mut values: Array<" + element + "> := []\nmut i := 0\nwhile i < rows.size()\n"
+	source += "value := try orm_read_" + slot + "(rows[i][0], first ? \"database projection value was invalid\" : \"database projection row was invalid\")\n"
+	return source + "values.push(value)\ni += 1\nend\nreturn " + result + "::Ok(values)\nend\n"
 end
 
 def orm_query_type(table: OrmTable, connection: String, projection: String): String
@@ -17,6 +29,8 @@ def orm_query_type(table: OrmTable, connection: String, projection: String): Str
 	source += "def offset(count: Integer): OrmQuery\nreturn OrmQuery.new(OrmSql.skipped(@_query, count))\nend\n"
 	source += "def all(): Result<Array<OrmModelType>, DbError>\nrows := try OrmSql.read_rows(" + args + ", false)\nmut items: Array<OrmModelType> := []\nmut i := 0\nwhile i < rows.size()\nitem := try orm_read(rows[i], @_query.scope)\nitems.push(item)\ni += 1\nend\nreturn Result<Array<OrmModelType>, DbError>::Ok(items)\nend\n"
 	source += "def first(): Result<OrmModelType?, DbError>\nrows := try OrmSql.read_rows(" + args + ", true)\nif rows.size() == 0\nreturn Result<OrmModelType?, DbError>::Ok(nil)\nend\nitem := try orm_read(rows[0], @_query.scope)\nreturn Result<OrmModelType?, DbError>::Ok(item)\nend\n"
+	# A bounded SELECT 1 can stop at the first match and preserves zero limits.
+	source += "def exists?(): Result<Boolean, DbError>\nrows := try OrmSql.read_rows(" + connection + ", @_query, " + count_rows + ", 1, true, \"database existence query failed\")\nreturn Result<Boolean, DbError>::Ok(rows.size() > 0)\nend\n"
 	source += "def count(): Result<Integer, DbError>\npage := OrmSql.read_statement(@_query, " + count_rows + ", false)\nreturn OrmSql.count_rows(" + connection + ", \"SELECT count(*) FROM (\" + page + \") AS trb_page\", @_query.scope, @_query.values)\nend\nend\n"
 	return source
 end
@@ -44,8 +58,9 @@ end
 
 # These nominal method keys cannot be named in user source. The call checker
 # selects a signature from the locked schema before it evaluates the value.
-def orm_query_columns(table: OrmTable): Array<OrmQueryMethod>
+def orm_query_columns(table: OrmTable, key: String): Array<OrmQueryMethod>
 	mut methods := [OrmQueryMethod.new(name: "$orm_query", source: "def orm_query_root(): OrmQuery\nreturn self\nend\n")]
+	mut index := 0
 	table.columns.each do |col|
 		column := web_dispatch_quote("\"" + col.name + "\"")
 		mut type_name := col.type_name
@@ -54,6 +69,18 @@ def orm_query_columns(table: OrmTable): Array<OrmQueryMethod>
 		if col.nullable
 			type_name += "?"
 			setup = "if value == nil\nreturn OrmQuery.new(OrmSql.filter(@_query, " + column + ", operator, SQLite::Parameter::Null))\nend\n"
+		end
+		slot := "v" + integer_string(index)
+		index += 1
+		project := "orm_project_" + slot + "(@_query, "
+		array := "Result<Array<" + type_name + ">, DbError>"
+		optional := col.type_name + "?"
+		picked := "Result<" + optional + ", DbError>"
+		pluck := "(): " + array + "\nreturn " + project + "false)\nend\n"
+		methods.push(OrmQueryMethod.new(name: "$pluck:" + col.name, source: "def orm_pluck_" + slot + pluck))
+		methods.push(OrmQueryMethod.new(name: "$pick:" + col.name, source: "def orm_pick_" + slot + "(): " + picked + "\nvalues := try " + project + "true)\nif values.size() == 0\nreturn " + picked + "::Ok(nil)\nend\nreturn " + picked + "::Ok(values[0])\nend\n"))
+		if col.name == key
+			methods.push(OrmQueryMethod.new(name: "$ids", source: "def orm_project_ids" + pluck))
 		end
 		mut body := "return OrmQuery.new(OrmSql.filter(@_query, " + column + ", operator, " + parameter + "))\nend\n"
 		methods.push(OrmQueryMethod.new(name: "$eq:" + col.name, source: "def orm_eq_" + col.name + "(operator: String, value: " + type_name + "): OrmQuery\n" + setup + body))

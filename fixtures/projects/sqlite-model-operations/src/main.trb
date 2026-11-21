@@ -1,3 +1,4 @@
+import { print_projection_errors, projected_values } from projections
 import { exercise_queries, read_without_single_key } from queries
 import { exercise_times } from events
 import { exercise_metrics, scan_metrics } from metrics
@@ -169,6 +170,19 @@ def main()
 			case read_without_single_key()
 			when DbResult::Ok(count)
 				puts(count)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "projection-errors"
+			print_projection_errors()
+			return
+		end
+		if operation == "projections"
+			case projected_values()
+			when DbResult::Ok(size)
+				puts(size)
 			when DbResult::Err(error)
 				puts(error.message)
 			end
