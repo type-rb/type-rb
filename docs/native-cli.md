@@ -229,6 +229,13 @@ nullable model. `count()` counts the selected page, including its limit and
 offset. A zero limit gives an empty array, a missing first row and a count of
 zero. These reads also work through `Report.using(tx)`.
 
+Use `sum(:column)` and `average(:column)` for numeric columns. For example,
+`Report.order(id: :desc).offset(2).limit(3).sum(:id)` adds the IDs of the
+three rows after the first two. `minimum` and `maximum` also accept text
+and temporal columns. These operations ignore SQL NULL and respect the
+selected transaction. If the page has no non-NULL values, `sum` gives a
+typed zero and the other three operations give `nil`.
+
 Use `pluck(:column)` to read one typed column and `pick(:column)` to
 read its first value. Both preserve the ordering and bounds on the query.
 A nullable column keeps its SQL NULL values, and an empty page gives

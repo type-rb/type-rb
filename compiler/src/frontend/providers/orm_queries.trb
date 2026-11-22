@@ -60,9 +60,62 @@ def orm_query_roots(scope: String, prefix: String): Array<OrmQueryMethod>
 	return methods
 end
 
+# Aggregate the filtered page in SQLite. The locked column determines which
+# operations exist and the result type exposed to the checker.
+def orm_aggregate_methods(table: OrmTable, col: OrmColumn, slot: String, connection: String): Array<OrmQueryMethod>
+	mut methods: Array<OrmQueryMethod> := []
+	mut numeric := false
+	if col.type_name == "Integer" || col.type_name == "Float"
+		numeric = true
+	end
+	if !numeric && col.type_name != "String" && !orm_time_column(col.type_name)
+		return methods
+	end
+	mut operations := ["minimum", "maximum"]
+	if numeric
+		operations.push("sum")
+		operations.push("average")
+	end
+	projection := web_dispatch_quote("SELECT \"" + col.name + "\" AS trb_value FROM \"" + table.name + "\"")
+	operations.each do |operation|
+		mut expression := "MIN(trb_value)"
+		mut element := col.type_name + "?"
+		if operation == "maximum"
+			expression = "MAX(trb_value)"
+		elsif operation == "sum"
+			expression = "COALESCE(SUM(trb_value), 0)"
+			element = col.type_name
+		elsif operation == "average"
+			expression = "AVG(trb_value)"
+			element = "Float?"
+		end
+		result := "Result<" + element + ", DbError>"
+		mut body := "def orm_" + operation + "_" + slot + "(): " + result + "\n"
+		body += "raw := try OrmSql.aggregate_value(" + connection + ", @_query, " + projection + ", " + web_dispatch_quote(expression) + ")\n"
+		if operation == "average"
+			body += "return OrmSql.average_value(raw)\n"
+		else
+			if operation != "sum"
+				body += "case raw\nwhen SQLite::Parameter::Null\nreturn " + result + "::Ok(nil)\nelse\nend\n"
+			end
+			mut errors := "\"database aggregate result was invalid\""
+			if col.type_name == "Integer"
+				errors += ", \"database Integer is outside the portable range\""
+			end
+			body += "value := try orm_read_" + slot + "(raw, " + errors + ")\n"
+			if operation == "sum" && col.nullable
+				body += "if value == nil\nreturn " + result + "::Err(DbError.new(kind: DbErrorKind::InvalidData, message: \"database aggregate result was invalid\"))\nend\n"
+			end
+			body += "return " + result + "::Ok(value)\n"
+		end
+		methods.push(OrmQueryMethod.new(name: "$" + operation + ":" + col.name, source: body + "end\n"))
+	end
+	return methods
+end
+
 # These nominal method keys cannot be named in user source. The call checker
 # selects a signature from the locked schema before it evaluates the value.
-def orm_query_columns(table: OrmTable, key: String): Array<OrmQueryMethod>
+def orm_query_columns(table: OrmTable, key: String, connection: String): Array<OrmQueryMethod>
 	mut methods := [OrmQueryMethod.new(name: "$orm_query", source: "def orm_query_root(): OrmQuery\nreturn self\nend\n")]
 	mut index := 0
 	table.columns.each do |col|
@@ -76,6 +129,7 @@ def orm_query_columns(table: OrmTable, key: String): Array<OrmQueryMethod>
 		end
 		slot := "v" + integer_string(index)
 		index += 1
+		orm_aggregate_methods(table, col, slot, connection).each { |method| methods.push(method) }
 		project := "orm_project_" + slot + "(@_query, "
 		array := "Result<Array<" + type_name + ">, DbError>"
 		optional := col.type_name + "?"

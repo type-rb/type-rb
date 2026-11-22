@@ -1,6 +1,7 @@
+import { aggregate_values, print_aggregate_data_errors, print_aggregate_errors } from aggregates
 import { mismatched_predicate_scope, predicate_rows } from predicates
 import { print_projection_errors, projected_values } from projections
-import { exercise_queries, read_without_single_key } from queries
+import { exercise_queries, print_query_error, read_without_single_key } from queries
 import { exercise_times } from events
 import { exercise_metrics, scan_metrics } from metrics
 import { commit_under_reader, exercise_transactions } from transactions
@@ -181,6 +182,23 @@ def main()
 				end
 			end
 			puts(result)
+			return
+		end
+		if operation == "aggregate-errors"
+			print_aggregate_errors()
+			return
+		end
+		if operation == "aggregate-data-errors"
+			print_aggregate_data_errors()
+			return
+		end
+		if operation == "aggregates"
+			case aggregate_values()
+			when DbResult::Ok(value)
+				puts(value)
+			when DbResult::Err(error)
+				print_query_error(error)
+			end
 			return
 		end
 		if operation == "without_single_key"
