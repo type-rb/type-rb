@@ -1,3 +1,4 @@
+import { mismatched_predicate_scope, predicate_rows } from predicates
 import { print_projection_errors, projected_values } from projections
 import { exercise_queries, read_without_single_key } from queries
 import { exercise_times } from events
@@ -166,6 +167,22 @@ end
 def main()
 	operation := Process.environment("ORM_TEST_OPERATION")
 	if operation != nil
+		if operation == "predicates" || operation == "scope-mismatch" || operation == "savepoint-mismatch"
+			mut result := 0
+			if operation == "predicates"
+				result = predicate_rows() catch |error|
+					puts(error.message)
+					return
+				end
+			else
+				result = mismatched_predicate_scope(operation == "savepoint-mismatch") catch |error|
+					puts(error.message)
+					return
+				end
+			end
+			puts(result)
+			return
+		end
 		if operation == "without_single_key"
 			case read_without_single_key()
 			when DbResult::Ok(count)

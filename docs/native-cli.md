@@ -205,8 +205,14 @@ end
 ```
 
 Build a read query from the model or its transaction scope. Equality filters
-accept named scalar columns, including `nil` for nullable columns. The
-three-argument form checks the column, operator and value against the lock.
+accept scalar values (including `nil` for nullable columns), integer ranges
+and single-column subqueries.
+For example, `Report.where(id: 2...5)` includes 2, 3 and 4.
+`select(:id)` creates a typed subquery and preserves its filters, ordering,
+limit and offset. A transaction-scoped subquery requires the same outer
+transaction or savepoint. An unscoped subquery can be used in either context.
+The three-argument form checks the column, operator and value against the lock;
+`=` and `!=` also accept a compatible subquery.
 Text columns also support SQLite `LIKE`. Each modifier returns a new query. Table reads also work when the locked
 schema has no primary key or has a composite primary key.
 

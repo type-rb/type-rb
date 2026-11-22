@@ -162,24 +162,42 @@ module OrmSql
 		row_limit: Integer?
 		row_offset: Integer?
 	end
+	enum Subquery<T>
+		Projected(query: Selection, projection: String)
+	end
 end
 
 def selection(scope: Integer): OrmSql::Selection
 	return OrmSql::Selection.new(scope: scope, predicate: "", values: [], ordering: "", row_limit: nil, row_offset: nil)
 end
 
-def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
-	mut predicate := query.predicate
-	predicate += predicate.empty?() ? " WHERE " : " AND "
+def _filter_clause(query: OrmSql::Selection, clause: String, parameters: Array<SQLite::Parameter>): OrmSql::Selection
+	predicate := query.predicate + (query.predicate.empty?() ? " WHERE " : " AND ") + clause
 	mut values := query.values.dup()
+	parameters.each { |value| values.push(value) }
+	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
 	case value
 	when SQLite::Parameter::Null
-		predicate += column + (operator == "!=" ? " IS NOT NULL" : " IS NULL")
+		return _filter_clause(query, column + (operator == "!=" ? " IS NOT NULL" : " IS NULL"), [])
 	else
-		predicate += column + " " + operator + " ?"
-		values.push(value)
+		return _filter_clause(query, column + " " + operator + " ?", [value])
 	end
-	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def filter_range(query: OrmSql::Selection, column: String, first: Integer, last: Integer, exclusive: Boolean): OrmSql::Selection
+	clause := "(" + column + " >= ? AND " + column + (exclusive ? " < ?)" : " <= ?)")
+	return _filter_clause(query, clause, [SQLite::Parameter::Integer(first), SQLite::Parameter::Integer(last)])
+end
+
+def filter_subquery(query: OrmSql::Selection, column: String, operator: String, inner: OrmSql::Selection, projection: String): OrmSql::Selection
+	if inner.scope != 0 && inner.scope != query.scope
+		return Runtime.fail<OrmSql::Selection>("ORM subquery transaction scope must match the base query")
+	end
+	clause := column + (operator == "!=" ? " NOT IN (" : " IN (") + read_statement(inner, projection, false) + ")"
+	return _filter_clause(query, clause, inner.values)
 end
 
 def ordered(query: OrmSql::Selection, column: String, direction: String): OrmSql::Selection

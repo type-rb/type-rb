@@ -83,6 +83,13 @@ def orm_query_columns(table: OrmTable, key: String): Array<OrmQueryMethod>
 		pluck := "(): " + array + "\nreturn " + project + "false)\nend\n"
 		methods.push(OrmQueryMethod.new(name: "$pluck:" + col.name, source: "def orm_pluck_" + slot + pluck))
 		methods.push(OrmQueryMethod.new(name: "$pick:" + col.name, source: "def orm_pick_" + slot + "(): " + picked + "\nvalues := try " + project + "true)\nif values.size() == 0\nreturn " + picked + "::Ok(nil)\nend\nreturn " + picked + "::Ok(values[0])\nend\n"))
+		subquery := "OrmSql::Subquery<" + col.type_name + ">"
+		project_sql := web_dispatch_quote("SELECT \"" + col.name + "\" FROM \"" + table.name + "\"")
+		methods.push(OrmQueryMethod.new(name: "$select:" + col.name, source: "def orm_select_" + slot + "(): " + subquery + "\nreturn " + subquery + "::Projected(@_query, " + project_sql + ")\nend\n"))
+		methods.push(OrmQueryMethod.new(name: "$sub:" + col.name, source: "def orm_sub_" + slot + "(operator: String, sub: " + subquery + "): OrmQuery\ncase sub\nwhen OrmSql::Subquery::Projected(inner, projection)\nreturn OrmQuery.new(OrmSql.filter_subquery(@_query, " + column + ", operator, inner, projection))\nend\nend\n"))
+		if col.type_name == "Integer"
+			methods.push(OrmQueryMethod.new(name: "$range:" + col.name, source: "def orm_range_" + slot + "(first: Integer, last: Integer, exclusive: Boolean): OrmQuery\nreturn OrmQuery.new(OrmSql.filter_range(@_query, " + column + ", first, last, exclusive))\nend\n"))
+		end
 		if col.name == key
 			methods.push(OrmQueryMethod.new(name: "$ids", source: "def orm_project_ids" + pluck))
 		end

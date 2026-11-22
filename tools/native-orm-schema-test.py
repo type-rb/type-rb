@@ -81,6 +81,13 @@ def check_model_rows(cli, reference, root, config, environment):
             projections.write_text(projection_source.replace(original, invalid))
             run([str(tool), "check"], root, environment, "error[")
         projections.write_text(projection_source)
+        predicates = src / "predicates.trb"
+        predicate_source = predicates.read_text()
+        for invalid in ['Report.where(note: 1..4)', 'Report.where(id: Tag.select(:code))',
+                        'Report.where(:id, ">", Report.select(:id))', 'Report.where(id: Report.select(:missing))']:
+            predicates.write_text(predicate_source.replace('Report.where(id: 5..2)', invalid))
+            run([str(tool), "check"], root, environment, "error[")
+        predicates.write_text(predicate_source)
         run([str(tool), "check"], root, environment)
         app = root / ("lookup-" + mode)
         run([str(tool), "build", "--compile", "--outfile", str(app)], root, environment)
@@ -96,6 +103,13 @@ def check_model_rows(cli, reference, root, config, environment):
             connection.executemany("INSERT INTO reports VALUES (?, ?, ?)", [
                 (1, "reader's copy", None), (2, "else", None), (3, "reader's copy", "ok"),
                 (4, "reader's copy", None), (5, "reader's copy", "ok")])
+        with sqlite3.connect(pages) as connection:
+            connection.executescript("CREATE TABLE tags(code TEXT PRIMARY KEY); INSERT INTO tags VALUES ('ok')")
+        predicate_env = dict(environment, DATABASE_URL=str(pages), ORM_TEST_OPERATION="predicates")
+        expect_output(app, root, predicate_env, "3\n2\n0\n0\n5\n0\n1\n3\n2\n2\n1\n")
+        for operation in ("scope-mismatch", "savepoint-mismatch"):
+            run([str(app)], root, dict(predicate_env, ORM_TEST_OPERATION=operation),
+                "ORM subquery transaction scope must match the base query")
         expect_output(app, root, query_env,
                       "5\n4\n1\n1\ntrue\n4\n3\n4\n0\ntrue\n0\ntrue\n0\n2\n4\n5\n4\n"
                       "4\n2\n1\n5\n3\n2\n2\n2\n1\n0\ndatabase insert failed\n0\n"

@@ -441,7 +441,7 @@
         "0086 M3c",
         "0086 M5"
       ],
-      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. List by creation time and ID. Reset only failed jobs and preserve running claims during queue administration. Check and compile models from the schema lock offline, then use bound values at runtime. Check ordered pages, typed single-column projections, primary keys, existence checks, named lookups, nullable first rows, page counts, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, binary payloads, portable times, transaction isolation and nested savepoint rollback against the reference.",
+      "referenceBehavior": "Use the SQLite release in the pinned modernc driver. Preserve Jobs payloads, queue selection, leases and acknowledgement. List by creation time and ID. Reset only failed jobs and preserve running claims during queue administration. Check and compile models from the schema lock offline, then use bound values at runtime. Check bound integer range filters, single-column subqueries and transaction scope compatibility, ordered pages, typed single-column projections, primary keys, existence checks, named lookups, nullable first rows, page counts, missing keys, SQLite defaults, explicit NULL, affected rows, typed errors, binary payloads, portable times, transaction isolation and nested savepoint rollback against the reference.",
       "decision": "retain",
       "pin": "sqlite"
     },

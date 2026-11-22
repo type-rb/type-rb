@@ -308,6 +308,9 @@ end
 
 def standard_source_function(kind: Integer, name: String): Boolean
 	if kind == standard_source_orm_sql()
+		if name == "::filter_range" || name == "::filter_subquery"
+			return true
+		end
 		if name == "::selection" || name == "::filter" || name == "::ordered" || name == "::limited" || name == "::skipped" || name == "::read_statement" || name == "::read_rows"
 			return true
 		end
