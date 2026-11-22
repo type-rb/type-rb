@@ -1311,6 +1311,10 @@ def load_file_root(entry_source: String, entry_path: String): CompilerState
 end
 
 def load_file_root_with_mode(entry_source: String, entry_path: String, interactive: Boolean): CompilerState
+	return load_file_root_with_overlays(entry_source, entry_path, interactive, {})
+end
+
+def load_file_root_with_overlays(entry_source: String, entry_path: String, interactive: Boolean, overlays: Hash<String, String>): CompilerState
 	mut state := compiler_new_with_mode(4194304, interactive)
 	root := path_directory(entry_path)
 	entry_name := string_without_suffix(path_basename(entry_path), ".trb")
@@ -1370,18 +1374,18 @@ def load_file_root_with_mode(entry_source: String, entry_path: String, interacti
 			end
 			if target == -1
 				direct_path := path_join(root, normalized + ".trb")
-				if compiler_file_exists(direct_path)
+				if overlays.key?(direct_path) || compiler_file_exists(direct_path)
 					if !validate_new_module_root(state, normalized, line)
 						return state
 					end
 					target = add_module(state, normalized, direct_path)
-					sources.push(compiler_read_source(direct_path))
+					sources.push(overlays.key?(direct_path) ? overlays[direct_path] : compiler_read_source(direct_path))
 				else
 					index_name := normalized + "/index"
 					target = find_module(state, index_name)
 					if target < 0
 						index_path := path_join(root, normalized + "/index.trb")
-						if !compiler_file_exists(index_path)
+						if !overlays.key?(index_path) && !compiler_file_exists(index_path)
 							diagnostic(state, "TRBN4003", line, "cannot resolve project import " + raw_path)
 							return state
 						end
@@ -1389,7 +1393,7 @@ def load_file_root_with_mode(entry_source: String, entry_path: String, interacti
 							return state
 						end
 						target = add_module(state, index_name, index_path)
-						sources.push(compiler_read_source(index_path))
+						sources.push(overlays.key?(index_path) ? overlays[index_path] : compiler_read_source(index_path))
 					end
 				end
 			end

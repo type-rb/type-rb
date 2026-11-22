@@ -474,6 +474,13 @@ def skip_comment(source: String, source_length: Integer, mut index: Integer): In
 end
 
 def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer): Boolean
+	mut offsets: Array<Integer> := []
+	return lex_source_offsets(state, source, terminal_kind, offsets, false)
+end
+
+# An editor needs authored scalar offsets to convert the lexer's diagnostic
+# columns to UTF-16. Ordinary compilation retains no offset table.
+def lex_source_offsets(mut state: CompilerState, source: String, terminal_kind: Integer, mut offsets: Array<Integer>, capture: Boolean): Boolean
 	if !compiler_source_is_utf8(source)
 		diagnostic(state, "TRBN4001", 1, "source is not valid UTF-8")
 		push_token(state, terminal_kind, "", 1)
@@ -527,6 +534,11 @@ def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer)
 						end
 					end
 				end
+			end
+		end
+		if capture
+			while offsets.size() < state.source_tokens.token_count[0]
+				offsets.push(start)
 			end
 		end
 		mut remaining := start
