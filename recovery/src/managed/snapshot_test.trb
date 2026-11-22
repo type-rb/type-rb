@@ -108,7 +108,7 @@ describe("Managed recovery snapshot v4") do
 	end
 
 	test("bounds compiler recovery functions separately from ordinary snapshots") do
-		[512, 513, 1024, 1025, 2048, 2049, 2304, 2305].each do |count|
+		[512, 513, 1024, 1025, 2048, 2049, 2304, 2305, 2560, 2561].each do |count|
 			source := _recovery_function_count_snapshot(count)
 			case decode_recovery_managed_snapshot(source)
 			when Result::Ok(native_module)
@@ -121,10 +121,10 @@ describe("Managed recovery snapshot v4") do
 			end
 			case decode_bootstrap_snapshot(source)
 			when Result::Ok(native_module)
-				expect(count <= 2304).to_be_true()
+				expect(count <= 2560).to_be_true()
 				expect(native_module.functions.size()).to_equal(count)
 			when Result::Err(diagnostic)
-				expect(count).to_equal(2305)
+				expect(count).to_equal(2561)
 				expect(diagnostic.code).to_equal("TRBN0005")
 				expect(diagnostic.path).to_equal("/functions")
 			end
