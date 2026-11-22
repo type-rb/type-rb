@@ -1325,6 +1325,13 @@ def file_root_overlay_index(paths: Array<String>, path: String): Integer
 	return -1
 end
 
+def file_root_source(path: String, index: Integer, overlay_sources: Array<String>): String
+	if index >= 0
+		return overlay_sources[index]
+	end
+	return compiler_read_source(path)
+end
+
 def load_file_root_with_overlays(entry_source: String, entry_path: String, interactive: Boolean, overlay_paths: Array<String>, overlay_sources: Array<String>): CompilerState
 	mut state := compiler_new_with_mode(4194304, interactive)
 	root := path_directory(entry_path)
@@ -1391,7 +1398,7 @@ def load_file_root_with_overlays(entry_source: String, entry_path: String, inter
 						return state
 					end
 					target = add_module(state, normalized, direct_path)
-					sources.push(direct_overlay >= 0 ? overlay_sources[direct_overlay] : compiler_read_source(direct_path))
+					sources.push(file_root_source(direct_path, direct_overlay, overlay_sources))
 				else
 					index_name := normalized + "/index"
 					target = find_module(state, index_name)
@@ -1406,7 +1413,7 @@ def load_file_root_with_overlays(entry_source: String, entry_path: String, inter
 							return state
 						end
 						target = add_module(state, index_name, index_path)
-						sources.push(index_overlay >= 0 ? overlay_sources[index_overlay] : compiler_read_source(index_path))
+						sources.push(file_root_source(index_path, index_overlay, overlay_sources))
 					end
 				end
 			end
