@@ -15,7 +15,7 @@ import time
 VALID = (
     'import { Greeting, greeting_text } from helper\n\n'
     'def main()\n\trow := Greeting.new(text: "hi")\n'
-    '\tputs("🍋" + row.text)\n\tputs(greeting_text(row))\nend\n'
+    '\tputs("🍋" + row.text)\n\tputs("🍋🍋🍋" + greeting_text(row))\nend\n'
 )
 INVALID = VALID.replace('row.text)', '1)')
 
@@ -120,11 +120,15 @@ def expect_definition(client, document, helper, line, function=False):
     # A cleared diagnostic can arrive before the reference finishes debounced analysis.
     start, end = (4, 17) if function else (7, 15)
     expected = {"start": {"line": line, "character": start}, "end": {"line": line, "character": end}}
+    position = {"line": 3, "character": 10}
+    if function:
+        # Use the very last letter. Counting Unicode scalars would miss the identifier.
+        prefix = VALID.splitlines()[5].split("greeting_text")[0] + "greeting_tex"
+        position = {"line": 5, "character": len(prefix.encode("utf-16-le")) // 2}
     target = None
     for request_id in range(10, 60):
         target = client.request("textDocument/definition", {
-            "textDocument": document, "position": {"line": 5 if function else 3, "character": 10}},
-            request_id)
+            "textDocument": document, "position": position}, request_id)
         if isinstance(target, list):
             target = next(iter(target), None)
         if target and target["uri"] == helper.as_uri() and target["range"] == expected:
