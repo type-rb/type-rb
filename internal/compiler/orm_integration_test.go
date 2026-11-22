@@ -1130,7 +1130,7 @@ def load_associations(): DbResult<Integer>
 	distinct_categories := try Category.join(:products).distinct().all()
 	category_ids := Category.where(name: "Books").select(:id)
 	subquery_products := try Product.where(category_id: category_ids).all()
-	excluded_products := try Product.where("category_id", "!=", Category.select(:id)).all()
+	excluded_products := try Product.where(:category_id, "!=", Category.select(:id)).all()
 	existing_products := try Product.where_exists(:category, Category.where(name: "Books")).all()
 	missing_products := try Product.where_not_exists(:category, Category.where(name: "Missing")).all()
 	group_counts := try Product.group(:category_id).count()
@@ -1188,6 +1188,7 @@ end
 		`Table: "categories"`, `SourceColumn: "category_id"`, `TargetColumn: "id"`,
 		`TrbOrmCategoryAssociationPredicate(`, `TrbOrmCategoryWhere`, `__trb_join_key`,
 		`TrbOrmSelectCategoryId(TrbOrmCategoryWhere`, `*orm.TrbOrmSubquery[int]`,
+		`TrbOrmProductWhere([]string{"category_id"}, []string{"NOT_IN"}, []any{`,
 		`condition.operator == "IN" || condition.operator == "NOT_IN"`, `operator = " NOT IN "`,
 		`TrbOrmProductWhereExists(TrbOrmProductWhere`, `operator := "EXISTS"`, `operator = "NOT EXISTS"`,
 		`TrbOrmGroupProductCategoryId(TrbOrmProductExecutionScope(TrbOrmProductWhere`, `TrbOrmHavingProductCategoryId`, `TrbOrmCountGroupedProductCategoryId`,

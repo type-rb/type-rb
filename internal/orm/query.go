@@ -1,10 +1,7 @@
 package orm
 
 import (
-	"strings"
-
 	"github.com/type-rb/type-rb/internal/ir"
-	"github.com/type-rb/type-rb/internal/stringliteral"
 	"github.com/type-rb/type-rb/internal/types"
 )
 
@@ -61,8 +58,8 @@ func Predicates(call *ir.Call) []Predicate {
 	if len(predicates) > 0 || len(call.Arguments) != 3 {
 		return predicates
 	}
-	column, columnOK := queryString(call.Arguments[0].Value)
-	operator, operatorOK := queryString(call.Arguments[1].Value)
+	column, columnOK := irStaticName(call.Arguments[0].Value)
+	operator, operatorOK := irStaticName(call.Arguments[1].Value)
 	if !columnOK || !operatorOK {
 		return nil
 	}
@@ -76,15 +73,4 @@ func Predicates(call *ir.Call) []Predicate {
 		}
 	}
 	return []Predicate{{Column: column, Operator: resolvedOperator, Value: call.Arguments[2].Value}}
-}
-
-func queryString(expression ir.Expression) (string, bool) {
-	literal, ok := expression.(*ir.Literal)
-	if !ok || literal.Kind != "string" {
-		return "", false
-	}
-	if value, err := stringliteral.Unquote(literal.Raw); err == nil {
-		return value, true
-	}
-	return strings.Trim(literal.Raw, "'\""), true
 }
