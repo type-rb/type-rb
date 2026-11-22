@@ -40,17 +40,48 @@ func Program(checked checker.Result) *ir.Program {
 	statements = l.generatedTypeImports(statements)
 	statements = append(l.runtimeImports(statements), statements...)
 	return &ir.Program{
-		Mode:              checked.Program.Mode,
-		Package:           checked.Program.Package,
-		ModulePath:        checked.Program.ModulePath,
-		GoModule:          checked.Program.GoModule,
-		RubyLoader:        checked.Program.RubyLoader,
-		TypeScriptRuntime: checked.Program.TypeScriptRuntime,
-		UsesJSX:           l.usesJSX,
-		NativeSyntax:      checked.Resolution.NativeSyntax,
-		Declarations:      checked.Resolution.Declarations,
-		Statements:        statements,
+		IterationParameters: iterationParameters(checked),
+		Mode:                checked.Program.Mode,
+		Package:             checked.Program.Package,
+		ModulePath:          checked.Program.ModulePath,
+		GoModule:            checked.Program.GoModule,
+		RubyLoader:          checked.Program.RubyLoader,
+		TypeScriptRuntime:   checked.Program.TypeScriptRuntime,
+		UsesJSX:             l.usesJSX,
+		NativeSyntax:        checked.Resolution.NativeSyntax,
+		Declarations:        checked.Resolution.Declarations,
+		Statements:          statements,
 	}
+}
+
+// Retain the checker-owned binding at its exact declaration in this module.
+// The editor can resolve a shadowing use with its existing lexical identity.
+func iterationParameters(checked checker.Result) map[int]ir.IterationBinding {
+	if len(checked.IterationBindings) == 0 {
+		return nil
+	}
+	parameters := make(map[int]ir.IterationBinding)
+	tokens := checked.Program.Tokens
+	for iteration, bindings := range checked.IterationBindings {
+		block := iteration.Block
+		if block == nil || len(bindings) == 0 {
+			continue
+		}
+		start := block.Span().Start.Offset
+		i := sort.Search(len(tokens), func(i int) bool { return tokens[i].Span.Start.Offset >= start })
+		if i+1 >= len(tokens) || tokens[i].Span.Start.Offset != start || tokens[i+1].Lexeme != "|" {
+			continue
+		}
+		parameter := 0
+		for i += 2; i < len(tokens) && tokens[i].Lexeme != "|" && parameter < len(bindings) && parameter < len(block.Parameters); i++ {
+			item := tokens[i]
+			if item.Kind == token.Identifier && item.Lexeme == block.Parameters[parameter] {
+				parameters[item.Span.Start.Offset] = ir.IterationBinding{Name: item.Lexeme, Type: bindings[parameter]}
+				parameter++
+			}
+		}
+	}
+	return parameters
 }
 
 // requireGeneratedType records project types that lowering introduces even

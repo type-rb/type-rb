@@ -19,6 +19,8 @@ type Base struct {
 func (b Base) SourceSpan() token.Span { return b.Span }
 
 type Program struct {
+	// IterationParameters indexes authored parameter tokens for editor queries.
+	IterationParameters map[int]IterationBinding
 	// CompilationUnit identifies an application or manifest-owned package.
 	// It is independent of source directories and declaration identities.
 	CompilationUnit string

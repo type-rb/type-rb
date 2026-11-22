@@ -482,3 +482,34 @@ end
 		t.Fatalf("class field declaration range=%#v", references[0])
 	}
 }
+
+func TestHoverUsesCheckedIteratorParameterAcrossShadowing(t *testing.T) {
+	const source = `def main()
+	row := "outer"
+	[1, 2].each do |row|
+		puts(row)
+	end
+	puts(row)
+end
+`
+	for _, mode := range []string{"go", "ruby", "typescript"} {
+		t.Run(mode, func(t *testing.T) {
+			artifact := compile(t, mode, source)
+			service := languageservice.New(mode)
+			service.Update([]*ir.Program{artifact.IR}, "repl")
+			for _, tc := range []struct {
+				at   int
+				want string
+			}{
+				{strings.Index(source, "|row|") + 2, "row: Integer"},
+				{strings.Index(source, "puts(row)") + 6, "row: Integer"},
+				{strings.LastIndex(source, "puts(row)") + 6, "row: String"},
+			} {
+				hover, ok := service.Hover(source, tc.at)
+				if !ok || hover.Detail != tc.want {
+					t.Fatalf("Hover(%d) = %q, want %q", tc.at, hover.Detail, tc.want)
+				}
+			}
+		})
+	}
+}

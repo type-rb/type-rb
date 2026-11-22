@@ -134,10 +134,11 @@ type TypeInfo struct {
 // Context is the checked project information available at a cursor position.
 // REPL contexts are rebuilt from typed IR after every accepted submission.
 type Context struct {
-	Symbols         []Symbol
-	TypeMembers     map[string][]Symbol
-	Types           map[string]TypeInfo
-	Implementations map[SymbolID][]DefinitionLocation
+	iterationParameters map[int]ir.IterationBinding
+	Symbols             []Symbol
+	TypeMembers         map[string][]Symbol
+	Types               map[string]TypeInfo
+	Implementations     map[SymbolID][]DefinitionLocation
 	// ModulePaths maps an authored import path to its resolved source filename.
 	ModulePaths map[string]string
 }
