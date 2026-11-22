@@ -20,6 +20,9 @@ def predicate_rows(): DbResult<Integer>
 	puts(try base.where("id", "!=", selected).count())
 	titles := Tag.select(:code)
 	puts(try Report.where(note: titles).count())
+	notes := Report.select(:note)
+	puts(try Report.where(note: notes).count())
+	puts(try Report.where("title", "!=", notes).count())
 	return Database.transaction() do |tx|
 		scoped := Report.using(tx)
 		local_ids := scoped.where(note: "ok").select(:id)

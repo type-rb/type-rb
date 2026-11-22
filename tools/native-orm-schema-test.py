@@ -106,7 +106,7 @@ def check_model_rows(cli, reference, root, config, environment):
         with sqlite3.connect(pages) as connection:
             connection.executescript("CREATE TABLE tags(code TEXT PRIMARY KEY); INSERT INTO tags VALUES ('ok')")
         predicate_env = dict(environment, DATABASE_URL=str(pages), ORM_TEST_OPERATION="predicates")
-        expect_output(app, root, predicate_env, "3\n2\n0\n0\n5\n0\n1\n3\n2\n2\n1\n")
+        expect_output(app, root, predicate_env, "3\n2\n0\n0\n5\n0\n1\n3\n2\n2\n0\n2\n1\n")
         for operation in ("scope-mismatch", "savepoint-mismatch"):
             run([str(app)], root, dict(predicate_env, ORM_TEST_OPERATION=operation),
                 "ORM subquery transaction scope must match the base query")
