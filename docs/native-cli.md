@@ -374,6 +374,27 @@ There is no special directory exemption in Native configuration discovery.
 The core and benchmark subprojects retain their explicit reference-validation
 configurations; opening one with `trbn` honors its configured mode too.
 
+## Editing in VS Code
+
+Set `typerb.server.path` in the official TypeRB extension to the absolute
+path of the built `bin/trbn`. The extension starts `trbn lsp --config
+<trbconfig.jsonc>` for a project, or `trbn lsp --mode <mode> <file.trb>`
+for a standalone file. The language server communicates over standard input
+and output. Each server owns its project or standalone import graph.
+
+The server checks unsaved edits and publishes the Native checker's first
+diagnostic. Fixing an error or closing the document clears its diagnostic.
+Go to Definition resolves visible record names and direct function calls
+to their declarations in project source, including imported files. Editor
+positions and incremental edits use UTF-16 units. Syntax highlighting and
+snippets come from the extension. Completion, hover, rename, Test Explorer,
+and debugger integration have separate acceptance work.
+
+Format Document applies the same formatter as `trbn fmt` to the editor
+buffer. An incomplete expression or an already formatted document produces
+no edit. Saving a document or changing a watched source on disk refreshes
+diagnostics against the open buffers and the updated project sources.
+
 ## Source formatting
 
 `trbn fmt [PATH ...]` formats `.trb` files, including test files. Directory

@@ -1,0 +1,175 @@
+import { native_cli_character } from host
+import { project_json_hex_digit } from project/config_json
+import { lex_source_offsets } from frontend/syntax/lexer
+import { compiler_new } from state/state
+import { token_kind_end_of_input, token_kind_identifier } from state/token_kinds
+import { compiler_string_bytes } from support/compiler_bytes
+import { load_integer, load_string } from support/storage
+import { integer_string } from support/literals
+import { path_normalize, string_starts_with } from support/path
+import { unicode_identifier_decode, unicode_identifier_point } from support/unicode_identifiers
+
+def lsp_uri_path(uri: String): String
+	mut i := 7
+	if string_starts_with(uri, "file://localhost/")
+		i = 16
+	elsif !string_starts_with(uri, "file:///")
+		return ""
+	end
+	mut path := ""
+	while i < uri.size()
+		character := uri[i]
+		if character == "%"
+			mut bytes: Array<Integer> := []
+			mut width := 1
+			while bytes.size() < width
+				if i + 2 >= uri.size() || uri[i] != "%"
+					return ""
+				end
+				high := project_json_hex_digit(uri[i + 1])
+				low := project_json_hex_digit(uri[i + 2])
+				if high < 0 || low < 0
+					return ""
+				end
+				byte := high * 16 + low
+				if bytes.empty?()
+					if byte == 0 || byte >= 128 && byte < 194 || byte > 244
+						return ""
+					end
+					if byte >= 240
+						width = 4
+					elsif byte >= 224
+						width = 3
+					elsif byte >= 194
+						width = 2
+					end
+				end
+				bytes.push(byte)
+				i += 3
+			end
+			mut point := bytes[0]
+			if width > 1
+				point = unicode_identifier_decode(bytes)
+				if point < 0
+					return ""
+				end
+			end
+			path += native_cli_character(point)
+		elsif character == "#" || character == "?"
+			return ""
+		else
+			path += character
+			i += 1
+		end
+	end
+	return path_normalize(path)
+end
+
+def lsp_file_uri(path: String): String
+	mut uri := "file://"
+	digits := "0123456789ABCDEF"
+	compiler_string_bytes(path).each do |byte|
+		if (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 47 || byte == 45 || byte == 46 || byte == 95 || byte == 126
+			uri += native_cli_character(byte)
+		else
+			uri += "%" + digits[byte / 16] + digits[byte % 16]
+		end
+	end
+	return uri
+end
+
+def lsp_width(character: String): Integer
+	return unicode_identifier_point(character) > 65535 ? 2 : 1
+end
+
+def lsp_offset(source: String, line: Integer, column: Integer): Integer
+	if line < 0 || column < 0
+		return -1
+	end
+	mut i := 0
+	mut row := 0
+	mut utf16 := 0
+	while i < source.size()
+		if row == line && utf16 == column
+			return i
+		end
+		if source[i] == "\n"
+			if row == line
+				return -1
+			end
+			row += 1
+			utf16 = 0
+		elsif row == line
+			utf16 += lsp_width(source[i])
+		end
+		i += 1
+	end
+	return row == line && utf16 == column ? i : -1
+end
+
+def lsp_position(source: String, offset: Integer): String
+	mut i := 0
+	mut row := 0
+	mut utf16 := 0
+	while i < offset && i < source.size()
+		if source[i] == "\n"
+			row += 1
+			utf16 = 0
+		else
+			utf16 += lsp_width(source[i])
+		end
+		i += 1
+	end
+	return "{\"line\":" + integer_string(row) + ",\"character\":" + integer_string(utf16) + "}"
+end
+
+def lsp_range(source: String, start: Integer, finish: Integer): String
+	return "{\"start\":" + lsp_position(source, start) + ",\"end\":" + lsp_position(source, finish) + "}"
+end
+
+record LspToken
+	text: String
+	start: Integer
+	finish: Integer
+	previous: String
+	following: String
+end
+
+# Read the compiler's token identities. Quoted text and comments cannot resolve
+# to declarations merely because they contain the same identifier.
+def lsp_token(source: String, offset: Integer, line: Integer, column: Integer, declaration: String): LspToken
+	mut state := compiler_new(source.size() + 8)
+	mut offsets: Array<Integer> := []
+	lex_source_offsets(state, source, token_kind_end_of_input(), offsets, true)
+	mut i := 0
+	while i < offsets.size()
+		tokens := state.source_tokens
+		start := offsets[i]
+		name := load_string(tokens.token_texts, i)
+		mut finish := start + name.size()
+		at_line := load_integer(tokens.token_lines, i) == line
+		is_id := load_integer(tokens.token_kinds, i) == token_kind_identifier()
+		mut match := is_id && start <= offset && offset < finish
+		if at_line && declaration != ""
+			match = is_id && name == declaration && i > 0 &&["record", "def", "class", "enum"].include?(load_string(tokens.token_texts, i - 1))
+		elsif at_line && column > 0
+			match = load_integer(tokens.token_columns, i) == column
+		end
+		if match
+			mut previous := ""
+			mut following := ""
+			if i > 0
+				previous = load_string(tokens.token_texts, i - 1)
+			end
+			if i + 1 < offsets.size()
+				following = load_string(tokens.token_texts, i + 1)
+			end
+			if !is_id
+				finish = start + 1
+			end
+			return LspToken.new(text: name, start: start, finish: finish, previous: previous, following: following)
+		end
+		i += 1
+	end
+	return LspToken.new(text: "", start: -1, finish: -1, previous: "", following: "")
+end

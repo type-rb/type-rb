@@ -1,0 +1,268 @@
+import trb/std/json
+import { compiler_file_exists, compiler_read_source, project_join } from compiler
+import { format_source } from format/source
+import { compiler_source_slice } from frontend/syntax/lexer
+import { cli_absolute, cli_error, cli_find_config } from main
+import { native_cli_cwd } from host
+import { lsp_offset, lsp_range, lsp_uri_path } from lsp/positions
+import { lsp_error, lsp_field, lsp_id, lsp_integer, lsp_read, lsp_result, lsp_send, lsp_text } from lsp/protocol
+import { LspWorkspace, lsp_analyze, lsp_definition, lsp_diagnostics, lsp_document_uri, lsp_files, lsp_owns, lsp_source } from lsp/workspace
+import { parse_project_config, project_config_declared_mode } from project/config
+import { package_json_quote } from project/package_json
+import { integer_string } from support/literals
+import { path_directory, path_normalize, string_ends_with, string_starts_with } from support/path
+
+def lsp_publish(uri: String, version: Integer, diagnostics: String): Boolean
+	return lsp_send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":" + package_json_quote(uri) + ",\"version\":" + integer_string(version) + ",\"diagnostics\":" + diagnostics + "}}")
+end
+
+def lsp_document_change(initial: String, changes: JSON::Value): String?
+	mut source := initial
+	case changes
+	when JSON::Value::Array(items)
+		mut i := 0
+		while i < items.size()
+			change := items[i]
+			replacement := lsp_field(change, "text")
+			case replacement
+			when JSON::Value::String(text)
+				range := lsp_field(change, "range")
+				case range
+				when JSON::Value::Null
+					source = text
+				else
+					start := lsp_field(range, "start")
+					finish := lsp_field(range, "end")
+					first := lsp_offset(source, lsp_integer(lsp_field(start, "line")), lsp_integer(lsp_field(start, "character")))
+					last := lsp_offset(source, lsp_integer(lsp_field(finish, "line")), lsp_integer(lsp_field(finish, "character")))
+					if first < 0 || last < first
+						return nil
+					end
+					source = compiler_source_slice(source, 0, first) + text + compiler_source_slice(source, last, source.size())
+				end
+			else
+				return nil
+			end
+			i += 1
+		end
+		return source
+	else
+		return nil
+	end
+end
+
+def lsp_recheck(mut workspace: LspWorkspace): Boolean
+	before := lsp_files(workspace)
+	state := lsp_analyze(workspace)
+	after := lsp_files(workspace)
+	if workspace.config == "" && before != after
+		if !lsp_send("{\"jsonrpc\":\"2.0\",\"method\":\"typerb/fileRootFilesChanged\",\"params\":{\"files\":" + after + "}}")
+			return false
+		end
+	end
+	mut paths := workspace.text.keys()
+	mut i := 0
+	while i < paths.size()
+		path := paths[i]
+		if !lsp_publish(lsp_document_uri(workspace, path), workspace.versions[path], lsp_diagnostics(workspace, state, path))
+			return false
+		end
+		i += 1
+	end
+	return true
+end
+
+def lsp_format(workspace: LspWorkspace, path: String): String
+	if !lsp_owns(workspace, path)
+		return "[]"
+	end
+	source := lsp_source(workspace, path)
+	formatted := format_source(source, path, "\t")
+	if formatted.error != "" || formatted.text == source
+		return "[]"
+	end
+	return "[{\"range\":" + lsp_range(source, 0, source.size()) + ",\"newText\":" + package_json_quote(formatted.text) + "}]"
+end
+
+def lsp_notification(mut workspace: LspWorkspace, method: String, params: JSON::Value): Boolean
+	if method == "workspace/didChangeWatchedFiles"
+		case lsp_field(params, "changes")
+		when JSON::Value::Array(events)
+			mut i := 0
+			while i < events.size()
+				if lsp_owns(workspace, lsp_uri_path(lsp_text(lsp_field(events[i], "uri"))))
+					return lsp_recheck(workspace)
+				end
+				i += 1
+			end
+		else
+			return true
+		end
+		return true
+	end
+	doc := lsp_field(params, "textDocument")
+	uri := lsp_text(lsp_field(doc, "uri"))
+	path := lsp_uri_path(uri)
+	if !lsp_owns(workspace, path)
+		return true
+	end
+	version := lsp_integer(lsp_field(doc, "version"))
+	if method == "textDocument/didOpen"
+		content := lsp_field(doc, "text")
+		case content
+		when JSON::Value::String(text)
+			workspace.text[path] = text
+			workspace.uris[path] = uri
+			workspace.versions[path] = version
+		else
+			return true
+		end
+	elsif method == "textDocument/didChange"
+		if !workspace.text.key?(path) || version <= workspace.versions[path]
+			return true
+		end
+		changed := lsp_document_change(workspace.text[path], lsp_field(params, "contentChanges"))
+		if changed == nil
+			return true
+		end
+		workspace.text[path] = changed
+		workspace.versions[path] = version
+	elsif method == "textDocument/didSave"
+		if !workspace.text.key?(path)
+			return true
+		end
+		case lsp_field(params, "text")
+		when JSON::Value::String(text)
+			workspace.text[path] = text
+		else
+			return lsp_recheck(workspace)
+		end
+	elsif method == "textDocument/didClose"
+		if !workspace.text.key?(path)
+			return true
+		end
+		if !lsp_publish(uri, workspace.versions[path], "[]")
+			return false
+		end
+		workspace.text.delete(path)
+		workspace.uris.delete(path)
+		workspace.versions.delete(path)
+	else
+		return true
+	end
+	return lsp_recheck(workspace)
+end
+
+def lsp_serve(mut workspace: LspWorkspace): Integer
+	mut initialized := false
+	mut shutdown := false
+	mut failure := [""]
+	while true
+		payload := lsp_read(failure)
+		if payload == ""
+			if failure[0] != ""
+				return cli_error(failure[0])
+			end
+			return 0
+		end
+		packet := JSON.parse(payload) catch |error|
+			return cli_error("invalid LSP JSON: " + error.message)
+		end
+		method := lsp_text(lsp_field(packet, "method"))
+		id := lsp_id(lsp_field(packet, "id"))
+		params := lsp_field(packet, "params")
+		mut ok := true
+		if method == "exit"
+			return shutdown ? 0 : 1
+		elsif id == ""
+			if initialized && !shutdown
+				ok = lsp_notification(workspace, method, params)
+			end
+		elsif method == "initialize" && !initialized
+			initialized = true
+			ok = lsp_result(id, "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":2,\"save\":true},\"definitionProvider\":true,\"documentFormattingProvider\":true},\"serverInfo\":{\"name\":\"TypeRB Native\"}}")
+		elsif !initialized
+			ok = lsp_error(id, -32002, "server is not initialized")
+		elsif shutdown || method == "initialize"
+			ok = lsp_error(id, -32600, "invalid request for this server state")
+		elsif method == "shutdown"
+			shutdown = true
+			ok = lsp_result(id, "null")
+		elsif method == "typerb/fileRootFiles"
+			if workspace.config == "" && workspace.files.empty?()
+				lsp_analyze(workspace)
+			end
+			ok = lsp_result(id, lsp_files(workspace))
+		elsif method == "textDocument/formatting"
+			doc := lsp_field(params, "textDocument")
+			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
+			if path == ""
+				ok = lsp_error(id, -32602, "expected a local file URI")
+			else
+				ok = lsp_result(id, lsp_format(workspace, path))
+			end
+		elsif method == "textDocument/definition"
+			doc := lsp_field(params, "textDocument")
+			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
+			position := lsp_field(params, "position")
+			mut state := lsp_analyze(workspace)
+			ok = lsp_result(id, lsp_definition(workspace, state, path, lsp_integer(lsp_field(position, "line")), lsp_integer(lsp_field(position, "character"))))
+		else
+			ok = lsp_error(id, -32601, "method not found")
+		end
+		if !ok
+			return cli_error("cannot write LSP response")
+		end
+	end
+	return 0
+end
+
+def cli_lsp_command(arguments: Array<String>): Integer
+	cwd := native_cli_cwd()
+	mut entry := ""
+	mut config := ""
+	mut mode := ""
+	mut runtime := ""
+	mut i := 1
+	while i < arguments.size()
+		arg := arguments[i]
+		if arg == "--config" || arg == "--mode" || arg == "--runtime"
+			i += 1
+			if i >= arguments.size() || arguments[i] == ""
+				return cli_error("lsp " + arg + " requires a value")
+			end
+			if arg == "--config"
+				config = path_normalize(cli_absolute(arguments[i], cwd))
+			elsif arg == "--mode"
+				mode = arguments[i]
+			else
+				runtime = arguments[i]
+			end
+		elsif entry == "" && !string_starts_with(arg, "-") && string_ends_with(arg, ".trb")
+			entry = path_normalize(cli_absolute(arg, cwd))
+		else
+			return cli_error("lsp expects a project configuration or one .trb file")
+		end
+		i += 1
+	end
+	if config == ""
+		config = cli_find_config(entry == "" ? cwd : path_directory(entry))
+	end
+	mut root := path_directory(entry)
+	mut output := ""
+	if config != ""
+		if mode != "" || runtime != "" || !compiler_file_exists(config)
+			return cli_error("lsp requires a readable project configuration and uses its mode")
+		end
+		options := parse_project_config(compiler_read_source(config))
+		if options.error != ""
+			return cli_error(options.error)
+		end
+		root = path_normalize(project_join(path_directory(config), options.source_dir))
+		output = path_normalize(project_join(path_directory(config), options.out_dir))
+	elsif entry == "" || mode != "" && !project_config_declared_mode(mode) || runtime != "" && (mode != "typescript" || runtime != "node" && runtime != "bun")
+		return cli_error("lsp expects a project or standalone .trb file with a supported mode")
+	end
+	mut workspace := LspWorkspace.new(config: config, entry: entry, root: root, output: output, text: {}, uris: {}, versions: {}, files: [])
+	return lsp_serve(workspace)
+end
