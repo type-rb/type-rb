@@ -45,7 +45,20 @@ exports.run = async function () {
 		await waitFor(folder + " diagnostic clearing", () => vscode.languages.getDiagnostics(uri).length === 0);
 		await waitFor(folder + " restored definition", findTarget);
 		assert.equal(document.getText(), original);
+		const binding = original.indexOf("row := ");
+		const compact = new vscode.WorkspaceEdit();
+		compact.replace(uri, new vscode.Range(document.positionAt(binding), document.positionAt(binding + 7)), "row:=");
+		assert.ok(await vscode.workspace.applyEdit(compact));
+		await waitFor(folder + " format document", async () => {
+			const edits = await vscode.commands.executeCommand("vscode.executeFormatDocumentProvider", uri,
+				{ tabSize: 4, insertSpaces: false });
+			if (!edits?.length) return false;
+			const formatted = new vscode.WorkspaceEdit();
+			formatted.set(uri, edits);
+			return vscode.workspace.applyEdit(formatted);
+		});
+		assert.ok(document.getText().includes("row := Greeting.new"));
 		assert.equal(await readFile(uri.fsPath, "utf8"), original);
-		console.log(folder + " extension-host diagnostic and definition passed");
+		console.log(folder + " extension-host diagnostics, definition and formatting passed");
 	}
 };

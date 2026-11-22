@@ -77,11 +77,12 @@ class Client:
         assert "error" not in response, response
         return response["result"]
 
-    def diagnostics(self, uri, version):
+    def diagnostics(self, uri, version, nonempty=None):
         def matches(packet):
             params = packet.get("params", {})
             return (packet.get("method") == "textDocument/publishDiagnostics"
-                    and params.get("uri") == uri and params.get("version") == version)
+                    and params.get("uri") == uri and params.get("version") == version
+                    and (nonempty is None or bool(params["diagnostics"]) == nonempty))
         return self.receive(matches)["params"]["diagnostics"]
 
 
@@ -160,11 +161,31 @@ def exercise(executable, configured):
             expect_definition(client, document, helper, 0)
             expect_definition(client, document, helper, 4, function=True)
             imported = {"uri": helper.as_uri()}
+            authored = helper.read_text()
             client.send("textDocument/didOpen", {"textDocument": dict(
-                imported, version=1, languageId="trb", text="\n\n" + helper.read_text())})
+                imported, version=1, languageId="trb", text="\n\n" + authored)})
             expect_definition(client, document, helper, 2)
+            options = {"textDocument": imported, "options": {"tabSize": 4, "insertSpaces": False}}
+            assert caps.get("documentFormattingProvider")
+            client.send("textDocument/didChange", {"textDocument": dict(imported, version=2),
+                        "contentChanges": [{"text": authored.replace("\ttext: String", "text:String")}]})
+            edits = client.request("textDocument/formatting", options, 71)
+            assert len(edits) == 1 and edits[0]["newText"] == authored, edits
+            client.send("textDocument/didSave", {"textDocument": imported, "text": authored})
+            assert client.request("textDocument/formatting", options, 72) == []
+            client.send("textDocument/didChange", {"textDocument": dict(imported, version=3),
+                        "contentChanges": [{"text": "record\n"}]})
+            assert client.request("textDocument/formatting", options, 73) == []
             client.send("textDocument/didClose", {"textDocument": imported})
             expect_definition(client, document, helper, 0)
+            # A separate writer modifies a closed dependency while the main buffer is open.
+            watched = {"changes": [{"uri": helper.as_uri(), "type": 2}]}
+            helper.write_text(authored.replace("text: String", "text: Integer"))
+            client.send("workspace/didChangeWatchedFiles", watched)
+            client.diagnostics(main.as_uri(), 2, nonempty=True)
+            helper.write_text(authored)
+            client.send("workspace/didChangeWatchedFiles", watched)
+            client.diagnostics(main.as_uri(), 2, nonempty=False)
             client.send("textDocument/didClose", {"textDocument": document})
             client.request("shutdown", None, 3)
             client.send("exit", None)

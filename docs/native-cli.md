@@ -390,6 +390,11 @@ positions and incremental edits use UTF-16 units. Syntax highlighting and
 snippets come from the extension. Completion, hover, rename, Test Explorer,
 and debugger integration have separate acceptance work.
 
+Format Document applies the same formatter as `trbn fmt` to the editor
+buffer. An incomplete expression or an already formatted document produces
+no edit. Saving a document or changing a watched source on disk refreshes
+diagnostics against the open buffers and the updated project sources.
+
 ## Source formatting
 
 `trbn fmt [PATH ...]` formats `.trb` files, including test files. Directory

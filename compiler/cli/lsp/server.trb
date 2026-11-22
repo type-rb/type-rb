@@ -1,11 +1,12 @@
 import trb/std/json
 import { compiler_file_exists, compiler_read_source, project_join } from compiler
+import { format_source } from format/source
 import { compiler_source_slice } from frontend/syntax/lexer
 import { cli_absolute, cli_error, cli_find_config } from main
 import { native_cli_cwd } from host
-import { lsp_offset, lsp_uri_path } from lsp/positions
+import { lsp_offset, lsp_range, lsp_uri_path } from lsp/positions
 import { lsp_error, lsp_field, lsp_id, lsp_integer, lsp_read, lsp_result, lsp_send, lsp_text } from lsp/protocol
-import { LspWorkspace, lsp_analyze, lsp_definition, lsp_diagnostics, lsp_document_uri, lsp_files, lsp_owns } from lsp/workspace
+import { LspWorkspace, lsp_analyze, lsp_definition, lsp_diagnostics, lsp_document_uri, lsp_files, lsp_owns, lsp_source } from lsp/workspace
 import { parse_project_config, project_config_declared_mode } from project/config
 import { package_json_quote } from project/package_json
 import { integer_string } from support/literals
@@ -71,7 +72,34 @@ def lsp_recheck(mut workspace: LspWorkspace): Boolean
 	return true
 end
 
+def lsp_format(workspace: LspWorkspace, path: String): String
+	if !lsp_owns(workspace, path)
+		return "[]"
+	end
+	source := lsp_source(workspace, path)
+	formatted := format_source(source, path, "\t")
+	if formatted.error != "" || formatted.text == source
+		return "[]"
+	end
+	return "[{\"range\":" + lsp_range(source, 0, source.size()) + ",\"newText\":" + package_json_quote(formatted.text) + "}]"
+end
+
 def lsp_notification(mut workspace: LspWorkspace, method: String, params: JSON::Value): Boolean
+	if method == "workspace/didChangeWatchedFiles"
+		case lsp_field(params, "changes")
+		when JSON::Value::Array(events)
+			mut i := 0
+			while i < events.size()
+				if lsp_owns(workspace, lsp_uri_path(lsp_text(lsp_field(events[i], "uri"))))
+					return lsp_recheck(workspace)
+				end
+				i += 1
+			end
+		else
+			return true
+		end
+		return true
+	end
 	doc := lsp_field(params, "textDocument")
 	uri := lsp_text(lsp_field(doc, "uri"))
 	path := lsp_uri_path(uri)
@@ -99,6 +127,16 @@ def lsp_notification(mut workspace: LspWorkspace, method: String, params: JSON::
 		end
 		workspace.text[path] = changed
 		workspace.versions[path] = version
+	elsif method == "textDocument/didSave"
+		if !workspace.text.key?(path)
+			return true
+		end
+		case lsp_field(params, "text")
+		when JSON::Value::String(text)
+			workspace.text[path] = text
+		else
+			return lsp_recheck(workspace)
+		end
 	elsif method == "textDocument/didClose"
 		if !workspace.text.key?(path)
 			return true
@@ -142,7 +180,7 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 			end
 		elsif method == "initialize" && !initialized
 			initialized = true
-			ok = lsp_result(id, "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":2},\"definitionProvider\":true},\"serverInfo\":{\"name\":\"TypeRB Native\"}}")
+			ok = lsp_result(id, "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":2,\"save\":true},\"definitionProvider\":true,\"documentFormattingProvider\":true},\"serverInfo\":{\"name\":\"TypeRB Native\"}}")
 		elsif !initialized
 			ok = lsp_error(id, -32002, "server is not initialized")
 		elsif shutdown || method == "initialize"
@@ -155,6 +193,14 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 				lsp_analyze(workspace)
 			end
 			ok = lsp_result(id, lsp_files(workspace))
+		elsif method == "textDocument/formatting"
+			doc := lsp_field(params, "textDocument")
+			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
+			if path == ""
+				ok = lsp_error(id, -32602, "expected a local file URI")
+			else
+				ok = lsp_result(id, lsp_format(workspace, path))
+			end
 		elsif method == "textDocument/definition"
 			doc := lsp_field(params, "textDocument")
 			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
