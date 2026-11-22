@@ -8334,6 +8334,7 @@
       "TestORMDeclarationInputIsVersionedSerializableAndDataOnly (internal/orm/declaration_input_test.go)",
       "TestORMDeclarationInputPreservesASTDiscoverySemantics (internal/orm/orm_test.go)",
       "TestORMDeclarationInputRejectsInvalidBoundaryData (internal/orm/declaration_input_test.go)",
+      "TestPositionalPredicatePreservesColumnAndOperator (internal/orm/orm_test.go)",
       "TestPostgreSQLAdapterDefinesPortableRuntimeSyntax (internal/orm/orm_test.go)",
       "TestPostgreSQLColumnTypes (internal/orm/orm_test.go)",
       "TestPostgreSQLLiveIntrospection (internal/orm/postgresql_integration_test.go)",

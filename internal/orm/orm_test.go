@@ -17,6 +17,30 @@ import (
 	"github.com/type-rb/type-rb/internal/types"
 )
 
+func TestPositionalPredicatePreservesColumnAndOperator(t *testing.T) {
+	column := &ir.Symbol{Name: "id"}
+	subquery := &ir.Identifier{ExprBase: ir.ExprBase{Type: types.FromName("Subquery")}, Name: "keys"}
+	scalar := &ir.Literal{Kind: "integer", Raw: "3"}
+	for _, tc := range []struct {
+		name                    string
+		column, operator, value ir.Expression
+		want                    Operator
+	}{
+		{"symbol column", column, &ir.Literal{Kind: "string", Raw: `">"`}, scalar, GreaterThan},
+		{"symbol comparison", &ir.Literal{Kind: "string", Raw: `"id"`}, &ir.Symbol{Name: "="}, subquery, In},
+		{"symbol column with excluded subquery", column, &ir.Literal{Kind: "string", Raw: `"!="`}, subquery, NotIn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := &ir.Call{Arguments: []ir.CallArgument{{Value: tc.column}, {Value: tc.operator}, {Value: tc.value}}}
+			got := Predicates(call)
+			want := []Predicate{{Column: "id", Operator: tc.want, Value: tc.value}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("predicates = %#v, want %#v", got, want)
+			}
+		})
+	}
+}
+
 func TestSQLiteIntrospectionAndModelDeclarations(t *testing.T) {
 	root, options := sqliteFixture(t)
 	schema, err := LoadSchema(root, options)
