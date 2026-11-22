@@ -1,0 +1,173 @@
+import { check_expression } from frontend/checking/body/expressions
+import { type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { object_method_function } from frontend/resolution/object_methods
+import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { mir_checked_call } from mir/lowering/calls
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_op_string_literal } from mir/model/instructions
+import { CheckedLocals } from state/local_state
+import { CompilerState, has_diagnostic } from state/state
+import { token_kind_identifier, token_kind_string, token_kind_symbol } from state/token_kinds
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Quoted strings and symbol spellings may select schema members. A variable or
+# computed expression cannot introduce a column, comparison or SQL direction.
+def orm_query_literal(state: CompilerState, mut position: Array<Integer>): String
+	mut depth := 0
+	while token_is(state, position[0], "(")
+		advance(position)
+		skip_newlines(state, position)
+		depth += 1
+	end
+	mut origin := position[0]
+	if token_is(state, origin, ":")
+		advance(position)
+		origin = position[0]
+		kind := load_integer(state.source_tokens.token_kinds, origin)
+		if kind != token_kind_identifier() && kind != token_kind_symbol() && kind != token_kind_string()
+			return ""
+		end
+	elsif load_integer(state.source_tokens.token_kinds, origin) != token_kind_string() || sparse_integer_at(state.source_tokens.token_fused_literals, origin) != 0
+		return ""
+	end
+	advance(position)
+	while depth > 0
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ")")
+			return ""
+		end
+		advance(position)
+		depth -= 1
+	end
+	return load_string(state.source_tokens.token_texts, origin)
+end
+
+def orm_query_string(mut state: CompilerState, mut locals: CheckedLocals, text: String, origin: Integer): Integer
+	slot := locals.mir_literal_texts.size()
+	locals.mir_literal_texts.push(text)
+	return checked_mir_value(mir_checked_string_operation(state, locals, mir_op_string_literal(), -1, -1, slot, "String", origin))
+end
+
+def orm_query_terminal(mut state: CompilerState, mut locals: CheckedLocals, query: CheckedValue, name: String, origin: Integer, unavailable: String): CheckedValue
+	target := object_method_function(state, query.type_name, name, false, [], origin)
+	if target < 0
+		line := load_integer(state.source_tokens.token_lines, origin)
+		return type_diagnostic(state, line, unavailable)
+	end
+	result := load_string(state.declarations.function_result_types, target)
+	return mir_checked_call(state, locals, target, [checked_mir_value(query)], result, origin)
+end
+
+def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, class_member: Boolean, root: Integer, member: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut arguments: Array<Integer> := []
+	if !class_member
+		arguments.push(checked_mir_value(receiver))
+	end
+	query_type := load_string(state.declarations.function_result_types, root)
+	mut query := mir_checked_call(state, locals, root, arguments, query_type, origin)
+	advance(position)
+	skip_newlines(state, position)
+	if member == "ids" || member == "pluck" || member == "pick"
+		mut method := "$ids"
+		mut unavailable := "ids requires a model with a single primary key"
+		if member != "ids"
+			column := orm_query_literal(state, position)
+			if column == ""
+				return type_diagnostic(state, line, member + " expects one literal column name")
+			end
+			method = "$" + member + ":" + column
+			unavailable = "unknown " + member + " column " + column
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			end
+		end
+		if !token_is(state, position[0], ")")
+			return type_diagnostic(state, line, "unexpected " + member + " argument")
+		end
+		advance(position)
+		return orm_query_terminal(state, locals, query, method, origin, unavailable)
+	end
+	if member == "find_by" && token_is(state, position[0], ")")
+		return type_diagnostic(state, line, "find_by expects at least one named column")
+	end
+	if member == "exists?" && !class_member && !token_is(state, position[0], ")")
+		return type_diagnostic(state, line, "exists? on a query does not accept named columns")
+	end
+	first := position[0]
+	mut seen: Hash<String, Integer> := {}
+	while !token_is(state, position[0], ")") && !has_diagnostic(state)
+		at := position[0]
+		mut column := parse_argument_label(state, position)
+		positional := column == ""
+		mut operator := "="
+		mut prefix := "$eq:"
+		if positional
+			if member != "where" || at != first
+				return type_diagnostic(state, line, member + " expects named columns")
+			end
+			column = orm_query_literal(state, position)
+			if column == "" || !expect(state, position, ",")
+				return type_diagnostic(state, line, "where expects a literal column name")
+			end
+			skip_newlines(state, position)
+			operator = orm_query_literal(state, position)
+			if operator == "<" || operator == "<=" || operator == ">" || operator == ">=" || operator == "LIKE"
+				prefix = "$cmp:"
+			elsif operator != "=" && operator != "!="
+				return type_diagnostic(state, line, "unsupported where comparison operator")
+			end
+			expect(state, position, ",")
+		elsif seen.key?(column)
+			return type_diagnostic(state, line, "duplicate " + member + " column " + column)
+		end
+		seen[column] = 1
+		skip_newlines(state, position)
+		if member == "order"
+			prefix = "$sort:"
+		end
+		target := object_method_function(state, query_type, prefix + column, false, [], at)
+		if target < 0
+			return type_diagnostic(state, line, "unknown " + member + " column or unsupported comparison for " + column)
+		end
+		mut values := [checked_mir_value(query)]
+		if member == "order"
+			direction := orm_query_literal(state, position)
+			if direction != "asc" && direction != "desc"
+				return type_diagnostic(state, line, "order direction must be asc or desc")
+			end
+			values.push(orm_query_string(state, locals, direction, at))
+		else
+			start := load_integer(state.declarations.function_parameter_starts, target)
+			expected := load_string(state.declarations.parameter_types, start + 2)
+			if operator == "LIKE" && expected != "String"
+				return type_diagnostic(state, line, "LIKE requires a String column")
+			end
+			values.push(orm_query_string(state, locals, operator, at))
+			value := check_expression(state, position, locals, 1, expected)
+			values.push(checked_mir_value(value))
+		end
+		query = mir_checked_call(state, locals, target, values, query_type, at)
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ",")
+			break
+		end
+		advance(position)
+		skip_newlines(state, position)
+		if positional && !token_is(state, position[0], ")")
+			return type_diagnostic(state, line, "where expects one column, operator and value")
+		end
+	end
+	expect(state, position, ")")
+	if member == "find_by"
+		return orm_query_terminal(state, locals, query, "first", origin, "find_by requires a readable model")
+	elsif member == "exists?"
+		return orm_query_terminal(state, locals, query, "exists?", origin, "exists? requires a readable model")
+	end
+	return query
+end

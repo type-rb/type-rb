@@ -204,6 +204,44 @@ def publish(title: String): DbResult<Integer>
 end
 ```
 
+Build a read query from the model or its transaction scope. Equality filters
+accept named scalar columns, including `nil` for nullable columns. The
+three-argument form checks the column, operator and value against the lock.
+Text columns also support SQLite `LIKE`. Each modifier returns a new query. Table reads also work when the locked
+schema has no primary key or has a composite primary key.
+
+```trb
+def recent_reports(): DbResult<Array<Report>>
+    base := Report.where(title: "published")
+    return base.where("id", ">", 10).order(id: :desc).limit(20).offset(5).all()
+end
+```
+
+`order` accepts one or more named columns with `:asc` or `:desc` in priority
+order. Use an explicit order when row identity matters. `first()` returns a
+nullable model. `count()` counts the selected page, including its limit and
+offset. A zero limit gives an empty array, a missing first row and a count of
+zero. These reads also work through `Report.using(tx)`.
+
+Use `pluck(:column)` to read one typed column and `pick(:column)` to
+read its first value. Both preserve the ordering and bounds on the query.
+A nullable column keeps its SQL NULL values, and an empty page gives
+`pick` a nil result. `ids()` returns the declared type of the primary key
+on models with a single key. These operations select only the requested
+column, so other fields do not need to be decoded.
+
+```trb
+def recent_titles(): DbResult<Array<String>>
+    return Report.order(id: :desc).limit(20).pluck(:title)
+end
+```
+
+`Report.exists?(status: "published")` checks whether a matching row exists.
+On a transaction scope or a derived query, add the conditions with `where`
+and call `exists?()`. `find_by` accepts one or more named column filters
+and returns the first matching model or nil. Each terminal runs on the
+connection selected by `using(tx)`.
+
 A nested `tx.transaction() do |inner| ... end` uses a savepoint. Catching an
 inner failure lets the outer transaction continue with its earlier changes.
 Unscoped model calls use their own connection.
@@ -215,6 +253,18 @@ SQLite `JOBS_ADAPTER`. `--config PATH` selects the project explicitly,
 `--queue NAME` limits acquisition to one queue, and `--once` processes up to
 one eligible job. The initial worker dispatches Integer, String, Float and
 Boolean payload arguments to `perform` and records its outcome in SQLite.
+
+Use the same project and SQLite adapter to manage its persistent queue:
+
+| Command | Effect |
+| --- | --- |
+| `trbn jobs list` | Lists jobs by creation time, then ID. Each line contains the ID, state, job name, attempts/maximum attempts and last error, separated by tabs. An empty queue prints nothing. |
+| `trbn jobs retry ID` | Makes a failed job eligible immediately and clears its attempts, claim and last error. A worker picks it up on a subsequent poll. |
+| `trbn jobs discard ID` | Removes a job in any state except running. |
+
+All three commands accept `--config PATH`. A missing or ineligible ID gives a
+nonzero exit status. The administration commands leave running handlers and
+their leases intact.
 
 The worker updates the active lease while the handler runs in a child process.
 The first interrupt or termination request stops acquisition and gives the

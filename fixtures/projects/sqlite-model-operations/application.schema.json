@@ -103,6 +103,40 @@
           ]
         }
       }
+    },
+    "readings": {
+      "columns": {
+        "label": {
+          "type": "String"
+        },
+        "score": {
+          "type": "Integer"
+        }
+      }
+    },
+    "votes": {
+      "columns": {
+        "reader": {
+          "type": "String",
+          "primaryKey": true
+        },
+        "topic": {
+          "type": "String",
+          "primaryKey": true
+        },
+        "points": {
+          "type": "Integer"
+        }
+      },
+      "uniqueConstraints": {
+        "primary:reader,topic": {
+          "primary": true,
+          "columns": [
+            "reader",
+            "topic"
+          ]
+        }
+      }
     }
   }
 }

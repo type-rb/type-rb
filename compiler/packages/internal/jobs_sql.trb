@@ -9,6 +9,15 @@ import trb/std/unit
 import { Duration, Instant, TimeZone } from trb/std/time
 
 module SQL
+	record Status
+		id: String
+		state: String
+		job_name: String
+		attempts: Integer
+		maximum_attempts: Integer
+		last_error: String
+	end
+
 	record Claim
 		id: String
 		job_name: String
@@ -168,6 +177,48 @@ def open_store(adapter: SQLAdapter): Result<String, EnqueueError>
 	end
 end
 
+def list_statuses(source: String): Result<Array<SQL::Status>, SQLite::Error>
+	statement := "SELECT id, state, job_name, attempts, maximum_attempts, COALESCE(last_error, '') FROM trb_jobs ORDER BY created_at ASC, id ASC"
+	rows := SQLite.query_rows(source, statement, [], 6, 0) catch |error|
+		return Result<Array<SQL::Status>, SQLite::Error>::Err(error)
+	end
+	mut statuses: Array<SQL::Status> := []
+	mut index := 0
+	while index < rows.size()
+		row := rows[index]
+		id := _text(row[0])
+		state := _text(row[1])
+		name := _text(row[2])
+		attempts := _integer(row[3])
+		maximum := _integer(row[4])
+		message := _text(row[5])
+		if id == nil || state == nil || name == nil || attempts == nil || maximum == nil || message == nil
+			return Result<Array<SQL::Status>, SQLite::Error>::Err(SQLite::Error.new(code: 20, message: "invalid SQLite job status"))
+		end
+		statuses.push(SQL::Status.new(id: id, state: state, job_name: name, attempts: attempts, maximum_attempts: maximum, last_error: message))
+		index += 1
+	end
+	return Result<Array<SQL::Status>, SQLite::Error>::Ok(statuses)
+end
+
+# RETURNING identifies the job affected by this statement, independently of
+# side effects from application-defined SQLite triggers.
+def _changed_job(source: String, statement: String, parameters: Array<SQLite::Parameter>): Result<Boolean, SQLite::Error>
+	row := SQLite.query_one(source, statement + " RETURNING id", parameters, [3], SQLite::QueryMode::WriteReturning, 0) catch |error|
+		return Result<Boolean, SQLite::Error>::Err(error)
+	end
+	return Result<Boolean, SQLite::Error>::Ok(row != nil)
+end
+
+def retry_failed(source: String, id: String): Result<Boolean, SQLite::Error>
+	statement := "UPDATE trb_jobs SET state = 'ready', attempts = 0, run_at = CURRENT_TIMESTAMP, claimed_by = NULL, claimed_at = NULL, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'failed'"
+	return _changed_job(source, statement, [SQLite::Parameter::Text(id)])
+end
+
+def discard(source: String, id: String): Result<Boolean, SQLite::Error>
+	return _changed_job(source, "DELETE FROM trb_jobs WHERE id = ? AND state != 'running'", [SQLite::Parameter::Text(id)])
+end
+
 def _seconds_rounded_up(duration: Duration): Integer
 	mut seconds := duration.whole_seconds()
 	if duration.nanosecond() > 0
@@ -187,10 +238,10 @@ def recover_stale(source: String, lease: Duration): Result<Integer, SQLite::Erro
 end
 
 def _update_claim(source: String, statement: String, parameters: Array<SQLite::Parameter>, operation: String): Result<Unit, SQLite::Error>
-	row := SQLite.query_one(source, statement + " RETURNING id", parameters, [3], SQLite::QueryMode::WriteReturning, 0) catch |error|
+	changed := _changed_job(source, statement, parameters) catch |error|
 		return Result<Unit, SQLite::Error>::Err(error)
 	end
-	if row == nil
+	if !changed
 		return Result<Unit, SQLite::Error>::Err(SQLite::Error.new(code: 12, message: "job claim was lost before " + operation))
 	end
 	return Result<Unit, SQLite::Error>::Ok(Unit.new())

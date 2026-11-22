@@ -54,6 +54,33 @@ def check_model_rows(cli, reference, root, config, environment):
             entry.write_text(source.replace(original, invalid))
             run([str(tool), "check"], root, environment, "error[")
         entry.write_text(source)
+        queries = src / "queries.trb"
+        query_source = queries.read_text()
+        for invalid in ['base.where("missing", ">", 1)', 'base.where("id", ">", "one")',
+                        'base.where("title", "unknown", "x")', 'base.where("id", "LIKE", "1")',
+                        'base.where("note", ">", nil)', 'base.where(id: "x")',
+                        'base.order(missing: :asc)', 'base.order(id: :sideways)']:
+            queries.write_text(query_source.replace('base.where("id", ">", 1)', invalid))
+            run([str(tool), "check"], root, environment, "error[")
+        for invalid in ['Reading.find(1)', 'Vote.find("sam")']:
+            queries.write_text(query_source.replace('Reading.where(label: "level").order(score: :desc).all()', invalid))
+            run([str(tool), "check"], root, environment,
+                "unknown class method find" if mode == "trb" else "has no member find")
+        queries.write_text(query_source)
+        projections = src / "projections.trb"
+        projection_source = projections.read_text()
+        for original, invalid in [
+                ("page.pluck(:note)", "page.pluck(:missing)"),
+                ("page.pluck(:note)", "page.pluck(:title, :note)"),
+                ("page.pick(\"note\")", "page.pick(notes[0])"),
+                ("page.ids()", "Reading.ids()"),
+                ('try q.exists?()', 'try tags.exists?(code: "temporary")'),
+                ('page.exists?()', 'page.exists?(id: 3)'),
+                ('Report.find_by(id: 3, title: "release")', 'Report.find_by()'),
+                ('Report.find_by(id: 3, title: "release")', 'Report.find_by(id: false)')]:
+            projections.write_text(projection_source.replace(original, invalid))
+            run([str(tool), "check"], root, environment, "error[")
+        projections.write_text(projection_source)
         run([str(tool), "check"], root, environment)
         app = root / ("lookup-" + mode)
         run([str(tool), "build", "--compile", "--outfile", str(app)], root, environment)
@@ -62,6 +89,63 @@ def check_model_rows(cli, reference, root, config, environment):
     for app in binaries:
         expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
+        pages = root / (app.name + "-pages.sqlite")
+        query_env = dict(environment, DATABASE_URL=str(pages), ORM_TEST_OPERATION="queries")
+        with sqlite3.connect(pages) as connection:
+            connection.execute("CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT NOT NULL, note TEXT)")
+            connection.executemany("INSERT INTO reports VALUES (?, ?, ?)", [
+                (1, "reader's copy", None), (2, "else", None), (3, "reader's copy", "ok"),
+                (4, "reader's copy", None), (5, "reader's copy", "ok")])
+        expect_output(app, root, query_env,
+                      "5\n4\n1\n1\ntrue\n4\n3\n4\n0\ntrue\n0\ntrue\n0\n2\n4\n5\n4\n"
+                      "4\n2\n1\n5\n3\n2\n2\n2\n1\n0\ndatabase insert failed\n0\n"
+                      "Query\ndatabase query failed\nQuery\ndatabase query failed\nQuery\ndatabase count failed\n")
+        with sqlite3.connect(pages) as connection:
+            assert connection.execute("SELECT count(*) FROM reports").fetchone() == (5,)
+            connection.execute("DROP TABLE reports")
+        expect_output(app, root, query_env, "Query\ndatabase query failed\n")
+        projected = root / (app.name + "-projections.sqlite")
+        with sqlite3.connect(projected) as connection:
+            connection.executescript("""
+                CREATE TABLE reports(id INTEGER PRIMARY KEY, title TEXT, note TEXT);
+                INSERT INTO reports VALUES (1,'release','first'),(2,'other','middle'),
+                                           (3,'release',NULL),(4,'release','last');
+                CREATE TABLE tags(code TEXT PRIMARY KEY);
+                INSERT INTO tags VALUES ('a'),('z');
+                CREATE TABLE readings(label TEXT, score INTEGER);
+                CREATE TABLE metrics(id INTEGER PRIMARY KEY, passed BOOLEAN, rating REAL, payload BLOB);
+                INSERT INTO metrics VALUES (1,'invalid',1.0,NULL),(2,'invalid',1.0,X''),(3,'invalid',1.0,X'FF00');
+                CREATE TABLE events(id INTEGER PRIMARY KEY, on_date TEXT);
+                INSERT INTO events VALUES (1,'2024-02-29'),(9007199254740992,'invalid-date');
+            """)
+        expect_output(app, root, dict(environment, DATABASE_URL=str(projected), ORM_TEST_OPERATION="projections"),
+                      "NULL\nlast\ntrue\n3\n4\ntrue\nfalse\ntrue\nfalse\n3\ntrue\nz\na\nfalse\n"
+                      "NULL\n0\n2\n255\n0\n1\ntrue\ntrue\ntrue\ndatabase Integer is outside the portable range\ntrue\n1\ntemporary\n1\ntrue\ntrue\nfalse\n" + "Query\n" * 5 + "2\n")
+        with sqlite3.connect(projected) as connection:
+            assert connection.execute("SELECT code FROM tags ORDER BY code").fetchall() == [("a",), ("z",)]
+        missing_table = root / (app.name + "-no-tag-table.sqlite")
+        missing_table.touch()
+        error_env = dict(environment, DATABASE_URL=str(missing_table), ORM_TEST_OPERATION="projection-errors")
+        expect_output(app, root, error_env, "Query\n" * 5)
+        error_env.pop("DATABASE_URL")
+        expect_output(app, root, error_env, "Connection\n" * 5)
+        keyless = root / (app.name + "-without-single-key.sqlite")
+        with sqlite3.connect(keyless) as connection:
+            connection.executescript("CREATE TABLE readings(label TEXT, score INTEGER);"
+                                     "INSERT INTO readings VALUES ('level', 2), ('other', 9), ('level', 4);"
+                                     "CREATE TABLE votes(reader TEXT, topic TEXT, points INTEGER, PRIMARY KEY(reader, topic));"
+                                     "INSERT INTO votes VALUES ('sam', 'one', 1), ('sam', 'two', 3), ('lee', 'two', 8);")
+        expect_output(app, root, dict(environment, DATABASE_URL=str(keyless), ORM_TEST_OPERATION="without_single_key"),
+                      "4\n2\ntwo\n2\n")
+        scan = root / (app.name + "-scan.sqlite")
+        scan_env = dict(environment, DATABASE_URL=str(scan), ORM_TEST_OPERATION="scan")
+        payloads = [None if i % 4 == 0 else bytes([i % 251]) * (0 if i % 4 == 1 else 2048)
+                    for i in range(512)]
+        with sqlite3.connect(scan) as connection:
+            connection.execute("CREATE TABLE metrics(id INTEGER PRIMARY KEY, passed BOOLEAN, rating REAL, payload BLOB)")
+            connection.executemany("INSERT INTO metrics VALUES(?, 1, 1.25, ?)", enumerate(payloads, 1))
+        checksum = sum(len(payload) + payload[0] for payload in payloads if payload)
+        expect_output(app, root, scan_env, f"512\n{checksum}\n")
         times = root / (app.name + "-times.sqlite")
         with sqlite3.connect(times) as connection:
             connection.execute("CREATE TABLE events(id INTEGER PRIMARY KEY, on_date DATE NOT NULL, at_time TIME NOT NULL,"
@@ -355,7 +439,7 @@ end
                           "Connection\ndatabase connection failed\n")
         check_model_rows(cli, reference, root, config, environment)
         check_model_worker(cli, reference, root / "worker-project")
-    print("SQLite ORM lock-only builds, typed counts, create/find/update/delete, nine column types, deferred saves, transaction isolation, nested rollback, failed commit cleanup and worker updates passed")
+    print("SQLite ORM lock-only builds, typed projections and named lookups, counts, create/find/update/delete, nine column types, deferred saves, transaction isolation, nested rollback, failed commit cleanup and worker updates passed")
 
 
 if __name__ == "__main__":

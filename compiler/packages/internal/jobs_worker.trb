@@ -158,19 +158,56 @@ def worker_run(adapter: SQLAdapter, database: String, once: Boolean, queue: Stri
 	return 0
 end
 
-def worker_start(adapter: SQLAdapter): Integer
+def worker_command(adapter: SQLAdapter): Integer
 	args := Process.argv()
-	if args.size() != 2 || SQLite.worker_control(WORKER_INSTALL_SIGNALS, 0) != 0
+	if args.size() != 3
+		worker_report("invalid Jobs invocation")
+		return 1
+	end
+	command := args[0]
+	if command == "start" && SQLite.worker_control(WORKER_INSTALL_SIGNALS, 0) != 0
 		worker_report("cannot initialize worker")
 		return 1
 	end
 	database := SQL.open_store(adapter) catch |error|
-		worker_report(error.message)
+		worker_report(command + ": " + error.message)
 		return 1
 	end
-	return worker_run(adapter, database, args[0] == "once", args[1])
+	if command == "start"
+		return worker_run(adapter, database, args[1] == "once", args[2])
+	elsif command == "list"
+		statuses := SQL.list_statuses(database) catch |error|
+			worker_report("list: " + error.message)
+			return 1
+		end
+		statuses.each do |status|
+			puts(status.id + "\t" + status.state + "\t" + status.job_name + "\t" + status.attempts.to_s() + "/" + status.maximum_attempts.to_s() + "\t" + status.last_error)
+		end
+	elsif command == "retry"
+		changed := SQL.retry_failed(database, args[1]) catch |error|
+			worker_report("retry: " + error.message)
+			return 1
+		end
+		if !changed
+			worker_report("retry: failed job not found")
+			return 1
+		end
+	elsif command == "discard"
+		changed := SQL.discard(database, args[1]) catch |error|
+			worker_report("discard: " + error.message)
+			return 1
+		end
+		if !changed
+			worker_report("discard: job not found or currently running")
+			return 1
+		end
+	else
+		worker_report("unknown Jobs command " + command)
+		return 1
+	end
+	return 0
 end
 
 def main()
-	SQLite.worker_control(WORKER_EXIT, worker_start(JOBS_ADAPTER))
+	SQLite.worker_control(WORKER_EXIT, worker_command(JOBS_ADAPTER))
 end

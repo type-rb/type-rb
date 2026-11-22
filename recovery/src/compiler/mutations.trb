@@ -408,6 +408,8 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/providers/orm_writes", "\"try\"", "\"try~\""],
 		["backend/qbe/runtime/sqlite_transactions", "\\\"SAVEPOINT trbn_orm_nested\\\"", "\\\"SAVEPOINT trbn_orm_nested~\\\""],
 		["frontend/checking/body/orm_transactions", "\"transaction requires a structured block\"", "\"transaction requires a structured block~\""],
+		["frontend/providers/orm_queries", "\"SELECT \"", "\"SELECT ~\""],
+		["frontend/checking/body/orm_queries", "\" expects named columns\"", "\" expects named columns~\""],
 		["mir/analysis/split_fields", ">= 0", ">= 1"],
 	]
 end

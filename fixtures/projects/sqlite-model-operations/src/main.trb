@@ -1,5 +1,7 @@
+import { print_projection_errors, projected_values } from projections
+import { exercise_queries, read_without_single_key } from queries
 import { exercise_times } from events
-import { exercise_metrics } from metrics
+import { exercise_metrics, scan_metrics } from metrics
 import { commit_under_reader, exercise_transactions } from transactions
 import { Report, Tag } from models
 import { DbErrorKind, DbResult } from trb/orm
@@ -164,10 +166,45 @@ end
 def main()
 	operation := Process.environment("ORM_TEST_OPERATION")
 	if operation != nil
+		if operation == "without_single_key"
+			case read_without_single_key()
+			when DbResult::Ok(count)
+				puts(count)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "projection-errors"
+			print_projection_errors()
+			return
+		end
+		if operation == "projections"
+			case projected_values()
+			when DbResult::Ok(size)
+				puts(size)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "queries"
+			exercise_queries()
+			return
+		end
 		if operation == "times"
 			case exercise_times()
 			when DbResult::Ok(id)
 				puts(id)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "scan"
+			case scan_metrics()
+			when DbResult::Ok(checksum)
+				puts(checksum)
 			when DbResult::Err(error)
 				puts(error.message)
 			end

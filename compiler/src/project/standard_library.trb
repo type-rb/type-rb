@@ -600,7 +600,7 @@ def load_standard_source(mut state: CompilerState, kind: Integer, line: Integer)
 	end
 	if kind == standard_source_internal_runtime()
 		caller := sparse_integer_at(state.standard_modules, state.module_graph.active_module[0])
-		if caller != standard_source_web_timeout() && caller != official_source_kind("trb/web/middleware/timeout") && caller != official_source_kind("trb/web") && caller != official_source_kind("trb/web/middleware") && caller != official_source_kind("trb/web/middleware/compression") && caller != standard_source_internal_time() && caller != standard_source_secure_random() && caller != standard_source_web_dispatch() && caller != standard_source_web_server()
+		if caller != standard_source_orm_sql() && caller != standard_source_web_timeout() && caller != official_source_kind("trb/web/middleware/timeout") && caller != official_source_kind("trb/web") && caller != official_source_kind("trb/web/middleware") && caller != official_source_kind("trb/web/middleware/compression") && caller != standard_source_internal_time() && caller != standard_source_secure_random() && caller != standard_source_web_dispatch() && caller != standard_source_web_server()
 			diagnostic(state, "TRBN4003", line, "internal package imports are reserved for verified standard sources: trb/internal/runtime")
 			return -1
 		end
