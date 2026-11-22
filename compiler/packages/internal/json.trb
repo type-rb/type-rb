@@ -758,81 +758,76 @@ def _decoding_path(parser: JsonParser, identity: Integer): String
 	return _path(parents, parts, positions, identity)
 end
 
+# Assemble each reachable child directly into its parent. The traversal stacks
+# hold only open containers, with one ordered key list per open object.
 def _value(parser: JsonParser, identity: Integer): Result<PublicJSON::Value, PublicJSON::Error>
-	# Node identities are dense indexes; unreachable duplicate-key nodes keep
-	# their unused placeholder without requiring a second Hash lookup per edge.
-	mut values: Array<PublicJSON::Value> := []
-	mut index := 0
-	while index < parser.nodes.size()
-		values.push(PublicJSON::Value::Null)
-		index += 1
+	root := parser.nodes[identity]
+	if _closing_byte(root) < 0
+		return _atomic_value(root)
 	end
 	mut pending := [identity]
-	mut entered := [false]
-	# Keep each active object's canonical order across its child traversal.
-	# Nested objects push and pop their own keys without sorting a parent twice.
+	mut positions := [0]
+	mut arrays: Array<Array<PublicJSON::Value>> := []
+	mut objects: Array<Hash<String, PublicJSON::Value>> := []
 	mut object_keys: Array<Array<String>> := []
+	mut completed := PublicJSON::Value::Null
 	while !pending.empty?()
 		top := pending.size() - 1
 		current := pending[top]
+		index := positions[top]
 		node := parser.nodes[current]
 		case node
 		when JsonNode::Array(items_index)
 			children := parser.arrays[items_index]
-			if !entered[top]
-				entered[top] = true
-				index = children.size()
-				while index > 0
-					index -= 1
-					child := children[index]
-					pending.push(child)
-					entered.push(false)
-				end
+			if index == 0
+				arrays.push([])
+			end
+			if index < children.size()
+				positions[top] = index + 1
+				pending.push(children[index])
+				positions.push(0)
 				next
 			end
-			mut items: Array<PublicJSON::Value> := []
-			index = 0
-			while index < children.size()
-				items.push(values[children[index]])
-				index += 1
-			end
-			values[current] = PublicJSON::Value::Array(items)
+			completed = PublicJSON::Value::Array(arrays[arrays.size() - 1])
+			arrays.pop()
 		when JsonNode::Object(members_index)
 			children := parser.objects[members_index]
-			if !entered[top]
-				keys := children.keys().sort()
-				object_keys.push(keys)
-				entered[top] = true
-				index = keys.size()
-				while index > 0
-					index -= 1
-					child := children.fetch(keys[index])
-					pending.push(child)
-					entered.push(false)
-				end
-				next
+			if index == 0
+				objects.push({})
+				object_keys.push(children.keys().sort())
 			end
 			keys := object_keys[object_keys.size() - 1]
-			object_keys.pop()
-			mut members: Hash<String, PublicJSON::Value> := {}
-			index = 0
-			while index < keys.size()
-				members[keys[index]] = values[children.fetch(keys[index])]
-				index += 1
+			if index < keys.size()
+				positions[top] = index + 1
+				pending.push(children.fetch(keys[index]))
+				positions.push(0)
+				next
 			end
-			values[current] = PublicJSON::Value::Object(members)
+			completed = PublicJSON::Value::Object(objects[objects.size() - 1])
+			objects.pop()
+			object_keys.pop()
 		else
 			case _atomic_value(node)
 			when Result::Ok(value)
-				values[current] = value
+				completed = value
 			when Result::Err(error)
 				return Result<PublicJSON::Value, PublicJSON::Error>::Err(_error(error.kind, error.message, _decoding_path(parser, current)))
 			end
 		end
 		pending.pop()
-		entered.pop()
+		positions.pop()
+		if !pending.empty?()
+			parent := pending.size() - 1
+			case parser.nodes[pending[parent]]
+			when JsonNode::Object(_members)
+				keys := object_keys[object_keys.size() - 1]
+				objects[objects.size() - 1][keys[positions[parent] - 1]] = completed
+			else
+				arrays[arrays.size() - 1].push(completed)
+			end
+		end
 	end
-	return Result<PublicJSON::Value, PublicJSON::Error>::Ok(values[identity])
+	return Result<PublicJSON::Value, PublicJSON::Error>::Ok(completed)
 end
 
 def parse(source: String): Result<PublicJSON::Value, PublicJSON::Error>
