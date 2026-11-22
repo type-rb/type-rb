@@ -179,10 +179,11 @@ func (index projectIndex) buildContext(session *ir.Program) Context {
 	}
 
 	context := Context{
-		TypeMembers:     index.metadata.TypeMembers,
-		Types:           index.metadata.Types,
-		Implementations: index.metadata.Implementations,
-		ModulePaths:     map[string]string{},
+		iterationParameters: session.IterationParameters,
+		TypeMembers:         index.metadata.TypeMembers,
+		Types:               index.metadata.Types,
+		Implementations:     index.metadata.Implementations,
+		ModulePaths:         map[string]string{},
 	}
 	for _, statement := range session.Statements {
 		imported, ok := statement.(*ir.Import)

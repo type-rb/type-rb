@@ -60,6 +60,13 @@ func Hover(request SemanticRequest) (HoverInfo, bool) {
 		}
 		return HoverInfo{}, false
 	}
+	if len(request.Context.iterationParameters) > 0 {
+		if declaration, ok := lexicalDeclaration(tokens, item); ok {
+			if binding, found := request.Context.iterationParameters[declaration.Span.Start.Offset]; found && binding.Name == item.Lexeme {
+				return HoverInfo{Range: range_, Detail: binding.Name + ": " + displayType(binding.Type)}, true
+			}
+		}
+	}
 	if symbol, found := callArgumentReferenceSymbol(request, item); found {
 		return HoverInfo{Range: range_, Detail: semanticDetail(symbol)}, true
 	}
@@ -395,8 +402,17 @@ func lexicalDefinition(path string, tokens []token.Token, reference token.Token)
 	if path == "" {
 		return nil, false
 	}
+	declaration, ok := lexicalDeclaration(tokens, reference)
+	if !ok {
+		return nil, false
+	}
+	return sourceDefinition(path, declaration.Lexeme, declaration.Span), true
+}
+
+func lexicalDeclaration(tokens []token.Token, reference token.Token) (token.Token, bool) {
 	scopes := lexicalScopeRanges(tokens)
-	var found *DefinitionLocation
+	var found token.Token
+	matched := false
 	foundScopeSize := 0
 	for index, item := range tokens {
 		if item.Span.Start.Offset > reference.Span.Start.Offset {
@@ -413,12 +429,12 @@ func lexicalDefinition(path string, tokens []token.Token, reference token.Token)
 			continue
 		}
 		scopeSize := scope.End - scope.Start
-		if found == nil || scopeSize < foundScopeSize || scopeSize == foundScopeSize && found.Range.Start < item.Span.Start.Offset {
-			found = sourceDefinition(path, item.Lexeme, item.Span)
+		if !matched || scopeSize < foundScopeSize || scopeSize == foundScopeSize && found.Span.Start.Offset < item.Span.Start.Offset {
+			found, matched = item, true
 			foundScopeSize = scopeSize
 		}
 	}
-	return found, found != nil
+	return found, matched
 }
 
 type lexicalScopeRange struct {

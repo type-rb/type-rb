@@ -8106,6 +8106,7 @@
       "TestHighlightDoesNotClassifyLegacyEffectWordsAsKeywords (internal/languageservice/highlight_test.go)",
       "TestHighlightMarksLexicallyInvalidInputWithoutPanicking (internal/languageservice/highlight_test.go)",
       "TestHighlightUsesByteOffsetsForUnicodeSource (internal/languageservice/highlight_test.go)",
+      "TestHoverUsesCheckedIteratorParameterAcrossShadowing (internal/languageservice/semantic_test.go)",
       "TestImplementationsResolveImportedInterfaceMethods (internal/languageservice/semantic_test.go)",
       "TestImplementationsResolveInterfaceTypesAndMethods (internal/languageservice/semantic_test.go)",
       "TestNamedOnlyBoundaryAppearsInEnumMemberSignatures (internal/languageservice/named_only_test.go)",
