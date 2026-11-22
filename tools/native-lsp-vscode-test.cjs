@@ -33,6 +33,23 @@ exports.run = async function () {
 			return items?.some((item) => (item.uri ?? item.targetUri).fsPath === helper.fsPath);
 		};
 		await waitFor(folder + " imported record", findTarget);
+		const member = original.indexOf("row.text") + "row.".length;
+		await waitFor(folder + " typed member completion", async () => {
+			const result = await vscode.commands.executeCommand("vscode.executeCompletionItemProvider",
+				uri, document.positionAt(member), ".");
+			return result?.items.some((item) => item.label === "text" && item.kind === vscode.CompletionItemKind.Field);
+		});
+		await waitFor(folder + " typed binding hover", async () => {
+			const items = await vscode.commands.executeCommand("vscode.executeHoverProvider",
+				uri, document.positionAt(member - 3));
+			return items?.some((item) => item.contents.some((entry) => entry.value?.includes("row: Greeting")));
+		});
+		await waitFor(folder + " imported call signature", async () => {
+			const call = original.indexOf("greeting_text(row)") + "greeting_text(".length;
+			const help = await vscode.commands.executeCommand("vscode.executeSignatureHelpProvider",
+				uri, document.positionAt(call), "(");
+			return help?.activeParameter === 0 && help.signatures[0]?.label === "greeting_text(row: Greeting): String";
+		});
 		const start = original.indexOf("row.text");
 		const edit = new vscode.WorkspaceEdit();
 		edit.replace(uri, new vscode.Range(document.positionAt(start), document.positionAt(start + 8)), "1");
@@ -59,6 +76,6 @@ exports.run = async function () {
 		});
 		assert.ok(document.getText().includes("row := Greeting.new"));
 		assert.equal(await readFile(uri.fsPath, "utf8"), original);
-		console.log(folder + " extension-host diagnostics, definition and formatting passed");
+		console.log(folder + " extension-host diagnostics, definitions, formatting, completion, hover and signature help passed");
 	}
 };

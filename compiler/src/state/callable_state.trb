@@ -1,11 +1,23 @@
 import { checking_discovery, checking_single_pass } from state/checking_phases
 import { CallBlockSyntax, CheckedFileBody, CheckedLambda, LambdaSyntax } from frontend/types/callable_types
+import { CheckedPresentation } from state/source_state
 import { CheckedBody, checked_body_new } from state/checked_body
 import { IntegerStorage, integer_storage } from support/storage
+
+# An optional query for the visible bindings at one authored token. Ordinary
+# checking and generic template forks leave this collection empty.
+record CheckedScopeQuery
+	path: String
+	line: Integer
+	column: Integer
+	bindings: Array<CheckedPresentation>
+	count: Array<Integer>
+end
 
 # Parsed lambda syntax is shared with template checks. Checked bodies, phase
 # progress and function-to-lambda bindings are specific to each program fork.
 record CompilerCallableAnalysis
+	scope_queries: Array<CheckedScopeQuery>
 	# Reachability is discovered from checked call identities, including defaults.
 	concurrent_functions: Array<Integer>
 	concurrent_checked: Array<Integer>
@@ -27,6 +39,7 @@ end
 
 def compiler_callable_analysis_new(capacity: Integer): CompilerCallableAnalysis
 	return CompilerCallableAnalysis.new(
+		scope_queries: [],
 		concurrent_functions: [], concurrent_checked: [], concurrent_audit: [0],
 		call_blocks: [], call_block_origins: integer_storage(capacity),
 		lambdas: [], lambda_origins: integer_storage(capacity),
@@ -40,6 +53,7 @@ end
 
 def compiler_callable_analysis_fork(source: CompilerCallableAnalysis, capacity: Integer): CompilerCallableAnalysis
 	return CompilerCallableAnalysis.new(
+		scope_queries: [],
 		concurrent_functions: [], concurrent_checked: [], concurrent_audit: [0],
 		call_blocks: source.call_blocks, call_block_origins: source.call_block_origins,
 		lambdas: source.lambdas, lambda_origins: source.lambda_origins,
