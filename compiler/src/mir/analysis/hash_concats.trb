@@ -102,7 +102,12 @@ def mir_hash_concats_equal(left: Array<MirHashConcatProbe>, right: Array<MirHash
 	end
 	mut index := 0
 	while index < left.size()
-		if left[index].function_id != right[index].function_id || left[index].concat != right[index].concat || left[index].membership != right[index].membership || left[index].omit_key_on_miss != right[index].omit_key_on_miss
+		a := left[index]
+		b := right[index]
+		if a.function_id != b.function_id || a.concat != b.concat || a.membership != b.membership
+			return false
+		end
+		if (a.omit_key_on_miss && !b.omit_key_on_miss) || (b.omit_key_on_miss && !a.omit_key_on_miss)
 			return false
 		end
 		index += 1
