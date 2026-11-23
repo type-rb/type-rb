@@ -39,7 +39,7 @@ import { array_element_type, find_record_type, resolve_type_name } from frontend
 import { CompilerState, diagnostic, has_diagnostic, local_add, terminal_token } from state/state
 import { CheckedLocals, local_bind, local_find, local_require_use } from state/local_state
 import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
-import { check_expression, check_expression_use } from frontend/checking/body/expressions
+import { check_expression, check_expression_use, checked_scope_at } from frontend/checking/body/expressions
 import { check_control_value, check_transfer_value, checked_while } from frontend/checking/body/control
 import { checked_iteration } from frontend/checking/body/iteration
 
@@ -179,6 +179,9 @@ def check_declaration(
 	end
 	if added
 		store_string(locals.presentations, locals.count[0] - 1, presentation)
+	end
+	if state.callables.scope_queries.size() > 0
+		checked_scope_at(state, locals, origin + mutable)
 	end
 	checked_submission_result(state, origin, local_type, mutable, presentation)
 	finish_statement(state, position)

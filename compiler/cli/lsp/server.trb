@@ -6,6 +6,7 @@ import { cli_absolute, cli_error, cli_find_config } from main
 import { native_cli_cwd } from host
 import { lsp_offset, lsp_range, lsp_uri_path } from lsp/positions
 import { lsp_error, lsp_field, lsp_id, lsp_integer, lsp_read, lsp_result, lsp_send, lsp_text } from lsp/protocol
+import { lsp_semantic } from lsp/semantics
 import { LspWorkspace, lsp_analyze, lsp_definition, lsp_diagnostics, lsp_document_uri, lsp_files, lsp_owns, lsp_source } from lsp/workspace
 import { parse_project_config, project_config_declared_mode } from project/config
 import { package_json_quote } from project/package_json
@@ -154,6 +155,7 @@ def lsp_notification(mut workspace: LspWorkspace, method: String, params: JSON::
 end
 
 def lsp_serve(mut workspace: LspWorkspace): Integer
+	position_methods := ["textDocument/definition", "textDocument/completion", "textDocument/hover", "textDocument/signatureHelp"]
 	mut initialized := false
 	mut shutdown := false
 	mut failure := [""]
@@ -180,7 +182,7 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 			end
 		elsif method == "initialize" && !initialized
 			initialized = true
-			ok = lsp_result(id, "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":2,\"save\":true},\"definitionProvider\":true,\"documentFormattingProvider\":true},\"serverInfo\":{\"name\":\"TypeRB Native\"}}")
+			ok = lsp_result(id, "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":2,\"save\":true},\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"hoverProvider\":true,\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"]},\"definitionProvider\":true,\"documentFormattingProvider\":true},\"serverInfo\":{\"name\":\"TypeRB Native\"}}")
 		elsif !initialized
 			ok = lsp_error(id, -32002, "server is not initialized")
 		elsif shutdown || method == "initialize"
@@ -201,12 +203,20 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 			else
 				ok = lsp_result(id, lsp_format(workspace, path))
 			end
-		elsif method == "textDocument/definition"
+		elsif position_methods.include?(method)
 			doc := lsp_field(params, "textDocument")
 			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
 			position := lsp_field(params, "position")
-			mut state := lsp_analyze(workspace)
-			ok = lsp_result(id, lsp_definition(workspace, state, path, lsp_integer(lsp_field(position, "line")), lsp_integer(lsp_field(position, "character"))))
+			line := lsp_integer(lsp_field(position, "line"))
+			column := lsp_integer(lsp_field(position, "character"))
+			if path == "" || line < 0 || column < 0
+				ok = lsp_error(id, -32602, "expected a local file URI and document position")
+			elsif method == "textDocument/definition"
+				mut state := lsp_analyze(workspace)
+				ok = lsp_result(id, lsp_definition(workspace, state, path, line, column))
+			else
+				ok = lsp_result(id, lsp_semantic(workspace, method, path, line, column))
+			end
 		else
 			ok = lsp_error(id, -32601, "method not found")
 		end

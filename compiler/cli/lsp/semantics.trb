@@ -1,0 +1,333 @@
+import { compiler_source_slice, lex_source_offsets } from frontend/syntax/lexer
+import { find_visible_function, find_visible_record } from frontend/resolution/declaration_lookup
+import { find_field, find_record_type, type_display } from frontend/resolution/type_resolution
+import { lsp_offset, lsp_range } from lsp/positions
+import { LspWorkspace, lsp_analyze, lsp_owns, lsp_source } from lsp/workspace
+import { package_json_quote } from project/package_json
+import { repl_function_detail } from repl/session
+import { CheckedScopeQuery } from state/callable_state
+import { CheckedPresentation } from state/source_state
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { token_kind_end_of_input, token_kind_identifier, token_kind_symbol } from state/token_kinds
+import { integer_string } from support/literals
+import { string_starts_with } from support/path
+import { load_integer, load_string } from support/storage
+
+# Buffer offsets always refer to the requested version of this document.
+record LspCursor
+	offsets: Array<Integer>
+	tokens: CompilerState
+	word: Integer
+	previous: Integer
+	start: Integer
+	finish: Integer
+end
+
+def lsp_cursor(source: String, offset: Integer, completion: Boolean): LspCursor
+	mut tokens := compiler_new(source.size() + 8)
+	mut offsets: Array<Integer> := []
+	lex_source_offsets(tokens, source, token_kind_end_of_input(), offsets, true)
+	mut previous := -1
+	mut word := -1
+	mut start := offset
+	mut finish := offset
+	mut i := 0
+	while i < offsets.size() && offsets[i] <= offset
+		name := load_string(tokens.source_tokens.token_texts, i)
+		last := offsets[i] + name.size()
+		if load_integer(tokens.source_tokens.token_kinds, i) == token_kind_identifier() && (offset < last || completion && offset == last)
+			word = i
+			previous = i - 1
+			start = offsets[i]
+			finish = last
+			break
+		end
+		if offsets[i] < offset
+			previous = i
+		end
+		i += 1
+	end
+	return LspCursor.new(offsets: offsets, tokens: tokens, word: word, previous: previous, start: start, finish: finish)
+end
+
+def lsp_spelling(cursor: LspCursor, index: Integer): String
+	return index >= 0 && index < cursor.offsets.size() ? load_string(cursor.tokens.source_tokens.token_texts, index) : ""
+end
+
+def lsp_syntax_token(cursor: LspCursor, index: Integer, spelling: String): Boolean
+	return index >= 0 && index < cursor.offsets.size() && load_integer(cursor.tokens.source_tokens.token_kinds, index) == token_kind_symbol() && lsp_spelling(cursor, index) == spelling
+end
+
+def lsp_candidate(mut items: Hash<String, String>, name: String, kind: Integer, detail: String, insertion: String, range: String, prefix: String)
+	if name != "" && string_starts_with(name, prefix) && !items.key?(name)
+		items[name] = "{\"label\":" + package_json_quote(name) + ",\"kind\":" + integer_string(kind) + ",\"detail\":" + package_json_quote(detail) + ",\"textEdit\":{\"range\":" + range + ",\"newText\":" + package_json_quote(insertion) + "}}"
+	end
+end
+
+def lsp_candidates(mut state: CompilerState, owner: Integer, bindings: Hash<String, String>, member: Boolean, receiver: String, prefix: String, range: String, incomplete: Boolean): String
+	mut items: Hash<String, String> := {}
+	catalog := state.declarations
+	if member && bindings.key?(receiver)
+		record_id := find_record_type(state, bindings[receiver])
+		if record_id >= 0
+			start := load_integer(catalog.record_field_starts, record_id)
+			mut i := start
+			while i < start + load_integer(catalog.record_field_counts, record_id)
+				name := load_string(catalog.field_names, i)
+				lsp_candidate(items, name, 5, type_display(state, load_string(catalog.field_types, i)), name, range, prefix)
+				i += 1
+			end
+		end
+	elsif !member
+		bindings.keys().each do |name|
+			lsp_candidate(items, name, 6, type_display(state, bindings[name]), name, range, prefix)
+		end
+		mut names: Array<String> := []
+		mut i := 0
+		while i < catalog.function_count[0]
+			if load_integer(catalog.function_modules, i) == owner
+				names.push(load_string(catalog.function_names, i))
+			end
+			i += 1
+		end
+		i = 0
+		while i < catalog.record_count[0]
+			if load_integer(catalog.record_modules, i) == owner
+				names.push(load_string(catalog.record_names, i))
+			end
+			i += 1
+		end
+		graph := state.module_graph
+		start := load_integer(graph.module_import_starts, owner)
+		i = start
+		while i < start + load_integer(graph.module_import_counts, owner)
+			names.push(load_string(graph.import_symbols, i))
+			i += 1
+		end
+		names.each do |name|
+			if name != "" && string_starts_with(name, prefix) && !items.key?(name)
+				function := find_visible_function(state, owner, name)
+				if function >= 0
+					insertion := load_integer(catalog.function_parameter_counts, function) == 0 ? name + "()" : name
+					lsp_candidate(items, name, 3, repl_function_detail(state, function), insertion, range, prefix)
+				elsif find_visible_record(state, owner, name) >= 0
+					lsp_candidate(items, name, 7, "record " + name, name, range, prefix)
+				end
+			end
+		end
+	end
+	mut sorted: Array<String> := []
+	items.keys().sort().each { |key| sorted.push(items[key]) }
+	return "{\"isIncomplete\":" + (incomplete ? "true" : "false") + ",\"items\":[" + sorted.join(",") + "]}"
+end
+
+def lsp_hover_detail(mut state: CompilerState, owner: Integer, types: Hash<String, String>, member: Boolean, receiver: String, name: String): String
+	if member
+		if types.key?(receiver)
+			record_id := find_record_type(state, types[receiver])
+			if record_id >= 0
+				field := find_field(state, record_id, name)
+				if field >= 0
+					return name + ": " + type_display(state, load_string(state.declarations.field_types, field))
+				end
+			end
+		end
+		return ""
+	end
+	if types.key?(name)
+		return name + ": " + type_display(state, types[name])
+	end
+	if find_visible_record(state, owner, name) >= 0
+		return "record " + name
+	end
+	function := find_visible_function(state, owner, name)
+	return function >= 0 ? repl_function_detail(state, function) : ""
+end
+
+# Walk lexer delimiters backwards so nested argument lists, array/hash
+# literals, comments and quoted commas never advance the outer parameter.
+def lsp_call_help(mut state: CompilerState, owner: Integer, cursor: LspCursor, offset: Integer): String
+	mut i := cursor.offsets.size() - 1
+	mut depth := 0
+	mut argument := 0
+	mut keyword := ""
+	while i >= 0
+		if cursor.offsets[i] < offset && load_integer(cursor.tokens.source_tokens.token_kinds, i) == token_kind_symbol()
+			symbol := lsp_spelling(cursor, i)
+			if symbol == ")" || symbol == "]" || symbol == "}"
+				depth += 1
+			elsif symbol == "(" || symbol == "[" || symbol == "{"
+				if depth == 0
+					if symbol == "("
+						break
+					end
+					return "null"
+				end
+				depth -= 1
+			elsif depth == 0 && symbol == ","
+				argument += 1
+			elsif depth == 0 && argument == 0 && symbol == ":"
+				keyword = lsp_spelling(cursor, i - 1)
+			end
+		end
+		i -= 1
+	end
+	if i <= 0
+		return "null"
+	end
+	name := lsp_spelling(cursor, i - 1)
+	mut params: Array<String> := []
+	mut labels: Array<String> := []
+	mut label := ""
+	mut constructor := -1
+	if lsp_syntax_token(cursor, i - 2, ".")
+		if name == "new"
+			constructor = find_visible_record(state, owner, lsp_spelling(cursor, i - 3))
+		end
+		if constructor < 0
+			return "null"
+		end
+	end
+	mut start := 0
+	mut count := 0
+	catalog := state.declarations
+	if constructor >= 0
+		start = load_integer(catalog.record_field_starts, constructor)
+		count = load_integer(catalog.record_field_counts, constructor)
+	else
+		function := find_visible_function(state, owner, name)
+		if function < 0
+			return "null"
+		end
+		start = load_integer(catalog.function_parameter_starts, function)
+		count = load_integer(catalog.function_parameter_counts, function)
+		label = repl_function_detail(state, function)
+	end
+	mut n := 0
+	while n < count
+		slot := start + n
+		parameter := constructor >= 0 ? load_string(catalog.field_names, slot) : load_string(catalog.parameter_names, slot)
+		type_name := constructor >= 0 ? load_string(catalog.field_types, slot) : load_string(catalog.parameter_types, slot)
+		field := parameter + ": " + type_display(state, type_name)
+		if keyword == parameter
+			argument = n
+		end
+		labels.push(field)
+		params.push("{\"label\":" + package_json_quote(field) + "}")
+		n += 1
+	end
+	if constructor >= 0
+		label = "new(" + labels.join(", ") + "): " + load_string(catalog.record_names, constructor)
+	end
+	if count > 0 && argument >= count
+		argument = count - 1
+	end
+	return "{\"signatures\":[{\"label\":" + package_json_quote(label) + ",\"parameters\":[" + params.join(",") + "]}],\"activeSignature\":0,\"activeParameter\":" + integer_string(argument) + "}"
+end
+
+# Construct one temporary, parseable expression from the live line. The
+# receiver and its lexical scope keep their authored positions. Only the
+# query uses this overlay, including when the original buffer is invalid.
+def lsp_repair_expression(source: String, cursor: LspCursor, offset: Integer, completion: Boolean, member: Boolean): String
+	mut end_of_line := offset
+	while end_of_line < source.size() && source[end_of_line] != "\n"
+		end_of_line += 1
+	end
+	mut stack: Array<String> := []
+	mut i := 0
+	while i < cursor.offsets.size() && cursor.offsets[i] < end_of_line
+		if load_integer(cursor.tokens.source_tokens.token_kinds, i) == token_kind_symbol()
+			symbol := lsp_spelling(cursor, i)
+			if symbol == "("
+				stack.push(")")
+			elsif symbol == "["
+				stack.push("]")
+			elsif symbol == "{"
+				stack.push("}")
+			elsif !stack.empty?() && symbol == stack[stack.size() - 1]
+				stack.pop()
+			end
+		end
+		i += 1
+	end
+	mut closers := ""
+	while !stack.empty?()
+		closers += stack[stack.size() - 1]
+		stack.pop()
+	end
+	mut start := offset
+	mut finish := offset
+	mut replacement := ""
+	if completion && member
+		start = cursor.offsets[cursor.previous]
+		finish = cursor.finish
+	elsif completion && cursor.word >= 0
+		start = cursor.start
+		finish = cursor.finish
+		replacement = "nil"
+	end
+	return compiler_source_slice(source, 0, start) + replacement + compiler_source_slice(source, finish, end_of_line) + closers + compiler_source_slice(source, end_of_line, source.size())
+end
+
+def lsp_semantic(mut workspace: LspWorkspace, method: String, path: String, line: Integer, column: Integer): String
+	completion := method == "textDocument/completion"
+	empty := completion ? "{\"items\":[],\"isIncomplete\":false}" : "null"
+	if !lsp_owns(workspace, path)
+		return empty
+	end
+	source := lsp_source(workspace, path)
+	offset := lsp_offset(source, line, column)
+	if offset < 0
+		return empty
+	end
+	cursor := lsp_cursor(source, offset, completion)
+	member := lsp_syntax_token(cursor, cursor.previous, ".")
+	receiver := lsp_spelling(cursor, cursor.previous - 1)
+	target := member ? cursor.previous - 1 : cursor.word
+	mut queries: Array<CheckedScopeQuery> := []
+	mut bindings: Array<CheckedPresentation> := []
+	mut count := [0]
+	if target >= 0 && method != "textDocument/signatureHelp"
+		queries.push(CheckedScopeQuery.new(path: path, line: load_integer(cursor.tokens.source_tokens.token_lines, target), column: load_integer(cursor.tokens.source_tokens.token_columns, target), bindings: bindings, count: count))
+	end
+	mut state := lsp_analyze(workspace, queries)
+	incomplete := has_diagnostic(state)
+	if incomplete && (completion && count[0] == 0 || method == "textDocument/signatureHelp")
+		repaired_text := lsp_repair_expression(source, cursor, offset, completion, member)
+		if repaired_text != source
+			mut overlay := workspace.text.dup()
+			overlay[path] = repaired_text
+			mut repaired := LspWorkspace.new(config: workspace.config, entry: workspace.entry, root: workspace.root, output: workspace.output, text: overlay, uris: workspace.uris, versions: workspace.versions, files: workspace.files.dup())
+			state = lsp_analyze(repaired, queries)
+		end
+	end
+	mut owner := 0
+	while owner < state.module_graph.module_count[0] && load_string(state.module_graph.module_files, owner) != path
+		owner += 1
+	end
+	if owner >= state.module_graph.module_count[0]
+		return empty
+	end
+	if method == "textDocument/signatureHelp"
+		return lsp_call_help(state, owner, cursor, offset)
+	end
+	mut types: Hash<String, String> := {}
+	mut slot := 0
+	while slot < count[0]
+		types[bindings[slot].name] = bindings[slot].type_name
+		slot += 1
+	end
+	range := lsp_range(source, cursor.start, cursor.finish)
+	if completion
+		prefix := compiler_source_slice(source, cursor.start, offset)
+		return lsp_candidates(state, owner, types, member, receiver, prefix, range, incomplete)
+	end
+	if cursor.word < 0
+		return "null"
+	end
+	detail := lsp_hover_detail(state, owner, types, member, receiver, lsp_spelling(cursor, cursor.word))
+	if detail == ""
+		return "null"
+	end
+	return "{\"contents\":{\"kind\":\"markdown\",\"value\":" + package_json_quote("```trb\n" + detail + "\n```") + "},\"range\":" + range + "}"
+end

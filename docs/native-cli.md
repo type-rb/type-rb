@@ -400,8 +400,16 @@ diagnostic. Fixing an error or closing the document clears its diagnostic.
 Go to Definition resolves visible record names and direct function calls
 to their declarations in project source, including imported files. Editor
 positions and incremental edits use UTF-16 units. Syntax highlighting and
-snippets come from the extension. Completion, hover, rename, Test Explorer,
-and debugger integration have separate acceptance work.
+snippets come from the extension.
+
+Hover over a local binding, a record field, or a visible record or function
+to see its checked type or declaration. Completion offers visible functions,
+records and local bindings, including the fields of a local record after a
+dot. Signature help shows the parameters of a direct function or record
+constructor and follows the active argument in a nested call. These operations
+use the current project and its unsaved buffers. References and rename,
+Test Explorer, debugger integration and additional completion providers have
+separate acceptance work.
 
 Format Document applies the same formatter as `trbn fmt` to the editor
 buffer. An incomplete expression or an already formatted document produces
