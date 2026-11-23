@@ -1,9 +1,10 @@
 # Releasing TypeRB
 
 The [v0.5.0 transition contract](native-transition.md) adds paired Native/Go
-release, complete feature-contract and repository/distribution handoff gates
-for the implementation switch. The procedure below describes the current
-Go-based distribution; it must be updated and rehearsed before that cutover.
+release and repository/distribution handoff gates for the alpha cutover. It
+also defines the complete feature-contract gates for the final release. The
+procedure below describes the existing stable Go-based distribution. The Go
+companion alpha has a separate release workflow in `type-rb/type-rb-go`.
 Existing tags and release assets remain immutable.
 
 TypeRB publishes prebuilt `trb` binaries for macOS and Linux on Arm64 and
