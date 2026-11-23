@@ -164,7 +164,8 @@ def parse_test_declaration(mut state: CompilerState, mut position: Array<Integer
 		previous += 1
 	end
 	item_index := state.parsed.tests.size()
-	state.parsed.tests.push(TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, parent: parent, name: name, full_name: full_name, function_id: -1))
+	state.parsed.tests.push(TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, closing_token: -1, parent: parent, name: name, full_name: full_name, function_id: -1))
+	mut function_id := -1
 	if kind == "describe"
 		mut children := 0
 		while !token_is(state, position[0], terminator) && !terminal_token(state, position[0])
@@ -182,12 +183,13 @@ def parse_test_declaration(mut state: CompilerState, mut position: Array<Integer
 		if !parse_statement_block_with_test_guard(state, position, true)
 			return false
 		end
-		function_id := test_case_function(state, origin, body, position[0])
-		state.parsed.tests[item_index] = TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, parent: parent, name: name, full_name: full_name, function_id: function_id)
+		function_id = test_case_function(state, origin, body, position[0])
 	end
+	closing_token := position[0]
 	if !expect(state, position, terminator)
 		return false
 	end
+	state.parsed.tests[item_index] = TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, closing_token: closing_token, parent: parent, name: name, full_name: full_name, function_id: function_id)
 	if !finish_statement(state, position)
 		return false
 	end

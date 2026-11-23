@@ -315,6 +315,100 @@ def semantic_session(executable, configured):
         print(f"{'configured' if configured else 'standalone'} editor semantic session passed")
 
 
+def discovery_session(executable):
+    # Compare complete items, including declaration IDs (UTF-8 bytes) and
+    # editor ranges (UTF-16). The emoji occurs both before and inside a case.
+    sample = ("# 🍋\nimport { describe, expect, test } from trb/std/test\n"
+              'describe("Totals") do\n\ttest("same") { expect("🍋").to_equal("🍋") }\nend\n')
+
+    def expected(path, source, name):
+        def point(index):
+            before = source[:index]
+            return {"line": before.count("\n"),
+                    "character": len(before.rsplit("\n", 1)[-1].encode("utf-16-le")) // 2}
+
+        suite_start = source.index('describe("')
+        case_start = source.index('test("')
+        suite_id = f"{path}:{len(source[:suite_start].encode())}"
+        return [{"id": suite_id, "kind": "suite", "name": "Totals", "fullName": "Totals",
+                 "uri": path.as_uri(), "range": {"start": point(suite_start),
+                                                 "end": point(source.rindex("end") + 3)}},
+                {"id": f"{path}:{len(source[:case_start].encode())}", "parentId": suite_id,
+                 "kind": "test", "name": name, "fullName": "Totals / " + name,
+                 "uri": path.as_uri(), "range": {"start": point(case_start),
+                                                 "end": point(source.rindex("}") + 1)}}]
+
+    with tempfile.TemporaryDirectory(prefix="trb-test-discovery-") as tmp:
+        root = Path(tmp).resolve()
+        project, other = root / "first", root / "other"
+        project.mkdir()
+        other.mkdir()
+        main, _, args = fixture(project, True)
+        sibling, _, _ = fixture(other, True)
+        (sibling.parent / "foreign_test.trb").write_text(sample)
+        first, second = main.parent / "one_test.trb", main.parent / "two_test.trb"
+        first.write_text(sample)
+        (main.parent / "decoy_test.trb").write_text(sample.replace(
+            "import { describe, expect, test } from trb/std/test", "# names without test imports"))
+        with server([executable, "lsp", *args], project) as client:
+            client.request("initialize", {"capabilities": {}}, 1)
+            client.send("initialized", {})
+            request_id = 2
+
+            def verify(want):
+                nonlocal request_id
+                deadline = time.monotonic() + 5
+                while True:
+                    request_id += 1
+                    rows = client.request("typerb/discoverTests", {}, request_id)
+                    if sorted(rows, key=lambda item: item["id"]) == sorted(want, key=lambda item: item["id"]):
+                        return
+                    if time.monotonic() >= deadline:
+                        raise AssertionError((want, rows))
+                    time.sleep(0.1)
+
+            def watched(kind):
+                client.send("workspace/didChangeWatchedFiles", {
+                    "changes": [{"uri": second.as_uri(), "type": kind}]})
+
+            one = expected(first, sample, "same")
+            verify(one)
+            second.write_text(sample)
+            watched(1)
+            verify(one + expected(second, sample, "same"))
+            changed = sample.replace('"same"', '"updated"')
+            second.write_text(changed)
+            watched(2)
+            verify(one + expected(second, changed, "updated"))
+            edited = changed.replace('"updated"', '"unsaved"')
+            client.send("textDocument/didOpen", {"textDocument": {
+                "uri": second.as_uri(), "languageId": "trb", "version": 1, "text": edited}})
+            verify(one + expected(second, edited, "unsaved"))
+            client.send("textDocument/didClose", {"textDocument": {"uri": second.as_uri()}})
+            verify(one + expected(second, changed, "updated"))
+            second.unlink()
+            watched(3)
+            verify(one)
+            nested = sample.replace('describe("Totals") do', 'describe("Outer") do\n\tdescribe("Inner") do') + "end\n"
+            second.write_text(nested)
+            watched(1)
+            deadline = time.monotonic() + 5
+            while True:
+                request_id += 1
+                rows = [row for row in client.request("typerb/discoverTests", {}, request_id)
+                        if row["uri"] == second.as_uri()]
+                if [row["fullName"] for row in rows] == ["Outer", "Outer / Inner", "Outer / Inner / same"]:
+                    break
+                if time.monotonic() >= deadline:
+                    raise AssertionError(rows)
+                time.sleep(0.1)
+            assert rows[2]["parentId"] == rows[1]["id"] and rows[1]["parentId"] == rows[0]["id"]
+            client.request("shutdown", None, 100000)
+            client.send("exit", None)
+            assert client.proc.wait(timeout=5) == 0
+        print("configured editor test discovery, refresh and project isolation passed")
+
+
 def extension_host(executable, vscode, extension):
     with tempfile.TemporaryDirectory(prefix="trb-editor-host-") as tmp:
         stage = Path(tmp).resolve()
@@ -348,5 +442,6 @@ if __name__ == "__main__":
     for configured in (True, False):
         exercise(args.executable.resolve(), configured)
         semantic_session(args.executable.resolve(), configured)
+    discovery_session(args.executable.resolve())
     if args.vscode:
         extension_host(args.executable.resolve(), args.vscode.resolve(), args.extension.resolve())

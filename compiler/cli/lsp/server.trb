@@ -5,6 +5,7 @@ import { compiler_source_slice } from frontend/syntax/lexer
 import { cli_absolute, cli_error, cli_find_config } from main
 import { native_cli_cwd } from host
 import { lsp_offset, lsp_range, lsp_uri_path } from lsp/positions
+import { lsp_discover_tests } from lsp/tests
 import { lsp_error, lsp_field, lsp_id, lsp_integer, lsp_read, lsp_result, lsp_send, lsp_text } from lsp/protocol
 import { lsp_semantic } from lsp/semantics
 import { LspWorkspace, lsp_analyze, lsp_definition, lsp_diagnostics, lsp_document_uri, lsp_files, lsp_owns, lsp_source } from lsp/workspace
@@ -195,6 +196,8 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 				lsp_analyze(workspace)
 			end
 			ok = lsp_result(id, lsp_files(workspace))
+		elsif method == "typerb/discoverTests"
+			ok = lsp_result(id, lsp_discover_tests(workspace))
 		elsif method == "textDocument/formatting"
 			doc := lsp_field(params, "textDocument")
 			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))

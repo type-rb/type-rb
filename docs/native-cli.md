@@ -407,9 +407,14 @@ to see its checked type or declaration. Completion offers visible functions,
 records and local bindings, including the fields of a local record after a
 dot. Signature help shows the parameters of a direct function or record
 constructor and follows the active argument in a nested call. These operations
-use the current project and its unsaved buffers. References and rename,
-Test Explorer, debugger integration and additional completion providers have
-separate acceptance work.
+use the current project and its unsaved buffers. References, rename, debugger
+integration and additional completion providers have separate acceptance work.
+
+For a configured project, `typerb/discoverTests` lists suites and cases
+with their parent identities, file URIs and declaration ranges. Project
+and file runs use the ordinary `test --reporter json` command. Native
+supports file and directory selection. Test-name selection is
+[deferred for v0.5](https://github.com/type-rb/type-rb-native/issues/643).
 
 Format Document applies the same formatter as `trbn fmt` to the editor
 buffer. An incomplete expression or an already formatted document produces
