@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   release:
+    if: github.repository == 'type-rb/type-rb' && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

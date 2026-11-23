@@ -1,0 +1,77 @@
+name: Go companion release
+
+on:
+  push:
+    tags:
+      - "v0.5.0-alpha.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-companion-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'type-rb/type-rb-go'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: ruby/setup-ruby@v1
+      - uses: oven-sh/setup-bun@v2
+      - run: go test ./...
+      - name: Package and verify the Go companion
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^0\.5\.0-alpha\.[1-9][0-9]*$ ]]
+          ./scripts/package-release.sh "$version" dist trbg
+          jq -n \
+            --arg version "$version" \
+            --arg revision "$GITHUB_SHA" \
+            --arg manifest "$(sha256sum contracts/v0.5/manifest.json | cut -d ' ' -f1)" \
+            --arg toolchain "$(go env GOVERSION)" \
+            '{implementation:"go",version:$version,revision:$revision,contractSha256:$manifest,toolchain:$toolchain}' \
+            > dist/build-info.json
+          (
+            cd dist
+            sha256sum -c checksums.txt
+            tar -xzf "trbg_${version}_linux_amd64.tar.gz"
+            test "$(./trbg --version)" = "$version"
+            test "$(printf '40 + 2\n:quit\n' | ./trbg repl)" = "42 : Integer"
+            rm trbg LICENSE
+          )
+      - uses: actions/upload-artifact@v6
+        with:
+          name: go-companion
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: go-companion
+          path: dist
+      - name: Publish immutable prerelease archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c checksums.txt
+          gh release create "$GITHUB_REF_NAME" trbg_*.tar.gz checksums.txt build-info.json \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "Go companion ${GITHUB_REF_NAME}" \
+            --notes 'The Go compiler is distributed as `trbg` for Go, Ruby, and TypeScript source workflows.'
