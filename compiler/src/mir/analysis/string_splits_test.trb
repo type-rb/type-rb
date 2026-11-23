@@ -143,9 +143,9 @@ describe("MIR literal String split") do
 			if mode == 0
 				state.scalar_mir.string_splits[0] = []
 			elsif mode == 1
-				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction + 1, fragments: plan.fragments)
+				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction + 1, fragments: plan.fragments, first_field: -1, last_field: -1)
 			elsif mode == 2
-				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction, fragments: [])
+				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction, fragments: [], first_field: -1, last_field: -1)
 			elsif mode == 3
 				plan.fragments[0] = MirLiteralData.new(bytes: [98], points: 1)
 			else

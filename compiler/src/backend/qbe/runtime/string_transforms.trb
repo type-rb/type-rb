@@ -113,23 +113,46 @@ end
 # malformed bytes. A contiguous fragment cannot create a new multibyte sequence.
 # Reuse its byte length as the point count; other sources keep bounded decoding.
 # The lookahead pair shortcut is useful only when at least one point is wider.
-def emit_string_split_runtime(mut output: QbeOutput)
-	qbe_output_line(output, "\nfunction l $trbn_string_split(l %source, l %separator) {\n@start\n %separator_length_slot =l add %separator, 8\n %width =l loadl %separator_length_slot\n %empty =w ceql %width, 0\n jnz %empty, @failure, @prepare\n@failure\n call $trbn_fail(l $trbn_split_error, l 39)\n hlt")
+def emit_string_split_runtime(mut output: QbeOutput, selected_fields: Boolean)
+	mut signature := "function l $trbn_string_split(l %source, l %separator)"
+	if selected_fields
+		qbe_output_line(output, "\ndata $trbn_split_unused_field = align 8 { l 0, l 0, l 0, b 0 }")
+		signature = "function l $trbn_string_split_fields(l %source, l %separator, l %first_field, l %last_field)"
+	end
+	qbe_output_line(output, "\n" + signature + " {\n@start\n %separator_length_slot =l add %separator, 8\n %width =l loadl %separator_length_slot\n %empty =w ceql %width, 0\n jnz %empty, @failure, @prepare\n@failure\n call $trbn_fail(l $trbn_split_error, l 39)\n hlt")
 	qbe_output_line(output, "\n@prepare\n %result =l call $trbn_array_new(l $trbn_desc_array_managed)\n %first =l call $trbn_string_find_bytes(l %source, l %separator, l 0)\n %no_match =w csltl %first, 0\n jnz %no_match, @whole_source, @matched")
 	# With no delimiter, the sole element is the original immutable String.
 	qbe_output_line(output, "\n@whole_source\n call $trbn_array_push_paced(l %result, l %source)\n ret %result")
-	qbe_output_line(output, "\n@matched\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %points_slot =l add %source, 16\n %points =l loadl %points_slot\n %single_width =w ceql %length, %points\n %multibyte =w ceqw %single_width, 0\n %data =l add %source, 24\n %retained =l loadl $trbn_gc_temp_count\n %single_byte =w ceql %width, 1\n %separator_data =l add %separator, 24\n %separator_byte =w loadub %separator_data\n %ascii =w cultw %separator_byte, 128\n %ascii_byte =w and %single_byte, %ascii\n %paired =w and %ascii_byte, %multibyte\n jnz %paired, @lookahead, @general")
-	qbe_output_line(output, "\n@lookahead\n %after_first =l add %first, 1\n %second =l call $trbn_string_find_bytes(l %source, l %separator, l %after_first)\n %only_one =w csltl %second, 0\n jnz %only_one, @pair, @prefix")
-	qbe_output_line(output, "\n@pair\n %pair =l call $trbn_split_pair(l %source, l %first, l %result, l %retained)\n ret %pair")
-	qbe_output_line(output, "\n@prefix\n %prefix =l call $trbn_string_from_bytes(l %data, l %first)\n call $trbn_array_push_paced(l %result, l %prefix)\n call $trbn_gc_temp_reset(l %retained)\n jmp @loop")
+	qbe_output_line(output, "\n@matched\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %points_slot =l add %source, 16\n %points =l loadl %points_slot\n %single_width =w ceql %length, %points\n %multibyte =w ceqw %single_width, 0\n %data =l add %source, 24\n %retained =l loadl $trbn_gc_temp_count")
+	if selected_fields
+		qbe_output_line(output, " jmp @general")
+	else
+		qbe_output_line(output, " %single_byte =w ceql %width, 1\n %separator_data =l add %separator, 24\n %separator_byte =w loadub %separator_data\n %ascii =w cultw %separator_byte, 128\n %ascii_byte =w and %single_byte, %ascii\n %paired =w and %ascii_byte, %multibyte\n jnz %paired, @lookahead, @general")
+		qbe_output_line(output, "\n@lookahead\n %after_first =l add %first, 1\n %second =l call $trbn_string_find_bytes(l %source, l %separator, l %after_first)\n %only_one =w csltl %second, 0\n jnz %only_one, @pair, @prefix")
+		qbe_output_line(output, "\n@pair\n %pair =l call $trbn_split_pair(l %source, l %first, l %result, l %retained)\n ret %pair")
+		qbe_output_line(output, "\n@prefix\n %prefix =l call $trbn_string_from_bytes(l %data, l %first)\n call $trbn_array_push_paced(l %result, l %prefix)\n call $trbn_gc_temp_reset(l %retained)\n jmp @loop")
+	end
 	qbe_output_line(output, "\n@general\n jmp @loop")
-	qbe_output_line(output, "\n@loop\n %start =l phi @prefix %after_first, @general 0, @advance %next\n %match =l phi @prefix %second, @general %first, @advance %next_match\n %missing =w csltl %match, 0\n jnz %missing, @tail, @part")
+	if selected_fields
+		qbe_output_line(output, "\n@loop\n %start =l phi @general 0, @advance %next\n %match =l phi @general %first, @advance %next_match\n %field =l phi @general 0, @advance %next_field\n %missing =w csltl %match, 0\n %before =w csltl %field, %first_field\n %after =w csgtl %field, %last_field\n %unused =w or %before, %after\n jnz %unused, @append, @selected\n@selected\n jnz %missing, @tail, @part")
+	else
+		qbe_output_line(output, "\n@loop\n %start =l phi @prefix %after_first, @general 0, @advance %next\n %match =l phi @prefix %second, @general %first, @advance %next_match\n %missing =w csltl %match, 0\n jnz %missing, @tail, @part")
+	end
 	qbe_output_line(output, "\n@tail\n jmp @span\n@part\n jmp @span")
 	qbe_output_line(output, "\n@span\n %end =l phi @tail %length, @part %match\n %size =l sub %end, %start\n %from =l add %data, %start\n jnz %single_width, @known_count, @decode_count")
 	qbe_output_line(output, "\n@known_count\n %known =l call $trbn_split_fragment(l %from, l %size, l %size)\n jmp @append")
 	qbe_output_line(output, "\n@decode_count\n %decoded =l call $trbn_string_from_bytes(l %from, l %size)\n jmp @append")
-	qbe_output_line(output, "\n@append\n %text =l phi @known_count %known, @decode_count %decoded\n call $trbn_array_push_paced(l %result, l %text)\n call $trbn_gc_temp_reset(l %retained)\n jnz %missing, @finish, @advance")
-	qbe_output_line(output, "\n@advance\n %next =l add %end, %width\n %next_match =l call $trbn_string_find_bytes(l %source, l %separator, l %next)\n jmp @loop")
+	mut incoming := "@known_count %known, @decode_count %decoded"
+	if selected_fields
+		# Keep a valid immutable String in every slot for the ordinary Array tracer.
+		incoming += ", @loop $trbn_split_unused_field"
+	end
+	qbe_output_line(output, "\n@append\n %text =l phi " + incoming + "\n call $trbn_array_push_paced(l %result, l %text)\n call $trbn_gc_temp_reset(l %retained)\n jnz %missing, @finish, @advance")
+	qbe_output_line(output, "\n@advance")
+	if selected_fields
+		qbe_output_line(output, " %next_field =l add %field, 1")
+	end
+	qbe_output_line(output, " %next =l add %match, %width\n %next_match =l call $trbn_string_find_bytes(l %source, l %separator, l %next)\n jmp @loop")
 	qbe_output_line(output, "\n@finish\n ret %result\n}\n")
 end
 
@@ -137,7 +160,7 @@ def emit_string_transform_runtime(mut output: QbeOutput)
 	emit_string_split_pair_runtime(output)
 	qbe_output_line(output, "\ndata $trbn_split_error = { b \"panic: String split separator is empty\", b 10 }\ndata $trbn_replace_error = { b \"panic: String replacement pattern is empty\", b 10 }\n")
 	# Reuse lookahead matches on fallback: one byte search per fragment.
-	emit_string_split_runtime(output)
+	emit_string_split_runtime(output, false)
 	qbe_output_line(output, "\nfunction l $trbn_string_replace(l %source, l %pattern, l %replacement) {\n@start\n %pattern_length_slot =l add %pattern, 8\n %width =l loadl %pattern_length_slot\n %empty =w ceql %width, 0\n jnz %empty, @failure, @prepare\n@failure\n call $trbn_fail(l $trbn_replace_error, l 43)\n hlt\n@prepare\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %replacement_length_slot =l add %replacement, 8\n %replacement_length =l loadl %replacement_length_slot\n %data =l add %source, 24\n %replacement_data =l add %replacement, 24\n jmp @measure\n@measure\n %offset =l phi @prepare 0, @measured %next_offset\n %count =l phi @prepare 0, @measured %next_count\n %found =l call $trbn_string_find_bytes(l %source, l %pattern, l %offset)\n %done =w csltl %found, 0\n jnz %done, @size, @measured\n@measured\n %next_offset =l add %found, %width\n %next_count =l add %count, 1\n jmp @measure\n@size\n %unchanged =w ceql %count, 0\n jnz %unchanged, @original, @capacity\n@original\n ret %source\n@capacity\n %removed =l mul %count, %width\n %base =l sub %length, %removed\n %deletion =w ceql %replacement_length, 0\n jnz %deletion, @allocate, @growth\n@growth\n %room =l sub 9007199254740974, %base\n %maximum =l div %room, %replacement_length\n %too_large =w csgtl %count, %maximum\n jnz %too_large, @overflow, @allocate\n@overflow\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n@allocate\n %added =l mul %count, %replacement_length\n %size =l add %base, %added\n %payload =l add %size, 17\n %result =l call $trbn_string_alloc(l %payload)\n %result_length_slot =l add %result, 8\n storel %size, %result_length_slot\n %result_data =l add %result, 24\n jmp @copy\n@copy\n %start =l phi @allocate 0, @copied %next_start\n %position =l phi @allocate 0, @copied %next_position\n %match =l call $trbn_string_find_bytes(l %source, l %pattern, l %start)\n %missing =w csltl %match, 0\n jnz %missing, @tail, @part\n@tail\n jmp @span\n@part\n jmp @span\n@span\n %end =l phi @tail %length, @part %match\n %span =l sub %end, %start\n %from =l add %data, %start\n %target =l add %result_data, %position\n call $memcpy(l %target, l %from, l %span)\n %after_span =l add %position, %span\n jnz %missing, @finish, @copied\n@copied\n %replacement_target =l add %result_data, %after_span\n call $memcpy(l %replacement_target, l %replacement_data, l %replacement_length)\n %next_position =l add %after_span, %replacement_length\n %next_start =l add %end, %width\n jmp @copy\n@finish\n %terminator =l add %result_data, %size\n storeb 0, %terminator\n %points =l call $trbn_utf8_count(l %result_data, l %size)\n %points_slot =l add %result, 16\n storel %points, %points_slot\n ret %result\n}\n")
 end
 

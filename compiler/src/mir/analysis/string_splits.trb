@@ -2,6 +2,7 @@ import { mir_function_control } from mir/model/control
 import { mir_op_literal_widen, mir_op_singleton_literal, mir_op_string_literal, mir_op_string_split } from mir/model/instructions
 import { MirFunction, MirLiteralData, MirModule, MirStringSplit, MirValue } from mir/model/module
 import { mir_build_flow_with_values, mir_flow_blocks } from mir/analysis/flow
+import { mir_add_observed_split_fields } from mir/analysis/split_fields
 import { mir_string_literal_data } from mir/analysis/literal_data
 import { integer_string } from support/literals
 
@@ -109,6 +110,7 @@ def mir_function_string_splits(native_module: MirModule, function: MirFunction, 
 	if changed
 		return plans
 	end
+	mut dynamic_splits: Array<Integer> := []
 	mut static_bytes := 0
 	block_index = function.block_start
 	while block_index < function.block_start + function.block_count
@@ -127,15 +129,18 @@ def mir_function_string_splits(native_module: MirModule, function: MirFunction, 
 						bytes += fragment.bytes.size() + 40
 					end
 					if fragments.size() > 0 && static_bytes + bytes <= 16384
-						plans.push(MirStringSplit.new(instruction: index, fragments: fragments))
+						plans.push(MirStringSplit.new(instruction: index, fragments: fragments, first_field: -1, last_field: -1))
 						static_bytes += bytes
 					end
+				else
+					dynamic_splits.push(index)
 				end
 			end
 			index += 1
 		end
 		block_index += 1
 	end
+	mir_add_observed_split_fields(native_module, function, flow, values, dynamic_splits, plans)
 	return plans
 end
 
@@ -187,7 +192,7 @@ def mir_string_splits_equal(left: Array<MirStringSplit>, right: Array<MirStringS
 	while index < left.size()
 		a := left[index]
 		b := right[index]
-		if a.instruction != b.instruction || a.fragments.size() != b.fragments.size()
+		if a.instruction != b.instruction || a.fragments.size() != b.fragments.size() || a.first_field != b.first_field || a.last_field != b.last_field
 			return false
 		end
 		mut part := 0
