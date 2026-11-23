@@ -163,9 +163,10 @@ registry, or mock-generation magic. Tests use ordinary constructors,
 interfaces, and explicit fake implementations. Higher-level testing packages
 can build on this portable core without changing the runner protocol.
 
-The VS Code extension discovers the same suite hierarchy through `trb lsp`,
-shows it in Test Explorer, and supports running a project, suite, or individual
-case. Go projects can also debug those selections with ordinary `.trb`
+The VS Code extension discovers suites through `trb lsp` and groups them by
+file in Test Explorer. Run a project or a file to execute all its tests.
+Suite and case selections use the compiler's test-name filter when available.
+Go projects can also debug those selections with ordinary `.trb`
 breakpoints, stepping, and variable inspection through Delve. Test CodeLens
 actions use that same native Testing API and debugger integration.
 

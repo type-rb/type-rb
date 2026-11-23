@@ -470,6 +470,31 @@ end
 		}
 	});
 
+
+	test("refreshes file-scoped Test Explorer items with identical suite and case names", async () => {
+		const source = 'import { describe, expect, test } from trb/std/test\ndescribe("Totals") do\n\ttest("same") { expect(1).to_equal(1) }\nend\n';
+		const files = ["left_test.trb", "right_test.trb"].map((name) => vscode.Uri.file(
+			path.join(workspaceRoot, "apps", "worker", "src", name)
+		));
+		const items = (uri) => vscode.commands.executeCommand("vscode.testing.getTestsInFile", uri);
+		try {
+			for (const file of files) await vscode.workspace.fs.writeFile(file, Buffer.from(source));
+			for (const file of files) {
+				await waitFor(async () => (await items(file)).length === 3, file.fsPath);
+				const [group, suite, leaf] = (await items(file)).sort((a, b) => a.length - b.length);
+				assert.ok(group.at(-1).startsWith("file:"));
+				assert.deepEqual(suite.slice(0, -1), group);
+				assert.deepEqual(leaf.slice(0, -1), suite);
+				assert.ok(leaf.at(-1).includes(file.fsPath));
+			}
+			await vscode.workspace.fs.delete(files[1]);
+			await waitFor(async () => (await items(files[1])).length === 0, "deleted file disappears");
+			assert.equal((await items(files[0])).length, 3);
+		} finally {
+			for (const file of files) await rm(file.fsPath, { force: true });
+			await waitFor(async () => (await items(files[0])).length === 0, "removed files disappear");
+		}
+	});
 });
 
 async function replaceDocument(document, source) {

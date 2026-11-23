@@ -27,7 +27,7 @@ Language support for [TypeRB](https://github.com/type-rb/type-rb).
   through Visual Studio Code's Run and Debug interface
 - Source breakpoints, stepping, stack frames, and variable inspection for
   Go-mode projects and standalone file-root programs
-- Native Test Explorer discovery and execution for `*_test.trb` suites
+- Test Explorer groups suites by `*_test.trb` file. Project and file runs also work with compilers that support only path selection.
 - Test debugging with TypeRB breakpoints and variables for `mode: go`
 
 The extension discovers every `trbconfig.jsonc` in the opened workspace and
