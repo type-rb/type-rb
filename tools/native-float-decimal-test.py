@@ -31,15 +31,19 @@ HARNESS = r'''
 #include <string.h>
 extern uint64_t trbn_decimal_multiply_high(uint64_t, uint64_t);
 extern void *trbn_float_to_string(double);
+struct string {
+  uint64_t header, bytes, points;
+  char data[];
+};
 static void *allocation;
-void *trbn_string_from_bytes(const void *data, int64_t size) {
-  uint64_t *value = malloc(24 + (size_t)size + 1);
-  if (!value) abort();
-  value[0] = 0; value[1] = (uint64_t)size; value[2] = (uint64_t)size;
-  memcpy((char *)value + 24, data, (size_t)size);
-  ((char *)value)[24 + size] = 0;
-  allocation = value;
-  return value;
+static size_t allocated_bytes;
+void *trbn_string_alloc(int64_t payload) {
+  if (payload < 0) abort();
+  allocated_bytes = sizeof(uint64_t) + (size_t)payload;
+  allocation = malloc(allocated_bytes);
+  if (!allocation) abort();
+  memset(allocation, 0xa5, allocated_bytes);
+  return allocation;
 }
 _Noreturn void trbn_fail(const char *text, int64_t size) {
   fwrite(text, 1, (size_t)size, stderr); exit(1);
@@ -53,8 +57,10 @@ int main(int argc, char **argv) {
   } else if (strcmp(argv[1], "floats") == 0) {
     while (scanf("%" SCNx64, &left) == 1) {
       double input; memcpy(&input, &left, sizeof(input));
-      uint64_t *value = trbn_float_to_string(input);
-      fwrite((char *)value + 24, 1, (size_t)value[1], stdout); putchar('\n');
+      struct string *value = trbn_float_to_string(input);
+      if (allocation && (value != allocation || value->bytes + sizeof(*value) + 1 != allocated_bytes)) abort();
+      if (value->bytes != value->points || value->data[value->bytes] != 0) abort();
+      fwrite(value->data, 1, (size_t)value->bytes, stdout); putchar('\n');
       free(allocation); allocation = NULL;
     }
   } else return 2;

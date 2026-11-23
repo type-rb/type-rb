@@ -4,8 +4,8 @@ import { emit_decimal_digits } from backend/qbe/runtime/decimal_digits
 
 # Direct shortest binary64 conversion returns integer digits and a decimal power.
 # Expand those digits without converting the binary Float a second time.
-# The 32-byte digit buffer and 384-byte fixed-output buffer cover all finite
-# binary64 values, including the smallest subnormal and its sign.
+# The digit buffer holds the coefficient. Decimal-point placement determines
+# the exact size of the final ASCII String, including for subnormals.
 def emit_float_string_runtime(mut output: QbeOutput)
 	emit_float_decimal_runtime(output)
 	qbe_output_line(output, "data $trbn_float_zero = align 8 { l 0, l 3, l 3, b \"0.0\", b 0 }\ndata $trbn_float_nan = align 8 { l 0, l 3, l 3, b \"NaN\", b 0 }\ndata $trbn_float_infinity = align 8 { l 0, l 8, l 8, b \"Infinity\", b 0 }\ndata $trbn_float_negative_infinity = align 8 { l 0, l 9, l 9, b \"-Infinity\", b 0 }\ndata $trbn_float_format_error = { b \"panic: Float formatting failed\", b 10 }\nfunction l $trbn_float_to_string(d %value) {\n")
@@ -27,24 +27,17 @@ def emit_float_string_runtime(mut output: QbeOutput)
 	emit_decimal_digits(output)
 	qbe_output_line(output, " %count =l sub %end, %decimal_start\n %point =l add %count, %power\n %sign =l extuw %negative\n %result =l call $trbn_decimal_fixed(l %decimal_start, l %count, l %point, l %sign)\n ret %result\n")
 	qbe_output_line(output, "@fail\n call $trbn_fail(l $trbn_float_format_error, l 31)\n hlt\n}\nfunction l $trbn_decimal_fixed(l %digits, l %count, l %point, l %negative) {\n")
-	qbe_output_line(output, "@start\n %buffer =l alloc8 384\n storeb 45, %buffer\n %fraction =w cslel %point, 0\n jnz %fraction, @fraction, @integer\n")
-	qbe_output_line(output, "@fraction\n %zero_address =l add %buffer, %negative\n storeb 48, %zero_address\n %dot_address =l add %zero_address, 1\n storeb 46, %dot_address\n %fraction_cursor =l add %negative, 2\n jmp @loop_start\n")
-	qbe_output_line(output, "@integer\n %extended =w csgtl %point, %count\n jnz %extended, @extended, @short\n")
-	qbe_output_line(output, "@extended\n jmp @integer_ready\n")
-	qbe_output_line(output, "@short\n jmp @integer_ready\n")
-	qbe_output_line(output, "@integer_ready\n %integer_end =l phi @extended %point, @short %count\n jmp @loop_start\n")
-	qbe_output_line(output, "@loop_start\n %initial =l phi @fraction %point, @integer_ready 0\n %end =l phi @fraction %count, @integer_ready %integer_end\n %initial_cursor =l phi @fraction %fraction_cursor, @integer_ready %negative\n jmp @loop\n")
-	qbe_output_line(output, "@loop\n %index =l phi @loop_start %initial, @next %next_index\n %cursor =l phi @loop_start %initial_cursor, @next %next_cursor\n %done =w csgel %index, %end\n jnz %done, @done, @dot_check\n")
-	qbe_output_line(output, "@dot_check\n %at_point =w ceql %index, %point\n %positive_point =w csgtl %point, 0\n %needs_dot =w and %at_point, %positive_point\n jnz %needs_dot, @dot, @no_dot\n")
-	qbe_output_line(output, "@dot\n %dot_slot =l add %buffer, %cursor\n storeb 46, %dot_slot\n %after_dot =l add %cursor, 1\n jmp @digit\n")
-	qbe_output_line(output, "@no_dot\n jmp @digit\n")
-	qbe_output_line(output, "@digit\n %position =l phi @dot %after_dot, @no_dot %cursor\n %below =w csltl %index, 0\n %above =w csgel %index, %count\n %padding =w or %below, %above\n jnz %padding, @padding, @copy\n")
-	qbe_output_line(output, "@padding\n jmp @store\n")
-	qbe_output_line(output, "@copy\n %source =l add %digits, %index\n %value =w loadub %source\n jmp @store\n")
-	qbe_output_line(output, "@store\n %character =w phi @padding 48, @copy %value\n %target =l add %buffer, %position\n storeb %character, %target\n jmp @next\n")
-	qbe_output_line(output, "@next\n %next_cursor =l add %position, 1\n %next_index =l add %index, 1\n jmp @loop\n")
-	qbe_output_line(output, "@done\n %whole =w csgel %point, %count\n jnz %whole, @whole, @fraction_done\n")
-	qbe_output_line(output, "@whole\n %decimal =l add %buffer, %cursor\n storeb 46, %decimal\n %zero =l add %decimal, 1\n storeb 48, %zero\n %whole_length =l add %cursor, 2\n jmp @finish\n")
-	qbe_output_line(output, "@fraction_done\n jmp @finish\n")
-	qbe_output_line(output, "@finish\n %length =l phi @whole %whole_length, @fraction_done %cursor\n %result =l call $trbn_string_from_bytes(l %buffer, l %length)\n ret %result\n}\n\n")
+	qbe_output_line(output, "@start\n %fraction =w cslel %point, 0\n %whole =w csgel %point, %count\n jnz %fraction, @leading_zeros, @positive_point\n")
+	qbe_output_line(output, "@leading_zeros\n %prefix =l sub 2, %point\n %fraction_length =l add %prefix, %count\n jmp @allocate\n")
+	qbe_output_line(output, "@positive_point\n jnz %whole, @trailing_zeros, @interior_point\n")
+	qbe_output_line(output, "@trailing_zeros\n %whole_length =l add %point, 2\n jmp @allocate\n")
+	qbe_output_line(output, "@interior_point\n %split_length =l add %count, 1\n jmp @allocate\n")
+	# The three layouts contain only ASCII, so byte and codepoint lengths agree.
+	# A positive number writes its first digit over the reserved sign position.
+	qbe_output_line(output, "@allocate\n %unsigned_length =l phi @leading_zeros %fraction_length, @trailing_zeros %whole_length, @interior_point %split_length\n %length =l add %unsigned_length, %negative\n %size =l add %length, 17\n %result =l call $trbn_string_alloc(l %size)\n %length_address =l add %result, 8\n storel %length, %length_address\n %points_address =l add %result, 16\n storel %length, %points_address\n %data =l add %result, 24\n storeb 45, %data\n %start_digits =l add %data, %negative\n jnz %fraction, @write_fraction, @write_integer_part\n")
+	qbe_output_line(output, "@write_fraction\n storeb 48, %start_digits\n %leading_dot =l add %start_digits, 1\n storeb 46, %leading_dot\n %padding =l add %start_digits, 2\n %zeros =l sub 0, %point\n call $memset(l %padding, w 48, l %zeros)\n %first_digit =l add %padding, %zeros\n call $memcpy(l %first_digit, l %digits, l %count)\n jmp @finish\n")
+	qbe_output_line(output, "@write_integer_part\n jnz %whole, @write_whole, @write_split\n")
+	qbe_output_line(output, "@write_split\n call $memcpy(l %start_digits, l %digits, l %point)\n %middle_dot =l add %start_digits, %point\n storeb 46, %middle_dot\n %tail =l add %middle_dot, 1\n %tail_digits =l add %digits, %point\n %tail_count =l sub %count, %point\n call $memcpy(l %tail, l %tail_digits, l %tail_count)\n jmp @finish\n")
+	qbe_output_line(output, "@write_whole\n call $memcpy(l %start_digits, l %digits, l %count)\n %pad_start =l add %start_digits, %count\n %pad_size =l sub %point, %count\n call $memset(l %pad_start, w 48, l %pad_size)\n %end_dot =l add %start_digits, %point\n storeb 46, %end_dot\n %end_zero =l add %end_dot, 1\n storeb 48, %end_zero\n jmp @finish\n")
+	qbe_output_line(output, "@finish\n %terminator =l add %data, %length\n storeb 0, %terminator\n ret %result\n}\n\n")
 end
