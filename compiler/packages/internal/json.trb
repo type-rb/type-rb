@@ -981,6 +981,146 @@ def _escape(text: String): String
 	return _escape_fragments(bytes)
 end
 
+# Index the canonical JSON spelling of each ASCII byte directly.
+JSON_ASCII_FRAGMENTS := [
+	# 0x00–0x0f
+	"\\u0000",
+	"\\u0001",
+	"\\u0002",
+	"\\u0003",
+	"\\u0004",
+	"\\u0005",
+	"\\u0006",
+	"\\u0007",
+	"\\b",
+	"\\t",
+	"\\n",
+	"\\u000b",
+	"\\f",
+	"\\r",
+	"\\u000e",
+	"\\u000f",
+	# 0x10–0x1f
+	"\\u0010",
+	"\\u0011",
+	"\\u0012",
+	"\\u0013",
+	"\\u0014",
+	"\\u0015",
+	"\\u0016",
+	"\\u0017",
+	"\\u0018",
+	"\\u0019",
+	"\\u001a",
+	"\\u001b",
+	"\\u001c",
+	"\\u001d",
+	"\\u001e",
+	"\\u001f",
+	# 0x20–0x2f
+	" ",
+	"!",
+	"\\\"",
+	"#",
+	"$",
+	"%",
+	"\\u0026",
+	"'",
+	"(",
+	")",
+	"*",
+	"+",
+	",",
+	"-",
+	".",
+	"/",
+	# 0x30–0x3f
+	"0",
+	"1",
+	"2",
+	"3",
+	"4",
+	"5",
+	"6",
+	"7",
+	"8",
+	"9",
+	":",
+	";",
+	"\\u003c",
+	"=",
+	"\\u003e",
+	"?",
+	# 0x40–0x4f
+	"@",
+	"A",
+	"B",
+	"C",
+	"D",
+	"E",
+	"F",
+	"G",
+	"H",
+	"I",
+	"J",
+	"K",
+	"L",
+	"M",
+	"N",
+	"O",
+	# 0x50–0x5f
+	"P",
+	"Q",
+	"R",
+	"S",
+	"T",
+	"U",
+	"V",
+	"W",
+	"X",
+	"Y",
+	"Z",
+	"[",
+	"\\\\",
+	"]",
+	"^",
+	"_",
+	# 0x60–0x6f
+	"`",
+	"a",
+	"b",
+	"c",
+	"d",
+	"e",
+	"f",
+	"g",
+	"h",
+	"i",
+	"j",
+	"k",
+	"l",
+	"m",
+	"n",
+	"o",
+	# 0x70–0x7f
+	"p",
+	"q",
+	"r",
+	"s",
+	"t",
+	"u",
+	"v",
+	"w",
+	"x",
+	"y",
+	"z",
+	"{",
+	"|",
+	"}",
+	"~",
+	"\x7f",
+]
+
 # The caller has already classified the input; do not repeat that scan.
 def _escape_fragments(bytes: Bytes): String
 	octets := Octets.table()
@@ -988,53 +1128,29 @@ def _escape_fragments(bytes: Bytes): String
 	mut index := 0
 	while index < bytes.size()
 		octet := bytes.at(index)
-		if octet >= 128
-			width := _byte_width(bytes, index, bytes.size())
-			if width == 1
-				# Preserve String#chars normalization before JSON quoting.
-				fragments.push("\ufffd")
-			elsif octet == 226 && width == 3 && bytes.at(index + 1) == 128 && bytes.at(index + 2) == 168
-				fragments.push("\\u2028")
-			elsif octet == 226 && width == 3 && bytes.at(index + 1) == 128 && bytes.at(index + 2) == 169
-				fragments.push("\\u2029")
-			else
-				# Valid UTF-8 can be joined from shared octets without allocating
-				# a character String and Bytes value for every code point.
-				mut offset := 0
-				while offset < width
-					fragments.push(octets[bytes.at(index + offset)])
-					offset += 1
-				end
-			end
-			index += width
+		if octet < 128
+			fragments.push(JSON_ASCII_FRAGMENTS[octet])
+			index += 1
 			next
 		end
-		if octet == 34
-			fragments.push("\\\"")
-		elsif octet == 92
-			fragments.push("\\\\")
-		elsif octet == 8
-			fragments.push("\\b")
-		elsif octet == 12
-			fragments.push("\\f")
-		elsif octet == 10
-			fragments.push("\\n")
-		elsif octet == 13
-			fragments.push("\\r")
-		elsif octet == 9
-			fragments.push("\\t")
-		elsif octet == 60
-			fragments.push("\\u003c")
-		elsif octet == 62
-			fragments.push("\\u003e")
-		elsif octet == 38
-			fragments.push("\\u0026")
-		elsif octet < 32
-			fragments.push("\\u00" + "0123456789abcdef"[octet / 16] + "0123456789abcdef"[octet % 16])
+		width := _byte_width(bytes, index, bytes.size())
+		if width == 1
+			# Preserve String#chars normalization before JSON quoting.
+			fragments.push("\ufffd")
+		elsif octet == 226 && width == 3 && bytes.at(index + 1) == 128 && bytes.at(index + 2) == 168
+			fragments.push("\\u2028")
+		elsif octet == 226 && width == 3 && bytes.at(index + 1) == 128 && bytes.at(index + 2) == 169
+			fragments.push("\\u2029")
 		else
-			fragments.push(octets[octet])
+			# Valid UTF-8 can be joined from shared octets without allocating
+			# a character String and Bytes value for every code point.
+			mut offset := 0
+			while offset < width
+				fragments.push(octets[bytes.at(index + offset)])
+				offset += 1
+			end
 		end
-		index += 1
+		index += width
 	end
 	fragments.push("\"")
 	return fragments.join("")
