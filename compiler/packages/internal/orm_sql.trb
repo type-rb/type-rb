@@ -162,24 +162,42 @@ module OrmSql
 		row_limit: Integer?
 		row_offset: Integer?
 	end
+	enum Subquery<T>
+		Projected(query: Selection, projection: String)
+	end
 end
 
 def selection(scope: Integer): OrmSql::Selection
 	return OrmSql::Selection.new(scope: scope, predicate: "", values: [], ordering: "", row_limit: nil, row_offset: nil)
 end
 
-def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
-	mut predicate := query.predicate
-	predicate += predicate.empty?() ? " WHERE " : " AND "
+def _filter_clause(query: OrmSql::Selection, clause: String, parameters: Array<SQLite::Parameter>): OrmSql::Selection
+	predicate := query.predicate + (query.predicate.empty?() ? " WHERE " : " AND ") + clause
 	mut values := query.values.dup()
+	parameters.each { |value| values.push(value) }
+	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
 	case value
 	when SQLite::Parameter::Null
-		predicate += column + (operator == "!=" ? " IS NOT NULL" : " IS NULL")
+		return _filter_clause(query, column + (operator == "!=" ? " IS NOT NULL" : " IS NULL"), [])
 	else
-		predicate += column + " " + operator + " ?"
-		values.push(value)
+		return _filter_clause(query, column + " " + operator + " ?", [value])
 	end
-	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def filter_range(query: OrmSql::Selection, column: String, first: Integer, last: Integer, exclusive: Boolean): OrmSql::Selection
+	clause := "(" + column + " >= ? AND " + column + (exclusive ? " < ?)" : " <= ?)")
+	return _filter_clause(query, clause, [SQLite::Parameter::Integer(first), SQLite::Parameter::Integer(last)])
+end
+
+def filter_subquery(query: OrmSql::Selection, column: String, operator: String, inner: OrmSql::Selection, projection: String): OrmSql::Selection
+	if inner.scope != 0 && inner.scope != query.scope
+		return Runtime.fail<OrmSql::Selection>("ORM subquery transaction scope must match the base query")
+	end
+	clause := column + (operator == "!=" ? " NOT IN (" : " IN (") + read_statement(inner, projection, false) + ")"
+	return _filter_clause(query, clause, inner.values)
 end
 
 def ordered(query: OrmSql::Selection, column: String, direction: String): OrmSql::Selection
@@ -220,8 +238,34 @@ def read_statement(query: OrmSql::Selection, project: String, first: Boolean): S
 end
 
 def read_rows(database: String, environment: String, query: OrmSql::Selection, projection: String, width: Integer, first: Boolean, failure: String = "database query failed"): Result<Array<Array<SQLite::Parameter>>, DbError>
+	return _read_page_rows(database, environment, query, read_statement(query, projection, first), width, failure)
+end
+
+def aggregate_value(database: String, environment: String, query: OrmSql::Selection, projection: String, expression: String): Result<SQLite::Parameter, DbError>
+	page := read_statement(query, projection, false)
+	rows := try _read_page_rows(database, environment, query, "SELECT " + expression + " FROM (" + page + ") AS trb_aggregate", 1, "database aggregate query failed")
+	if rows.empty?()
+		return Result<SQLite::Parameter, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database aggregate result was missing"))
+	end
+	return Result<SQLite::Parameter, DbError>::Ok(rows[0][0])
+end
+
+def average_value(raw: SQLite::Parameter): Result<Float?, DbError>
+	case raw
+	when SQLite::Parameter::Null
+		return Result<Float?, DbError>::Ok(nil)
+	when SQLite::Parameter::Float(value)
+		return Result<Float?, DbError>::Ok(value)
+	when SQLite::Parameter::Integer(value)
+		return Result<Float?, DbError>::Ok(value.to_f())
+	else
+		return Result<Float?, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database aggregate result was invalid"))
+	end
+end
+
+def _read_page_rows(database: String, environment: String, query: OrmSql::Selection, statement: String, width: Integer, failure: String): Result<Array<Array<SQLite::Parameter>>, DbError>
 	source := try _orm_database(database, environment, query.scope)
-	case SQLite.query_rows(source, read_statement(query, projection, first), query.values, width, query.scope)
+	case SQLite.query_rows(source, statement, query.values, width, query.scope)
 	when Result::Ok(rows)
 		return Result<Array<Array<SQLite::Parameter>>, DbError>::Ok(rows)
 	when Result::Err(error)

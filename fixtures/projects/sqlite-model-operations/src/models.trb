@@ -11,3 +11,5 @@ class Reading < Model
 end
 class Vote < Model
 end
+class Observation < Model
+end

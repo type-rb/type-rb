@@ -1,6 +1,8 @@
-import { check_expression } from frontend/checking/body/expressions
+import { check_expression_value, finish_expression_argument } from frontend/checking/body/expressions
 import { type_diagnostic } from frontend/checking/body/types
 import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { mir_checked_range_field } from mir/lowering/ranges
+import { mir_range_field_exclusive, mir_range_field_first, mir_range_field_last } from mir/model/operation_modes
 import { object_method_function } from frontend/resolution/object_methods
 import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
 import { parse_argument_label } from frontend/syntax/syntax_forms
@@ -60,6 +62,55 @@ def orm_query_terminal(mut state: CompilerState, mut locals: CheckedLocals, quer
 	return mir_checked_call(state, locals, target, [checked_mir_value(query)], result, origin)
 end
 
+# Evaluate the predicate once, then use the selected schema signature for
+# ownership checks, literal widening and optional-value coercion.
+def orm_query_predicate(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, query: CheckedValue, column: String, operator: String, positional: Boolean, mut target: Integer, origin: Integer): CheckedValue
+	start := load_integer(state.declarations.function_parameter_starts, target)
+	mut expected := load_string(state.declarations.parameter_types, start + 2)
+	line := load_integer(state.source_tokens.token_lines, origin)
+	if operator == "LIKE" && expected != "String"
+		return type_diagnostic(state, line, "LIKE requires a String column")
+	end
+	value_origin := position[0]
+	mut value := check_expression_value(state, position, locals, 1, expected)
+	mut values := [checked_mir_value(query)]
+	if !positional && value.type_name == "Range<Integer>"
+		target = object_method_function(state, query.type_name, "$range:" + column, false, [], origin)
+		if target < 0
+			return type_diagnostic(state, line, "range predicate requires an Integer column")
+		end
+		value = finish_expression_argument(state, locals, value, "Range<Integer>", value_origin, position[0], false, "")
+		owner := checked_mir_value(value)
+		values.push(checked_mir_value(mir_checked_range_field(state, locals, owner, mir_range_field_first(), origin)))
+		values.push(checked_mir_value(mir_checked_range_field(state, locals, owner, mir_range_field_last(), origin)))
+		values.push(checked_mir_value(mir_checked_range_field(state, locals, owner, mir_range_field_exclusive(), origin)))
+		return mir_checked_call(state, locals, target, values, query.type_name, origin)
+	else
+		if operator == "=" || operator == "!="
+			sub := object_method_function(state, query.type_name, "$sub:" + column, false, [], origin)
+			if sub >= 0
+				parameters := load_integer(state.declarations.function_parameter_starts, sub)
+				sub_type := load_string(state.declarations.parameter_types, parameters + 2)
+				if value.type_name == sub_type
+					target = sub
+					expected = sub_type
+				end
+			end
+		end
+		values.push(orm_query_string(state, locals, operator, origin))
+	end
+	value = finish_expression_argument(state, locals, value, expected, value_origin, position[0], false, "")
+	values.push(checked_mir_value(value))
+	return mir_checked_call(state, locals, target, values, query.type_name, origin)
+end
+
+def orm_literal_column_method(member: String): Boolean
+	if member == "pluck" || member == "pick" || member == "select" || member == "minimum" || member == "maximum" || member == "sum" || member == "average"
+		return true
+	end
+	return false
+end
+
 def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, class_member: Boolean, root: Integer, member: String): CheckedValue
 	origin := position[0]
 	line := load_integer(state.source_tokens.token_lines, origin)
@@ -71,7 +122,7 @@ def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut 
 	mut query := mir_checked_call(state, locals, root, arguments, query_type, origin)
 	advance(position)
 	skip_newlines(state, position)
-	if member == "ids" || member == "pluck" || member == "pick"
+	if member == "ids" || orm_literal_column_method(member)
 		mut method := "$ids"
 		mut unavailable := "ids requires a model with a single primary key"
 		if member != "ids"
@@ -135,24 +186,16 @@ def check_orm_query(mut state: CompilerState, mut position: Array<Integer>, mut 
 		if target < 0
 			return type_diagnostic(state, line, "unknown " + member + " column or unsupported comparison for " + column)
 		end
-		mut values := [checked_mir_value(query)]
 		if member == "order"
 			direction := orm_query_literal(state, position)
 			if direction != "asc" && direction != "desc"
 				return type_diagnostic(state, line, "order direction must be asc or desc")
 			end
-			values.push(orm_query_string(state, locals, direction, at))
+			values := [checked_mir_value(query), orm_query_string(state, locals, direction, at)]
+			query = mir_checked_call(state, locals, target, values, query_type, at)
 		else
-			start := load_integer(state.declarations.function_parameter_starts, target)
-			expected := load_string(state.declarations.parameter_types, start + 2)
-			if operator == "LIKE" && expected != "String"
-				return type_diagnostic(state, line, "LIKE requires a String column")
-			end
-			values.push(orm_query_string(state, locals, operator, at))
-			value := check_expression(state, position, locals, 1, expected)
-			values.push(checked_mir_value(value))
+			query = orm_query_predicate(state, position, locals, query, column, operator, positional, target, at)
 		end
-		query = mir_checked_call(state, locals, target, values, query_type, at)
 		skip_newlines(state, position)
 		if !token_is(state, position[0], ",")
 			break

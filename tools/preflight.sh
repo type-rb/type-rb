@@ -88,6 +88,7 @@ step "recovery types" "$reference" check --config recovery/trbconfig.jsonc
 step "compiler types" "$reference" check --config compiler/trbconfig.jsonc
 step "CLI and core closure" sh tools/check-native-cli.sh "$reference"
 step "reference formatter observations" python3 tools/native-format-test.py --reference-only --reference "$reference"
+step "reference language server editing" python3 tools/native-lsp-test.py "$reference"
 step "bootstrap snapshot v4 closure" sh tools/check-bootstrap-snapshot.sh "$reference"
 step "browser client reference contracts" python3 tools/native-web-client-test.py "$reference" --reference --browser-check --browser-runtime "$(command -v node)"
 step "HTTP server reference contracts" python3 tools/native-web-network-test.py "$reference" --reference

@@ -26,6 +26,31 @@ def expect_output(binary, root, environment, expected):
         raise AssertionError(f"{binary}: expected {expected!r}, got {actual!r}")
 
 
+def check_aggregates(app, root, environment):
+    database = root / (app.name + "-aggregates.sqlite")
+    env = dict(environment, DATABASE_URL=str(database), ORM_TEST_OPERATION="aggregate-errors")
+    expect_output(app, root, env, "Query\n" * 4)
+    missing = env.copy()
+    del missing["DATABASE_URL"]
+    expect_output(app, root, missing, "Connection\n" * 4)
+    with sqlite3.connect(database) as connection:
+        connection.executescript("""
+            CREATE TABLE observations(id INTEGER PRIMARY KEY, label TEXT NOT NULL, score INTEGER, weight REAL, day DATE);
+            INSERT INTO observations VALUES
+                (1,'prod',8,1.5,'2024-02-01'), (2,'prod',NULL,NULL,NULL),
+                (3,'other',40,4.5,'2024-03-01'), (4,'prod',4,3.0,'2024-01-01'),
+                (5,'prod',2,5.5,'2024-05-01');
+        """)
+    expect_output(app, root, dict(env, ORM_TEST_OPERATION="aggregates"),
+                  "4\ntrue\ntrue\ntrue\ntrue\n2024-01-01\ntrue\ntrue\ntrue\n0\ntrue\ntrue\n0\ntrue\ntrue\ntrue\n"
+                  "true\ndatabase aggregate query failed\n60\n")
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT score FROM observations WHERE label = 'tx'").fetchall() == [(6,)]
+        connection.execute("INSERT INTO observations(label, score, day) VALUES ('bad', 9007199254740991, 'z')")
+    expect_output(app, root, dict(env, ORM_TEST_OPERATION="aggregate-data-errors"),
+                  "true\ndatabase Integer is outside the portable range\ntrue\n")
+
+
 def check_model_rows(cli, reference, root, config, environment):
     src = root / "src"
     fixture = Path(__file__).resolve().parents[1] / "fixtures/projects/sqlite-model-operations"
@@ -81,12 +106,27 @@ def check_model_rows(cli, reference, root, config, environment):
             projections.write_text(projection_source.replace(original, invalid))
             run([str(tool), "check"], root, environment, "error[")
         projections.write_text(projection_source)
+        predicates = src / "predicates.trb"
+        predicate_source = predicates.read_text()
+        for invalid in ['Report.where(note: 1..4)', 'Report.where(id: Tag.select(:code))',
+                        'Report.where(:id, ">", Report.select(:id))', 'Report.where(id: Report.select(:missing))']:
+            predicates.write_text(predicate_source.replace('Report.where(id: 5..2)', invalid))
+            run([str(tool), "check"], root, environment, "error[")
+        predicates.write_text(predicate_source)
+        aggregates = src / "aggregates.trb"
+        aggregate_source = aggregates.read_text()
+        for invalid in ['page.sum(:label)', 'page.average(:day)', 'page.maximum(:missing)',
+                        'page.minimum(:id, :score)', 'page.sum(Observation.new().label)']:
+            aggregates.write_text(aggregate_source.replace('page.sum(:score)', invalid, 1))
+            run([str(tool), "check"], root, environment, "error[")
+        aggregates.write_text(aggregate_source)
         run([str(tool), "check"], root, environment)
         app = root / ("lookup-" + mode)
         run([str(tool), "build", "--compile", "--outfile", str(app)], root, environment)
         binaries.append(app)
     assert not database.exists()
     for app in binaries:
+        check_aggregates(app, root, environment)
         expect_output(app, root, dict(environment, ORM_TEST_OPERATION="empty"), "0\n\n")
         assert not database.exists()
         pages = root / (app.name + "-pages.sqlite")
@@ -96,6 +136,13 @@ def check_model_rows(cli, reference, root, config, environment):
             connection.executemany("INSERT INTO reports VALUES (?, ?, ?)", [
                 (1, "reader's copy", None), (2, "else", None), (3, "reader's copy", "ok"),
                 (4, "reader's copy", None), (5, "reader's copy", "ok")])
+        with sqlite3.connect(pages) as connection:
+            connection.executescript("CREATE TABLE tags(code TEXT PRIMARY KEY); INSERT INTO tags VALUES ('ok')")
+        predicate_env = dict(environment, DATABASE_URL=str(pages), ORM_TEST_OPERATION="predicates")
+        expect_output(app, root, predicate_env, "3\n2\n0\n0\n5\n0\n1\n3\n2\n2\n0\n2\n1\n")
+        for operation in ("scope-mismatch", "savepoint-mismatch"):
+            run([str(app)], root, dict(predicate_env, ORM_TEST_OPERATION=operation),
+                "ORM subquery transaction scope must match the base query")
         expect_output(app, root, query_env,
                       "5\n4\n1\n1\ntrue\n4\n3\n4\n0\ntrue\n0\ntrue\n0\n2\n4\n5\n4\n"
                       "4\n2\n1\n5\n3\n2\n2\n2\n1\n0\ndatabase insert failed\n0\n"
@@ -439,7 +486,7 @@ end
                           "Connection\ndatabase connection failed\n")
         check_model_rows(cli, reference, root, config, environment)
         check_model_worker(cli, reference, root / "worker-project")
-    print("SQLite ORM lock-only builds, typed projections and named lookups, counts, create/find/update/delete, nine column types, deferred saves, transaction isolation, nested rollback, failed commit cleanup and worker updates passed")
+    print("SQLite ORM lock-only builds, typed projections, named lookups and page aggregates, counts, create/find/update/delete, nine column types, deferred saves, transaction isolation, nested rollback, failed commit cleanup and worker updates passed")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-import { check_orm_query } from frontend/checking/body/orm_queries
+import { check_orm_query, orm_literal_column_method } from frontend/checking/body/orm_queries
 import { concurrent_mutation, concurrent_value } from frontend/checking/body/concurrency
 import { check_orm_transaction } from frontend/checking/body/orm_transactions
 import { check_file_acquisition } from frontend/checking/body/file_acquisition
@@ -489,7 +489,7 @@ def check_object_member(mut state: CompilerState, mut position: Array<Integer>, 
 		return type_diagnostic(state, line, "unknown class field or missing method call")
 	end
 	class_member := receiver.category == checked_category_object()
-	if (member == "where" || member == "order" || member == "find_by" || member == "exists?" || member == "ids" || member == "pluck" || member == "pick") && method_arguments.size() == 0
+	if (member == "where" || member == "order" || member == "find_by" || member == "exists?" || member == "ids" || orm_literal_column_method(member)) && method_arguments.size() == 0
 		root := object_method_function(state, receiver.type_name, "$orm_query", class_member, [], origin)
 		if root >= 0
 			return check_orm_query(state, position, locals, receiver, class_member, root, member)

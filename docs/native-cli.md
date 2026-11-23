@@ -205,8 +205,14 @@ end
 ```
 
 Build a read query from the model or its transaction scope. Equality filters
-accept named scalar columns, including `nil` for nullable columns. The
-three-argument form checks the column, operator and value against the lock.
+accept scalar values (including `nil` for nullable columns), integer ranges
+and single-column subqueries.
+For example, `Report.where(id: 2...5)` includes 2, 3 and 4.
+`select(:id)` creates a typed subquery and preserves its filters, ordering,
+limit and offset. A transaction-scoped subquery requires the same outer
+transaction or savepoint. An unscoped subquery can be used in either context.
+The three-argument form checks the column, operator and value against the lock;
+`=` and `!=` also accept a compatible subquery.
 Text columns also support SQLite `LIKE`. Each modifier returns a new query. Table reads also work when the locked
 schema has no primary key or has a composite primary key.
 
@@ -222,6 +228,13 @@ order. Use an explicit order when row identity matters. `first()` returns a
 nullable model. `count()` counts the selected page, including its limit and
 offset. A zero limit gives an empty array, a missing first row and a count of
 zero. These reads also work through `Report.using(tx)`.
+
+Use `sum(:column)` and `average(:column)` for numeric columns. For example,
+`Report.order(id: :desc).offset(2).limit(3).sum(:id)` adds the IDs of the
+three rows after the first two. `minimum` and `maximum` also accept text
+and temporal columns. These operations ignore SQL NULL and respect the
+selected transaction. If the page has no non-NULL values, `sum` gives a
+typed zero and the other three operations give `nil`.
 
 Use `pluck(:column)` to read one typed column and `pick(:column)` to
 read its first value. Both preserve the ordering and bounds on the query.
@@ -373,6 +386,27 @@ tools/check-native-cli.sh /path/to/trb
 There is no special directory exemption in Native configuration discovery.
 The core and benchmark subprojects retain their explicit reference-validation
 configurations; opening one with `trbn` honors its configured mode too.
+
+## Editing in VS Code
+
+Set `typerb.server.path` in the official TypeRB extension to the absolute
+path of the built `bin/trbn`. The extension starts `trbn lsp --config
+<trbconfig.jsonc>` for a project, or `trbn lsp --mode <mode> <file.trb>`
+for a standalone file. The language server communicates over standard input
+and output. Each server owns its project or standalone import graph.
+
+The server checks unsaved edits and publishes the Native checker's first
+diagnostic. Fixing an error or closing the document clears its diagnostic.
+Go to Definition resolves visible record names and direct function calls
+to their declarations in project source, including imported files. Editor
+positions and incremental edits use UTF-16 units. Syntax highlighting and
+snippets come from the extension. Completion, hover, rename, Test Explorer,
+and debugger integration have separate acceptance work.
+
+Format Document applies the same formatter as `trbn fmt` to the editor
+buffer. An incomplete expression or an already formatted document produces
+no edit. Saving a document or changing a watched source on disk refreshes
+diagnostics against the open buffers and the updated project sources.
 
 ## Source formatting
 

@@ -1311,6 +1311,28 @@ def load_file_root(entry_source: String, entry_path: String): CompilerState
 end
 
 def load_file_root_with_mode(entry_source: String, entry_path: String, interactive: Boolean): CompilerState
+	return load_file_root_with_overlays(entry_source, entry_path, interactive, [], [])
+end
+
+def file_root_overlay_index(paths: Array<String>, path: String): Integer
+	mut i := 0
+	while i < paths.size()
+		if paths[i] == path
+			return i
+		end
+		i += 1
+	end
+	return -1
+end
+
+def file_root_source(path: String, index: Integer, overlay_sources: Array<String>): String
+	if index >= 0
+		return overlay_sources[index]
+	end
+	return compiler_read_source(path)
+end
+
+def load_file_root_with_overlays(entry_source: String, entry_path: String, interactive: Boolean, overlay_paths: Array<String>, overlay_sources: Array<String>): CompilerState
 	mut state := compiler_new_with_mode(4194304, interactive)
 	root := path_directory(entry_path)
 	entry_name := string_without_suffix(path_basename(entry_path), ".trb")
@@ -1370,18 +1392,20 @@ def load_file_root_with_mode(entry_source: String, entry_path: String, interacti
 			end
 			if target == -1
 				direct_path := path_join(root, normalized + ".trb")
-				if compiler_file_exists(direct_path)
+				direct_overlay := file_root_overlay_index(overlay_paths, direct_path)
+				if direct_overlay >= 0 || compiler_file_exists(direct_path)
 					if !validate_new_module_root(state, normalized, line)
 						return state
 					end
 					target = add_module(state, normalized, direct_path)
-					sources.push(compiler_read_source(direct_path))
+					sources.push(file_root_source(direct_path, direct_overlay, overlay_sources))
 				else
 					index_name := normalized + "/index"
 					target = find_module(state, index_name)
 					if target < 0
 						index_path := path_join(root, normalized + "/index.trb")
-						if !compiler_file_exists(index_path)
+						index_overlay := file_root_overlay_index(overlay_paths, index_path)
+						if index_overlay < 0 && !compiler_file_exists(index_path)
 							diagnostic(state, "TRBN4003", line, "cannot resolve project import " + raw_path)
 							return state
 						end
@@ -1389,7 +1413,7 @@ def load_file_root_with_mode(entry_source: String, entry_path: String, interacti
 							return state
 						end
 						target = add_module(state, index_name, index_path)
-						sources.push(compiler_read_source(index_path))
+						sources.push(file_root_source(index_path, index_overlay, overlay_sources))
 					end
 				end
 			end

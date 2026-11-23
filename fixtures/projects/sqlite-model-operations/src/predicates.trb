@@ -1,0 +1,46 @@
+import { Report, Tag } from models
+import { Database, DbResult } from trb/orm
+
+def predicate_rows(): DbResult<Integer>
+	base := Report.where(title: "reader's copy")
+	bounds := 2...4
+	row := try base.order(id: :desc).find_by(id: bounds)
+	if row != nil
+		puts(row.id)
+	end
+	puts(try base.where(id: 2..4).count())
+	puts(try base.where(id: 4...4).count())
+	puts(try Report.where(id: 5..2).count())
+	puts(try Report.where(id: 1..1000000000).count())
+	# Retain the inner ordering and offset when selecting from a derived query.
+	selected := base.order(id: :desc).limit(1).offset(1).select(:id)
+	outer := Report.where(note: "ok").where(id: selected).where(title: "reader's copy")
+	puts(try outer.count())
+	puts(try Report.where(title: "reader's copy").where(id: selected).where(id: 4).count())
+	puts(try base.where("id", "!=", selected).count())
+	titles := Tag.select(:code)
+	puts(try Report.where(note: titles).count())
+	notes := Report.select(:note)
+	puts(try Report.where(note: notes).count())
+	puts(try Report.where("title", "!=", notes).count())
+	return Database.transaction() do |tx|
+		scoped := Report.using(tx)
+		local_ids := scoped.where(note: "ok").select(:id)
+		puts(try scoped.where(id: local_ids).count())
+		try scoped.where(id: selected).count()
+	end
+end
+
+def mismatched_predicate_scope(nested: Boolean): DbResult<Integer>
+	return Database.transaction() do |tx|
+		inner_ids := Report.using(tx).select(:id)
+		if nested
+			count := try tx.transaction() do |child|
+				try Report.using(child).where(id: inner_ids).count()
+			end
+			count
+		else
+			try Report.where(id: inner_ids).count()
+		end
+	end
+end
