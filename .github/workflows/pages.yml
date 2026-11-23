@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: type-rb/type-rb-go
-          ref: 374d683218ce83adf9f803073ef94dbcdabf5f77
+          ref: 942dcc763678f0c7e315014690f095c5ef6e7876
           path: .site-generator
           persist-credentials: false
 
@@ -51,7 +51,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: tools/site/package-lock.json
+          cache-dependency-path: .site-generator/tools/site/package-lock.json
 
       - name: Verify site and published contract tooling
         run: |
@@ -59,8 +59,8 @@ jobs:
           (cd .site-generator && go run ./tools/release-contract --check)
           cmp contracts/v0.5/manifest.json .site-generator/contracts/v0.5/manifest.json
           cmp docs/v0.5-feature-contract.md .site-generator/docs/v0.5-feature-contract.md
-          npm ci --prefix tools/site
-          npm test --prefix tools/site
+          npm ci --prefix .site-generator/tools/site
+          npm test --prefix .site-generator/tools/site
 
       - name: Verify the published release before deployment
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
@@ -74,7 +74,7 @@ jobs:
           set -euo pipefail
           (cd .site-generator && go build -trimpath -buildvcs=false -o "$RUNNER_TEMP/trb-site" ./cmd/trb-site)
           "$RUNNER_TEMP/trb-site" --out dist/site --docs docs --version "$(cat NATIVE_VERSION)" --docs-only
-          node tools/site/highlight.mjs dist/site syntaxes/typerb.tmLanguage.json
+          node .site-generator/tools/site/highlight.mjs dist/site syntaxes/typerb.tmLanguage.json
           cp llms.txt dist/site/llms.txt
           cp -R docs/capabilities/dependencies dist/site/dependencies
           test -s dist/site/docs/getting-started/index.html
