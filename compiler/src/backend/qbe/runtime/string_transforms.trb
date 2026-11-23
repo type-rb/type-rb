@@ -1,0 +1,191 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { emit_sized_array_allocation } from backend/qbe/runtime/array_copies
+import { integer_string } from support/literals
+
+# Binary and three-fragment concatenation share one static constructor emitter.
+# The only callers supply arity two or three. Empty operands reuse the binary
+# contract; nonempty operands need neither a scratch table nor runtime loops.
+def emit_fixed_string_concat_runtime(name: String, count: Integer, mut output: QbeOutput)
+	mut arguments := ""
+	mut index := 0
+	while index < count
+		if index > 0
+			arguments += ", "
+		end
+		arguments += "l %v" + integer_string(index)
+		index += 1
+	end
+	qbe_output_line(output, "\nfunction l $" + name + "(" + arguments + ") {\n@start")
+	index = 0
+	while index < count
+		i := integer_string(index)
+		qbe_output_line(output, " %length_address" + i + " =l add %v" + i + ", 8\n %length" + i + " =l loadl %length_address" + i)
+		index += 1
+	end
+	index = count - 1
+	while index >= 0
+		i := integer_string(index)
+		qbe_output_line(output, " %empty" + i + " =w ceql %length" + i + ", 0\n jnz %empty" + i + ", @empty" + i + ", @next" + i + "\n@empty" + i)
+		mut remaining: Array<String> := []
+		mut other := 0
+		while other < count
+			if other != index
+				remaining.push("%v" + integer_string(other))
+			end
+			other += 1
+		end
+		if count == 2
+			qbe_output_line(output, " ret " + remaining[0])
+		else
+			qbe_output_line(output, " %remaining" + i + " =l call $trbn_string_concat(l " + remaining[0] + ", l " + remaining[1] + ")\n ret %remaining" + i)
+		end
+		qbe_output_line(output, "@next" + i)
+		index -= 1
+	end
+	mut length := "%length0"
+	index = 1
+	while index < count
+		i := integer_string(index)
+		qbe_output_line(output, " %total" + i + " =l add " + length + ", %length" + i)
+		length = "%total" + i
+		index += 1
+	end
+	qbe_output_line(output, " %size =l add " + length + ", 17\n %result =l call $trbn_string_alloc(l %size)\n %result_length =l add %result, 8\n storel " + length + ", %result_length\n %data =l add %result, 24")
+	index = 0
+	while index < count
+		i := integer_string(index)
+		qbe_output_line(output, " %data" + i + " =l add %v" + i + ", 24")
+		mut target := "%data"
+		if index > 0
+			mut offset := "%length0"
+			if index > 1
+				offset = "%total" + integer_string(index - 1)
+			end
+			target = "%target" + i
+			qbe_output_line(output, " " + target + " =l add %data, " + offset)
+		end
+		qbe_output_line(output, " call $memcpy(l " + target + ", l %data" + i + ", l %length" + i + ")")
+		index += 1
+	end
+	qbe_output_line(output, " %end =l add %data, " + length + "\n storeb 0, %end")
+	# Recount only when a join can complete a multibyte sequence. All operands
+	# here are nonempty, so both boundary-byte reads stay inside their String.
+	index = 1
+	while index < count
+		i := integer_string(index)
+		previous := integer_string(index - 1)
+		qbe_output_line(output, " %first" + i + " =w loadub %data" + i + "\n %low" + i + " =w cultw %first" + i + ", 128\n %high" + i + " =w cugtw %first" + i + ", 191\n %not_continuation" + i + " =w or %low" + i + ", %high" + i + "\n jnz %not_continuation" + i + ", @boundary" + i + ", @last" + i + "\n@last" + i)
+		qbe_output_line(output, " %last_offset" + i + " =l sub %length" + previous + ", 1\n %last_address" + i + " =l add %data" + previous + ", %last_offset" + i + "\n %last" + i + " =w loadub %last_address" + i + "\n %ascii" + i + " =w cultw %last" + i + ", 128\n jnz %ascii" + i + ", @boundary" + i + ", @recount\n@boundary" + i)
+		index += 1
+	end
+	qbe_output_line(output, " jmp @sum\n@recount\n %decoded =l call $trbn_utf8_count(l %data, l " + length + ")\n jmp @store\n@sum")
+	mut points := "%points0"
+	index = 0
+	while index < count
+		i := integer_string(index)
+		qbe_output_line(output, " %points_address" + i + " =l add %v" + i + ", 16\n %points" + i + " =l loadl %points_address" + i)
+		if index > 0
+			qbe_output_line(output, " %point_sum" + i + " =l add " + points + ", %points" + i)
+			points = "%point_sum" + i
+		end
+		index += 1
+	end
+	qbe_output_line(output, " jmp @store\n@store\n %points =l phi @sum " + points + ", @recount %decoded\n %result_points =l add %result, 16\n storel %points, %result_points\n ret %result\n}\n")
+end
+
+# Literal transforms preserve bytes, including NUL and malformed UTF-8.
+# Searches are bounded; split releases temporary roots after each managed append.
+# Replacement measures the complete result before its single String allocation.
+# With one ASCII delimiter, UTF-8 decoding cannot cross the split boundary.
+# Derive the larger fragment count from the source and decode only the shorter
+# one. The copied fragments keep ordinary allocation order and temporary roots;
+# every other separator shape uses the general splitter below.
+def emit_string_split_pair_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\nfunction l $trbn_split_fragment(l %source, l %length, l %points) {")
+	qbe_output_line(output, "\n@start\n %size =l add %length, 17\n %text =l call $trbn_string_alloc(l %size)\n %length_slot =l add %text, 8\n storel %length, %length_slot\n %points_slot =l add %text, 16\n storel %points, %points_slot\n %data =l add %text, 24\n call $memcpy(l %data, l %source, l %length)\n %end =l add %data, %length\n storeb 0, %end\n ret %text\n}\n\nfunction l $trbn_split_pair(l %source, l %first, l %result, l %retained) {")
+	qbe_output_line(output, "\n@start\n %after =l add %first, 1\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %points_slot =l add %source, 16\n %points =l loadl %points_slot\n %available_points =l sub %points, 1\n %data =l add %source, 24\n %right_data =l add %data, %after\n %right_length =l sub %length, %after\n %left_shorter =w cslel %first, %right_length\n jnz %left_shorter, @left_count, @right_count")
+	qbe_output_line(output, "\n@left_count\n %left_count =l call $trbn_utf8_count(l %data, l %first)\n %derived_right =l sub %available_points, %left_count\n jmp @allocate")
+	qbe_output_line(output, "\n@right_count\n %right_count =l call $trbn_utf8_count(l %right_data, l %right_length)\n %derived_left =l sub %available_points, %right_count\n jmp @allocate")
+	qbe_output_line(output, "\n@allocate\n %left_points =l phi @left_count %left_count, @right_count %derived_left\n %right_points =l phi @left_count %derived_right, @right_count %right_count\n %left =l call $trbn_split_fragment(l %data, l %first, l %left_points)\n call $trbn_array_push_paced(l %result, l %left)\n call $trbn_gc_temp_reset(l %retained)\n %right =l call $trbn_split_fragment(l %right_data, l %right_length, l %right_points)\n call $trbn_array_push_paced(l %result, l %right)\n call $trbn_gc_temp_reset(l %retained)\n ret %result\n}\n")
+end
+
+# Equal byte and point counts mean every decoding unit has width one, including
+# malformed bytes. A contiguous fragment cannot create a new multibyte sequence.
+# Reuse its byte length as the point count; other sources keep bounded decoding.
+# The lookahead pair shortcut is useful only when at least one point is wider.
+def emit_string_split_runtime(mut output: QbeOutput, selected_fields: Boolean)
+	mut signature := "function l $trbn_string_split(l %source, l %separator)"
+	if selected_fields
+		qbe_output_line(output, "\ndata $trbn_split_unused_field = align 8 { l 0, l 0, l 0, b 0 }")
+		signature = "function l $trbn_string_split_fields(l %source, l %separator, l %first_field, l %last_field)"
+	end
+	qbe_output_line(output, "\n" + signature + " {\n@start\n %separator_length_slot =l add %separator, 8\n %width =l loadl %separator_length_slot\n %empty =w ceql %width, 0\n jnz %empty, @failure, @prepare\n@failure\n call $trbn_fail(l $trbn_split_error, l 39)\n hlt")
+	qbe_output_line(output, "\n@prepare\n %result =l call $trbn_array_new(l $trbn_desc_array_managed)\n %first =l call $trbn_string_find_bytes(l %source, l %separator, l 0)\n %no_match =w csltl %first, 0\n jnz %no_match, @whole_source, @matched")
+	# With no delimiter, the sole element is the original immutable String.
+	qbe_output_line(output, "\n@whole_source\n call $trbn_array_push_paced(l %result, l %source)\n ret %result")
+	qbe_output_line(output, "\n@matched\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %points_slot =l add %source, 16\n %points =l loadl %points_slot\n %single_width =w ceql %length, %points\n %multibyte =w ceqw %single_width, 0\n %data =l add %source, 24\n %retained =l loadl $trbn_gc_temp_count")
+	if selected_fields
+		qbe_output_line(output, " jmp @general")
+	else
+		qbe_output_line(output, " %single_byte =w ceql %width, 1\n %separator_data =l add %separator, 24\n %separator_byte =w loadub %separator_data\n %ascii =w cultw %separator_byte, 128\n %ascii_byte =w and %single_byte, %ascii\n %paired =w and %ascii_byte, %multibyte\n jnz %paired, @lookahead, @general")
+		qbe_output_line(output, "\n@lookahead\n %after_first =l add %first, 1\n %second =l call $trbn_string_find_bytes(l %source, l %separator, l %after_first)\n %only_one =w csltl %second, 0\n jnz %only_one, @pair, @prefix")
+		qbe_output_line(output, "\n@pair\n %pair =l call $trbn_split_pair(l %source, l %first, l %result, l %retained)\n ret %pair")
+		qbe_output_line(output, "\n@prefix\n %prefix =l call $trbn_string_from_bytes(l %data, l %first)\n call $trbn_array_push_paced(l %result, l %prefix)\n call $trbn_gc_temp_reset(l %retained)\n jmp @loop")
+	end
+	qbe_output_line(output, "\n@general\n jmp @loop")
+	if selected_fields
+		qbe_output_line(output, "\n@loop\n %start =l phi @general 0, @advance %next\n %match =l phi @general %first, @advance %next_match\n %field =l phi @general 0, @advance %next_field\n %missing =w csltl %match, 0\n %before =w csltl %field, %first_field\n %after =w csgtl %field, %last_field\n %unused =w or %before, %after\n jnz %unused, @append, @selected\n@selected\n jnz %missing, @tail, @part")
+	else
+		qbe_output_line(output, "\n@loop\n %start =l phi @prefix %after_first, @general 0, @advance %next\n %match =l phi @prefix %second, @general %first, @advance %next_match\n %missing =w csltl %match, 0\n jnz %missing, @tail, @part")
+	end
+	qbe_output_line(output, "\n@tail\n jmp @span\n@part\n jmp @span")
+	qbe_output_line(output, "\n@span\n %end =l phi @tail %length, @part %match\n %size =l sub %end, %start\n %from =l add %data, %start\n jnz %single_width, @known_count, @decode_count")
+	qbe_output_line(output, "\n@known_count\n %known =l call $trbn_split_fragment(l %from, l %size, l %size)\n jmp @append")
+	qbe_output_line(output, "\n@decode_count\n %decoded =l call $trbn_string_from_bytes(l %from, l %size)\n jmp @append")
+	mut incoming := "@known_count %known, @decode_count %decoded"
+	if selected_fields
+		# Keep a valid immutable String in every slot for the ordinary Array tracer.
+		incoming += ", @loop $trbn_split_unused_field"
+	end
+	qbe_output_line(output, "\n@append\n %text =l phi " + incoming + "\n call $trbn_array_push_paced(l %result, l %text)\n call $trbn_gc_temp_reset(l %retained)\n jnz %missing, @finish, @advance")
+	qbe_output_line(output, "\n@advance")
+	if selected_fields
+		qbe_output_line(output, " %next_field =l add %field, 1")
+	end
+	qbe_output_line(output, " %next =l add %match, %width\n %next_match =l call $trbn_string_find_bytes(l %source, l %separator, l %next)\n jmp @loop")
+	qbe_output_line(output, "\n@finish\n ret %result\n}\n")
+end
+
+def emit_string_transform_runtime(mut output: QbeOutput)
+	emit_string_split_pair_runtime(output)
+	qbe_output_line(output, "\ndata $trbn_split_error = { b \"panic: String split separator is empty\", b 10 }\ndata $trbn_replace_error = { b \"panic: String replacement pattern is empty\", b 10 }\n")
+	# Reuse lookahead matches on fallback: one byte search per fragment.
+	emit_string_split_runtime(output, false)
+	qbe_output_line(output, "\nfunction l $trbn_string_replace(l %source, l %pattern, l %replacement) {\n@start\n %pattern_length_slot =l add %pattern, 8\n %width =l loadl %pattern_length_slot\n %empty =w ceql %width, 0\n jnz %empty, @failure, @prepare\n@failure\n call $trbn_fail(l $trbn_replace_error, l 43)\n hlt\n@prepare\n %length_slot =l add %source, 8\n %length =l loadl %length_slot\n %replacement_length_slot =l add %replacement, 8\n %replacement_length =l loadl %replacement_length_slot\n %data =l add %source, 24\n %replacement_data =l add %replacement, 24\n jmp @measure\n@measure\n %offset =l phi @prepare 0, @measured %next_offset\n %count =l phi @prepare 0, @measured %next_count\n %found =l call $trbn_string_find_bytes(l %source, l %pattern, l %offset)\n %done =w csltl %found, 0\n jnz %done, @size, @measured\n@measured\n %next_offset =l add %found, %width\n %next_count =l add %count, 1\n jmp @measure\n@size\n %unchanged =w ceql %count, 0\n jnz %unchanged, @original, @capacity\n@original\n ret %source\n@capacity\n %removed =l mul %count, %width\n %base =l sub %length, %removed\n %deletion =w ceql %replacement_length, 0\n jnz %deletion, @allocate, @growth\n@growth\n %room =l sub 9007199254740974, %base\n %maximum =l div %room, %replacement_length\n %too_large =w csgtl %count, %maximum\n jnz %too_large, @overflow, @allocate\n@overflow\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n@allocate\n %added =l mul %count, %replacement_length\n %size =l add %base, %added\n %payload =l add %size, 17\n %result =l call $trbn_string_alloc(l %payload)\n %result_length_slot =l add %result, 8\n storel %size, %result_length_slot\n %result_data =l add %result, 24\n jmp @copy\n@copy\n %start =l phi @allocate 0, @copied %next_start\n %position =l phi @allocate 0, @copied %next_position\n %match =l call $trbn_string_find_bytes(l %source, l %pattern, l %start)\n %missing =w csltl %match, 0\n jnz %missing, @tail, @part\n@tail\n jmp @span\n@part\n jmp @span\n@span\n %end =l phi @tail %length, @part %match\n %span =l sub %end, %start\n %from =l add %data, %start\n %target =l add %result_data, %position\n call $memcpy(l %target, l %from, l %span)\n %after_span =l add %position, %span\n jnz %missing, @finish, @copied\n@copied\n %replacement_target =l add %result_data, %after_span\n call $memcpy(l %replacement_target, l %replacement_data, l %replacement_length)\n %next_position =l add %after_span, %replacement_length\n %next_start =l add %end, %width\n jmp @copy\n@finish\n %terminator =l add %result_data, %size\n storeb 0, %terminator\n %points =l call $trbn_utf8_count(l %result_data, l %size)\n %points_slot =l add %result, 16\n storel %points, %points_slot\n ret %result\n}\n")
+end
+
+# A verified chain publishes all original fragment roots before this call.
+# One allocation copies each byte once; empty fragments never read a boundary.
+# Cached point counts are additive except where UTF-8 can span a join.
+# One-byte fragments use one load/store; longer spans retain the system copy.
+# A fragment starting with a continuation byte may change the decoded count.
+# Valid UTF-8 never starts that way, so ordinary concatenation needs no tail reads.
+def emit_string_concat_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\nfunction l $trbn_string_concat_many(l %fragments, l %count) {\n@start\n %initial =l loadl %fragments\n jmp @size_loop\n@size_loop\n %index =l phi @start 0, @advance %next\n %length =l phi @start 0, @advance %next_length\n %points =l phi @start 0, @advance %next_points\n %nonempty =l phi @start 0, @advance %next_nonempty\n %sole =l phi @start %initial, @advance %next_sole\n %dirty =w phi @start 0, @advance %next_dirty\n %done =w ceql %index, %count\n jnz %done, @check_count, @read\n@read\n %slot_offset =l mul %index, 8\n %slot =l add %fragments, %slot_offset\n %fragment =l loadl %slot\n %fragment_length_address =l add %fragment, 8\n %fragment_length =l loadl %fragment_length_address\n %empty =w ceql %fragment_length, 0\n jnz %empty, @empty, @nonempty\n@empty\n jmp @advance\n@nonempty\n %expanded_length =l add %length, %fragment_length\n %fragment_points_address =l add %fragment, 16\n %fragment_points =l loadl %fragment_points_address\n %expanded_points =l add %points, %fragment_points\n %expanded_nonempty =l add %nonempty, 1\n %fragment_data =l add %fragment, 24\n %first =w loadub %fragment_data\n %prefix =w and %first, 192\n %continuation =w ceqw %prefix, 128\n %expanded_dirty =w or %dirty, %continuation\n jmp @advance")
+	qbe_output_line(output, "\n@advance\n %next_length =l phi @empty %length, @nonempty %expanded_length\n %next_points =l phi @empty %points, @nonempty %expanded_points\n %next_nonempty =l phi @empty %nonempty, @nonempty %expanded_nonempty\n %next_sole =l phi @empty %sole, @nonempty %fragment\n %next_dirty =w phi @empty %dirty, @nonempty %expanded_dirty\n %next =l add %index, 1\n jmp @size_loop\n@check_count\n %single =w cslel %nonempty, 1\n jnz %single, @return_sole, @allocate\n@return_sole\n ret %sole\n@allocate\n %size =l add %length, 17\n %result =l call $trbn_string_alloc(l %size)\n %result_length =l add %result, 8\n storel %length, %result_length\n %data =l add %result, 24\n jmp @copy_loop")
+	qbe_output_line(output, "\n@copy_loop\n %copy_index =l phi @allocate 0, @copy_advance %copy_next\n %offset =l phi @allocate 0, @copy_advance %next_offset\n %copied =w ceql %copy_index, %count\n jnz %copied, @terminate, @copy")
+	qbe_output_line(output, "\n@copy\n %copy_slot_offset =l mul %copy_index, 8\n %copy_slot =l add %fragments, %copy_slot_offset\n %source =l loadl %copy_slot\n %source_length_address =l add %source, 8\n %source_length =l loadl %source_length_address\n %source_data =l add %source, 24\n %target =l add %data, %offset\n %single_byte =w ceql %source_length, 1\n jnz %single_byte, @copy_byte, @copy_span")
+	qbe_output_line(output, "\n@copy_byte\n %byte =w loadub %source_data\n storeb %byte, %target\n jmp @copy_advance")
+	qbe_output_line(output, "\n@copy_span\n call $memcpy(l %target, l %source_data, l %source_length)\n jmp @copy_advance")
+	qbe_output_line(output, "\n@copy_advance\n %next_offset =l add %offset, %source_length\n %copy_next =l add %copy_index, 1\n jmp @copy_loop")
+	qbe_output_line(output, "\n@terminate\n %end =l add %data, %length\n storeb 0, %end\n jnz %dirty, @recount, @sum\n@recount\n %decoded =l call $trbn_utf8_count(l %data, l %length)\n jmp @store\n@sum\n jmp @store\n@store\n %result_points =l phi @sum %points, @recount %decoded\n %points_address =l add %result, 16\n storel %result_points, %points_address\n ret %result\n}\n")
+end
+
+# Verified fragment tables are immutable and contain 1..64 elements. Preserve
+# ordinary fourfold capacity geometry and the fresh mutable Array representation.
+# No managed operation occurs between initialized publication and the bulk copy.
+def emit_literal_split_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\nfunction l $trbn_literal_split(l %fragments, l %count) {\n@start\n jmp @capacity\n@capacity\n %capacity =l phi @start 4, @grow %expanded\n %enough =w cugel %capacity, %count\n jnz %enough, @allocate, @grow\n@grow\n %expanded =l shl %capacity, 2\n jmp @capacity\n@allocate\n %bytes =l shl %capacity, 3")
+	emit_sized_array_allocation("$trbn_desc_array_managed", true, output)
+	qbe_output_line(output, " %copy_bytes =l shl %count, 3\n call $memcpy(l %data, l %fragments, l %copy_bytes)\n ret %array\n}\n")
+end

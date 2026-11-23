@@ -1,0 +1,80 @@
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_function_fixture } from mir/model/control
+import { mir_type_composite_start, mir_type_integer, mir_type_string } from mir/model/type_ids
+import { mir_type_kind_enum } from mir/model/type_kinds
+import { mir_semantic_type_name } from mir/model/types
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { MirBlock, MirInstruction, MirModule, mir_function_index, mir_table_span_valid } from mir/model/module
+
+# The single structured operation owns the acquired handle. Its caller cannot
+# forge an acquisition-success edge, omit release, or use a released handle.
+# Ordinary borrowed-body MIR still has independent escape and call-graph proof.
+def mir_file_scope_error(native_module: MirModule, flow: MirFlow, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.payload < 0 || instruction.payload >= native_module.file_scopes.size() || instruction.failure != -1
+		return "MIR File scope plan is invalid"
+	end
+	if !mir_value_available(flow, block, index, instruction.first) || mir_flow_type(flow, instruction.first) != mir_type_string() || !mir_value_available(flow, block, index, instruction.second) || mir_flow_type(flow, instruction.second) != mir_type_integer()
+		return "MIR File scope requires an available path and mode"
+	end
+	scope := native_module.file_scopes[instruction.payload]
+	if scope.body < 0 || scope.body >= native_module.signatures.size() || scope.error < 0 || scope.error >= native_module.signatures.size()
+		return "MIR File scope target is invalid"
+	end
+	body := native_module.signatures[scope.body]
+	error := native_module.signatures[scope.error]
+	if body.kind != mir_signature_ordinary() || error.kind != mir_signature_ordinary() || mir_function_index(native_module, body.id) < 0 || mir_function_index(native_module, error.id) < 0
+		return "MIR File scope requires checked source targets"
+	end
+	if native_module.functions[mir_function_index(native_module, body.id)].kind == mir_function_fixture() || native_module.functions[mir_function_index(native_module, error.id)].kind == mir_function_fixture()
+		return "MIR File scope requires executable source targets"
+	end
+	if !mir_table_span_valid(scope.argument_start, scope.argument_count, native_module.arguments.size()) || body.parameter_types.size() != scope.argument_count + 1
+		return "MIR File scope capture span differs"
+	end
+	file_type := body.parameter_types[scope.argument_count]
+	mut file := false
+	native_module.objects.each do |object|
+		if object.resource_kind == 1 && mir_semantic_type_name(native_module, object.type_id) == file_type
+			file = true
+		end
+	end
+	if !file || body.parameter_mutable[scope.argument_count] != 0
+		return "MIR File scope body requires an immutable File borrow"
+	end
+	mut parameter := 0
+	while parameter < scope.argument_count
+		value := native_module.arguments[scope.argument_start + parameter]
+		if !mir_value_available(flow, block, index, value) || mir_semantic_type_name(native_module, mir_flow_type(flow, value)) != body.parameter_types[parameter]
+			return "MIR File scope capture type or availability differs"
+		end
+		parameter += 1
+	end
+	result_type := mir_flow_type(flow, instruction.result)
+	if mir_semantic_type_name(native_module, result_type) != body.result_type || body.result_type != error.result_type
+		return "MIR File scope result differs from its targets"
+	end
+	if result_type < mir_type_composite_start() || result_type - mir_type_composite_start() >= native_module.types.size()
+		return "MIR File scope requires a structured Result"
+	end
+	result := native_module.types[result_type - mir_type_composite_start()]
+	if result.kind != mir_type_kind_enum() || scope.error_variant < 0 || scope.error_variant >= native_module.enum_variants.size()
+		return "MIR File scope requires a structured Result"
+	end
+	variant := native_module.enum_variants[scope.error_variant]
+	if variant.owner != result.declaration || variant.name != "Err" || variant.field_count != 1 || native_module.enums[variant.owner].variant_count != 2
+		return "MIR File scope error variant differs"
+	end
+	mut success := false
+	native_module.enum_variants.each do |candidate|
+		if candidate.owner == variant.owner && candidate.name == "Ok" && candidate.field_count == 1
+			success = true
+		end
+	end
+	if !success || error.parameter_types.size() != 3 || error.parameter_mutable.size() != 3
+		return "MIR File scope error constructor differs"
+	end
+	if error.parameter_types[0] != "String" || error.parameter_types[1] != "Integer" || error.parameter_types[2] != "Integer" || error.parameter_mutable[0] != 0 || error.parameter_mutable[1] != 0 || error.parameter_mutable[2] != 0
+		return "MIR File scope error constructor differs"
+	end
+	return ""
+end

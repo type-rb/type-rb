@@ -1,0 +1,16 @@
+def increment(value: Integer): Integer
+	return value + 1
+end
+
+def walk(value: Integer): Integer
+	mut remaining := 1
+	while remaining > 0
+		remaining -= 1
+		return increment(value)
+	end
+	return 0
+end
+
+def main()
+	puts(walk(9007199254740991))
+end

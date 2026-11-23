@@ -1,0 +1,15 @@
+class Entry
+	def hidden(): Integer
+		return 0
+	end
+end
+module Models
+	record Entry<T>
+		value: T
+		copy: T = value
+	end
+end
+def main()
+	puts(Models::Entry<String>.new(value: "record").copy)
+	puts(Entry.new().hidden())
+end

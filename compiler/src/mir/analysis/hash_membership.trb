@@ -1,0 +1,142 @@
+import { hash_action_has_key } from mir/model/hash_actions
+import { mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_hash_get, mir_op_hash_method } from mir/model/instructions
+import { MirFunction, MirHashMembershipReuse, MirModule, mir_type_id } from mir/model/module
+import { MirFlow, mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks, mir_flow_position, mir_flow_type, mir_instruction_occurrences } from mir/analysis/flow
+import { mir_hash_lookup_preserves } from mir/analysis/hash_lookup
+import { mir_hash_key_type } from mir/model/types
+
+# Follow only a unique incoming success edge and an effect-free linear path.
+# Keep the bucket number, never an address across a possible allocation.
+def mir_hash_membership_lookup(native_module: MirModule, function: MirFunction, flow: MirFlow, guard_index: Integer, membership: Integer, occurrences: Array<Integer>): Integer
+	guard := native_module.blocks[function.block_start + guard_index]
+	probe := native_module.instructions[membership]
+	key_type := mir_hash_key_type(native_module, mir_flow_type(flow, probe.first))
+	if key_type != mir_type_id("Integer") && key_type != mir_type_id("String")
+		return -1
+	end
+	mut cursor := membership + 1
+	while cursor < guard.instruction_start + guard.instruction_count
+		if !mir_hash_lookup_preserves(native_module.instructions[cursor])
+			return -1
+		end
+		cursor += 1
+	end
+	aliases := mir_flow_aliases(native_module, function, flow, guard)
+	owner := mir_flow_alias(aliases, probe.first)
+	key := mir_flow_alias(aliases, probe.second)
+	if owner < 0 || key < 0
+		return -1
+	end
+	mut previous := guard_index
+	mut target := guard.first_target
+	mut traversed := 0
+	while traversed < function.block_count
+		position := mir_flow_block_index(flow, target)
+		if position == flow.entry || flow.predecessors[position].size() != 1 || flow.predecessors[position][0] != previous
+			return -1
+		end
+		block := native_module.blocks[function.block_start + position]
+		cursor = block.instruction_start
+		while cursor < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[cursor]
+			if occurrences[cursor] != 1
+				return -1
+			end
+			if instruction.kind == mir_op_hash_get()
+				if mir_flow_alias(aliases, instruction.first) == owner && mir_flow_alias(aliases, instruction.second) == key
+					return cursor
+				end
+				return -1
+			end
+			if !mir_hash_lookup_preserves(instruction)
+				return -1
+			end
+			cursor += 1
+		end
+		if block.terminator != mir_terminator_jump()
+			return -1
+		end
+		previous = position
+		target = block.first_target
+		traversed += 1
+	end
+	return -1
+end
+
+def mir_hash_membership_plans(native_module: MirModule): Array<MirHashMembershipReuse>
+	mut plans: Array<MirHashMembershipReuse> := []
+	occurrences := mir_instruction_occurrences(native_module)
+	native_module.functions.each do |function|
+		mut candidates: Array<Integer> := []
+		mut index := 0
+		while index < function.block_count
+			guard := native_module.blocks[function.block_start + index]
+			if guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target
+				mut cursor := guard.instruction_start
+				while cursor < guard.instruction_start + guard.instruction_count
+					instruction := native_module.instructions[cursor]
+					if instruction.result == guard.condition && instruction.kind == mir_op_hash_method() && instruction.payload == hash_action_has_key() && occurrences[cursor] == 1
+						candidates.push(index)
+					end
+					cursor += 1
+				end
+			end
+			index += 1
+		end
+		if candidates.size() > 0
+			flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+			candidates.each do |index|
+				guard := native_module.blocks[function.block_start + index]
+				if flow.ranks[index] >= 0 && guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target
+					membership := mir_flow_position(flow, guard.condition)
+					if membership >= guard.instruction_start && membership < guard.instruction_start + guard.instruction_count
+						instruction := native_module.instructions[membership]
+						if occurrences[membership] == 1 && instruction.kind == mir_op_hash_method() && instruction.payload == hash_action_has_key()
+							lookup := mir_hash_membership_lookup(native_module, function, flow, index, membership, occurrences)
+							if lookup >= 0
+								plans.push(MirHashMembershipReuse.new(membership: membership, lookup: lookup))
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	# Physical block order is not an input to proof identity.
+	mut index := 1
+	while index < plans.size()
+		row := plans[index]
+		mut position := index
+		while position > 0 && plans[position - 1].membership > row.membership
+			plans[position] = plans[position - 1]
+			position -= 1
+		end
+		plans[position] = row
+		index += 1
+	end
+	return plans
+end
+
+def mir_hash_membership_equal(left: Array<MirHashMembershipReuse>, right: Array<MirHashMembershipReuse>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].membership != right[index].membership || left[index].lookup != right[index].lookup
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_hash_membership_find(plans: Array<MirHashMembershipReuse>, instruction: Integer, producer: Boolean): Integer
+	plans.each do |plan|
+		if (producer && plan.membership == instruction) || (!producer && plan.lookup == instruction)
+			return plan.membership
+		end
+	end
+	return -1
+end

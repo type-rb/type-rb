@@ -1,0 +1,111 @@
+import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
+import { standard_oidc_host } from frontend/resolution/oidc_intrinsics
+import { compiler_host_intrinsic, compiler_runtime_intrinsic } from frontend/resolution/entry_resolution
+import { standard_crypto } from frontend/resolution/crypto_intrinsics
+import { standard_compression } from frontend/resolution/compression_intrinsics
+import { standard_network_host } from frontend/resolution/network_intrinsics
+import { standard_entropy } from frontend/resolution/secure_random_intrinsics
+import { standard_time_host } from frontend/resolution/time_intrinsics
+import { standard_runtime_recover } from frontend/resolution/standard_intrinsics
+import { web_context_primitive } from frontend/resolution/web_context_intrinsics
+import { object_abstract_function } from frontend/types/object_types
+import { scoped_resource_name } from frontend/types/resource_types
+import { scoped_call_failures, scoped_call_node } from mir/analysis/resource_calls
+import { mir_state_function_slot } from state/local_slots
+import { CheckedLocals } from state/local_state
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+
+# Source bodies are followed transitively. Intrinsics are admitted by their
+# exact compiler-owned identity, never by provider flags or package prefixes.
+# The reference resource contract excludes these otherwise supported adapters.
+def resource_opaque_function(state: CompilerState, function: Integer): Boolean
+	if standard_oidc_host(state, function) >= 0 || object_abstract_function(state, function) || compiler_host_intrinsic(state, function) || compiler_runtime_intrinsic(state, function) || standard_crypto(state, function) >= 0 || standard_compression(state, function) || standard_network_host(state, function) >= 0 || standard_entropy(state, function) || standard_time_host(state, function) > 0 || standard_runtime_recover(state, function) || standard_runtime_deadline(state, function) || web_context_primitive(state, function) > 0
+		return true
+	end
+	return false
+end
+
+def resource_checked_body(mut state: CompilerState, function: Integer)
+	if !state.resource_calls.enabled[0]
+		return
+	end
+	scoped_call_node(state.resource_calls, function)
+	state.resource_calls.checked[function] = 1
+	if resource_opaque_function(state, function)
+		state.resource_calls.forbidden[function] = 1
+	end
+end
+
+def resource_unknown_call(mut state: CompilerState, locals: CheckedLocals)
+	function := locals.mir_state[mir_state_function_slot()]
+	if state.resource_calls.enabled[0] && function >= 0
+		scoped_call_node(state.resource_calls, function)
+		state.resource_calls.forbidden[function] = 1
+	end
+end
+
+def resource_source_call(mut state: CompilerState, locals: CheckedLocals, callee: Integer)
+	caller := locals.mir_state[mir_state_function_slot()]
+	if !state.resource_calls.enabled[0] || caller < 0 || callee < 0 || callee >= state.declarations.function_count[0]
+		return
+	end
+	if resource_opaque_function(state, callee)
+		resource_unknown_call(state, locals)
+		return
+	end
+	scoped_call_node(state.resource_calls, callee)
+	state.resource_calls.callers.push(caller)
+	state.resource_calls.callees.push(callee)
+end
+
+def resource_borrow_body(state: CompilerState, function: Integer): Boolean
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	finish := start + load_integer(state.declarations.function_parameter_counts, function)
+	mut parameter := start
+	while parameter < finish
+		if scoped_resource_name(state, load_string(state.declarations.parameter_types, parameter)) != ""
+			return true
+		end
+		parameter += 1
+	end
+	return false
+end
+
+# Abstract generic bodies can call ordinary helpers which were not part of the
+# template loop. Check that source closure before accepting an unused template.
+def resource_unchecked_dependency(state: CompilerState): Integer
+	if !state.resource_calls.enabled[0]
+		return -1
+	end
+	mut function := 0
+	while function < state.declarations.function_count[0]
+		if resource_borrow_body(state, function) && (function >= state.resource_calls.checked.size() || state.resource_calls.checked[function] == 0)
+			return function
+		end
+		function += 1
+	end
+	state.resource_calls.callees.each do |callee|
+		if state.resource_calls.checked[callee] == 0
+			return callee
+		end
+	end
+	return -1
+end
+
+def verify_resource_calls(mut state: CompilerState): Boolean
+	if !state.resource_calls.enabled[0] || has_diagnostic(state)
+		return !has_diagnostic(state)
+	end
+	failures := scoped_call_failures(state.resource_calls, state.declarations.function_count[0])
+	mut function := 0
+	while function < failures.size()
+		if failures[function] > 0 && resource_borrow_body(state, function)
+			state.module_graph.active_module[0] = load_integer(state.declarations.function_modules, function)
+			diagnostic(state, "TRBN4004", load_integer(state.declarations.function_lines, function), "scoped resource borrow requires a verified synchronous call graph")
+			return false
+		end
+		function += 1
+	end
+	return true
+end

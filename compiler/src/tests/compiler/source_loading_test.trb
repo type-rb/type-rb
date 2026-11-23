@@ -1,0 +1,574 @@
+import { path_normalize } from support/path
+import { CompilerProjectSources, check, emit_qbe, load_named_project_sources, load_project_sources } from compiler
+import { lex_module } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { CompilerState, add_module, compiler_new, find_module, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+import { output_source, required_test_source } from testing/compiler
+import trb/std/process
+
+describe("Native TypeRB frontend") do
+	test("loads every configured project module and selects its unique main") do
+		mut state := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/lib/value/index.trb",
+					"/project/src/unrelated.trb",
+					"/project/src/application.trb",
+				],
+				sources: [
+					"def configured_value(): Integer\n\treturn 42\nend\n",
+					"def unrelated_value(): Integer\n\treturn 99\nend\n",
+					"import { configured_value } from lib/value\n\ndef main()\n\t_value := configured_value()\n\treturn\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.module_graph.module_count[0]).to_equal(3)
+		expect(load_string(state.module_graph.module_names, 0)).to_equal("application")
+		expect(load_string(state.module_graph.module_names, 1)).to_equal("lib/value/index")
+		expect(load_string(state.module_graph.module_names, state.module_graph.entry_module[0])).to_equal("application")
+		indexed := find_module(state, "lib/value/index")
+		expect(indexed >= 0).to_be_true()
+		expect(load_integer(state.module_graph.import_targets, 0)).to_equal(indexed)
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+
+		mut forward := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/application.trb",
+					"/project/src/middle.trb",
+					"/project/src/value.trb",
+				],
+				sources: [
+					"import { middle } from middle\n\ndef main()\n\tmiddle()\n\treturn\nend\n",
+					"import { value } from value\n\ndef middle(): Integer\n\treturn value()\nend\n",
+					"def value(): Integer\n\treturn 1\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(forward)).to_be_false()
+		expect(resolve(forward)).to_be_true()
+		expect(check(forward)).to_be_true()
+	end
+
+	test("orders configured modules like file-root discovery") do
+		mut configured := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/m0000.trb",
+					"/project/src/m0001.trb",
+					"/project/src/main.trb",
+				],
+				sources: [
+					"def f0000(): Integer\n\treturn 1\nend\n",
+					"import { f0000 } from m0000\n\ndef f0001(): Integer\n\treturn f0000() + 1\nend\n",
+					"import { f0001 } from m0001\n\ndef main()\n\t_value := f0001()\n\treturn\nend\n",
+				],
+				error: "",
+			),
+		)
+		mut file_order := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/main.trb",
+					"/project/src/m0001.trb",
+					"/project/src/m0000.trb",
+				],
+				sources: [
+					"import { f0001 } from m0001\n\ndef main()\n\t_value := f0001()\n\treturn\nend\n",
+					"import { f0000 } from m0000\n\ndef f0001(): Integer\n\treturn f0000() + 1\nend\n",
+					"def f0000(): Integer\n\treturn 1\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(load_string(configured.module_graph.module_names, 0)).to_equal("main")
+		expect(load_string(configured.module_graph.module_names, 1)).to_equal("m0001")
+		expect(load_string(configured.module_graph.module_names, 2)).to_equal("m0000")
+		expect(resolve(configured)).to_be_true()
+		expect(check(configured)).to_be_true()
+		expect(resolve(file_order)).to_be_true()
+		expect(check(file_order)).to_be_true()
+		expect(output_source(emit_qbe(configured))).to_equal(
+			output_source(emit_qbe(file_order)),
+		)
+	end
+
+	test("resolves exact aliases and unique record roots with canonical identities") do
+		mut state := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/shared/ui/data_table/index.trb",
+					"/project/src/main.trb",
+					"/project/src/services/secure_random.trb",
+					"/project/src/services/http.trb",
+				],
+				sources: [
+					"record DataTable\n\trows: Integer\nend\n",
+					"import { Response as WebResponse, status_code as read_status } from services/http\nimport services/secure_random as Random\nimport shared/ui/data_table\n\ndef main()\n\tresponse := WebResponse.new(status: read_status())\n\trandom := Random.new(value: response.status)\n\t_table := DataTable.new(rows: random.value)\n\treturn\nend\n",
+					"record SecureRandom\n\tvalue: Integer\nend\n",
+					"record Response\n\tstatus: Integer\nend\n\ndef status_code(): Integer\n\treturn 42\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(load_string(state.module_graph.import_declarations, 0)).to_equal("Response")
+		expect(load_string(state.module_graph.import_symbols, 0)).to_equal("WebResponse")
+		expect(load_string(state.module_graph.import_declarations, 1)).to_equal("status_code")
+		expect(load_string(state.module_graph.import_symbols, 1)).to_equal("read_status")
+		expect(load_string(state.module_graph.import_declarations, 2)).to_equal("SecureRandom")
+		expect(load_string(state.module_graph.import_symbols, 2)).to_equal("Random")
+		expect(load_string(state.module_graph.import_declarations, 3)).to_equal("DataTable")
+		expect(load_string(state.module_graph.import_symbols, 3)).to_equal("DataTable")
+		data_table_target := load_integer(state.module_graph.import_targets, 3)
+		expect(load_string(state.module_graph.module_names, data_table_target)).to_equal(
+			"shared/ui/data_table/index",
+		)
+	end
+
+	test("rejects invalid declaration-root imports deterministically") do
+		zero_match := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/value.trb"],
+				sources: [
+					"import value\n\ndef main()\n\treturn\nend\n",
+					"record Other\n\tnumber: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(zero_match)).to_be_false()
+		expect(load_string(zero_match.diagnostics.messages, 0)).to_equal(
+			"import value has no record root declaration matching value",
+		)
+
+		ambiguous := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/json.trb"],
+				sources: [
+					"import json\n\ndef main()\n\treturn\nend\n",
+					"record JSON\n\tvalue: Integer\nend\n\nrecord Json\n\tvalue: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(ambiguous)).to_be_false()
+		expect(load_string(ambiguous.diagnostics.messages, 0)).to_equal(
+			"import json has multiple record root declarations matching json: JSON, Json; use an exact named import",
+		)
+
+		bare_function := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/worker.trb"],
+				sources: [
+					"import worker\n\ndef main()\n\treturn\nend\n",
+					"def worker(): Integer\n\treturn 1\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(bare_function)).to_be_false()
+		expect(load_string(bare_function.diagnostics.messages, 0)).to_equal(
+			"import worker matches only a top-level function; use an exact named import",
+		)
+
+		unused_alias := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/value.trb"],
+				sources: [
+					"import value as Renamed\n\ndef main()\n\treturn\nend\n",
+					"record Value\n\tnumber: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(unused_alias)).to_be_true()
+		expect(check(unused_alias)).to_be_false()
+		expect(load_string(unused_alias.diagnostics.messages, 0)).to_equal(
+			"unused import Renamed",
+		)
+
+		duplicate_identity := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/value.trb"],
+				sources: [
+					"import { Value as First, Value as Second } from value\n\ndef main()\n\treturn\nend\n",
+					"record Value\n\tnumber: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(duplicate_identity)).to_be_false()
+		expect(load_string(duplicate_identity.diagnostics.messages, 0)).to_equal(
+			"declaration Value from value is already imported as First",
+		)
+
+		equivalent_index_identity := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/main.trb",
+					"/project/src/shared/data_table/index.trb",
+				],
+				sources: [
+					"import { DataTable as First } from shared/data_table\nimport { DataTable as Second } from shared/data_table/index\n\ndef main()\n\treturn\nend\n",
+					"record DataTable\n\trows: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(equivalent_index_identity)).to_be_false()
+		expect(load_string(equivalent_index_identity.diagnostics.messages, 0)).to_equal(
+			"declaration DataTable from shared/data_table/index is already imported as First",
+		)
+
+		binding_collision := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/main.trb",
+					"/project/src/first.trb",
+					"/project/src/second.trb",
+				],
+				sources: [
+					"import { First as Shared } from first\nimport { Second as Shared } from second\n\ndef main()\n\treturn\nend\n",
+					"record First\n\tnumber: Integer\nend\n",
+					"record Second\n\tnumber: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(resolve(binding_collision)).to_be_false()
+		expect(load_string(binding_collision.diagnostics.messages, 0)).to_equal(
+			"duplicate import binding Shared",
+		)
+	end
+
+	test("keeps configured package identities separate from physical source paths") do
+		mut state := load_named_project_sources(
+			"/project/trbconfig.jsonc",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/shared sources/api.trb", "/other shared/index.trb"],
+				sources: [
+					"import { label } from local/widgets/api\ndef main()\nputs(label())\nend\n",
+					"import { value } from local/shared\ndef label(): String\nreturn value()\nend\n",
+					"def value(): String\nreturn \"widget\"\nend\n",
+				], error: "",
+			), ["main", "local/widgets/api", "local/shared/index"],
+		)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		shared := find_module(state, "local/shared/index")
+		expect(shared >= 0).to_be_true()
+		expect(load_string(state.module_graph.module_files, shared)).to_equal("/other shared/index.trb")
+		expect(state.module_graph.entry_module[0]).to_equal(0)
+	end
+
+	test("rejects collisions between project and configured package identities") do
+		["local/widgets", "local/widgets/index"].each do |project_name|
+			state := load_named_project_sources(
+				"/project/trbconfig.jsonc",
+				CompilerProjectSources.new(
+					paths: ["/project/src/main.trb", "/project/src/widget.trb", "/shared/index.trb"],
+					sources: ["def main()\nend\n", "def local_value(): Integer\nreturn 1\nend\n", "def package_value(): Integer\nreturn 2\nend\n"], error: "",
+				), ["main", project_name, "local/widgets/index"],
+			)
+			expect(has_diagnostic(state)).to_be_true()
+			message := load_string(state.diagnostics.messages, 0)
+			expect(message.include?("local/widgets")).to_be_true()
+		end
+	end
+
+	test("normalizes configured roots lexically without discarding parent escapes") do
+		inputs := ["/app/../widgets//src/.", "/../../widgets", "/app/./out/../src", "../../src/../lib", "a/../../b", "a/..", "", "//"]
+		expected := ["/widgets/src", "/widgets", "/app/src", "../../lib", "../b", ".", ".", "/"]
+		mut index := 0
+		while index < inputs.size()
+			expect(path_normalize(inputs[index])).to_equal(expected[index])
+			index += 1
+		end
+	end
+
+	test("rejects invalid configured project bundles before checking") do
+		empty := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(paths: [], sources: [], error: ""),
+		)
+		expect(load_string(empty.diagnostics.messages, 0)).to_equal("no production .trb files found")
+
+		mismatched := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb"], sources: [], error: ""),
+		)
+		expect(load_string(mismatched.diagnostics.messages, 0)).to_equal(
+			"project source adapter returned mismatched paths and sources",
+		)
+
+		outside := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/outside.trb"],
+				sources: ["def main()\n\treturn\nend\n"],
+				error: "",
+			),
+		)
+		expect(load_string(outside.diagnostics.messages, 0)).to_equal(
+			"project source is outside configured sourceDir",
+		)
+
+		conflicting_roots := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: [
+					"/project/src/main.trb",
+					"/project/src/lib/value.trb",
+					"/project/src/lib/value/index.trb",
+				],
+				sources: [
+					"import { Value } from lib/value\n\ndef main()\n\tvalue := Value.new(number: 1)\n\treturn\nend\n",
+					"record Value\n\tnumber: Integer\nend\n",
+					"record ValueIndex\n\tnumber: Integer\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(load_string(conflicting_roots.diagnostics.messages, 0)).to_equal(
+			"module paths lib/value/index and lib/value define the same import root",
+		)
+	end
+
+	test("checks unimported configured sources and unique entrypoints") do
+		invalid := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/application.trb", "/project/src/unrelated.trb"],
+				sources: ["def main()\n\treturn\nend\n", "def unfinished(\n"],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(invalid)).to_be_true()
+		expect(load_string(invalid.module_graph.module_files, 1)).to_equal("/project/src/unrelated.trb")
+
+		missing := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/library.trb"],
+				sources: ["def value(): Integer\n\treturn 1\nend\n"],
+				error: "",
+			),
+		)
+		expect(load_string(missing.diagnostics.messages, 0)).to_equal(
+			"project must declare exactly one top-level main function",
+		)
+
+		duplicate := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/first.trb", "/project/src/second.trb"],
+				sources: ["def main()\n\treturn\nend\n", "def main()\n\treturn\nend\n"],
+				error: "",
+			),
+		)
+		expect(load_string(duplicate.diagnostics.messages, 0)).to_equal(
+			"project has more than one top-level main function",
+		)
+	end
+
+	test("rejects missing imports and admits same-unit project cycles") do
+		missing := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/application.trb"],
+				sources: ["import { value } from missing\n\ndef main()\n\treturn\nend\n"],
+				error: "",
+			),
+		)
+		expect(load_string(missing.diagnostics.messages, 0)).to_equal(
+			"cannot resolve project import missing",
+		)
+
+		mut cycle := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/application.trb", "/project/src/library.trb"],
+				sources: [
+					"import { value } from library\ndef root_value(): Integer\nreturn 1\nend\ndef main()\nputs(value())\nend\n",
+					"import { root_value } from application\ndef value(): Integer\nreturn root_value()\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(cycle)).to_be_false()
+		expect(resolve(cycle) && check(cycle)).to_be_true()
+	end
+
+	test("keeps declarations and named imports scoped to their source modules") do
+		mut state := compiler_new(16384)
+		add_module(state, "main", "/project/main.trb")
+		add_module(state, "alpha", "/project/alpha.trb")
+		add_module(state, "beta", "/project/beta.trb")
+		state.module_graph.entry_module[0] = 0
+		sources := [
+			"import { left } from alpha\nimport { right } from beta\n\ndef main()\n\tif left() + right() == 42\n\t\tputs(\"modules-ok\")\n\tend\n\treturn\nend\n",
+			"record Value\n\tnumber: Integer\nend\n\ndef normalize(value: Integer): Integer\n\treturn value\nend\n\ndef left(): Integer\n\tvalue := Value.new(number: 20)\n\treturn normalize(value.number)\nend\n",
+			"record Value\n\tnumber: Integer\nend\n\ndef normalize(value: Integer): Integer\n\treturn value\nend\n\ndef right(): Integer\n\tvalue := Value.new(number: 22)\n\treturn normalize(value.number)\nend\n",
+		]
+		mut module_index := 0
+		while module_index < sources.size()
+			start := state.source_tokens.token_count[0]
+			expect(lex_module(state, sources[module_index], module_index)).to_be_true()
+			expect(parse_module(state, start, module_index)).to_be_true()
+			module_index += 1
+		end
+		expect(load_integer(state.module_graph.module_import_starts, 0)).to_equal(0)
+		expect(load_integer(state.module_graph.module_import_counts, 0)).to_equal(2)
+		expect(load_integer(state.module_graph.module_import_starts, 1)).to_equal(2)
+		expect(load_integer(state.module_graph.module_import_counts, 1)).to_equal(0)
+		expect(load_integer(state.module_graph.module_import_starts, 2)).to_equal(2)
+		expect(load_integer(state.module_graph.module_import_counts, 2)).to_equal(0)
+		mut import_index := 0
+		while import_index < state.module_graph.import_count[0]
+			path := load_string(state.module_graph.import_paths, import_index)
+			if path == "alpha"
+				store_integer(state.module_graph.import_targets, import_index, 1)
+			else
+				store_integer(state.module_graph.import_targets, import_index, 2)
+			end
+			import_index += 1
+		end
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.declarations.record_count[0]).to_equal(2)
+		expect(state.declarations.function_count[0]).to_equal(5)
+		first := output_source(emit_qbe(state))
+		second := output_source(emit_qbe(state))
+		expect(first).to_equal(second)
+	end
+
+	test("parses the checked-in compiler closure through its own frontend") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root == nil
+			expect(true).to_be_true()
+		else
+			base := root + "/compiler/src/"
+			names := ["compiler", "frontend/resolution/module_components", "project/package_checksum", "backend/qbe/emit/bytes", "project/package_manifest", "project/package_json", "project/packages", "backend/qbe/emit/object_dispatch", "frontend/types/object_types", "backend/qbe/runtime/number_parsing", "backend/qbe/runtime/scalar_strings", "backend/qbe/emit/globals", "mir/lowering/globals", "frontend/checking/program/globals", "backend/qbe/emit/callables", "project/standard_library", "frontend/checking/program/generics", "backend/qbe/emit/functions", "frontend/checking/program/functions", "frontend/checking/program/attributes", "mir/model/types", "frontend/syntax/lexer", "backend/qbe/runtime/hash_runtime", "support/literals", "mir/lowering/calls", "frontend/syntax/parser", "support/path", "project/config", "backend/qbe/emit/constants", "backend/qbe/output", "backend/qbe/runtime/system", "backend/qbe/runtime/power", "frontend/resolution/entry_resolution", "frontend/resolution/import_resolution", "frontend/checking/program/resolution", "frontend/resolution/declaration_lookup", "state/state", "support/storage", "support/compiler_bytes", "mir/model/module", "backend/qbe/context", "frontend/syntax/string_escapes", "mir/model/intrinsics", "frontend/types/nullable_types", "mir/analysis/initialization", "frontend/checking/body/values", "mir/build/control", "frontend/checking/nominal/nullable_flow", "state/local_state", "frontend/resolution/default_arguments", "frontend/checking/program/generic_fork", "frontend/checking/body/expressions", "frontend/checking/body/statements", "frontend/syntax/syntax_tokens", "frontend/types/hash_types", "mir/lowering/callables", "frontend/resolution/object_dispatch", "frontend/resolution/alias_patterns", "frontend/resolution/generic_functions", "frontend/types/generic_bindings", "frontend/resolution/type_resolution", "mir/analysis/enum_stack", "mir/analysis/numeric", "backend/qbe/emit/control", "backend/qbe/emit/mir", "mir/lowering/global_initialization", "frontend/checking/nominal/object_fields", "frontend/checking/builtins/results", "frontend/checking/nominal/results", "state/checked_body", "mir/lowering/lambdas", "mir/build/bindings", "frontend/checking/collections/hashes", "mir/build/functions", "mir/passes/optimize", "mir/verify/module", "frontend/types/object_model", "mir/model/objects", "frontend/types/literal_types", "mir/model/newtypes", "frontend/types/newtype_model", "frontend/types/newtype_types", "frontend/types/union_types", "frontend/types/callable_types", "frontend/types/enum_types", "support/unicode_identifiers", "backend/qbe/runtime/hash_key_runtime", "mir/analysis/flow", "mir/analysis/roots", "frontend/resolution/argument_binding", "frontend/syntax/object_syntax", "frontend/syntax/newtype_syntax", "frontend/types/generic_arguments", "frontend/types/namespace_model", "frontend/syntax/alias_syntax", "frontend/syntax/enum_syntax", "frontend/syntax/syntax_forms", "frontend/syntax/body_syntax", "frontend/syntax/declaration_syntax", "backend/qbe/emit/objects", "backend/qbe/emit/unions", "backend/qbe/emit/enums", "backend/qbe/emit/nullable", "backend/qbe/runtime/array_join", "backend/qbe/runtime/array_copies", "backend/qbe/runtime/array_mutations", "backend/qbe/runtime/string_literals", "backend/qbe/runtime/string_slices", "backend/qbe/runtime/string_trimming", "backend/qbe/runtime/string_transforms", "backend/qbe/runtime/string_case", "backend/qbe/runtime/string_sequences", "backend/qbe/runtime/string_queries", "backend/qbe/emit/strings", "frontend/resolution/body_resolution", "frontend/resolution/object_resolution", "frontend/resolution/newtype_resolution", "frontend/resolution/raw_enum_resolution", "frontend/syntax/global_declarations", "frontend/resolution/generic_validation", "frontend/resolution/enum_resolution", "state/callable_state", "state/global_state", "state/nominal_state", "state/catalog_state", "state/source_state", "frontend/types/enum_model", "mir/lowering/collection_inference", "mir/build/blocks", "mir/lowering/nullable", "frontend/types/alias_model", "frontend/types/generic_model", "mir/lowering/literals", "mir/lowering/newtypes", "frontend/resolution/namespace_references", "frontend/checking/body/lambdas", "mir/lowering/enums", "frontend/checking/program/submission", "mir/lowering/ranges", "frontend/checking/body/types", "frontend/checking/collections/iteration", "mir/model/iteration", "mir/build/logical", "mir/lowering/strings", "frontend/checking/body/collections", "frontend/checking/body/members", "frontend/checking/body/control", "frontend/checking/collections/inference", "frontend/checking/nominal/union_members", "mir/build/value_control", "mir/lowering/hashes", "mir/lowering/arrays", "frontend/checking/body/iteration", "frontend/syntax/literal_type_syntax", "mir/model/object_dispatch", "frontend/resolution/object_methods", "mir/analysis/ranges", "mir/analysis/array_loops", "backend/qbe/emit/ranges", "backend/qbe/emit/hashes", "backend/qbe/emit/records", "backend/qbe/emit/arrays", "backend/qbe/emit/roots", "backend/qbe/emit/calls", "backend/qbe/emit/numeric", "frontend/types/result_model", "frontend/types/transform_model", "mir/model/hashes", "mir/lowering/object_dispatch", "mir/verify/object_initialization", "mir/analysis/identities", "mir/verify/instructions", "support/unicode_identifier_data", "frontend/syntax/generic_syntax", "frontend/syntax/raw_enum_syntax", "frontend/syntax/attribute_syntax", "frontend/syntax/literal_syntax", "frontend/syntax/lambda_syntax", "frontend/syntax/iteration_syntax", "frontend/types/global_model", "backend/qbe/runtime/unicode_case_data", "frontend/resolution/enum_methods", "frontend/resolution/lambda_resolution", "frontend/types/raw_enum_types", "frontend/types/attribute_model", "frontend/checking/nominal/literal_cases", "mir/lowering/unions", "mir/lowering/objects", "frontend/resolution/newtype_methods", "frontend/checking/nominal/raw_enums", "mir/lowering/records", "frontend/checking/body/calls", "frontend/checking/nominal/unions", "frontend/checking/nominal/enums", "frontend/checking/collections/sliced_iteration", "frontend/checking/builtins/array_sorting", "mir/build/iteration", "mir/lowering/bytes", "frontend/checking/builtins/number_parsing", "frontend/checking/builtins/lookup", "frontend/checking/builtins/range_methods", "frontend/checking/builtins/array_queries", "frontend/checking/builtins/array_methods", "frontend/checking/builtins/string_methods", "frontend/checking/builtins/float_methods", "frontend/checking/builtins/integer_methods", "backend/qbe/runtime/managed_storage", "state/resolution_locals", "project/official_catalog", "mir/analysis/call_effects", "mir/analysis/literal_data", "mir/verify/program", "mir/lowering/program", "mir/model/program", "mir/analysis/loop_calls", "mir/analysis/callables", "mir/analysis/numeric_interface", "backend/qbe/runtime/requirements", "mir/passes/enum_calls", "mir/passes/enum_components", "mir/passes/rewrite", "mir/analysis/string_concats", "mir/analysis/hash_lookup", "mir/analysis/array_joins", "mir/analysis/string_splits", "mir/analysis/array_read_guards", "mir/analysis/hash_membership", "mir/analysis/call_returns", "backend/qbe/runtime/array_construction", "mir/analysis/hash_concats", "mir/model/effects", "mir/passes/literal_calls", "mir/model/instructions", "mir/model/control", "mir/model/call_kinds", "mir/model/type_kinds", "mir/model/type_ids", "state/token_kinds", "frontend/types/operators", "mir/model/scalar_operators", "state/checking_phases", "state/local_slots", "frontend/types/declaration_kinds", "state/control_kinds", "mir/model/hash_actions", "mir/model/numeric_modes", "frontend/types/transform_kinds", "frontend/types/iteration_kinds", "frontend/types/method_kinds", "project/json_kinds", "state/binding_kinds", "state/default_kinds", "frontend/types/generic_kinds", "frontend/types/attribute_kinds", "frontend/types/value_categories", "frontend/types/operator_plans", "state/standard_source_kinds", "backend/qbe/runtime_slots", "mir/model/operation_modes", "state/import_kinds", "project/config_json", "mir/analysis/array_appends", "backend/qbe/runtime/integer_strings", "mir/analysis/array_lengths", "backend/qbe/emit/array_joins", "mir/analysis/array_bounds", "mir/passes/array_loop_versions", "mir/analysis/loop_arithmetic", "mir/analysis/array_headers", "mir/analysis/loops", "mir/passes/leaf_loops", "mir/passes/inline_calls", "mir/passes/record_loops", "mir/analysis/array_local", "mir/analysis/array_values", "backend/qbe/emit/array_caches", "mir/analysis/array_promotions", "backend/qbe/emit/loop_peels", "mir/analysis/array_peeling", "mir/passes/local_callables", "mir/analysis/callable_allocations", "mir/analysis/liveness", "frontend/checking/collections/context_analysis", "mir/passes/boolean_edges", "mir/passes/loop_exit_constants", "frontend/resolution/projected_types", "frontend/resolution/standard_intrinsics", "frontend/providers/web_declarations", "frontend/providers/web_parameters", "frontend/providers/json_declarations", "frontend/providers/json_codecs", "frontend/providers/json_schema", "frontend/providers/json_bodies", "frontend/checking/builtins/json_codecs", "frontend/providers/web_inputs", "backend/qbe/runtime/time_host", "frontend/resolution/time_intrinsics", "frontend/providers/time_codecs", "frontend/providers/web_context", "frontend/resolution/web_context_intrinsics", "frontend/checking/builtins/web_context", "mir/lowering/web_context", "backend/qbe/runtime/entropy", "frontend/resolution/secure_random_intrinsics", "project/web_routes", "state/web_routes", "project/web_route_paths", "project/web_dispatch_source", "frontend/checking/program/web_routes", "backend/qbe/runtime/failure_recovery", "frontend/checking/program/web_endpoints", "frontend/providers/path_source", "project/package_lock", "backend/qbe/runtime/package_files", "backend/qbe/runtime/network", "mir/model/network_contract", "backend/qbe/runtime/network_libraries", "backend/qbe/runtime/network_buffers", "backend/qbe/runtime/network_parser", "backend/qbe/runtime/network_transport", "frontend/resolution/network_intrinsics", "backend/qbe/runtime/string_builder", "mir/model/string_builder_contract", "frontend/resolution/string_builder_intrinsics", "frontend/checking/builtins/string_builder", "backend/qbe/runtime/network_link", "backend/qbe/runtime/compression", "frontend/resolution/compression_intrinsics", "backend/qbe/runtime/compression_link", "backend/qbe/runtime/crypto", "mir/model/crypto_contract", "frontend/resolution/crypto_intrinsics", "backend/qbe/runtime/crypto_link", "frontend/resolution/oidc_intrinsics", "mir/model/oidc_contract", "backend/qbe/runtime/oidc", "backend/qbe/runtime/oidc_link", "backend/qbe/runtime/oidc_trust", "backend/qbe/runtime/oidc_uri", "backend/qbe/runtime/oidc_gzip", "frontend/syntax/test_syntax", "backend/qbe/emit/file_scopes", "mir/model/filesystem_contract", "backend/qbe/runtime/filesystem_adapters", "backend/qbe/runtime/directory_values", "backend/qbe/runtime/filesystem_io", "backend/qbe/runtime/filesystem_values", "project/filesystem_sources", "project/directory_sources", "state/source_capacity", "frontend/checking/body/resource_calls", "frontend/resolution/filesystem_intrinsics", "frontend/checking/body/file_bodies", "frontend/types/resource_types", "frontend/checking/program/resource_declarations", "mir/analysis/resource_calls", "frontend/checking/body/resources", "mir/lowering/file_scopes", "mir/verify/resource_calls", "mir/verify/resource_values", "backend/qbe/runtime/resource_cleanup", "frontend/checking/body/file_acquisition", "mir/verify/file_scopes", "backend/qbe/runtime/test_paths", "backend/qbe/runtime/test_recovery", "mir/model/test_contract", "frontend/providers/test_declarations", "frontend/resolution/test_intrinsics", "frontend/providers/test_origins", "project/test_sources", "frontend/checking/builtins/test_expectations", "backend/qbe/runtime/test_comparison", "mir/analysis/test_comparison", "project/test_runner", "frontend/providers/test_assertions", "backend/qbe/runtime/decimal_digits", "backend/qbe/runtime/float_decimal", "backend/qbe/runtime/float_powers", "backend/qbe/runtime/test_inspection", "mir/analysis/test_inspection", "backend/qbe/runtime/test_inspection_helpers", "backend/qbe/runtime/test_predicate", "backend/qbe/runtime/gc_mark", "mir/model/deadlines", "backend/qbe/runtime/deadlines", "mir/lowering/deadlines", "mir/verify/deadlines", "frontend/checking/body/concurrency", "frontend/types/concurrent_types", "frontend/checking/collections/concurrent_limit", "backend/qbe/runtime/oidc_idna", "frontend/resolution/process_intrinsics", "mir/model/process_contract", "backend/qbe/runtime/process", "backend/qbe/runtime/sqlite_write", "mir/model/sqlite_contract", "frontend/resolution/sqlite_intrinsics", "backend/qbe/runtime/sqlite_link", "backend/qbe/runtime/sqlite_query", "frontend/providers/jobs_wrappers", "frontend/providers/orm_models", "project/orm_schema", "support/unicode_lower_data", "frontend/providers/orm_lookup", "frontend/providers/orm_writes", "backend/qbe/runtime/sqlite_transactions", "frontend/checking/body/orm_transactions", "frontend/providers/orm_queries", "frontend/checking/body/orm_queries", "mir/analysis/split_fields"]
+			mut sources: Array<String> := []
+			names.each do |name|
+				sources.push(required_test_source(base + name + ".trb"))
+			end
+			mut capacity := 0
+			mut module_index := 0
+			while module_index < sources.size()
+				expect(!sources[module_index].empty?()).to_be_true()
+				capacity += sources[module_index].size() + 1
+				module_index += 1
+			end
+			mut state := compiler_new(capacity)
+			module_index = 0
+			while module_index < names.size()
+				add_module(state, names[module_index], base + names[module_index] + ".trb")
+				module_index += 1
+			end
+			state.module_graph.entry_module[0] = 0
+			module_index = 0
+			while module_index < sources.size()
+				start := state.source_tokens.token_count[0]
+				expect(lex_module(state, sources[module_index], module_index)).to_be_true()
+				expect(parse_module(state, start, module_index)).to_be_true()
+				module_index += 1
+			end
+			mut import_index := 0
+			while import_index < state.module_graph.import_count[0]
+				target := find_module(state, load_string(state.module_graph.import_paths, import_index))
+				expect(target >= 0).to_be_true()
+				store_integer(state.module_graph.import_targets, import_index, target)
+				import_index += 1
+			end
+			expect(find_record_in_module(state, 0, "CompilerState")).to_equal(-1)
+			expect(find_record_in_module(state, 0, "QbeOutput")).to_equal(-1)
+			expect(find_record_in_module(state, find_module(state, "backend/qbe/output"), "QbeOutput") >= 0).to_be_true()
+			expect(find_record_in_module(state, find_module(state, "state/state"), "CompilerState") >= 0).to_be_true()
+			expect(find_record_in_module(state, 0, "CheckedLocals")).to_equal(-1)
+			expect(find_record_in_module(state, find_module(state, "state/local_state"), "CheckedLocals") >= 0).to_be_true()
+			expect(find_record_in_module(state, 0, "CheckedValue")).to_equal(-1)
+			expect(find_record_in_module(state, find_module(state, "frontend/checking/body/values"), "CheckedValue") >= 0).to_be_true()
+			expect(state.declarations.record_count[0] > 5).to_be_true()
+			expect(state.declarations.function_count[0] > 20).to_be_true()
+			if !resolve(state)
+				puts(
+					load_string(state.diagnostics.codes, 0) + ":" + load_integer(state.diagnostics.lines, 0).to_s() + ":" +
+					load_string(state.diagnostics.messages, 0),
+				)
+			end
+			expect(has_diagnostic(state)).to_be_false()
+			# Function lookup is indexed by resolution, unlike record lookup.
+			expect(find_function_in_module(state, 0, "parse_module")).to_equal(-1)
+			expect(find_function_in_module(state, find_module(state, "frontend/syntax/parser"), "parse_module") >= 0).to_be_true()
+			expect(find_function_in_module(state, 0, "resolve")).to_equal(-1)
+			expect(find_function_in_module(state, find_module(state, "frontend/checking/program/resolution"), "resolve") >= 0).to_be_true()
+			expect(find_function_in_module(state, 0, "check_expression")).to_equal(-1)
+			expect(find_function_in_module(state, find_module(state, "frontend/checking/body/expressions"), "check_expression") >= 0).to_be_true()
+			if !check(state)
+				puts(
+					load_string(state.diagnostics.codes, 0) + ":" + load_integer(state.diagnostics.lines, 0).to_s() + ":" +
+					load_string(state.diagnostics.messages, 0),
+				)
+			end
+			expect(has_diagnostic(state)).to_be_false()
+			# Every compiler declaration, including intrinsic fallback bodies,
+			# must have verified MIR when compiling the real module closure.
+			expect(state.scalar_mir.functions.size()).to_equal(state.declarations.function_count[0])
+			mut function := 0
+			while function < state.declarations.function_count[0]
+				if mir_function_index(state.scalar_mir, function) < 0
+					puts("missing compiler MIR: " + load_string(state.declarations.function_names, function))
+					expect(false).to_be_true()
+				end
+				function += 1
+			end
+		end
+	end
+end

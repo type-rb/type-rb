@@ -1,0 +1,41 @@
+import trb/std/result
+
+def main()
+	mut values := ["first", "last"]
+	values.push("added")
+	value := values.try_fetch(-1) catch |error|
+		error.message
+	end
+	puts(value)
+	part := values.try_slice(1...3) catch |error|
+		puts(error.message)
+		[]
+	end
+	puts(part.join(","))
+	case { 7: "kept" }.try_fetch(8)
+	when Result::Ok(found)
+		puts(found)
+	when Result::Err(error)
+		case error.key
+		when Integer(key)
+			puts(key)
+		when String(key)
+			puts(key)
+		end
+		puts(error.message)
+	end
+	case "9007199254740992".try_to_i()
+	when Result::Ok(number)
+		puts(number)
+	when Result::Err(error)
+		puts(error.input)
+		puts(error.message)
+	end
+	case "1e309x".try_to_f()
+	when Result::Ok(number)
+		puts(number)
+	when Result::Err(error)
+		puts(error.message)
+	end
+	puts(1.0 / "-0".to_f())
+end

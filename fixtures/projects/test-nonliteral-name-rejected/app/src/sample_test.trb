@@ -1,0 +1,9 @@
+import { describe, expect, test } from trb/std/test
+
+name := "dynamic"
+
+describe(name) do
+	test("runs") do
+		expect(1).to_equal(1)
+	end
+end

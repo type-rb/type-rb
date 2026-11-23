@@ -1,0 +1,14 @@
+record Samples
+	values: Array<Integer>
+end
+
+def access(samples: Samples, index: Integer): Integer
+	values := samples.values
+	return values[index]
+end
+
+def main()
+	values := [1]
+	puts(access(Samples.new(values: values), -2).to_s())
+	return
+end

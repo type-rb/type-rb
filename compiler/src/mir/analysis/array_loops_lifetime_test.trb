@@ -1,0 +1,15 @@
+import { array_loop_mir_check } from testing/mir/array_loops
+import { mir_function_index } from mir/model/module
+import { describe, expect, test } from trb/std/test
+
+describe("Array header lifetime after initialization") do
+	test("separates calls outside the loop from growth inside it") do
+		bodies := ["total += values[i]", "values.push(4)\ntotal += values[i]"]
+		mut index := 0
+		while index < bodies.size()
+			state := array_loop_mir_check("def main()\nmut values := [1, 2]\nvalues.push(3)\nmut i := 0\nmut total := 0\nwhile i < values.size()\n" + bodies[index] + "\ni += 1\nend\nvalues.push(4)\nend\n")
+			expect(state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 0)].size()).to_equal(1 - index)
+			index += 1
+		end
+	end
+end

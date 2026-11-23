@@ -1,0 +1,7 @@
+def main()
+	mut index := 9007199254740991
+	while true
+		index += 1
+		break
+	end
+end

@@ -1,0 +1,89 @@
+import { mir_hash_string_key } from mir/lowering/hashes
+import { mir_semantic_type_id, mir_types_error } from mir/model/types
+import { mir_module_new, mir_type_id } from mir/model/module
+import { check, emit_qbe } from compiler
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Plain String Hash probe ownership") do
+	test("selects canonical String keys without admitting other domains") do
+		mut native_module := mir_module_new()
+		words := mir_semantic_type_id(native_module, "Hash<String,Integer>")
+		integers := mir_semantic_type_id(native_module, "Hash<Integer,Integer>")
+		empty := mir_semantic_type_id(native_module, "Hash")
+		expect(mir_types_error(native_module)).to_equal("")
+		expect(mir_hash_string_key(native_module, words)).to_be_true()
+		expect(mir_hash_string_key(native_module, integers)).to_be_false()
+		expect(mir_hash_string_key(native_module, empty)).to_be_false()
+		expect(mir_hash_string_key(native_module, mir_type_id("String"))).to_be_false()
+		expect(mir_hash_string_key(native_module, -1)).to_be_false()
+	end
+
+	test("specializes the unchanged String workload and its reused slot") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			mut state := logical_checked_source(array_mir_test_read(root + "/benchmarks/features/hash-string-keys/src/main.trb"))
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			text := control_test_output(emit_qbe(state))
+			expect(text.include?("call $trbn_hash_existing_slot_string(")).to_be_false()
+			expect(text.include?("call $trbn_hash_slot_string(")).to_be_true()
+			expect(text.include?(" =l copy %hash_membership_")).to_be_true()
+			expect(text.include?("call $trbn_hash_get_string(")).to_be_true()
+			expect(state.scalar_mir.hash_lookup_reuse[0].size() > 0).to_be_true()
+		end
+	end
+
+	test("keeps boxed String literal keys on the generic probe") do
+		mut state := logical_checked_source("alias Key = \"one\" | \"two\"\ndef main()\nkey: Key := \"one\"\nmut table: Hash<Key, Integer> := {key => 9}\nputs(table.key?(key))\nputs(table[key])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		text := control_test_output(emit_qbe(state))
+		expect(text.include?("$trbn_hash_slot_string(")).to_be_false()
+		expect(text.include?("call $trbn_hash_get(")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, text)
+			when Result::Ok(actual)
+				expect(actual).to_equal("true\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains String helpers when Integer reads are emitted afterwards") do
+		mut state := logical_checked_source("def main()\nmut words: Hash<String, Integer> := {}\nwords[\"key\"] = 2\nputs(words.key?(\"key\"))\nputs(words[\"key\"])\nmut integers: Hash<Integer, String> := {}\nintegers[-1] = \"kept\"\nputs(integers.key?(-1))\nputs(integers[-1])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		text := control_test_output(emit_qbe(state))
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, text)
+			when Result::Ok(actual)
+				expect(actual).to_equal("true\n2\ntrue\nkept\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end
+
+describe("Plain String Hash managed lifetimes") do
+	test("hash-string-alias-lifetime") do
+		managed_mir_test_fixture("hash-string-alias-lifetime", 6)
+	end
+
+	test("hash-string-recursive-lifetime") do
+		managed_mir_test_fixture("hash-string-recursive-lifetime", 6)
+	end
+end

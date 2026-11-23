@@ -1,0 +1,57 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Checked readonly reference bindings") do
+	test("rejects capability upgrades from direct immutable bindings") do
+		sources := [
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Sample): Integer\n\tmut copy := input\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Sample): Integer\n\tmut copy: Sample := ((input))\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(): Integer\n\tinput := Sample.new(value: 1)\n\tmut copy := input\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Array<Integer>): Integer\n\tmut copy := input\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(): Integer\n\tinput := [1]\n\tmut copy := (input)\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+		]
+		mut index := 0
+		while index < sources.size()
+			source := sources[index]
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("cannot initialize mutable copy from an immutable value")
+			index += 1
+		end
+	end
+
+	test("preserves mutable, fresh, scalar and shallow nested values") do
+		sources := [
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(mut input: Sample): Integer\n\tmut copy := input\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(): Integer\n\tmut input := Sample.new(value: 1)\n\tmut copy := input\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(mut input: Array<Integer>): Integer\n\tmut copy := input\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Box): Integer\n\tmut copy := input.item\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Box): Integer\n\tmut copy := input.values\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Array<Array<Integer>>): Integer\n\tmut copy := input[0]\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: Integer): Integer\n\tmut copy := input\n\treturn copy\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(input: String): String\n\tmut copy := input\n\treturn copy\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(): Integer\n\tmut copy := make_sample()\n\treturn copy.value\nend\n\ndef main()\n\treturn\nend\n",
+			"record Sample\n\tvalue: Integer\nend\n\nrecord Box\n\titem: Sample\n\tvalues: Array<Integer>\nend\n\ndef make_sample(): Sample\n\treturn Sample.new(value: 1)\nend\n\ndef make_values(): Array<Integer>\n\treturn [1]\nend\n\ndef probe(): Integer\n\tmut copy := make_values()\n\treturn copy.size()\nend\n\ndef main()\n\treturn\nend\n",
+		]
+		mut index := 0
+		while index < sources.size()
+			source := sources[index]
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_true()
+			index += 1
+		end
+	end
+
+end

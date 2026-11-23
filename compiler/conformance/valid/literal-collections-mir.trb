@@ -1,0 +1,40 @@
+def mixed(value: 0 | "0" | ""): Integer
+	return case value
+	when 0, ""
+		1
+	when "0"
+		2
+	end
+end
+
+def range_size(value: 1 | 2): Integer
+	puts(-value)
+	puts(+value)
+	return (value..3).to_a().size()
+end
+
+def held(value: String): String
+	return value + "!"
+end
+
+def main()
+	key: "a" := "a"
+	mut table: Hash<"a", String> := {}
+	table[key] = held("value")
+	retained := table.keys()
+	noise := held("noise")
+	puts(table[retained[0]])
+	puts(noise)
+	values: Array<1 | 2> := [2, 1, 2]
+	puts(values.sort()[0])
+	puts(values.sort_by { |value| value }[0])
+	puts(values.include?(1))
+	puts(values.uniq().size())
+	labels: Array<"b" | "a"> := ["b", "a"]
+	puts(labels.sort()[0])
+	puts(labels.include?("a"))
+	puts(range_size(1))
+	puts(mixed(0))
+	puts(mixed("0"))
+	puts(mixed(""))
+end

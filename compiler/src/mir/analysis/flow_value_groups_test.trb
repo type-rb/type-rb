@@ -1,0 +1,93 @@
+import { check, emit_qbe } from compiler
+import { mir_function_value_groups } from mir/analysis/flow
+import { MirFunction, MirValue, mir_module_new } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { output_source } from testing/compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { mir_test_module } from testing/mir/model
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def value_groups_test_function(id: Integer): MirFunction
+	return MirFunction.new(kind: 0, result_type: "Void", integer_guard: 0, id: id, entry_block: 100, source_id: 0, line: 1, parameter_start: 0, parameter_count: 0, block_start: 0, block_count: 0)
+end
+
+describe("MIR function value groups") do
+	test("preserves sparse identities original value order and empty functions") do
+		mut native_module := mir_module_new()
+		[9007199254740991, 7, 41].each do |id|
+			native_module.functions.push(value_groups_test_function(id))
+		end
+		first := MirValue.new(function_id: 7, id: 31, type_id: 2, source_id: 5, line: 13)
+		second := MirValue.new(function_id: 9007199254740991, id: 8, type_id: 3, source_id: 6, line: 17)
+		third := MirValue.new(function_id: 7, id: 2, type_id: 4, source_id: 5, line: 19)
+		native_module.values.push(first)
+		native_module.values.push(second)
+		native_module.values.push(MirValue.new(function_id: 99, id: 1, type_id: 1, source_id: 0, line: 1))
+		native_module.values.push(third)
+		expect(mir_function_value_groups(native_module)).to_equal([[second], [first, third], []])
+		saved := native_module.functions[0]
+		native_module.functions[0] = native_module.functions[1]
+		native_module.functions[1] = saved
+		expect(mir_function_value_groups(native_module)).to_equal([[first, third], [second], []])
+		expect(native_module.values).to_equal([first, second, MirValue.new(function_id: 99, id: 1, type_id: 1, source_id: 0, line: 1), third])
+	end
+
+	test("keeps the first identity match without admitting duplicate functions") do
+		mut native_module := mir_module_new()
+		native_module.functions.push(value_groups_test_function(7))
+		native_module.functions.push(value_groups_test_function(7))
+		value := MirValue.new(function_id: 7, id: 0, type_id: 1, source_id: 0, line: 1)
+		native_module.values.push(value)
+		expect(mir_function_value_groups(native_module)).to_equal([[value], []])
+		mut invalid := mir_test_module(false, false)
+		invalid.functions.push(invalid.functions[0])
+		expect(verify_mir(invalid, false)).to_equal("MIR function identifier is duplicated")
+	end
+
+	test("leaves validation of foreign value owners with the verifier") do
+		mut native_module := mir_test_module(false, false)
+		before := mir_function_value_groups(native_module)
+		native_module.values.push(MirValue.new(function_id: 999, id: 0, type_id: 1, source_id: 0, line: 1))
+		expect(mir_function_value_groups(native_module)).to_equal(before)
+		expect(verify_mir(native_module, false)).to_equal("MIR value identity is invalid")
+	end
+
+	test("emits the same managed values after source erasure and physical reordering") do
+		mut state := logical_checked_source("def decorate(text: String): String\nreturn text + \"!\"\nend\ndef count(value: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < value\ntotal += index\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(decorate(\"held\"))\nputs(count(4))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := output_source(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		last := state.scalar_mir.functions.size() - 1
+		saved := state.scalar_mir.functions[0]
+		state.scalar_mir.functions[0] = state.scalar_mir.functions[last]
+		state.scalar_mir.functions[last] = saved
+		mut left := 0
+		mut right := state.scalar_mir.values.size() - 1
+		while left < right
+			value := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = value
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(output_source(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("held!\n6\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,73 @@
+record Flags
+	yes: Boolean
+	no: Boolean
+end
+
+def identity(value: Boolean): Boolean
+	return value
+end
+
+def invert(value: Boolean): Boolean
+	return !value
+end
+
+def inverted_below(value: Integer, limit: Integer): Boolean
+	following := value + 1
+	return !(following < limit)
+end
+
+def select(value: Boolean, yes: String, no: String)
+	if value
+		puts(yes)
+	else
+		puts(no)
+	end
+end
+
+def observe(mut calls: Array<Integer>, value: Boolean): Boolean
+	calls[0] += 1
+	return value
+end
+
+def quotient(numerator: Float, denominator: Float): Float
+	return numerator / denominator
+end
+
+def main()
+	mut index := 0
+	while index < 2
+		select(inverted_below(index, 2), "inlined-not-true", "inlined-not-false")
+		index += 1
+	end
+	flags := Flags.new(yes: true, no: false)
+	select(flags.yes, "record-true", "bad")
+	select(flags.no, "bad", "record-false")
+	select(identity(true), "call-true", "bad")
+	select(identity(false), "bad", "call-false")
+	select(invert(false), "mir-not", "bad")
+	select(invert(true), "bad", "mir-not-false")
+	mut held := false
+	held = !held
+	select(held, "binding", "bad")
+	select(1 < 2, "integer", "bad")
+	select(-5 < -3, "negative", "bad")
+	select(2.5 > 2, "mixed", "bad")
+	select("a" + "b" == "ab", "string-equal", "bad")
+	select("a" + "b" != "a", "string-unequal", "bad")
+	nan := quotient(0.0, 0.0)
+	select(nan == nan, "bad", "nan-equality")
+	select(nan != nan, "nan-inequality", "bad")
+	select(nan < 1.0, "bad", "nan-order")
+	select(-0.0 == 0.0, "signed-zero", "bad")
+	mut calls: Array<Integer> := [0]
+	while observe(calls, calls[0] < 3)
+		if calls[0] == 2
+			puts("nested")
+		end
+	end
+	puts(calls[0].to_s())
+	if observe(calls, true)
+		puts("effect")
+	end
+	puts(calls[0].to_s())
+end

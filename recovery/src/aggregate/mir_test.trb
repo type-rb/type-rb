@@ -1,0 +1,437 @@
+import { ComparisonOperator, IntegerBinaryOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { AggregateField, AggregateTypeDefinition, AggregateValueType, AggregateVariant } from aggregate/layout
+import { RecoveryAggregateBlock, RecoveryAggregateFunction, RecoveryAggregateInstruction, RecoveryAggregateModule, RecoveryAggregateParameter, RecoveryAggregateResultType, RecoveryAggregateTerminator, verify_recovery_aggregate_mir } from aggregate/mir
+import { build_recovery_aggregate_executable } from aggregate/toolchain
+import { NativeSource } from snapshot/mir
+import { emit_recovery_aggregate_qbe } from aggregate/qbe
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_aggregate_mir_origin(line: Integer): SourceOrigin
+	return SourceOrigin.new(
+		source_id: "main",
+		start_line: line,
+		start_column: 1,
+		end_line: line,
+		end_column: 8,
+	)
+end
+
+def _recovery_aggregate_mir_scalar(value_type: ScalarType): AggregateValueType
+	return AggregateValueType::Scalar(value_type)
+end
+
+def _recovery_aggregate_mir_types(): Array<AggregateTypeDefinition>
+	return [
+		AggregateTypeDefinition::Record(
+			"example#Point",
+			[
+				AggregateField.new(name: "x", value_type: _recovery_aggregate_mir_scalar(ScalarType::Integer)),
+				AggregateField.new(name: "y", value_type: _recovery_aggregate_mir_scalar(ScalarType::Integer)),
+			],
+		),
+		AggregateTypeDefinition::Tagged(
+			"example#Outcome",
+			[
+				AggregateVariant.new(
+					name: "Found",
+					fields: [
+						AggregateField.new(name: "point", value_type: AggregateValueType::Aggregate("example#Point")),
+					],
+				),
+				AggregateVariant.new(
+					name: "Missing",
+					fields: [
+						AggregateField.new(name: "code", value_type: _recovery_aggregate_mir_scalar(ScalarType::Integer)),
+					],
+				),
+			],
+		),
+	]
+end
+
+def _recovery_aggregate_make_point(): RecoveryAggregateFunction
+	origin := _recovery_aggregate_mir_origin(1)
+	return RecoveryAggregateFunction.new(
+		id: "example#make_point",
+		name: "make_point",
+		parameters: [
+			RecoveryAggregateParameter.new(id: "x", value_type: _recovery_aggregate_mir_scalar(ScalarType::Integer), origin: origin),
+			RecoveryAggregateParameter.new(id: "y", value_type: _recovery_aggregate_mir_scalar(ScalarType::Integer), origin: origin),
+		],
+		result_type: RecoveryAggregateResultType::Value(AggregateValueType::Aggregate("example#Point")),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryAggregateBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::RecordConstruct("point", "example#Point", ["x", "y"], origin),
+				],
+				terminator: RecoveryAggregateTerminator::Return("point", origin),
+			),
+		],
+	)
+end
+
+def _recovery_aggregate_classify(): RecoveryAggregateFunction
+	origin := _recovery_aggregate_mir_origin(5)
+	point_type := AggregateValueType::Aggregate("example#Point")
+	return RecoveryAggregateFunction.new(
+		id: "example#classify",
+		name: "classify",
+		parameters: [
+			RecoveryAggregateParameter.new(id: "point", value_type: point_type, origin: origin),
+			RecoveryAggregateParameter.new(id: "found", value_type: _recovery_aggregate_mir_scalar(ScalarType::Boolean), origin: origin),
+		],
+		result_type: RecoveryAggregateResultType::Value(AggregateValueType::Aggregate("example#Outcome")),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryAggregateBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [],
+				terminator: RecoveryAggregateTerminator::Branch("found", "yes", ["point"], "no", [], origin),
+			),
+			RecoveryAggregateBlock.new(
+				id: "yes",
+				parameters: [RecoveryAggregateParameter.new(id: "selected", value_type: point_type, origin: origin)],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::VariantConstruct(
+						"outcome",
+						"example#Outcome",
+						"Found",
+						["selected"],
+						origin,
+					),
+				],
+				terminator: RecoveryAggregateTerminator::Return("outcome", origin),
+			),
+			RecoveryAggregateBlock.new(
+				id: "no",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("code", 404, origin)),
+					RecoveryAggregateInstruction::VariantConstruct(
+						"outcome_missing",
+						"example#Outcome",
+						"Missing",
+						["code"],
+						origin,
+					),
+				],
+				terminator: RecoveryAggregateTerminator::Return("outcome_missing", origin),
+			),
+		],
+	)
+end
+
+def _recovery_aggregate_sum_point(): RecoveryAggregateFunction
+	origin := _recovery_aggregate_mir_origin(12)
+	return RecoveryAggregateFunction.new(
+		id: "example#sum_point",
+		name: "sum_point",
+		parameters: [
+			RecoveryAggregateParameter.new(
+				id: "point",
+				value_type: AggregateValueType::Aggregate("example#Point"),
+				origin: origin,
+			),
+		],
+		result_type: RecoveryAggregateResultType::Value(_recovery_aggregate_mir_scalar(ScalarType::Integer)),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryAggregateBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::RecordProject("x", "example#Point", "point", "x", origin),
+					RecoveryAggregateInstruction::RecordProject("y", "example#Point", "point", "y", origin),
+					RecoveryAggregateInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerBinary("sum", IntegerBinaryOperator::Add, "x", "y", origin)
+					),
+				],
+				terminator: RecoveryAggregateTerminator::Return("sum", origin),
+			),
+		],
+	)
+end
+
+def _recovery_aggregate_entry(): RecoveryAggregateFunction
+	origin := _recovery_aggregate_mir_origin(18)
+	outcome_type := AggregateValueType::Aggregate("example#Outcome")
+	return RecoveryAggregateFunction.new(
+		id: "example#main",
+		name: "main",
+		parameters: [],
+		result_type: RecoveryAggregateResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryAggregateBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("twenty", 20, origin)),
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("twenty_two", 22, origin)),
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("found", true, origin)),
+					RecoveryAggregateInstruction::Call("point", "example#make_point", ["twenty", "twenty_two"], origin),
+					RecoveryAggregateInstruction::Call("outcome", "example#classify", ["point", "found"], origin),
+					RecoveryAggregateInstruction::VariantTest("is_found", "example#Outcome", "outcome", "Found", origin),
+				],
+				terminator: RecoveryAggregateTerminator::Branch("is_found", "found", ["outcome"], "failure", [], origin),
+			),
+			RecoveryAggregateBlock.new(
+				id: "found",
+				parameters: [RecoveryAggregateParameter.new(id: "matched", value_type: outcome_type, origin: origin)],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::VariantProject(
+						"point_payload",
+						"example#Outcome",
+						"matched",
+						"Found",
+						"point",
+						origin,
+					),
+					RecoveryAggregateInstruction::Call("answer", "example#sum_point", ["point_payload"], origin),
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("expected", 42, origin)),
+					RecoveryAggregateInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerCompare(
+							"matches",
+							ComparisonOperator::Equal,
+							"answer",
+							"expected",
+							origin,
+						)
+					),
+				],
+				terminator: RecoveryAggregateTerminator::Branch("matches", "success", [], "failure", [], origin),
+			),
+			RecoveryAggregateBlock.new(
+				id: "success",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("recovery-aggregate-aggregate\n", origin)),
+				],
+				terminator: RecoveryAggregateTerminator::Return(nil, origin),
+			),
+			RecoveryAggregateBlock.new(
+				id: "failure",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("bad\n", origin)),
+				],
+				terminator: RecoveryAggregateTerminator::Return(nil, origin),
+			),
+		],
+	)
+end
+
+def recovery_aggregate_mir_sample_module(): RecoveryAggregateModule
+	return RecoveryAggregateModule.new(
+		id: "example",
+		entry_function: "example#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: _recovery_aggregate_mir_types(),
+		functions: [_recovery_aggregate_make_point(), _recovery_aggregate_classify(), _recovery_aggregate_sum_point(), _recovery_aggregate_entry()],
+	)
+end
+
+def _recovery_aggregate_invalid_projection_module(): RecoveryAggregateModule
+	origin := _recovery_aggregate_mir_origin(40)
+	entry := RecoveryAggregateFunction.new(
+		id: "example#main",
+		name: "main",
+		parameters: [],
+		result_type: RecoveryAggregateResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryAggregateBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("code", 404, origin)),
+					RecoveryAggregateInstruction::VariantConstruct(
+						"missing",
+						"example#Outcome",
+						"Missing",
+						["code"],
+						origin,
+					),
+					RecoveryAggregateInstruction::VariantProject(
+						"invalid",
+						"example#Outcome",
+						"missing",
+						"Found",
+						"point",
+						origin,
+					),
+				],
+				terminator: RecoveryAggregateTerminator::Return(nil, origin),
+			),
+		],
+	)
+	return RecoveryAggregateModule.new(
+		id: "example",
+		entry_function: entry.id,
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: _recovery_aggregate_mir_types(),
+		functions: [entry],
+	)
+end
+
+describe("Aggregate recovery aggregate MIR") do
+	test("verifies aggregate construction, projection, calls, returns, and block arguments") do
+		case verify_recovery_aggregate_mir(recovery_aggregate_mir_sample_module())
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("emits deterministic QBE IL with stack-owned aggregate storage") do
+		first := emit_recovery_aggregate_qbe(recovery_aggregate_mir_sample_module())
+		second := emit_recovery_aggregate_qbe(recovery_aggregate_mir_sample_module())
+		case first
+		when Result::Ok(source)
+			expect(second).to_equal(first)
+			expect(source.include?("storel 0")).to_be_true()
+			expect(source.include?("blit")).to_be_true()
+			expect(source.include?("$memset")).to_be_false()
+			expect(source.include?("$memcpy")).to_be_false()
+			expect(source.include?("$trbn_variant_projection_fail")).to_be_true()
+			expect(source.include?("export function w $main()")).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("builds and executes the aggregate vertical slice when QBE is configured") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-aggregate-integration"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_aggregate_executable(
+					recovery_aggregate_mir_sample_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/sample",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("recovery-aggregate-aggregate\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + "\n" + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("fails an invalid dynamic variant projection deterministically") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-aggregate-invalid-projection"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_aggregate_executable(
+					_recovery_aggregate_invalid_projection_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/sample",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.status).to_equal(2)
+					expect(process.stdout).to_equal("")
+					expect(process.stderr).to_equal("panic: invalid enum projection\n")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + "\n" + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects nominally mismatched record construction") do
+		origin := _recovery_aggregate_mir_origin(30)
+		broken := RecoveryAggregateFunction.new(
+			id: "example#main",
+			name: "main",
+			parameters: [],
+			result_type: RecoveryAggregateResultType::Void,
+			entry: "entry",
+			origin: origin,
+			blocks: [
+				RecoveryAggregateBlock.new(
+					id: "entry",
+					parameters: [],
+					origin: origin,
+					instructions: [
+						RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("wrong", true, origin)),
+						RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("right", 1, origin)),
+						RecoveryAggregateInstruction::RecordConstruct(
+							"point",
+							"example#Point",
+							["wrong", "right"],
+							origin,
+						),
+					],
+					terminator: RecoveryAggregateTerminator::Return(nil, origin),
+				),
+			],
+		)
+		native_module := RecoveryAggregateModule.new(
+			id: "example",
+			entry_function: broken.id,
+			sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+			types: _recovery_aggregate_mir_types(),
+			functions: [broken],
+		)
+		case verify_recovery_aggregate_mir(native_module)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.message).to_equal("operand type does not match the operation")
+		end
+	end
+end

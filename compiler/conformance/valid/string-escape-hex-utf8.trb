@@ -1,0 +1,9 @@
+def probe()
+	text := "\xc3\xa9"
+	puts(text.size())
+	text.codepoints().each { |point| puts(point) }
+end
+
+def main()
+	probe()
+end

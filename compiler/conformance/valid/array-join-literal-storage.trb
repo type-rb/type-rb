@@ -1,0 +1,21 @@
+def main()
+	mut index := 0
+	while index < 24
+		first := "\xC2"
+		last := "\xA2"
+		joined := [first, last].join("")
+		puts(joined == "¢")
+		puts(joined.size())
+		puts(["a\000", "雪", "\xFF", "z"].join("\000").to_bytes().size())
+		index += 1
+	end
+	puts(["λ\xC2", "", "\xA2"].join("") == "λ¢")
+	puts(["λ\xC2", "", "\xA2"].join("").size())
+	puts(["λ\xF0", "\x9F\x98", "\x80"].join("") == "λ😀")
+	puts(["λ\xF0", "\x9F\x98", "\x80"].join("").size())
+	puts(["λ\xFF", "\000", "雪"].join("").size())
+	puts(["λ😀"].join("").size())
+	puts(["", "λ😀", "x"].join("/").size())
+	puts(["\xC2", "\xA2"].join("/").size())
+	puts(["", "\xFF"].join("/").size())
+end

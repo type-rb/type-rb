@@ -1,0 +1,157 @@
+import { mir_array_forwarding_safe } from mir/analysis/array_local
+import { mir_op_array_load, mir_op_array_new, mir_op_array_position, mir_op_array_push, mir_op_array_size, mir_op_array_store } from mir/model/instructions
+import { MirFunction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_alias, mir_flow_aliases, mir_flow_position } from mir/analysis/flow
+import { mir_live_add, mir_live_before } from mir/analysis/liveness
+import { binary_remainder } from frontend/types/operators
+import { mir_op_scalar_binary, mir_op_scalar_literal } from mir/model/instructions
+import { mir_build_flow_with_values, mir_flow_blocks } from mir/analysis/flow
+import { mir_nonnegative_value, mir_nonnegative_values, mir_scalar_literal } from mir/analysis/ranges
+import { MirValue } from mir/model/module
+
+# A fresh Array initialized by entry-block appends has a constant length when
+# its identity never escapes and no other operation can resize it. Calls may
+# mutate loaded objects: those objects cannot acquire this fresh container
+# without an explicit escape, which the canonical use scan below rejects.
+# Numeric selection and index checks consume this proof and derive it again.
+# The instruction identifies both the Array and the observation point.
+def mir_fixed_array_length(native_module: MirModule, function: MirFunction, flow: MirFlow, size: Integer): Integer
+	instruction := native_module.instructions[size]
+	if (instruction.kind < mir_op_array_size() || instruction.kind > mir_op_array_store()) || flow.entry < 0
+		return -1
+	end
+	if flow.predecessors[flow.entry].size() != 0
+		return -1
+	end
+	entry := native_module.blocks[function.block_start + flow.entry]
+	aliases := mir_flow_aliases(native_module, function, flow, entry)
+	owner := mir_flow_alias(aliases, instruction.first)
+	if owner < 0
+		return -1
+	end
+	allocation := mir_flow_position(flow, owner)
+	if allocation < entry.instruction_start || allocation >= entry.instruction_start + entry.instruction_count
+		return -1
+	end
+	if native_module.instructions[allocation].kind != mir_op_array_new()
+		return -1
+	end
+	mut names: Array<Integer> := []
+	native_module.values.each do |value|
+		if value.function_id == function.id && mir_flow_alias(aliases, value.id) == owner
+			mir_live_add(names, value.id)
+		end
+	end
+	mut length := 0
+	mut initialized := allocation
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		if mir_flow_alias(aliases, block.return_value) == owner
+			return -1
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.first_target, block.first_argument_start, block.first_argument_count)
+			return -1
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.second_target, block.second_argument_start, block.second_argument_count)
+			return -1
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			use := native_module.instructions[index]
+			if mir_live_before(native_module, names, use, []).size() > 0
+				if mir_flow_alias(aliases, use.first) != owner
+					return -1
+				end
+				kind := use.kind
+				if kind == mir_op_array_push()
+					if block.id != entry.id || mir_flow_alias(aliases, use.second) == owner
+						return -1
+					end
+					length += 1
+					initialized = index
+				elsif kind == mir_op_array_size() || kind == mir_op_array_position() || kind == mir_op_array_load() || kind == mir_op_array_store()
+					if mir_flow_alias(aliases, use.second) == owner
+						return -1
+					end
+					if kind == mir_op_array_store() && mir_flow_alias(aliases, use.payload) == owner
+						return -1
+					end
+				else
+					return -1
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	if size >= entry.instruction_start && size <= initialized
+		return -1
+	end
+	return length
+end
+
+# A nonnegative remainder by a positive divisor is below that divisor. Fixed
+# fresh storage then makes the result a logical index without normalization.
+# Do not assume a remainder from an unknown or negative dividend is nonnegative.
+def mir_fixed_array_index_checks(native_module: MirModule, function: MirFunction, values: Array<MirValue>, mut checks: Array<Integer>)
+	# Match the bounded numeric policy; compiler-sized modules avoid this scan.
+	if native_module.functions.size() > 96
+		return
+	end
+	mut fresh := false
+	mut remainder := false
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_array_new()
+				fresh = true
+			end
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_remainder()
+				remainder = true
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	if !fresh || !remainder
+		return
+	end
+	flow := mir_build_flow_with_values(native_module, function, mir_flow_blocks(native_module, function), values)
+	nonnegative := mir_nonnegative_values(native_module, function, flow)
+	block_index = function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			access := native_module.instructions[index]
+			if access.kind >= mir_op_array_position() && access.kind <= mir_op_array_store()
+				position := mir_flow_position(flow, access.second)
+				if position >= 0
+					operation := native_module.instructions[position]
+					if operation.kind == mir_op_scalar_binary() && operation.payload == binary_remainder() && mir_nonnegative_value(nonnegative, operation.first)
+						length := mir_fixed_array_length(native_module, function, flow, index)
+						divisor_position := mir_flow_position(flow, operation.second)
+						if length > 0 && divisor_position >= 0
+							divisor := native_module.instructions[divisor_position]
+							mut bound := -1
+							if divisor.kind == mir_op_scalar_literal()
+								bound = mir_scalar_literal(native_module.literal_texts[divisor.payload])
+							elsif divisor.kind == mir_op_array_size()
+								bound = mir_fixed_array_length(native_module, function, flow, divisor_position)
+							end
+							if bound > 0 && bound <= length
+								mir_live_add(checks, index)
+							end
+						end
+					end
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+end

@@ -1,0 +1,39 @@
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def qbe_runner_fixture(status: Integer, descriptor: Integer): String
+	return "data $message = { b \"kept\", b 10 }\nexport function w $main() {\n@start\n call $write(w " + descriptor.to_s() + ", l $message, l 5)\n ret " + status.to_s() + "\n}\n"
+end
+
+describe("QBE execution status") do
+	test("accepts stdout only at the requested exit status") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			expect(logical_run_qbe(qbe, qbe_runner_fixture(0, 1))).to_equal(Result<String, String>::Ok("kept\n"))
+			expect(logical_run_qbe(qbe, qbe_runner_fixture(2, 1), 2)).to_equal(Result<String, String>::Ok("kept\n"))
+		end
+	end
+
+	test("keeps stderr exact after verifying an expected failure status") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			expect(logical_run_qbe(qbe, qbe_runner_fixture(2, 2), 2)).to_equal(Result<String, String>::Err("kept\n"))
+		end
+	end
+
+	test("rejects the right stderr with an unexpected successful exit") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			expect(logical_run_qbe(qbe, qbe_runner_fixture(0, 2), 2)).to_equal(Result<String, String>::Err("program status 0, expected 2\nkept\n"))
+		end
+	end
+
+	test("rejects an unexpected failure even when stdout is correct") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			expect(logical_run_qbe(qbe, qbe_runner_fixture(2, 1))).to_equal(Result<String, String>::Err("program status 2, expected 0\nkept\n"))
+		end
+	end
+end

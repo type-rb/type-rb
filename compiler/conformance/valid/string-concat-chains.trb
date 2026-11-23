@@ -1,0 +1,24 @@
+def surround(a: String, b: String, c: String): String
+	return "[" + a + b + c + "]"
+end
+
+def nested(a: String, b: String): String
+	return a + ("[" + b + "]")
+end
+
+def main()
+	puts(surround("a", "b", "c"))
+	puts(nested("é", "🙂"))
+	puts(surround("", "", ""))
+	puts(surround("a", "\x00", "b"))
+	joined := surround("\xC3", "\xA9", "")
+	puts(joined)
+	puts(joined.size().to_s())
+	astral := surround("\xF0", "\x9F\x99", "\x82")
+	puts(astral)
+	puts(astral.size().to_s())
+	malformed := surround("\xFF", "", "x")
+	puts(malformed)
+	puts(malformed.size().to_s())
+	return
+end

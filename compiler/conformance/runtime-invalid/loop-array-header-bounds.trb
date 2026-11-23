@@ -1,0 +1,10 @@
+def main()
+	mut source := [1, 2]
+	mut destination := [0]
+	source.push(3)
+	mut index := 0
+	while index < source.size()
+		destination[index] = source[index]
+		index += 1
+	end
+end

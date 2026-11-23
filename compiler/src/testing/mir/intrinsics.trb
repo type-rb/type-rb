@@ -1,0 +1,26 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { CompilerState } from state/state
+import { load_integer, load_string, store_string } from support/storage
+import { expect } from trb/std/test
+
+def intrinsic_mir_state(): CompilerState
+	source := "record CompilerProjectSources\npaths: Array<String>\nsources: Array<String>\nerror: String\nend\ndef compiler_main(source: String, mode: String, _file_mode: Boolean): Integer\nretained := source + \"-tail\"\nkey := compiler_source_slice(retained, 0, source.size())\nmut values := {\"saved\" => retained}\nbytes := compiler_string_bytes(key)\nliteral := compiler_literal_byte(194) + compiler_literal_byte(162)\nputs(literal.size())\nputs(compiler_string_bytes(literal)[0])\ncompiler_reset_temporary_storage()\ncompiler_set_network_link(false)\ncompiler_set_compression_link(false)\ncompiler_set_crypto_link(false)\nputs(values[\"saved\"])\nputs(bytes[0])\nputs(compiler_source_is_utf8(key))\nif mode == \"files\"\nif compiler_file_exists(source)\nputs(compiler_read_source(source))\nend\nproject := compiler_collect_project_sources(source, \"out\")\ncompiler_eputs(project.error)\nall_files := compiler_collect_package_files(source)\ncompiler_eputs(all_files.error)\ntest_paths := compiler_collect_test_paths(source, \"out\")\ncompiler_eputs(test_paths.error)\nend\nreturn 0\nend\ndef compiler_file_exists(_path: String): Boolean\nreturn false\nend\ndef compiler_read_source(_path: String): String\nreturn \"\"\nend\ndef compiler_source_is_utf8(_text: String): Boolean\nreturn true\nend\ndef compiler_string_bytes(_text: String): Array<Integer>\nreturn []\nend\ndef compiler_literal_byte(_byte: Integer): String\nreturn \"unadapted\"\nend\ndef decode_escape(byte: Integer): String\nreturn compiler_literal_byte(byte)\nend\ndef emit_static_strings(text: String)\ncompiler_string_bytes(text)\nend\ndef compiler_source_slice(text: String, _start: Integer, _finish: Integer): String\nreturn text\nend\ndef compiler_collect_project_sources(_root: String, _out: String): CompilerProjectSources\nreturn CompilerProjectSources.new(paths: [], sources: [], error: \"\")\nend\ndef compiler_collect_test_paths(_root: String, _out: String): CompilerProjectSources\nreturn CompilerProjectSources.new(paths: [], sources: [], error: \"\")\nend\ndef compiler_collect_package_files(_root: String): CompilerProjectSources\nreturn CompilerProjectSources.new(paths: [], sources: [], error: \"\")\nend\ndef compiler_eputs(_text: String)\nend\ndef compiler_set_compression_link(_needed: Boolean)\nend\ndef compiler_set_crypto_link(_needed: Boolean)\nend\ndef compiler_set_network_link(_needed: Boolean)\nend\ndef compiler_reset_temporary_storage()\nend\ndef compiler_file_main(_source: String, _path: String, _mode: String, _file: Boolean): Integer\nreturn 0\nend\ndef main()\nend\n"
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	return state
+end
+
+def intrinsic_mir_erase(mut state: CompilerState)
+	state.scalar_mir.functions.each do |function|
+		# CLI runtime templates are compile-time backend data, not call operands.
+		if load_string(state.declarations.function_names, function.id) == "native_cli_runtime_qbe"
+			next
+		end
+		mut token := load_integer(state.declarations.function_body_starts, function.id)
+		while token < load_integer(state.declarations.function_body_ends, function.id)
+			store_string(state.source_tokens.token_texts, token, "unavailable")
+			token += 1
+		end
+	end
+end

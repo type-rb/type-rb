@@ -1,0 +1,167 @@
+import { parse_function } from frontend/syntax/declaration_syntax
+import { lex_module } from frontend/syntax/lexer
+import { compiler_reserve_source } from state/source_capacity
+import { orm_add_method, orm_lookup_methods } from frontend/providers/orm_lookup
+import { find_visible_declaration } from frontend/resolution/declaration_lookup
+import { escape_scalar } from frontend/syntax/string_escapes
+import { web_dispatch_quote } from project/web_dispatch_source
+import { resolve_bare_imports } from frontend/resolution/import_resolution
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { declaration_object } from frontend/types/declaration_kinds
+import { ObjectField } from frontend/types/object_model
+import { official_source_kind } from project/official_catalog
+import { project_config_lower_ascii } from project/config
+import { project_json_has_key } from project/config_json
+import { OrmTable, orm_sqlite_schema } from project/orm_schema
+import { load_standard_source } from project/standard_library
+import { CompilerState, diagnostic, find_module, has_diagnostic } from state/state
+import { standard_source_time } from state/standard_source_kinds
+import { ascii_code } from support/literals
+import { unicode_identifier_field, unicode_identifier_point } from support/unicode_identifiers
+import { unicode_lower_data } from support/unicode_lower_data
+import { string_ends_with, string_without_suffix } from support/path
+import { sparse_integer_at } from support/storage
+
+def orm_lower_character(mut state: CompilerState, character: String, line: Integer): String
+	if ascii_code(character) >= 0
+		return project_config_lower_ascii(character)
+	end
+	point := unicode_identifier_point(character)
+	data := unicode_lower_data()
+	mut low := 0
+	mut high := data.size() / 12
+	while low < high
+		middle := low + (high - low) / 2
+		key := unicode_identifier_field(data, middle * 12)
+		if point == key
+			return escape_scalar(state, unicode_identifier_field(data, middle * 12 + 6), line)
+		elsif point < key
+			high = middle
+		else
+			low = middle + 1
+		end
+	end
+	return character
+end
+
+def orm_table_name(mut state: CompilerState, model: String, line: Integer): String
+	mut name := ""
+	mut index := 0
+	while index < model.size()
+		character := model[index]
+		code := ascii_code(character)
+		if index > 0 && code >= 65 && code <= 90
+			name += "_"
+		end
+		name += orm_lower_character(state, character, line)
+		index += 1
+	end
+	if string_ends_with(name, "s") || string_ends_with(name, "x") || string_ends_with(name, "z") || string_ends_with(name, "ch") || string_ends_with(name, "sh")
+		return name + "es"
+	end
+	if name.size() > 1 && string_ends_with(name, "y") && !project_json_has_key(["a", "e", "i", "o", "u"], name[name.size() - 2])
+		return string_without_suffix(name, "y") + "ies"
+	end
+	return name + "s"
+end
+
+def orm_model_indices(mut state: CompilerState): Array<Integer>
+	mut models: Array<Integer> := []
+	if !resolve_bare_imports(state)
+		return models
+	end
+	mut seen: Hash<String, Integer> := {}
+	mut index := 0
+	while index < state.nominal.objects.size()
+		row := state.nominal.objects[index]
+		if row.superclass != ""
+			parent := find_visible_declaration(state, row.source_id, row.superclass, declaration_object())
+			if parent >= 0
+				base := state.nominal.objects[parent]
+				if base.name == "Model" && sparse_integer_at(state.standard_modules, base.source_id) == official_source_kind("trb/orm")
+					if seen.key?(row.name)
+						state.module_graph.active_module[0] = row.source_id
+						diagnostic(state, "TRBN4003", row.line, "trb/orm model " + row.name + " is declared more than once")
+						return models
+					end
+					seen[row.name] = 1
+					models.push(index)
+				end
+			end
+		end
+		index += 1
+	end
+	return models
+end
+
+def orm_model_fields(mut state: CompilerState, table: OrmTable, index: Integer)
+	row := state.nominal.objects[index]
+	table.columns.each do |column|
+		mut field_type := column.type_name
+		if project_json_has_key(["Date", "TimeOfDay", "DateTime", "Instant"], field_type)
+			time := load_standard_source(state, standard_source_time(), row.line)
+			if time < 0
+				return
+			end
+			field_type = resolve_type_name(state, time, field_type, false)
+		end
+		if column.nullable
+			field_type += "?"
+		end
+		state.nominal.objects[index].fields.push(ObjectField.new(name: "@" + column.name, type_name: field_type, line: row.line, origin: row.origin, readonly: true, default_start: -1, default_finish: -1))
+	end
+end
+
+def orm_count_method(mut state: CompilerState, index: Integer, table: String, database: String, environment: String)
+	row := state.nominal.objects[index]
+	statement := "SELECT count(*) FROM \"" + table + "\""
+	source := "def self.count(): Result<Integer, DbError>\nreturn count_rows(" + web_dispatch_quote(database) + ", " + web_dispatch_quote(environment) + ", " + web_dispatch_quote(statement) + ", 0)\nend\n"
+	runtime := find_module(state, "trb/internal/orm/sql/index")
+	if runtime < 0
+		diagnostic(state, "TRBN4003", row.line, "missing owned SQLite ORM runtime")
+		return
+	end
+	state.module_graph.active_module[0] = runtime
+	orm_add_method(state, index, source, "count", "")
+end
+
+def prepare_orm_models(mut state: CompilerState, models: Array<Integer>, source: String, database: String, environment: String)
+	schema := orm_sqlite_schema(source)
+	if schema.error != ""
+		diagnostic(state, "TRBN4003", 1, "trb/orm schema lock: " + schema.error)
+		return
+	end
+	previous := state.module_graph.active_module[0]
+	runtime := find_module(state, "trb/internal/orm/sql/index")
+	state.module_graph.active_module[0] = runtime
+	root := "def _orm_root<T>(action: (Transaction) -> Result<T, DbError>): Result<T, DbError>\nreturn _transact<T>(nil, " + web_dispatch_quote(database) + ", " + web_dispatch_quote(environment) + ", action)\nend\n"
+	compiler_reserve_source(state, root.size())
+	start := state.source_tokens.token_count[0]
+	lex_module(state, root, runtime)
+	mut cursor := [start]
+	parse_function(state, cursor, "", [], false, false)
+	models.each do |index|
+		if !has_diagnostic(state)
+			row := state.nominal.objects[index]
+			state.module_graph.active_module[0] = row.source_id
+			name := orm_table_name(state, row.name, row.line)
+			mut found := false
+			schema.tables.each do |table|
+				if table.name == name
+					found = true
+					orm_model_fields(state, table, index)
+					if !has_diagnostic(state)
+						orm_count_method(state, index, name, database, environment)
+					end
+					if !has_diagnostic(state)
+						orm_lookup_methods(state, index, table, database, environment)
+					end
+				end
+			end
+			if !found
+				diagnostic(state, "TRBN4003", row.line, "trb/orm model " + row.name + " expects table " + name + ", but it was not found")
+			end
+		end
+	end
+	state.module_graph.active_module[0] = previous
+end

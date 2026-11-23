@@ -1,0 +1,47 @@
+def identity<T>(values: Array<T>): Array<T>
+	return values.map { |item| item }
+end
+
+record Item
+	label: String
+end
+
+def main()
+	mut source := [Item.new(label: "original" + 1.to_s())]
+	selected := source.select do |item|
+		source[0] = Item.new(label: "replacement")
+		item = Item.new(label: "parameter")
+		item.label == "parameter"
+	end
+	puts(selected[0].label)
+	callbacks := [1, 2].map do |item|
+		callback := fn(): Integer
+			return item
+		end
+		item += 10
+		callback
+	end
+	puts(callbacks[0]())
+	puts(callbacks[1]())
+	mut initial: Array<String> := []
+	result := [1, 2].reduce(initial) do |accumulator, item|
+		accumulator.push("value" + item.to_s())
+		accumulator
+	end
+	puts(result[1])
+	puts(initial.size())
+	rows := [1, 2].map do |item|
+		mut values: Array<Integer> := []
+		(1..item).each do |other|
+			values.push(other)
+		end
+		values
+	end
+	puts(rows[1][1])
+	copy := identity<String>(["generic"])
+	puts(copy[0])
+	mapper := fn(values: Array<Integer>): Array<Integer>
+		return values.map { |item| item + 1 }
+	end
+	puts(mapper([41])[0])
+end

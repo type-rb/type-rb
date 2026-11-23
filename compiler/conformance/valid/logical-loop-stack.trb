@@ -1,0 +1,18 @@
+def visit(mut calls: Array<Integer>): Boolean
+	calls[0] += 1
+	return true
+end
+
+def main()
+	mut calls := [0]
+	mut skipped := [0]
+	mut index := 0
+	while index < 600000
+		if (index >= 0 && visit(calls)) || visit(skipped)
+			index += 1
+		end
+	end
+	puts(index)
+	puts(calls[0])
+	puts(skipped[0])
+end

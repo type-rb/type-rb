@@ -1,0 +1,36 @@
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { integer_string } from support/literals
+import { terminal_paint, terminal_style_error } from terminal
+
+# Include a column only when the diagnostic owns an authored token origin.
+def cli_diagnostic(state: CompilerState, fallback: String, offset: Integer): String
+	return cli_styled_diagnostic(state, fallback, offset, false)
+end
+
+def cli_styled_diagnostic(state: CompilerState, fallback: String, offset: Integer, color: Boolean): String
+	module_index := load_integer(state.diagnostics.modules, 0)
+	mut path := fallback
+	mut line := load_integer(state.diagnostics.lines, 0)
+	if module_index >= 0 && module_index < state.module_graph.module_count[0]
+		module_path := load_string(state.module_graph.module_files, module_index)
+		if module_path != ""
+			path = module_path
+		end
+	end
+	if fallback == "(trb)"
+		if module_index == state.module_graph.entry_module[0]
+			path = fallback
+			line -= offset
+			if line < 1
+				line = 1
+			end
+		end
+	end
+	mut location := path + ":" + integer_string(line)
+	column := sparse_integer_at(state.diagnostics.columns, 0)
+	if column > 0
+		location += ":" + integer_string(column)
+	end
+	return location + ": " + terminal_paint("error", terminal_style_error(), color) + "[" + load_string(state.diagnostics.codes, 0) + "]: " + load_string(state.diagnostics.messages, 0)
+end

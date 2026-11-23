@@ -1,0 +1,76 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Array copy MIR") do
+	test("executes fresh shallow copies and edges without source or block storage order") do
+		managed_mir_test_fixture("array-copy-mir", 4)
+	end
+	test("retains captured Array and Range values across collection") do
+		managed_mir_test_fixture("array-copy-managed-mir", 6)
+	end
+	test("rejects malformed copy types, operands, modes and failure edges") do
+		mut mutation := 0
+		while mutation < 8
+			mut state := logical_checked_source("def main()\ntext := [1, 2].slice(0...1)\nputs(text.size())\nend\n")
+			expect(check(state)).to_be_true()
+			mut index := 0
+			while index < state.scalar_mir.instructions.size() && state.scalar_mir.instructions[index].kind != 47
+				index += 1
+			end
+			expect(index < state.scalar_mir.instructions.size()).to_be_true()
+			instruction := state.scalar_mir.instructions[index]
+			expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+			mut cell := mutation
+			mut value := 999999
+			if mutation == 0
+				value = 49
+			elsif mutation == 2
+				value = instruction.second
+			elsif mutation == 3
+				value = instruction.first
+			elsif mutation == 4
+				value = 3
+			elsif mutation == 5
+				value = 0
+			elsif mutation == 6
+				cell = 2
+				value = -1
+			elsif mutation == 7
+				cell = 3
+				value = -1
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+	test("rejects a root plan that drops the copied Array or bounds") do
+		mut mutation := 0
+		while mutation < 2
+			mut state := logical_checked_source("def main()\ntext := [1, 2].slice(0...1)\nputs(text.size())\nend\n")
+			expect(check(state)).to_be_true()
+			plan := state.scalar_mir.root_plans[0]
+			mut point := 0
+			while state.scalar_mir.instructions[plan.instructions[point]].kind != 47
+				point += 1
+			end
+			instruction := state.scalar_mir.instructions[plan.instructions[point]]
+			mut retained := instruction.first
+			if mutation == 1
+				retained = instruction.second
+			end
+			expect(plan.roots[point].size()).to_equal(2)
+			mut roots := plan.roots
+			roots[point] = [retained]
+			state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+			mutation += 1
+		end
+	end
+end

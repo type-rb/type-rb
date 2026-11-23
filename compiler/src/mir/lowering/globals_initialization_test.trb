@@ -1,0 +1,183 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { lex } from frontend/syntax/lexer
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirGlobal } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR constant safety") do
+	test("executes erased reordered globals with persistent roots across collection") do
+		mut state := logical_checked_source("record Box\nvalue: String\nend\ndef label(): String\nputs(\"initialize\")\nreturn \"kept\" + \" value\"\nend\nTEXT := label()\nITEMS := [TEXT, TEXT + \" twice\"]\nBOX := Box.new(value: ITEMS[1])\nCALL := fn(): String; return BOX.value; end\ndef main()\nputs(TEXT)\nputs(ITEMS[0])\nputs(BOX.value)\nputs(CALL())\nend\n")
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			while !state.global_bindings.runtime_order.empty?()
+				state.global_bindings.runtime_order.pop()
+			end
+			while !state.global_bindings.globals.empty?()
+				state.global_bindings.globals.pop()
+				state.global_bindings.global_types.pop()
+				state.global_bindings.global_functions.pop()
+				state.global_bindings.global_order.pop()
+			end
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			mut left := 0
+			mut right := state.scalar_mir.globals.size() - 1
+			while left < right
+				saved := state.scalar_mir.globals[left]
+				state.scalar_mir.globals[left] = state.scalar_mir.globals[right]
+				state.scalar_mir.globals[right] = saved
+				left += 1
+				right -= 1
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			mut forced := ""
+			mut initialize := false
+			mut entry := false
+			mut hooks := 0
+			control_test_output(emit_qbe(state)).split("\n").each do |line|
+				if line.start_with?("function ") || line.start_with?("export function ")
+					initialize = line.include?("$trbn_initialize_globals(")
+					entry = line.include?("$main(")
+				end
+				if (initialize || entry) && line.include?("call $trbnf")
+					forced += "\tcall $trbn_gc_collect(w 0)\n"
+					hooks += 1
+				end
+				forced += line + "\n"
+			end
+			expect(hooks).to_equal(5)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("initialize\nkept value\nkept value\nkept value twice\nkept value twice\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("rejects malformed catalogs initialization orders and reads") do
+		mut mutation := 0
+		while mutation < 16
+			mut state := logical_checked_source("TEXT := \"a\" + \"b\"\nCOUNT := 3\ndef main()\nputs(TEXT)\nputs(COUNT)\nend\n")
+			expect(check(state)).to_be_true()
+			old := state.scalar_mir.globals[0]
+			mut identity := old.id
+			mut source := old.source_id
+			mut line := old.line
+			mut type_id := old.type_id
+			mut initializer := old.initializer
+			mut managed := old.managed
+			if mutation == 0
+				identity = -1
+			elsif mutation == 1
+				identity = state.scalar_mir.globals[1].id
+			elsif mutation == 2
+				source = 999999
+			elsif mutation == 3
+				line = 0
+			elsif mutation == 4
+				type_id = -1
+			elsif mutation == 5
+				managed = !managed
+			elsif mutation == 6
+				initializer = -1
+			elsif mutation == 7
+				initializer = state.scalar_mir.globals[1].initializer
+			elsif mutation == 8
+				state.scalar_mir.global_initialization.pop()
+			elsif mutation == 9
+				state.scalar_mir.global_initialization[1] = 0
+			elsif mutation == 10
+				state.scalar_mir.global_initialization[1] = 999999
+			else
+				mut index := 0
+				while state.scalar_mir.instructions[index].kind != 51
+					index += 1
+				end
+				instruction := state.scalar_mir.instructions[index]
+				mut cell := 2
+				mut value := 0
+				if mutation == 12
+					cell = 3
+				elsif mutation == 13
+					cell = 5
+				elsif mutation == 14
+					cell = 4
+					value = 999999
+				elsif mutation == 15
+					cell = 4
+					value = 1
+				end
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			end
+			state.scalar_mir.globals[0] = MirGlobal.new(cyclic: old.cyclic, mutable: old.mutable, runtime: old.runtime, id: identity, name: old.name, source_id: source, line: line, type_id: type_id, initializer: initializer, managed: managed)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("rejects runtime reads from an inactive initializer") do
+		mut state := logical_checked_source("FIRST := 1\ndef read(): Integer\nreturn FIRST\nend\nSECOND := read()\ndef main()\nputs(SECOND)\nend\n")
+		expect(check(state)).to_be_true()
+		old := state.scalar_mir.globals[0]
+		state.scalar_mir.globals[0] = MirGlobal.new(cyclic: old.cyclic, mutable: old.mutable, runtime: false, id: old.id, name: old.name, source_id: old.source_id, line: old.line, type_id: old.type_id, initializer: old.initializer, managed: old.managed)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR runtime initializer can read an inactive constant")
+	end
+
+	test("rejects uninitialized transitive reads after MIR order changes") do
+		mut state := logical_checked_source("FIRST := 1\ndef read(): Integer\nreturn FIRST\nend\nSECOND := read()\ndef main()\nputs(SECOND)\nend\n")
+		expect(check(state)).to_be_true()
+		state.scalar_mir.global_initialization[0] = 1
+		state.scalar_mir.global_initialization[1] = 0
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR constant initializer can read an uninitialized constant")
+	end
+
+	test("rejects constant reassignment mutation promotion duplicate and forward reads") do
+		sources := [
+			"COUNT := 1\ndef main()\nCOUNT = 2\nend\n",
+			"ITEMS := [1]\ndef main()\nITEMS.push(2)\nend\n",
+			"ITEMS := [1]\ndef main()\nmut values := ITEMS\nvalues.push(2)\nend\n",
+			"ITEMS := {\"a\" => 1}\ndef main()\nITEMS[\"a\"] = 2\nend\n",
+			"COUNT := 1\nCOUNT := 2\ndef main()\nend\n",
+			"FIRST := SECOND\nSECOND := 2\ndef main()\nend\n",
+			"FIRST := read()\nSECOND := 2\ndef read(): Integer\nreturn SECOND\nend\ndef main()\nend\n",
+		]
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			mut accepted := lex(state, source)
+			if accepted
+				accepted = parse_module(state, 0, state.module_graph.entry_module[0])
+			end
+			if accepted
+				accepted = resolve(state)
+			end
+			if accepted
+				accepted = check(state)
+			end
+			if accepted
+				puts(source)
+			end
+			expect(accepted).to_be_false()
+		end
+	end
+end

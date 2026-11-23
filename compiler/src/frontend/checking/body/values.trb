@@ -1,0 +1,269 @@
+import { checked_category_readonly, checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot, mir_state_failure_block_slot, mir_state_function_slot, mir_state_next_value_slot } from state/local_slots
+import { binary_invalid, binary_power, binary_remainder, unary_invalid, unary_negate, unary_not, unary_positive } from frontend/types/operators
+import { mir_type_float, mir_type_none } from mir/model/type_ids
+import { mir_op_integer_to_float, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_scalar_unary } from mir/model/instructions
+import { small_nonnegative_integer_operand } from support/literals
+import { MirInstruction, MirValue, mir_type_id } from mir/model/module
+import { binary_operator_id } from frontend/syntax/syntax_forms
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+record CheckedValue
+	concurrent_borrowed: Boolean
+	type_name: String
+	# Checked display spelling; never a semantic type or a MIR identity.
+	presentation: String
+	category: Integer
+	# Exact token index; the portable Integer maximum represents no source value.
+	origin: Integer
+	mutable: Integer
+	# Mutation syntax needs a binding root; fresh values can still be arguments.
+	binding: Boolean
+	# A field binding is readonly independently of its SSA identity/capability.
+	readonly: Boolean
+	# Joining branches must retain an immutable reference binding capability.
+	immutable_reference: Boolean
+	nullable_binding: Integer
+	nullable_field: Integer
+	truth: Integer
+	falsity: Integer
+	flow_type: String
+end
+
+def checked_value(
+		type_name: String,
+		category: Integer,
+		origin: Integer,
+		mutable: Integer,
+	): CheckedValue
+	return checked_bound_value(type_name, category, origin, mutable, false)
+end
+
+def checked_bound_value(type_name: String, category: Integer, origin: Integer, mutable: Integer, binding: Boolean): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: false, presentation: "", type_name: type_name, category: category, origin: origin, mutable: mutable, binding: binding, readonly: category == checked_category_readonly(), immutable_reference: false, nullable_binding: -1, nullable_field: -1, truth: -1, falsity: -1, flow_type: type_name)
+end
+
+# A display view shares the checked value's capabilities and semantic identity.
+def checked_presentation(value: CheckedValue, presentation: String): CheckedValue
+	if value.presentation == presentation
+		return value
+	end
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: value.truth, falsity: value.falsity, flow_type: value.flow_type)
+end
+
+def checked_mir_value(value: CheckedValue): Integer
+	if value.category < 0
+		return -value.category - 1
+	end
+	return -1
+end
+
+def mir_checked_value(
+		type_name: String,
+		value_id: Integer,
+		origin: Integer,
+		mutable: Integer,
+	): CheckedValue
+	return checked_value(type_name, -value_id - 1, origin, mutable)
+end
+
+def scalar_mir_disable(mut locals: CheckedLocals)
+	locals.mir_state[mir_state_enabled_slot()] = 0
+	return
+end
+
+def scalar_mir_value(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		type_id: Integer,
+		origin: Integer,
+	): Integer
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return -1
+	end
+	if type_id == mir_type_none()
+		scalar_mir_disable(locals)
+		return -1
+	end
+	return mir_add_value(state, locals, type_id, load_integer(state.source_tokens.token_lines, origin))
+end
+
+def mir_add_value(
+		state: CompilerState,
+		mut locals: CheckedLocals,
+		type_id: Integer,
+		line: Integer,
+	): Integer
+	value_id := locals.mir_state[mir_state_next_value_slot()]
+	locals.mir_state[mir_state_next_value_slot()] = value_id + 1
+	locals.mir_value_rows.push(MirValue.new(
+			function_id: locals.mir_state[mir_state_function_slot()],
+			id: value_id,
+			type_id: type_id,
+			source_id: state.module_graph.active_module[0],
+			line: line,
+		))
+	return value_id
+end
+
+def scalar_mir_instruction(
+		state: CompilerState,
+		mut locals: CheckedLocals,
+		kind: Integer,
+		result: Integer,
+		first: Integer,
+		second: Integer,
+		operation: Integer,
+		failure: Integer,
+		line: Integer,
+	)
+	locals.mir_instructions.push(MirInstruction.new(
+			kind: kind,
+			result: result,
+			first: first,
+			second: second,
+			payload: operation,
+			failure: failure,
+			source_id: state.module_graph.active_module[0],
+			line: line,
+		))
+end
+
+def scalar_mir_literal(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		type_name: String,
+		origin: Integer,
+		text: String,
+	): CheckedValue
+	value_id := scalar_mir_value(state, locals, mir_type_id(type_name), origin)
+	if value_id < 0
+		return checked_value(type_name, checked_category_value(), origin, 0)
+	end
+	literal_index := locals.mir_literal_texts.size()
+	mut fact := 0
+	if type_name == "Integer"
+		if small_nonnegative_integer_operand(text)
+			fact = 1
+		end
+	end
+	locals.mir_literal_texts.push(text)
+	scalar_mir_instruction(
+		state, locals, mir_op_scalar_literal(), value_id, fact, -1, literal_index, -1, load_integer(state.source_tokens.token_lines, origin),
+	)
+	return mir_checked_value(type_name, value_id, origin, 0)
+end
+
+def scalar_mir_binary(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		operator: String,
+		left: CheckedValue,
+		right: CheckedValue,
+		result_type: String,
+		origin: Integer,
+	): CheckedValue
+	left_id := checked_mir_value(left)
+	right_id := checked_mir_value(right)
+	operator_id := binary_operator_id(operator)
+	if left_id < 0
+		scalar_mir_disable(locals)
+	end
+	if right_id < 0
+		scalar_mir_disable(locals)
+	end
+	if operator_id == binary_invalid()
+		scalar_mir_disable(locals)
+	end
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	value_id := scalar_mir_value(state, locals, mir_type_id(result_type), origin)
+	mut failure := -1
+	if result_type == "Integer"
+		if operator_id <= binary_remainder() || operator_id == binary_power()
+			failure = locals.mir_state[mir_state_failure_block_slot()]
+		end
+	end
+	scalar_mir_instruction(
+		state, locals, mir_op_scalar_binary(), value_id, left_id, right_id, operator_id, failure, load_integer(state.source_tokens.token_lines, origin),
+	)
+	return mir_checked_value(result_type, value_id, 9007199254740991, 0)
+end
+
+def scalar_mir_unary(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		operator: String,
+		value: CheckedValue,
+		result_type: String,
+		origin: Integer,
+	): CheckedValue
+	operand := checked_mir_value(value)
+	mut operator_id := unary_invalid()
+	if operator == "!"
+		operator_id = unary_not()
+	end
+	if operator == "-"
+		operator_id = unary_negate()
+	end
+	if operator == "+"
+		operator_id = unary_positive()
+	end
+	if operand < 0
+		scalar_mir_disable(locals)
+	end
+	if operator_id == unary_invalid()
+		scalar_mir_disable(locals)
+	end
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	result := scalar_mir_value(state, locals, mir_type_id(result_type), origin)
+	scalar_mir_instruction(
+		state, locals, mir_op_scalar_unary(), result, operand, -1, operator_id, -1, load_integer(state.source_tokens.token_lines, origin),
+	)
+	return mir_checked_value(result_type, result, 9007199254740991, 0)
+end
+
+def scalar_mir_convert_float(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		value: CheckedValue,
+		origin: Integer,
+	): CheckedValue
+	operand := checked_mir_value(value)
+	if operand < 0 || locals.mir_state[mir_state_enabled_slot()] == 0
+		scalar_mir_disable(locals)
+		return checked_value("Float", checked_category_value(), origin, 0)
+	end
+	result := scalar_mir_value(state, locals, mir_type_float(), origin)
+	scalar_mir_instruction(
+		state, locals, mir_op_integer_to_float(), result, operand, -1, 0, -1, load_integer(state.source_tokens.token_lines, origin),
+	)
+	return mir_checked_value("Float", result, 9007199254740991, 0)
+end
+
+# Preserve reference capabilities and source identity when exposing a flow view.
+def checked_view(value: CheckedValue, type_name: String, category: Integer): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: value.presentation, type_name: type_name, category: category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: value.truth, falsity: value.falsity, flow_type: type_name)
+end
+
+def checked_flow(value: CheckedValue, flow_type: String): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: value.presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: value.truth, falsity: value.falsity, flow_type: flow_type)
+end
+
+def checked_nullable_target(value: CheckedValue, binding: Integer, field: Integer): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: value.presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: binding, nullable_field: field, truth: value.truth, falsity: value.falsity, flow_type: value.flow_type)
+end
+
+def checked_condition_value(value: CheckedValue, truth: Integer, falsity: Integer): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: value.presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: truth, falsity: falsity, flow_type: value.flow_type)
+end
+
+# Keep borrow provenance separate from shallow mutability and nullable views.
+def checked_concurrent_borrow(value: CheckedValue, borrowed: Boolean): CheckedValue
+	return CheckedValue.new(concurrent_borrowed: borrowed, presentation: value.presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: value.binding, readonly: value.readonly, immutable_reference: value.immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: value.truth, falsity: value.falsity, flow_type: value.flow_type)
+end

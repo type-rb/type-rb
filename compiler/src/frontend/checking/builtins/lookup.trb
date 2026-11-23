@@ -1,0 +1,130 @@
+import { mir_array_copy_slice, mir_range_field_exclusive, mir_range_field_first, mir_range_field_last } from mir/model/operation_modes
+import { result_method_index, result_method_key, result_method_slice } from frontend/types/method_kinds
+import { checked_category_value } from frontend/types/value_categories
+import { hash_action_has_key } from mir/model/hash_actions
+import { mir_op_array_copy, mir_op_array_load, mir_op_array_size, mir_op_hash_get, mir_op_string_index, mir_op_string_size, mir_op_string_slice } from mir/model/instructions
+import { builtin_lookup_result, builtin_result_variant } from frontend/checking/builtins/results
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_binary, scalar_mir_literal } from frontend/checking/body/values
+import { mir_enum_construct } from mir/lowering/enums
+import { hash_value_type } from frontend/types/hash_types
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { mir_control_active, mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_checked_hash_method, mir_checked_hash_operation } from mir/lowering/hashes
+import { mir_checked_range_field } from mir/lowering/ranges
+import { mir_checked_record_new } from mir/lowering/records
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_value_complete, mir_value_exit, mir_value_join, mir_value_select } from mir/build/value_control
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { raw_enum_literal } from frontend/checking/nominal/raw_enums
+import { array_element_type, find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, store_string } from support/storage
+
+def mir_builtin_error(mut state: CompilerState, mut locals: CheckedLocals, result_type: String, fields: Array<CheckedValue>, origin: Integer): CheckedValue
+	err := builtin_result_variant(state, result_type, false)
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	record_index := find_record_type(state, error_type)
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	mut values: Array<Integer> := []
+	fields.each.with_index do |field, index|
+		converted := mir_nullable_coerce(state, locals, field, load_string(state.declarations.field_types, start + index), origin)
+		values.push(checked_mir_value(converted))
+	end
+	error := mir_checked_record_new(state, locals, record_index, error_type, values, origin)
+	return mir_enum_construct(state, locals, err, [checked_mir_value(error)], origin)
+end
+
+# Negative normalization is conditional: adding a large positive index to size
+# eagerly would overflow even though the safe operation should return Err.
+def mir_safe_lookup_index(mut state: CompilerState, mut locals: CheckedLocals, index: CheckedValue, size: CheckedValue, origin: Integer): CheckedValue
+	line := load_integer(state.source_tokens.token_lines, origin)
+	zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	negative := scalar_mir_binary(state, locals, "<", index, zero, "Boolean", origin)
+	mut join := mir_value_join(locals, line)
+	alternate := mir_control_branch(state, locals, negative, line)
+	normalized := scalar_mir_binary(state, locals, "+", index, size, "Integer", origin)
+	mir_value_exit(state, locals, join, normalized)
+	mir_control_enter(state, locals, alternate, line)
+	mir_value_exit(state, locals, join, index)
+	return mir_value_complete(state, locals, join, "Integer", origin)
+end
+
+# Safe lookup and slicing are ordinary typed comparisons, branches, reads and
+# Result/record construction. QBE receives no method names or source decisions.
+def mir_builtin_lookup(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, receiver: CheckedValue, argument: CheckedValue, origin: Integer): CheckedValue
+	result_type := builtin_lookup_result(state, receiver.type_name, kind)
+	store_string(state.callables.checked[0].builtin_result_types, origin, result_type)
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), origin, 0)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut fields: Array<CheckedValue> := []
+	mut size := checked_value("Integer", checked_category_value(), origin, 0)
+	mut present := checked_value("Boolean", checked_category_value(), origin, 0)
+	mut position := checked_value("Integer", checked_category_value(), origin, 0)
+	mut label := "Array"
+	if receiver.type_name == "String"
+		label = "String"
+		size = mir_checked_string_operation(state, locals, mir_op_string_size(), checked_mir_value(receiver), -1, 0, "Integer", origin)
+	elsif kind != result_method_key()
+		size = mir_checked_array_operation(state, locals, mir_op_array_size(), checked_mir_value(receiver), -1, 0, "Integer", origin)
+	end
+	if kind == result_method_key()
+		present = mir_checked_hash_method(state, locals, receiver, checked_mir_value(argument), hash_action_has_key(), "Boolean", origin)
+		fields.push(argument)
+		fields.push(raw_enum_literal(state, locals, "String", "Hash key is missing", origin))
+	elsif kind == result_method_index()
+		position = mir_safe_lookup_index(state, locals, argument, size, origin)
+		zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+		low := scalar_mir_binary(state, locals, ">=", position, zero, "Boolean", origin)
+		high := scalar_mir_binary(state, locals, "<", position, size, "Boolean", origin)
+		no := scalar_mir_literal(state, locals, "Boolean", origin, "false")
+		present = mir_value_select(state, locals, low, high, no, origin)
+		fields.push(argument)
+		fields.push(size)
+		fields.push(raw_enum_literal(state, locals, "String", label + " index is out of bounds", origin))
+	else
+		first := mir_checked_range_field(state, locals, checked_mir_value(argument), mir_range_field_first(), origin)
+		finish := mir_checked_range_field(state, locals, checked_mir_value(argument), mir_range_field_last(), origin)
+		exclusive := mir_checked_range_field(state, locals, checked_mir_value(argument), mir_range_field_exclusive(), origin)
+		zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+		low := scalar_mir_binary(state, locals, ">=", first, zero, "Boolean", origin)
+		ordered := scalar_mir_binary(state, locals, "<=", first, finish, "Boolean", origin)
+		inclusive_end := scalar_mir_binary(state, locals, "<", finish, size, "Boolean", origin)
+		exclusive_end := scalar_mir_binary(state, locals, "<=", finish, size, "Boolean", origin)
+		last := mir_value_select(state, locals, exclusive, exclusive_end, inclusive_end, origin)
+		no := scalar_mir_literal(state, locals, "Boolean", origin, "false")
+		upper := mir_value_select(state, locals, ordered, last, no, origin)
+		present = mir_value_select(state, locals, low, upper, no, origin)
+		fields.push(first)
+		fields.push(finish)
+		fields.push(exclusive)
+		fields.push(size)
+		fields.push(raw_enum_literal(state, locals, "String", label + " slice range is out of bounds", origin))
+	end
+	mut join := mir_value_join(locals, line)
+	alternate := mir_control_branch(state, locals, present, line)
+	mut value := checked_value("Invalid", checked_category_value(), origin, 0)
+	if kind == result_method_key()
+		value = mir_checked_hash_operation(state, locals, mir_op_hash_get(), checked_mir_value(receiver), checked_mir_value(argument), 0, hash_value_type(receiver.type_name), origin)
+	elsif kind == result_method_slice()
+		if receiver.type_name == "String"
+			value = mir_checked_string_operation(state, locals, mir_op_string_slice(), checked_mir_value(receiver), checked_mir_value(argument), 0, "String", origin)
+		else
+			value = mir_checked_array_operation(state, locals, mir_op_array_copy(), checked_mir_value(receiver), checked_mir_value(argument), mir_array_copy_slice(), receiver.type_name, origin)
+		end
+	elsif receiver.type_name == "String"
+		value = mir_checked_string_operation(state, locals, mir_op_string_index(), checked_mir_value(receiver), checked_mir_value(position), 0, "String", origin)
+	else
+		value = mir_checked_array_operation(state, locals, mir_op_array_load(), checked_mir_value(receiver), checked_mir_value(position), 0, array_element_type(receiver.type_name), origin)
+	end
+	ok := builtin_result_variant(state, result_type, true)
+	success := mir_enum_construct(state, locals, ok, [checked_mir_value(value)], origin)
+	mir_value_exit(state, locals, join, success)
+	mir_control_enter(state, locals, alternate, line)
+	error := mir_builtin_error(state, locals, result_type, fields, origin)
+	mir_value_exit(state, locals, join, error)
+	return mir_value_complete(state, locals, join, result_type, origin)
+end

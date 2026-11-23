@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "id": "package.std.process",
+      "bindings": [
+        {
+          "surface": "document:docs/standard-library.md#process",
+          "member": "Process",
+          "scenarios": [
+            "process-argv-fresh",
+            "process-run-success",
+            "process-run-not-found",
+            "process-reject-internal-import"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "declaration root Process",
+          "scenarios": [
+            "process-argv-fresh",
+            "process-run-success",
+            "process-run-not-found",
+            "process-reject-internal-import"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "def argv(): Array<String>",
+          "scenarios": [
+            "process-argv-fresh",
+            "process-reject-argv-arity"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "def environment(name: String): String?",
+          "scenarios": [
+            "process-environment-present",
+            "process-environment-empty",
+            "process-environment-absent",
+            "process-environment-invalid-name",
+            "process-reject-environment-type"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "def run(command: String, args: Array<String>): Result<Process::Output, Process::Error>",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-literal-arguments",
+            "process-run-search-path",
+            "process-run-not-found",
+            "process-run-empty-command",
+            "process-run-invalid-utf8",
+            "process-run-both-pipes",
+            "process-run-repeated",
+            "process-reject-run-arguments"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "def working_directory(): Result<String, Process::Error>",
+          "scenarios": [
+            "process-working-directory",
+            "process-reject-directory-arity"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Error::command: String",
+          "scenarios": [
+            "process-run-not-found",
+            "process-run-empty-command"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Error::message: String",
+          "scenarios": [
+            "process-run-not-found",
+            "process-run-empty-command"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Error::operation: String",
+          "scenarios": [
+            "process-run-not-found",
+            "process-run-empty-command"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Output::status: Integer",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-both-pipes"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Output::stderr: String",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-both-pipes"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Output::stdout: String",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-both-pipes"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "field Process::Output::success: Boolean",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-both-pipes"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "module Process",
+          "scenarios": [
+            "process-argv-fresh",
+            "process-run-success",
+            "process-run-not-found",
+            "process-reject-internal-import"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "record Process::Error",
+          "scenarios": [
+            "process-run-not-found",
+            "process-run-empty-command"
+          ]
+        },
+        {
+          "surface": "package:trb/std/process",
+          "member": "record Process::Output",
+          "scenarios": [
+            "process-run-success",
+            "process-run-nonzero",
+            "process-run-signaled",
+            "process-run-both-pipes"
+          ]
+        }
+      ],
+      "remaining": [
+        "Mapping covers declared members, not all semantics. Qualify descendant exit and descriptor cleanup, working-directory host failure and launch permissions with independent observers.",
+        "Observe every required output on all four contract hosts. A matching selected scenario is not a passing release cell.",
+        "Review native and source-output diagnostics, retained interactive state and any cross-mode differences before enabling canonical qualificationReady.",
+        "Retain the historical Ruby signal observation in https://github.com/type-rb/type-rb/issues/855. The accepted reference correction is https://github.com/type-rb/type-rb/pull/856. Compare status -1 and success false on each required output and host."
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "process-argv-fresh",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "mut first := Process.argv()\nfirst.push(\"local\")\nputs(first.size())\nputs(Process.argv().size())",
+      "kind": "accepted",
+      "stdout": "1\n0\n"
+    },
+    {
+      "id": "process-environment-present",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "value := Process.environment(\"TRB_SCENARIO_PRESENT\")\nif value != nil\nputs(value == \"value 日本語\")\nelse\nputs(false)\nend",
+      "kind": "accepted",
+      "stdout": "true\n"
+    },
+    {
+      "id": "process-environment-empty",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "value := Process.environment(\"TRB_SCENARIO_EMPTY\")\nif value != nil\nputs(value == \"\")\nelse\nputs(false)\nend",
+      "kind": "accepted",
+      "stdout": "true\n"
+    },
+    {
+      "id": "process-environment-absent",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "puts(Process.environment(\"TRB_SCENARIO_ABSENT\") == nil)",
+      "kind": "accepted",
+      "stdout": "true\n"
+    },
+    {
+      "id": "process-environment-invalid-name",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "puts(Process.environment(\"invalid=name\") == nil)\nputs(Process.environment(\"\") == nil)",
+      "kind": "accepted",
+      "stdout": "true\ntrue\n"
+    },
+    {
+      "id": "process-working-directory",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "expected := Process.environment(\"TRB_SCENARIO_CWD\")\ncase Process.working_directory()\nwhen Result::Ok(value)\nif expected != nil\nputs(value == expected)\nelse\nputs(false)\nend\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "true\n"
+    },
+    {
+      "id": "process-run-success",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"/bin/sh\", [\"-c\", \"printf out; printf err >&2\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "0\nout\nerr\ntrue\n"
+    },
+    {
+      "id": "process-run-nonzero",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"/bin/sh\", [\"-c\", \"printf before; exit 7\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "7\nbefore\n\nfalse\n"
+    },
+    {
+      "id": "process-run-signaled",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"/bin/sh\", [\"-c\", \"kill -TERM $$\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "-1\n\n\nfalse\n"
+    },
+    {
+      "id": "process-run-literal-arguments",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"/usr/bin/printf\", [\"[%s]\", \"a b\", \"$(echo unexpected)\", \"日本語\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "0\n[a b][$(echo unexpected)][日本語]\n\ntrue\n"
+    },
+    {
+      "id": "process-run-search-path",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"sh\", [\"-c\", \"printf found\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "0\nfound\n\ntrue\n"
+    },
+    {
+      "id": "process-run-not-found",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"trb-scenario-command-does-not-exist\", [])\nwhen Result::Ok(value)\nputs(value.status)\nwhen Result::Err(error)\nputs(error.operation)\nputs(error.command == \"trb-scenario-command-does-not-exist\")\nputs(error.message.empty?())\nend",
+      "kind": "accepted",
+      "stdout": "run\ntrue\nfalse\n"
+    },
+    {
+      "id": "process-run-empty-command",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"\", [])\nwhen Result::Ok(value)\nputs(value.status)\nwhen Result::Err(error)\nputs(error.operation)\nputs(error.command == \"\")\nputs(error.message.empty?())\nend",
+      "kind": "accepted",
+      "stdout": "run\ntrue\nfalse\n"
+    },
+    {
+      "id": "process-run-invalid-utf8",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"/bin/sh\", [\"-c\", \"printf '\\\\377'\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout)\nputs(value.stderr)\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "0\n�\n\ntrue\n"
+    },
+    {
+      "id": "process-run-both-pipes",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "case Process.run(\"python3\", [\"-c\", \"import sys; sys.stdout.write('o' * 102400); sys.stderr.write('e' * 102400)\"])\nwhen Result::Ok(value)\nputs(value.status)\nputs(value.stdout.size())\nputs(value.stderr.size())\nputs(value.success)\nwhen Result::Err(error)\nputs(error.operation)\nend",
+      "kind": "accepted",
+      "stdout": "0\n102400\n102400\ntrue\n"
+    },
+    {
+      "id": "process-run-repeated",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\nimport trb/std/result\n",
+      "body": "mut count := 0\nwhile count < 8\ncase Process.run(\"/bin/sh\", [\"-c\", \"exit 3\"])\nwhen Result::Ok(value)\nputs(value.status)\nwhen Result::Err(error)\nputs(error.operation)\nend\ncount += 1\nend",
+      "kind": "accepted",
+      "stdout": "3\n3\n3\n3\n3\n3\n3\n3\n"
+    },
+    {
+      "id": "process-reject-environment-type",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "Process.environment(1)",
+      "kind": "rejected",
+      "stdout": "",
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*String|error\\[TRBN4004\\]: expected String, found Integer$)"
+    },
+    {
+      "id": "process-reject-run-arguments",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "Process.run(\"unused\", [1])",
+      "kind": "rejected",
+      "stdout": "",
+      "diagnostic": "(?m)(?:argument[^\\n]*(?:type|expected)[^\\n]*Array<String>|error\\[TRBN4004\\]: expected String, found Integer$)"
+    },
+    {
+      "id": "process-reject-directory-arity",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "Process.working_directory(1)",
+      "kind": "rejected",
+      "stdout": "",
+      "diagnostic": "(?:working_directory[^\\n]*(?:argument|expected)|argument[^\\n]*working_directory)"
+    },
+    {
+      "id": "process-reject-argv-arity",
+      "row": "package.std.process",
+      "declarations": "import trb/std/process\n",
+      "body": "Process.argv(1)",
+      "kind": "rejected",
+      "stdout": "",
+      "diagnostic": "(?:argv[^\\n]*(?:argument|expected)|argument[^\\n]*(?:argv|does not match Process))"
+    },
+    {
+      "id": "process-reject-internal-import",
+      "row": "package.std.process",
+      "declarations": "import trb/internal/process\n",
+      "body": "Process.argv()",
+      "kind": "rejected",
+      "stdout": "",
+      "diagnostic": "(?m)(?:package trb/internal/process is internal|error\\[TRBN4003\\]: internal package imports are reserved for verified standard sources: trb/internal/process$)"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+def main()
+	mut values: Array<Float> := [1]
+	values.reverse(1)
+	return
+end

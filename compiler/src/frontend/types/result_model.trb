@@ -1,0 +1,22 @@
+# Statement-only catch syntax is distinct from its checked semantic operation.
+record CatchSyntax
+	origin: Integer
+	operand_finish: Integer
+	binding: Integer
+	body: Integer
+	finish: Integer
+end
+
+# Optional projection consumed by the REPL; Native code uses ordinary enum MIR.
+record ResultOperation
+	origin: Integer
+	finish: Integer
+	result_type: String
+	success_type: String
+	error_type: String
+	ok_variant: Integer
+	err_variant: Integer
+	boundary_type: String
+	boundary_error: String
+	boundary_variant: Integer
+end

@@ -1,0 +1,122 @@
+import { integer_string } from support/literals
+import { mir_global_index } from mir/lowering/globals
+import { mir_initializer_dependencies, mir_inline_reaches } from mir/analysis/initialization
+import { verify_mir_structure } from mir/verify/module
+import { CompilerState, diagnostic } from state/state
+
+# Stable topological scheduling changes only nontrivial source components.
+# Values in one source retain declaration order; transitive checked reads add
+# the remaining prerequisites. The backend consumes the verified MIR order.
+def plan_global_initialization(mut state: CompilerState): Boolean
+	mut cyclic := false
+	state.global_bindings.component_cyclic.each do |value|
+		if value == 1
+			cyclic = true
+		end
+	end
+	if !cyclic
+		return true
+	end
+	error := verify_mir_structure(state.scalar_mir, false)
+	if error != ""
+		diagnostic(state, "TRBN4004", 1, error)
+		return false
+	end
+	state.scalar_mir.records.each do |definition|
+		if state.global_bindings.component_cyclic[state.global_bindings.module_components[definition.source_id]] == 1
+			mut field := definition.field_start
+			while field < definition.field_start + definition.field_count
+				mut visited: Hash<String, Integer> := {}
+				if mir_inline_reaches(state.scalar_mir, state.scalar_mir.fields[field].type_id, definition.type_id, visited)
+					state.module_graph.active_module[0] = definition.source_id
+					diagnostic(state, "TRBN4004", definition.line, "infinite value layout involving record " + definition.name + "; use a nullable value or collection to introduce indirection")
+					return false
+				end
+				field += 1
+			end
+		end
+	end
+	mut order: Array<Integer> := []
+	mut component := 0
+	while component < state.global_bindings.component_modules.size()
+		mut pending: Array<Integer> := []
+		state.global_bindings.global_order.each do |identity|
+			row := state.global_bindings.globals[identity]
+			if state.global_bindings.module_components[row.source_id] == component
+				pending.push(identity)
+			end
+		end
+		if state.global_bindings.component_cyclic[component] == 0
+			pending.each do |identity|
+				order.push(identity)
+			end
+		else
+			mut dependencies: Array<Array<Integer>> := []
+			mut previous: Hash<String, Integer> := {}
+			pending.each do |identity|
+				row := state.global_bindings.globals[identity]
+				plan := mir_initializer_dependencies(state.scalar_mir, state.global_bindings.global_functions[identity])
+				if plan.opaque
+					state.module_graph.active_module[0] = row.source_id
+					diagnostic(state, "TRBN4004", row.line, "initializer in an import cycle reaches an indirect, native, or unverified operation")
+					return false
+				end
+				mut required: Array<Integer> := []
+				plan.values.each do |dependency|
+					target := state.scalar_mir.globals[mir_global_index(state.scalar_mir, dependency)]
+					if state.global_bindings.module_components[target.source_id] == component
+						required.push(dependency)
+					end
+				end
+				key := integer_string(row.source_id)
+				if previous.key?(key)
+					required.push(previous[key])
+				end
+				previous[key] = identity
+				dependencies.push(required)
+			end
+			mut initialized: Hash<String, Integer> := {}
+			mut remaining := pending.size()
+			while remaining > 0
+				mut selected := -1
+				mut position := 0
+				while position < pending.size()
+					if !initialized.key?(integer_string(pending[position]))
+						mut ready := true
+						dependencies[position].each do |dependency|
+							if !initialized.key?(integer_string(dependency))
+								ready = false
+							end
+						end
+						if ready
+							selected = position
+							break
+						end
+					end
+					position += 1
+				end
+				if selected < 0
+					pending.each do |identity|
+						if !initialized.key?(integer_string(identity))
+							row := state.global_bindings.globals[identity]
+							state.module_graph.active_module[0] = row.source_id
+							diagnostic(state, "TRBN4004", row.line, "value initialization cycle involving " + row.name)
+							return false
+						end
+					end
+				end
+				identity := pending[selected]
+				initialized[integer_string(identity)] = 1
+				order.push(identity)
+				remaining -= 1
+			end
+		end
+		component += 1
+	end
+	mut index := 0
+	while index < order.size()
+		state.scalar_mir.global_initialization[index] = order[index]
+		index += 1
+	end
+	return true
+end

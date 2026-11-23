@@ -1,0 +1,97 @@
+import { has_diagnostic } from state/state
+import { check } from compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { mir_op_array_new, mir_op_hash_new } from mir/model/instructions
+import { MirValue } from mir/model/module
+import { mir_semantic_type_id } from mir/model/types
+import { describe, expect, test } from trb/std/test
+
+describe("MIR constant initialization") do
+	test("still requires concrete local empty collections") do
+		cases := ["mut values := []\nputs(values.size())", "mut table := {}\nputs(table.size())"]
+		cases.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+end
+
+describe("Empty collection contexts") do
+	test("infers mutable arguments and preserves shared managed values") do
+		source := "def fill(mut values: Array<String>, mut table: Hash<Integer, String>)\nvalues.push(\"held\")\ntable[1] = values[0]\nend\ndef main()\nmut values := []\nmut table := {}\nfill(values, table)\nputs(values[0])\nputs(table[1])\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("infers return values without a write witness") do
+		source := "def values(): Array<String>\nmut result := []\nreturn result\nend\ndef table(): Hash<Integer, String>\nmut result := {}\nreturn result\nend\ndef main()\nputs(values().size())\nputs(table().size())\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("infers grouped typed aliases and nested literal contexts") do
+		source := "def main()\nmut values := []\nmut typed: Array<String> := (values)\ntyped.push(\"held\")\nputs(values[0])\nmut table := {}\nnested: Array<Hash<Integer, String>> := [table]\ntable[1] = \"table\"\nputs(nested[0][1])\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("infers replacement assignments after observations") do
+		source := "def main()\nmut values := []\nmut table := {}\nputs(values.empty?())\nputs(table.size())\nvalues = [\"held\"]\ntable = {1 => \"table\"}\nputs(values[0])\nputs(table[1])\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("applies a Float context to earlier writes in the first statement") do
+		source := "def count(values: Array<Float>): Integer\nreturn values.size()\nend\ndef main()\nmut values := []\nif true\nvalues.push(1)\nputs(count(values))\nelse\nvalues.push(2.5)\nend\nputs(values[0])\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("keeps immutable aliases and later conflicting writes invalid") do
+		bodies := [
+			"values := []\ntyped: Array<String> := values\nputs(typed.size())",
+			"mut values := []\nmut copy := values\ncopy.push(1)\nputs(values.size())",
+			"mut values := []\ntyped: Array<String> := values\nputs(typed.size())\nvalues.push(1)",
+			"mut table := {}\ntyped: Hash<String, Integer> := table\nputs(typed.size())\ntable[1] = 2",
+			"mut values := []\nmut other := []\nvalues = other\nputs(values.size())",
+			"mut table := {}\ntable = []\nputs(table.size())",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+	test("rejects pending allocation types in published MIR") do
+		cases := [
+			"def count(values: Array<String>): Integer\nreturn values.size()\nend\ndef main()\nmut values := []\nputs(count(values))\nend\n",
+			"def count(values: Hash<String, Integer>): Integer\nreturn values.size()\nend\ndef main()\nmut values := {}\nputs(count(values))\nend\n",
+		]
+		cases.each do |source|
+			mut state := logical_checked_source(source)
+			expect_compiler_phase(state, "check", check(state))
+			mut changed := false
+			state.scalar_mir.instructions.each do |instruction|
+				if !changed && (instruction.kind == mir_op_array_new() || instruction.kind == mir_op_hash_new())
+					mut pending := "Array"
+					if instruction.kind == mir_op_hash_new()
+						pending = "Hash"
+					end
+					mut index := 0
+					while index < state.scalar_mir.values.size()
+						value := state.scalar_mir.values[index]
+						if value.id == instruction.result && value.source_id == instruction.source_id && value.line == instruction.line
+							state.scalar_mir.values[index] = MirValue.new(function_id: value.function_id, id: value.id, type_id: mir_semantic_type_id(state.scalar_mir, pending), source_id: value.source_id, line: value.line)
+							changed = true
+						end
+						index += 1
+					end
+				end
+			end
+			expect(changed).to_be_true()
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		end
+	end
+end

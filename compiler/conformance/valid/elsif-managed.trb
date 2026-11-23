@@ -1,0 +1,40 @@
+def grow(mut values: Array<Integer>): Boolean
+	values.push(7)
+	return true
+end
+
+def allocate(value: String): String
+	return value + "x"
+end
+
+def main()
+	mut values := [1]
+	mut kept := "start"
+	mut index := 0
+	while index < 60000
+		if index < 0
+			kept = allocate("wrong")
+		elsif index % 2 == 0
+			local := allocate("even")
+			kept = local
+		elsif true
+			local := allocate("odd")
+			kept = local
+		else
+			kept = allocate("wrong")
+		end
+		index += 1
+	end
+	mut round := 0
+	while round < 3
+		first := values[0]
+		if first != 1
+			puts("wrong")
+		elsif grow(values)
+			puts(values[round + 1])
+		end
+		round += 1
+	end
+	puts(kept)
+	puts(values.size())
+end

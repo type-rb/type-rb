@@ -1,0 +1,8 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 3,
+  "module": "example/main",
+  "entryFunction": "example/main#main",
+  "sources": [],
+  "functions": []
+}

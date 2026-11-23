@@ -1,0 +1,17 @@
+{
+  "hardware": {
+    "processor": "Apple M2 Pro",
+    "memoryBytes": 34359738368
+  },
+  "currentSource": "2a5e2ac54795226deb1a62db8cba1358afaf3411",
+  "controlSource": "7acb9dff192dd5a25ee0839bcecf2610f13bea14",
+  "ordinaryLimitsChanged": false,
+  "coreBytes": 398888,
+  "cliBytes": 548872,
+  "coreSha256": "920e30739f9cb7e7af78696df8d43e7e8d2da81208219eaf5f2807c7b78eae3d",
+  "cliSha256": "1ba74205d603a734b749d975e0062fd3f46c9e90b6a3440a4b216215e0adef2b",
+  "coreTextBytes": 290856,
+  "coreQbeBytes": 1328312,
+  "note": "Local diagnostic; validation overlapped timing cohorts. Initial source digests describe the prototype, not the final readonly corrections. The scalar-pool paired cohort is tied to the recorded implementation commits.",
+  "scalarPoolCandidateSource": "0004b86928a47a49181066160c90717e8f481a7d"
+}

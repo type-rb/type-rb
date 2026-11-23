@@ -1,0 +1,52 @@
+record Window
+	bounds: Range<Integer>
+end
+
+def make_bounds(start: Integer, finish: Integer): Range<Integer>
+	return start..finish
+end
+
+def sum_bounds(bounds: Range<Integer>): Integer
+	mut total := 0
+	bounds.each do |value|
+		total += value
+	end
+	return total
+end
+
+def first_bound(bounds: Range<Integer>): Integer
+	bounds.each do |value|
+		return value
+	end
+	return -1
+end
+
+def main()
+	window := Window.new(bounds: make_bounds(-2, 2))
+	puts(sum_bounds(window.bounds))
+	mut entries: Hash<String, Range<Integer>> := { "active" => make_bounds(1, 3) }
+	mut total := 0
+	entries["active"].each.with_index do |value, index|
+		entries["active"] = 10...10
+		total += value * 10 + index
+	end
+	puts(total)
+	puts(sum_bounds(entries["active"]))
+	mut integer_keys: Hash<Integer, Range<Integer>> := { 7 => make_bounds(4, 6) }
+	puts(sum_bounds(integer_keys[7]))
+	mut nested: Array<Array<Range<Integer>>> := [[make_bounds(2, 3)]]
+	mut retained: Array<Window> := [Window.new(bounds: nested[0][0])]
+	nested[0][0] = 20..20
+	puts(sum_bounds(retained[0].bounds))
+	puts(sum_bounds(nested[0][0]))
+	mut selected := make_bounds(3, 5)
+	mut visited := 0
+	selected.each do |value|
+		selected = 30..30
+		visited += value
+	end
+	puts(visited)
+	puts(sum_bounds(selected))
+	puts(first_bound(-9007199254740991..9007199254740991))
+	puts(first_bound(4...4))
+end

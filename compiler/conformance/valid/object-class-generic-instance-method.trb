@@ -1,0 +1,10 @@
+class Box
+	def identity<T>(value: T): T
+		return value
+	end
+end
+def main()
+	box := Box.new()
+	puts(box.identity<Integer>(3))
+	puts(box.identity<String>("word"))
+end

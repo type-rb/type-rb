@@ -1,0 +1,41 @@
+import { emit_test_predicate_runtime } from backend/qbe/runtime/test_predicate
+import { emit_test_inspection_runtime } from backend/qbe/runtime/test_inspection
+import { emit_test_comparison_runtime } from backend/qbe/runtime/test_comparison
+import { MirModule } from mir/model/module
+import { mir_signature_standard } from mir/model/call_kinds
+import { test_adapter_capture, test_adapter_fail, test_adapter_finish } from mir/model/test_contract
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Optional test support consumes verified callback/outcome types. The shared
+# failure path only knows a frame-local notification callback; ordinary programs
+# do not acquire the test reporter or structural-comparison runtime.
+def emit_test_recovery_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_desc_test_outcome = align 8 { l 1, l 2, l 40, l 16, l 24 }\ndata $trbn_test_empty = align 8 { l 0, l 0, l 0, b 0 }\ndata $trbn_test_panic_prefix = { b \"panic: \" }\n")
+	qbe_output_line(output, "function l $trbn_test_capture(l %action, l %path, l %line, l %column) {\n@start\n %original_roots =l loadl $trbn_gc_temp_count\n call $trbn_gc_temp_push(l %action)\n call $trbn_gc_temp_push(l %path)\n %outcome =l call $trbn_gc_alloc(l $trbn_desc_test_outcome, l 40, l 0)\n %failed_slot =l add %outcome, 8\n storel 0, %failed_slot\n %message_slot =l add %outcome, 16\n storel $trbn_test_empty, %message_slot\n %path_slot =l add %outcome, 24\n storel %path, %path_slot\n %line_slot =l add %outcome, 32\n storel %line, %line_slot\n %column_slot =l add %outcome, 40\n storel %column, %column_slot\n call $trbn_gc_temp_push(l %outcome)\n %scope =l alloc16 1072\n %previous =l loadl $trbn_recovery_scope\n storel %previous, %scope\n %saved_roots =l add %scope, 8\n storel %original_roots, %saved_roots\n %context_slot =l add %scope, 16\n storel %outcome, %context_slot\n %action_slot =l add %scope, 24\n storel %action, %action_slot\n %cleanup_slot =l add %scope, 1056\n %boundary =l loadl $trbn_resource_scope\n storel %boundary, %cleanup_slot\n %notice_slot =l add %scope, 1064\n storel $trbn_test_record_failure, %notice_slot\n %environment =l add %scope, 32\n %caught =w call $setjmp(l %environment)\n jnz %caught, @complete, @invoke\n@invoke\n storel %scope, $trbn_recovery_scope\n %saved_action =l add %scope, 24\n %closure =l loadl %saved_action\n %code_slot =l add %closure, 8\n %code =l loadl %code_slot\n call %code(l %closure)\n jmp @complete\n@complete\n %parent =l loadl %scope\n storel %parent, $trbn_recovery_scope\n %root_slot =l add %scope, 8\n %root_count =l loadl %root_slot\n storel %root_count, $trbn_gc_temp_count\n %result_slot =l add %scope, 16\n %result =l loadl %result_slot\n call $trbn_gc_temp_push(l %result)\n ret %result\n}")
+	qbe_output_line(output, "function $trbn_test_record_failure(l %outcome, l %message, l %size, l %raw, l %path, l %line, l %column) {\n@start\n %failed_slot =l add %outcome, 8\n storel 1, %failed_slot\n %has_origin =w cnel %path, 0\n jnz %has_origin, @origin, @format\n@origin\n %path_slot =l add %outcome, 24\n storel %path, %path_slot\n %line_slot =l add %outcome, 32\n storel %line, %line_slot\n %column_slot =l add %outcome, 40\n storel %column, %column_slot\n jmp @format\n@format\n %raw_message =w cnel %raw, 0\n jnz %raw_message, @prefix_length, @authored\n@authored\n jmp @copy\n@prefix_length\n %enough =w cugel %size, 7\n jnz %enough, @prefix, @whole\n@prefix\n %comparison =w call $memcmp(l %message, l $trbn_test_panic_prefix, l 7)\n %matches =w ceqw %comparison, 0\n jnz %matches, @strip, @whole\n@strip\n %body =l add %message, 7\n %body_size =l sub %size, 7\n jmp @newline\n@whole\n jmp @newline\n@newline\n %start =l phi @strip %body, @whole %message\n %length =l phi @strip %body_size, @whole %size\n %nonempty =w cnel %length, 0\n jnz %nonempty, @last, @kept\n@last\n %last_offset =l sub %length, 1\n %last_address =l add %start, %last_offset\n %last =w loadub %last_address\n %newline =w ceqw %last, 10\n jnz %newline, @trimmed, @kept\n@trimmed\n jmp @copy\n@kept\n jmp @copy\n@copy\n %bytes =l phi @authored %message, @trimmed %start, @kept %start\n %count =l phi @authored %size, @trimmed %last_offset, @kept %length\n %owned =l call $trbn_string_from_bytes(l %bytes, l %count)\n %message_slot =l add %outcome, 16\n storel %owned, %message_slot\n ret\n}")
+	qbe_output_line(output, "function $trbn_test_raise(l %message, l %path, l %line, l %column) {\n@start\n call $trbn_gc_temp_push(l %message)\n call $trbn_gc_temp_push(l %path)\n %length_slot =l add %message, 8\n %length =l loadl %length_slot\n %data =l add %message, 24\n call $trbn_failure_notice(l %data, l %length, l 0, l %path, l %line, l %column)\n call $trbn_unwind()\n # Without a surrounding case, keep the ordinary terminal failure behavior.\n call $trbn_runtime_fail(l %message)\n hlt\n}")
+end
+
+# Only verified test boundaries select this family. Ordinary applications retain
+# just the small shared failure notification hook.
+def emit_test_runtime(native_module: MirModule, mut output: QbeOutput)
+	emit_test_comparison_runtime(native_module, output)
+	emit_test_inspection_runtime(native_module, output)
+	emit_test_predicate_runtime(native_module, output)
+	mut needed := false
+	mut finish := false
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_finish()
+			finish = true
+		end
+		if signature.kind == mir_signature_standard() && (signature.adapter == test_adapter_capture() || signature.adapter == test_adapter_fail())
+			needed = true
+		end
+	end
+	if finish
+		qbe_output_line(output, "function $trbn_test_finish(l %status) {\n@start\n call $trbn_gc_finish()\n call $exit(w %status)\n hlt\n}")
+	end
+	if needed
+		emit_test_recovery_runtime(output)
+	end
+end

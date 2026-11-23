@@ -1,0 +1,160 @@
+import { check } from compiler
+import { flow_test_module } from testing/mir/flow
+import { logical_checked_source } from testing/pipeline
+import { MirFunction, MirModule } from mir/model/module
+import { mir_flow_blocks } from mir/analysis/flow
+import { mir_test_block_with_cell, mir_test_instruction_with_cell } from testing/mir/model
+import { mir_live_before, mir_live_equal, mir_live_exit, mir_live_incoming, mir_managed_add } from mir/analysis/liveness
+import { mir_managed_type } from mir/model/types
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+def root_test_incoming(native_module: MirModule, function: MirFunction, managed: Array<Integer>): Array<Array<Integer>>
+	blocks := mir_flow_blocks(native_module, function)
+	mut incoming: Array<Array<Integer>> := []
+	mut index := 0
+	while index < function.block_count
+		incoming.push([])
+		index += 1
+	end
+	mut changed := true
+	while changed
+		changed = false
+		index = function.block_count - 1
+		while index >= 0
+			block := native_module.blocks[function.block_start + index]
+			mut live := mir_live_exit(native_module, function, blocks, managed, block, incoming)
+			mut cursor := block.instruction_start + block.instruction_count - 1
+			while cursor >= block.instruction_start
+				live = mir_live_before(native_module, managed, native_module.instructions[cursor], live)
+				cursor -= 1
+			end
+			if !mir_live_equal(incoming[index], live)
+				incoming[index] = live
+				changed = true
+			end
+			index -= 1
+		end
+	end
+	return incoming
+end
+
+def root_test_compare(native_module: MirModule, function: MirFunction, managed: Array<Integer>)
+	expected := root_test_incoming(native_module, function, managed)
+	actual := mir_live_incoming(native_module, function, mir_flow_blocks(native_module, function), managed)
+	expect(actual.size()).to_equal(expected.size())
+	mut index := 0
+	while index < expected.size()
+		expect(actual[index]).to_equal(expected[index])
+		index += 1
+	end
+end
+
+def root_test_source(source: String)
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	state.scalar_mir.functions.each do |function|
+		mut managed: Array<Integer> := []
+		state.scalar_mir.values.each do |value|
+			if value.function_id == function.id && mir_managed_type(state.scalar_mir, value.type_id)
+				mir_managed_add(managed, value.id)
+			end
+		end
+		root_test_compare(state.scalar_mir, function, managed)
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			saved := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = saved
+			left += 1
+			right -= 1
+		end
+		root_test_compare(state.scalar_mir, function, managed)
+	end
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+end
+
+describe("MIR root liveness worklist") do
+	test("matches instruction iteration across managed joins and nested loop transfers") do
+		root_test_source("def scan(flag: Boolean): String\nmut value := (10).to_s()\nmut dead := (20).to_s()\nmut index := 0\nwhile index < 5\nindex += 1\nif flag\ndead = (30).to_s()\nnext\nend\nmut inner := 0\nwhile inner < 2\ninner += 1\nvalue = value + inner.to_s()\nif inner == 1\nbreak\nend\nend\nend\nreturn value\nend\ndef main()\nputs(scan(false))\nend\n")
+	end
+
+	test("matches instruction iteration for retained closures containers and unreachable code") do
+		root_test_source("record Box\ntext: String\nend\ndef make(value: String): String\nmut values := [Box.new(text: value)]\nmut table := {\"key\" => value}\ncallback := fn(): String\nreturn values[0].text + table[\"key\"]\nend\nvalues.push(Box.new(text: (42).to_s()))\nresult := callback()\nreturn result\nputs((99).to_s())\nend\ndef main()\nputs(make(\"word\"))\nend\n")
+	end
+
+	test("matches the oracle on every three-block graph with at most two successors") do
+		mut mask := 0
+		mut checked := 0
+		while mask < 512
+			mut bits := mask
+			mut edges: Array<Array<Integer>> := []
+			mut valid := true
+			mut row := 0
+			while row < 3
+				mut targets: Array<Integer> := []
+				mut column := 0
+				while column < 3
+					if bits % 2 == 1
+						targets.push(column)
+					end
+					bits /= 2
+					column += 1
+				end
+				if targets.size() > 2
+					valid = false
+				end
+				edges.push(targets)
+				row += 1
+			end
+			if valid
+				# Isolated dataflow inputs use sparse managed identities. Each
+				# block uses a different external value and kills a local result.
+				mut native_module := flow_test_module(edges)
+				mut managed: Array<Integer> := []
+				row = 0
+				while row < 3
+					value := 9007199254740900 + row
+					mir_managed_add(managed, value)
+					mir_managed_add(managed, native_module.instructions[row].result)
+					instruction := mir_test_instruction_with_cell(native_module.instructions[row], 0, 13)
+					native_module.instructions[row] = mir_test_instruction_with_cell(instruction, 2, value)
+					row += 1
+				end
+				root_test_compare(native_module, native_module.functions[0], managed)
+				checked += 1
+			end
+			mask += 1
+		end
+		expect(checked).to_equal(343)
+	end
+
+	test("substitutes both parallel edges without retaining an undemanded parameter") do
+		mut native_module := flow_test_module([[1, 1], []])
+		native_module.arguments[0] = 1000
+		native_module.arguments.push(2000)
+		native_module.arguments.push(9007199254740900)
+		native_module.arguments.push(4000)
+		native_module.arguments.push(5000)
+		native_module.arguments.push(6000)
+		mut first := native_module.blocks[0]
+		first = mir_test_block_with_cell(first, 11, 0)
+		first = mir_test_block_with_cell(first, 12, 2)
+		first = mir_test_block_with_cell(first, 13, 2)
+		first = mir_test_block_with_cell(first, 14, 2)
+		native_module.blocks[0] = first
+		mut last := native_module.blocks[1]
+		last = mir_test_block_with_cell(last, 3, 4)
+		last = mir_test_block_with_cell(last, 4, 2)
+		native_module.blocks[1] = last
+		instruction := mir_test_instruction_with_cell(native_module.instructions[1], 0, 18)
+		native_module.instructions[1] = mir_test_instruction_with_cell(instruction, 2, 5000)
+		managed := [1000, 2000, 4000, 5000, 6000, 9007199254740900]
+		root_test_compare(native_module, native_module.functions[0], managed)
+		actual := mir_live_incoming(native_module, native_module.functions[0], mir_flow_blocks(native_module, native_module.functions[0]), managed)
+		expect(actual[0]).to_equal([1000, 9007199254740900])
+		expect(actual[1]).to_equal([5000])
+	end
+end

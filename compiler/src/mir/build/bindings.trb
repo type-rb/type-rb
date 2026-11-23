@@ -1,0 +1,108 @@
+import { concurrent_bind, concurrent_value } from frontend/checking/body/concurrency
+import { checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot } from state/local_slots
+import { mir_op_array_load, mir_op_array_store } from mir/model/instructions
+import { LambdaCapture } from frontend/types/callable_types
+import { mir_global_assign } from mir/lowering/globals
+import { CheckedValue, checked_bound_value, checked_mir_value, scalar_mir_disable, scalar_mir_literal } from frontend/checking/body/values
+import { mir_checked_array_literal, mir_checked_array_operation } from mir/lowering/arrays
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals, local_find, local_identity, local_slot } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { array_type } from frontend/resolution/type_resolution
+
+# Storage is chosen before entering the body, using analyzed declaration IDs.
+# Creating a cell at the later capture expression would be path-dependent.
+def mir_binding_initialize(mut state: CompilerState, mut locals: CheckedLocals, slot: Integer, value: CheckedValue, origin: Integer)
+	concurrent_bind(state, locals, slot, value)
+	if locals.mir_state[mir_state_enabled_slot()] != 1
+		return
+	end
+	mut operand := checked_mir_value(value)
+	if operand < 0
+		scalar_mir_disable(locals)
+		return
+	end
+	if sparse_integer_at(locals.mir_cell_plans, local_identity(locals, slot)) > 0
+		if load_integer(locals.mutable, slot) == 0 || load_string(locals.mir_cell_types, slot) != ""
+			diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "shared binding requires one mutable declaration initialization")
+			scalar_mir_disable(locals)
+			return
+		end
+		semantic := load_string(locals.types, slot)
+		storage := array_type(semantic)
+		cell := mir_checked_array_literal(state, locals, storage, semantic, origin, [value])
+		operand = checked_mir_value(cell)
+		store_string(locals.mir_cell_types, slot, storage)
+	end
+	store_integer(locals.mir_values, slot, operand + 1)
+end
+
+def mir_binding_read(mut state: CompilerState, mut locals: CheckedLocals, slot: Integer, origin: Integer): CheckedValue
+	mut operand := load_integer(locals.mir_values, slot) - 1
+	type_name := load_string(locals.types, slot)
+	mut category := checked_category_value()
+	if locals.mir_state[mir_state_enabled_slot()] == 1 && operand >= 0
+		if load_string(locals.mir_cell_types, slot) != ""
+			zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+			value := mir_checked_array_operation(state, locals, mir_op_array_load(), operand, checked_mir_value(zero), 0, type_name, origin)
+			operand = checked_mir_value(value)
+		end
+		category = -operand - 1
+	else
+		scalar_mir_disable(locals)
+	end
+	return concurrent_value(state, checked_bound_value(type_name, category, origin, load_integer(locals.mutable, slot), true), sparse_integer_at(locals.concurrent_borrowed, local_identity(locals, slot)) > 0)
+end
+
+# Direct bindings advance SSA values; shared bindings replace cell contents.
+def mir_binding_assign(mut state: CompilerState, mut locals: CheckedLocals, target: CheckedValue, value: CheckedValue)
+	if target.origin >= 0 && target.origin < state.source_tokens.token_count[0]
+		binding_slot := local_find(locals, load_string(state.source_tokens.token_texts, target.origin))
+		if binding_slot >= 0
+			concurrent_bind(state, locals, binding_slot, value)
+		end
+	end
+	if locals.mir_state[mir_state_enabled_slot()] != 1
+		return
+	end
+	if target.origin < 0 || target.origin >= state.source_tokens.token_count[0]
+		scalar_mir_disable(locals)
+		return
+	end
+	global := sparse_integer_at(state.callables.checked[0].global_references, target.origin)
+	if global > 0
+		mir_global_assign(state, locals, global - 1, value, target.origin)
+		return
+	end
+	slot := local_find(locals, load_string(state.source_tokens.token_texts, target.origin))
+	operand := checked_mir_value(value)
+	if slot < 0 || operand < 0
+		scalar_mir_disable(locals)
+		return
+	end
+	if load_string(locals.mir_cell_types, slot) != ""
+		owner := load_integer(locals.mir_values, slot) - 1
+		zero := scalar_mir_literal(state, locals, "Integer", target.origin, "0")
+		mir_checked_array_operation(state, locals, mir_op_array_store(), owner, checked_mir_value(zero), operand, "Void", target.origin)
+	else
+		store_integer(locals.mir_values, slot, operand + 1)
+	end
+end
+
+# Capture the cell itself, never its current payload or a reusable local slot.
+def mir_binding_capture(mut state: CompilerState, locals: CheckedLocals, capture: LambdaCapture, origin: Integer): Integer
+	slot := local_slot(locals, capture.identity)
+	if slot >= 0
+		if load_string(locals.names, slot) == capture.name && load_string(locals.types, slot) == capture.type_name && load_integer(locals.mutable, slot) == capture.mutable
+			if capture.mutable == 0 || load_string(locals.mir_cell_types, slot) == array_type(capture.type_name)
+				value := load_integer(locals.mir_values, slot) - 1
+				if locals.mir_state[mir_state_enabled_slot()] == 1 && value >= 0
+					return value
+				end
+			end
+		end
+	end
+	diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "capture requires its analyzed lexical binding storage")
+	return -1
+end

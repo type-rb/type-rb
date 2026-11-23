@@ -1,0 +1,40 @@
+record Flags
+	values: Array<Boolean>
+end
+
+def first(values: Array<Boolean>): Boolean
+	return values[0]
+end
+
+def extend(mut values: Array<Boolean>, value: Boolean)
+	values.push(value)
+end
+
+def main()
+	mut values: Array<Boolean> := []
+	values.push(true)
+	extend(values, false)
+	mut shared := values
+	shared[0] = false
+	puts(first(values))
+	puts(values[1])
+	puts(values.size())
+	mut holder := Flags.new(values: values)
+	holder.values[1] = true
+	puts(values[1])
+	mut nested: Array<Array<Array<Boolean>>> := [[[true]]]
+	mut inner := nested[0][0]
+	inner.push(false)
+	inner[0] = false
+	puts(nested[0][0][0])
+	puts(nested[0][0][1])
+	puts(nested[0][0].size())
+	puts(values[-1])
+	values[-2] = true
+	puts(values[0])
+	mut empty_nested: Array<Array<Boolean>> := []
+	empty_nested.push([])
+	puts(empty_nested[0].size())
+	inferred := [true, false]
+	puts(first(inferred))
+end

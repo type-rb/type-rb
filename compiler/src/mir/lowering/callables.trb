@@ -1,0 +1,185 @@
+import { resource_unknown_call } from frontend/checking/body/resource_calls
+import { checked_category_value } from frontend/types/value_categories
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_type_kind_callable } from mir/model/type_kinds
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_function_fixture } from mir/model/control
+import { mir_op_callable_new, mir_op_indirect_call } from mir/model/instructions
+import { callable_type } from frontend/types/callable_types
+import { nullable_capture_call } from frontend/checking/nominal/nullable_flow
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_disable, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirFunction, MirInstruction, MirModule, mir_function_index, mir_table_span_valid } from mir/model/module
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+# The environment binds a prefix of an ordinary checked function's parameters.
+# The remaining parameters and result are the closure's public call signature.
+def declared_callable_type(state: CompilerState, function: Integer, captures: Integer): String
+	mut parameters: Array<String> := []
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := captures
+	while index < load_integer(state.declarations.function_parameter_counts, function)
+		parameters.push(load_string(state.declarations.parameter_types, start + index))
+		index += 1
+	end
+	return callable_type(parameters, load_string(state.declarations.function_result_types, function))
+end
+
+# Authored names retain their resolved declaration. The existing closure MIR
+# binds an empty parameter prefix and checks the same indirect-call ABI as fn.
+def checked_function_value(mut state: CompilerState, mut locals: CheckedLocals, function: Integer, origin: Integer): CheckedValue
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	finish := start + load_integer(state.declarations.function_parameter_counts, function)
+	mut parameter := start
+	while parameter < finish
+		if load_integer(state.declarations.parameter_named_only, parameter) > 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+			diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "function " + load_string(state.source_tokens.token_texts, origin) + " requires an explicit fn wrapper to be used as a value")
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		parameter += 1
+	end
+	store_integer(state.callables.checked[0].function_values, origin, function + 1)
+	return mir_checked_closure(state, locals, function, [], origin)
+end
+
+def mir_callable_id(native_module: MirModule, type_id: Integer): Integer
+	if type_id < mir_type_composite_start() || type_id - mir_type_composite_start() >= native_module.types.size()
+		return -1
+	end
+	row := native_module.types[type_id - mir_type_composite_start()]
+	if row.kind != mir_type_kind_callable()
+		return -1
+	end
+	return row.declaration
+end
+
+def mir_checked_closure(mut state: CompilerState, mut locals: CheckedLocals, function: Integer, captures: Array<Integer>, origin: Integer): CheckedValue
+	type_name := declared_callable_type(state, function, captures.size())
+	mir_control_prepare(state, locals)
+	captures.each do |capture|
+		if capture < 0
+			scalar_mir_disable(locals)
+		end
+	end
+	if !mir_control_active(locals)
+		return checked_value(type_name, checked_category_value(), 9007199254740991, 0)
+	end
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, type_name), origin)
+	start := locals.mir_arguments.size()
+	captures.each do |capture|
+		locals.mir_arguments.push(capture)
+	end
+	scalar_mir_instruction(state, locals, mir_op_callable_new(), result, start, captures.size(), function, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(type_name, result, 9007199254740991, 0)
+end
+
+def mir_checked_callable_call(mut state: CompilerState, mut locals: CheckedLocals, callee: CheckedValue, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
+	resource_unknown_call(state, locals)
+	nullable_capture_call(state, locals)
+	mir_control_prepare(state, locals)
+	owner := checked_mir_value(callee)
+	if owner < 0
+		scalar_mir_disable(locals)
+	end
+	arguments.each do |argument|
+		if argument < 0
+			scalar_mir_disable(locals)
+		end
+	end
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	start := locals.mir_arguments.size()
+	arguments.each do |argument|
+		locals.mir_arguments.push(argument)
+	end
+	mut result := -1
+	if result_type != "Void"
+		result = scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+	end
+	scalar_mir_instruction(state, locals, mir_op_indirect_call(), result, owner, arguments.size(), start, -1, load_integer(state.source_tokens.token_lines, origin))
+	if result < 0
+		return checked_value("Void", checked_category_value(), 9007199254740991, 0)
+	end
+	return mir_checked_value(result_type, result, 9007199254740991, 0)
+end
+
+def mir_callable_instruction_error(flow: MirFlow, native_module: MirModule, function: MirFunction, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.failure != -1
+		return "MIR callable failure shape differs"
+	end
+	if instruction.kind == mir_op_callable_new()
+		if instruction.payload < 0 || instruction.payload >= native_module.signatures.size()
+			return "MIR function value declaration is missing"
+		end
+		signature := native_module.signatures[instruction.payload]
+		if signature.kind != mir_signature_ordinary()
+			return "MIR function value requires an ordinary declaration"
+		end
+		body := mir_function_index(native_module, signature.id)
+		if body < 0
+			return "MIR function value body is missing"
+		end
+		if native_module.functions[body].kind == mir_function_fixture()
+			return "MIR function value requires a checked body"
+		end
+		if instruction.second < 0 || instruction.second > signature.parameter_types.size() || !mir_table_span_valid(instruction.first, instruction.second, native_module.arguments.size())
+			return "MIR closure capture span differs"
+		end
+		mut parameter := 0
+		while parameter < instruction.second
+			value := native_module.arguments[instruction.first + parameter]
+			if !mir_value_available(flow, block, index, value)
+				return "MIR closure capture is undefined"
+			end
+			if mir_semantic_type_name(native_module, mir_flow_type(flow, value)) != signature.parameter_types[parameter]
+				return "MIR closure capture type differs"
+			end
+			parameter += 1
+		end
+		mut parameters: Array<String> := []
+		while parameter < signature.parameter_types.size()
+			parameters.push(signature.parameter_types[parameter])
+			parameter += 1
+		end
+		expected := callable_type(parameters, signature.result_type)
+		if mir_semantic_type_name(native_module, mir_flow_type(flow, instruction.result)) != expected
+			return "MIR function value signature differs"
+		end
+		return ""
+	end
+	if !mir_value_available(flow, block, index, instruction.first)
+		return "MIR callable operand is undefined"
+	end
+	id := mir_callable_id(native_module, mir_flow_type(flow, instruction.first))
+	if id < 0
+		return "MIR indirect callee is not callable"
+	end
+	signature := native_module.callables[id]
+	if instruction.second != signature.parameters.size() || !mir_table_span_valid(instruction.payload, instruction.second, native_module.arguments.size())
+		return "MIR callable argument range or arity differs"
+	end
+	mut argument := 0
+	while argument < instruction.second
+		value := native_module.arguments[instruction.payload + argument]
+		if !mir_value_available(flow, block, index, value)
+			return "MIR callable argument is undefined"
+		end
+		if mir_flow_type(flow, value) != signature.parameters[argument]
+			return "MIR callable argument type differs"
+		end
+		argument += 1
+	end
+	if signature.result == 0
+		if instruction.result != -1
+			return "MIR Void callable cannot define a value"
+		end
+	elsif mir_flow_type(flow, instruction.result) != signature.result
+		return "MIR callable result type differs"
+	end
+	return ""
+end

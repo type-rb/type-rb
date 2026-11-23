@@ -1,0 +1,48 @@
+alias Status = 201 | 404
+
+record Response
+	status: 201
+	body: "held"
+end
+
+newtype Created = 201
+
+def describe_status(status: Status): String
+	return case status
+	when 201
+		"created"
+	when 404
+		"missing"
+	end
+end
+
+def keep<T>(value: T): T
+	return value
+end
+
+def maybe_status(status: Status?): Float?
+	return status
+end
+
+def main()
+	mut statuses: Array<Status> := [201, 404]
+	statuses[0] = 404
+	mut labels: Hash<String, "held"> := { "a" => "held" }
+	labels["b"] = "held"
+	response := Response.new(status: 201, body: "held")
+	read := fn(): "held"
+		return response.body
+	end
+	puts(describe_status(statuses[0]))
+	puts(labels["b"])
+	puts(read())
+	puts(Created.new(201).value())
+	puts(keep<201> (201))
+	value: -2 := -2
+	puts(value + 3)
+	optional := maybe_status(201)
+	if optional != nil
+		puts(optional.floor())
+	end
+	puts(maybe_status(nil) == nil)
+end

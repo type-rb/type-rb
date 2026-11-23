@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/type-rb/type-rb-native/blob/main/compatibility/schema-v2.json",
+  "title": "TypeRB Native exact compatibility manifest version 2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "status",
+    "nativeVersion",
+    "typeRB",
+    "compilerProtocol",
+    "bootstrap",
+    "nativeMIR",
+    "runtimeABI",
+    "backend",
+    "targets",
+    "evidence"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "schema-v2.json"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "status": {
+      "const": "experimental"
+    },
+    "nativeVersion": {
+      "type": "string",
+      "pattern": "^0\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "typeRB": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supportMode", "version", "revision"],
+      "properties": {
+        "supportMode": {
+          "const": "exact"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+    "compilerProtocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stability", "version"],
+      "properties": {
+        "stability": {
+          "const": "experimental-unstable"
+        },
+        "version": {
+          "type": "null"
+        }
+      }
+    },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotSchemaVersion", "seed"],
+      "properties": {
+        "snapshotSchemaVersion": {
+          "type": "integer"
+        },
+        "seed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "releaseTag", "manifestSchemaVersion"],
+          "properties": {
+            "status": {
+              "const": "experimental"
+            },
+            "releaseTag": {
+              "type": "string",
+              "pattern": "^bootstrap-seed-[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "manifestSchemaVersion": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "nativeMIR": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stability", "version"],
+      "properties": {
+        "stability": {
+          "const": "internal-unstable"
+        },
+        "version": {
+          "type": "null"
+        }
+      }
+    },
+    "runtimeABI": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stability", "version"],
+      "properties": {
+        "stability": {
+          "const": "internal-unstable"
+        },
+        "version": {
+          "type": "null"
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "sourceURL", "sourceSHA256"],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "sourceURL": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "sourceSHA256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profile", "status", "os", "architecture", "qbeTarget", "ccBoundary"],
+        "properties": {
+          "profile": {
+            "type": "string"
+          },
+          "status": {
+            "const": "experimental"
+          },
+          "os": {
+            "type": "string"
+          },
+          "architecture": {
+            "type": "string"
+          },
+          "qbeTarget": {
+            "type": "string"
+          },
+          "ccBoundary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["compatibility", "bootstrap", "targetChains"],
+      "properties": {
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nativeRevision", "result", "workflow"],
+          "properties": {
+            "nativeRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "result": {
+              "type": "string",
+              "pattern": "^results/[0-9A-Za-z._/-]+/README\\.md$"
+            },
+            "workflow": {
+              "type": "string",
+              "pattern": "^https://github\\.com/type-rb/type-rb-native/actions/runs/[0-9]+$"
+            }
+          }
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["nativeRevision", "result", "release"],
+          "properties": {
+            "nativeRevision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "result": {
+              "type": "string",
+              "pattern": "^results/[0-9A-Za-z._/-]+/README\\.md$"
+            },
+            "release": {
+              "type": "string",
+              "pattern": "^https://github\\.com/type-rb/type-rb-native/releases/tag/bootstrap-seed-[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          }
+        },
+        "targetChains": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["profile", "nativeRevision", "result", "workflow"],
+            "properties": {
+              "profile": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-v[0-9]+$"
+              },
+              "nativeRevision": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "result": {
+                "type": "string",
+                "pattern": "^results/[0-9A-Za-z._/-]+/README\\.md$"
+              },
+              "workflow": {
+                "type": "string",
+                "pattern": "^https://github\\.com/type-rb/type-rb-native/actions/runs/[0-9]+$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

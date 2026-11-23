@@ -1,0 +1,15 @@
+{
+  "architecture": "arm64",
+  "asset": "type-rb-native-bootstrap-linux-arm64",
+  "attestationSubjectSha256": "b4307c244edc9e4da620f2a7c1b03a733e575da032efefae615f9edf75048a37",
+  "ccBoundary": "system-cc",
+  "mode": "0755",
+  "os": "linux",
+  "profile": "linux-arm64-v0",
+  "qbeBinarySha256": "510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c",
+  "qbeBinarySize": 714640,
+  "qbeTarget": "arm64",
+  "runnerImage": "ubuntu-24.04-arm",
+  "sha256": "b4307c244edc9e4da620f2a7c1b03a733e575da032efefae615f9edf75048a37",
+  "size": 241488
+}

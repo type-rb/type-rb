@@ -1,0 +1,22 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { expect_mir_callable_bodies } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { load_string } from support/storage
+import { expect } from trb/std/test
+
+def array_loop_mir_source(body: String): String
+	return "def touch(mut values: Array<Integer>)\nvalues.push(0)\nend\ndef scan(mut values: Array<Integer>, other: Array<Integer>): Integer\nmut index := 0\nmut total := 0\n" + body + "\nreturn total\nend\ndef main()\nend\n"
+end
+
+def array_loop_mir_check(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	if !check(state)
+		puts(load_string(state.diagnostics.messages, 0))
+		expect(false).to_be_true()
+	end
+	expect_mir_callable_bodies(state)
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end

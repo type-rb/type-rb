@@ -1,0 +1,109 @@
+import { process_kind } from mir/model/process_contract
+import { filesystem_adapter_start, filesystem_names } from mir/model/filesystem_contract
+import { mir_op_file_scope } from mir/model/instructions
+import { scoped_call_failures, scoped_call_graph, scoped_call_node } from mir/analysis/resource_calls
+import { mir_adapter_runtime_fail, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { mir_function_fixture } from mir/model/control
+import { mir_op_direct_call, mir_op_indirect_call } from mir/model/instructions
+import { builder_adapter_start, builder_append_bytes } from mir/model/string_builder_contract
+import { mir_type_composite_start } from mir/model/type_ids
+import { MirModule, MirSignature } from mir/model/module
+
+# Nominal resource identity survives source erasure. The frontend's borrow
+# diagnostics are not proof for transformed call edges or signature mutability.
+def mir_resource_parameter(native_module: MirModule, name: String): Boolean
+	native_module.objects.each do |object|
+		if object.resource_kind > 0 && native_module.types[object.type_id - mir_type_composite_start()].name == name
+			return true
+		end
+	end
+	return false
+end
+
+# Verified standard signatures already bind these adapter IDs to exact names,
+# parameters and results. Other standard/host adapters are not admitted.
+def mir_resource_standard_call(signature: MirSignature): Boolean
+	if signature.kind != mir_signature_standard()
+		return false
+	end
+	if signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
+		return true
+	end
+	if process_kind(signature.adapter) >= 0 || signature.adapter == mir_adapter_runtime_fail()
+		return true
+	end
+	if signature.adapter >= builder_adapter_start() && signature.adapter <= builder_adapter_start() + builder_append_bytes()
+		return true
+	end
+	return false
+end
+
+# Called after structural verification: all spans, signatures and call targets
+# are in range. Reconstruct the graph from instructions rather than consuming a
+# frontend/provider effect assertion. This is the call boundary, not a lifetime
+# or cleanup proof for future resource acquisition regions.
+def mir_resource_calls_error(native_module: MirModule): String
+	mut present := false
+	native_module.objects.each do |object|
+		if object.resource_kind > 0
+			present = true
+		end
+	end
+	if !present
+		return ""
+	end
+	mut graph := scoped_call_graph(true)
+	native_module.signatures.each do |signature|
+		scoped_call_node(graph, signature.id)
+		if signature.kind != mir_signature_ordinary()
+			graph.checked[signature.id] = 1
+			if !mir_resource_standard_call(signature)
+				graph.forbidden[signature.id] = 1
+			end
+		end
+	end
+	native_module.functions.each do |function|
+		if function.kind == mir_function_fixture()
+			next
+		end
+		graph.checked[function.id] = 1
+		mut block := function.block_start
+		while block < function.block_start + function.block_count
+			row := native_module.blocks[block]
+			mut instruction := row.instruction_start
+			while instruction < row.instruction_start + row.instruction_count
+				operation := native_module.instructions[instruction]
+				if operation.kind == mir_op_file_scope()
+					scope := native_module.file_scopes[operation.payload]
+					graph.callers.push(function.id)
+					graph.callees.push(scope.body)
+					graph.callers.push(function.id)
+					graph.callees.push(scope.error)
+				elsif operation.kind == mir_op_direct_call()
+					graph.callers.push(function.id)
+					graph.callees.push(native_module.calls[operation.payload].callee)
+				elsif operation.kind == mir_op_indirect_call()
+					graph.forbidden[function.id] = 1
+				end
+				instruction += 1
+			end
+			block += 1
+		end
+	end
+	failures := scoped_call_failures(graph, native_module.signatures.size())
+	native_module.signatures.each do |signature|
+		mut parameter := 0
+		while parameter < signature.parameter_types.size()
+			if mir_resource_parameter(native_module, signature.parameter_types[parameter])
+				if (signature.kind != mir_signature_ordinary() && !mir_resource_standard_call(signature)) || signature.parameter_mutable[parameter] != 0
+					return "MIR scoped resource requires an immutable source borrow"
+				end
+				if failures[signature.id] > 0
+					return "MIR scoped resource call graph contains an opaque or unverified edge"
+				end
+			end
+			parameter += 1
+		end
+	end
+	return ""
+end

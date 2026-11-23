@@ -1,0 +1,13 @@
+def main()
+	mut table: Hash<Integer, String> := {}
+	index := 0
+	table[-9007199254740991] = "lower" + index.to_s()
+	table[0] = "zero" + index.to_s()
+	table[9007199254740991] = "upper" + index.to_s()
+	puts(table.key?(-9007199254740991))
+	puts(table[-9007199254740991])
+	puts(table.key?(0))
+	puts(table[0])
+	puts(table.key?(9007199254740991))
+	puts(table[9007199254740991])
+end

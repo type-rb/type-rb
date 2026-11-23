@@ -1,0 +1,23 @@
+import { mir_adapter_gzip, mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Only checked intrinsic identity selects the external whole-buffer operation.
+def compression_runtime_needed(native_module: MirModule): Boolean
+	mut needed := false
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == mir_adapter_gzip()
+			needed = true
+		end
+	end
+	return needed
+end
+
+# Foreign allocation cannot collect managed values. Release the compressor
+# before the result's managed allocation; the raw output survives that safe point.
+# No managed allocation occurs after constructing the returned immutable Bytes.
+def emit_compression_runtime(native_module: MirModule, mut output: QbeOutput)
+	if compression_runtime_needed(native_module)
+		qbe_output_line(output, "function l $trbn_gzip(l %value) {\n@start\n %marker =w loadub $trbn_compression_build_identity\n %identity =w ceqw %marker, 84\n jnz %identity, @input, @fatal\n@input\n %lenp =l add %value, 8\n %length =l loadl %lenp\n %large =w cugtl %length, 4503599627370496\n jnz %large, @fatal, @compressor\n@compressor\n %state =l call $libdeflate_alloc_compressor(w -1)\n %state_nonzero =w cnel %state, 0\n jnz %state_nonzero, @bound, @fatal\n@bound\n %bound =l call $libdeflate_gzip_compress_bound(l %state, l %length)\n %invalid =w cugtl %bound, 9007199254740974\n jnz %invalid, @free_state, @allocate\n@allocate\n %raw =l call $malloc(l %bound)\n %raw_nonzero =w cnel %raw, 0\n jnz %raw_nonzero, @compress, @free_state\n@compress\n %data =l add %value, 24\n %used =l call $libdeflate_gzip_compress(l %state, l %data, l %length, l %raw, l %bound)\n call $libdeflate_free_compressor(l %state)\n %used_nonzero =w cnel %used, 0\n jnz %used_nonzero, @managed, @free_raw\n@managed\n %size =l add %used, 17\n %result =l call $trbn_string_alloc(l %size)\n %result_length =l add %result, 8\n storel %used, %result_length\n %result_points =l add %result, 16\n storel %used, %result_points\n %destination =l add %result, 24\n call $memcpy(l %destination, l %raw, l %used)\n %end =l add %destination, %used\n storeb 0, %end\n call $free(l %raw)\n ret %result\n@free_raw\n call $free(l %raw)\n jmp @fatal\n@free_state\n call $libdeflate_free_compressor(l %state)\n jmp @fatal\n@fatal\n call $trbn_fatal(l $trbn_allocation_error, l 25)\n hlt\n}\n")
+	end
+end

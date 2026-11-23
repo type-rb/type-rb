@@ -1,0 +1,33 @@
+record Ranked
+	key: Float
+	position: Integer
+end
+
+def main()
+	nan := 0.0 / 0.0
+	rows := [Ranked.new(key: nan, position: 0), Ranked.new(key: 2.0, position: 1), Ranked.new(key: nan, position: 2), Ranked.new(key: 0.0, position: 3), Ranked.new(key: -0.0, position: 4), Ranked.new(key: -1.0, position: 5)]
+	ascending := rows.sort_by { |row| row.key }.sort_by { |row| row.key }
+	descending := rows.sort_by_descending { |row| row.key }.sort_by_descending { |row| row.key }
+	ascending.each { |row| puts(row.position) }
+	descending.each { |row| puts(row.position) }
+	puts(rows[0].position)
+	mut calls := 0
+	mut values := [3, 1]
+	ordered := values.sort_by do |value|
+		calls += 1
+		if value == 3
+			values.push(2)
+			values[0] = 9
+		end
+		key := value
+		value = 99
+		key
+	end
+	ordered.each { |value| puts(value) }
+	puts(calls)
+	puts(values[0])
+	empty: Array<String> := []
+	puts(empty.sort_by { |text| text.size() }.size())
+	nested := [[2, 0], [1, 1], [2, 2]].sort_by_descending { |item| item[0] }
+	nested.each { |item| puts(item[1]) }
+end

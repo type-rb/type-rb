@@ -1,0 +1,56 @@
+import { web_context_primitive_target } from frontend/resolution/web_context_intrinsics
+import { mir_op_object_copy, mir_op_object_identity, mir_op_union_extract, mir_op_union_inject, mir_op_union_test } from mir/model/instructions
+import { mir_binding_read } from mir/build/bindings
+import { mir_union_operation } from mir/lowering/unions
+import { mir_control_prepare, mir_control_return } from mir/build/control
+import { scalar_mir_commit } from mir/build/functions
+import { checked_mir_value, scalar_mir_instruction, scalar_mir_literal, scalar_mir_value } from frontend/checking/body/values
+import { mir_semantic_type_id } from mir/model/types
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string } from support/storage
+
+def lower_web_context_primitive(mut state: CompilerState, function: Integer, kind: Integer, mut locals: CheckedLocals)
+	origin := load_integer(state.declarations.function_body_starts, function)
+	line := load_integer(state.declarations.function_lines, function)
+	target := web_context_primitive_target(state, function)
+	mir_control_prepare(state, locals)
+	first := mir_binding_read(state, locals, 0, origin)
+	mut result := checked_mir_value(first)
+	if kind <= 3
+		if target == "Any"
+			if kind == 2
+				result = checked_mir_value(scalar_mir_literal(state, locals, "Boolean", origin, "true"))
+			end
+		else
+			mut operation := mir_op_union_inject()
+			mut result_type := "Any"
+			if kind == 2
+				operation = mir_op_union_test()
+				result_type = "Boolean"
+			elsif kind == 3
+				operation = mir_op_union_extract()
+				result_type = target
+			end
+			result = checked_mir_value(mir_union_operation(state, locals, operation, first, target, result_type, origin))
+		end
+	else
+		second := mir_binding_read(state, locals, 1, origin)
+		result_type := load_string(state.declarations.function_result_types, function)
+		result = scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+		mut operation := mir_op_object_copy()
+		mut field := 2
+		if kind == 4
+			operation = mir_op_object_identity()
+			field = 0
+		elsif kind == 6
+			field = 0
+		end
+		scalar_mir_instruction(state, locals, operation, result, checked_mir_value(first), checked_mir_value(second), field, -1, line)
+	end
+	mir_control_return(state, locals, result)
+	error := scalar_mir_commit(state, function, locals)
+	if error != ""
+		diagnostic(state, "TRBN4004", line, error)
+	end
+end

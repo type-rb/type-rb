@@ -1,0 +1,101 @@
+# Derived from the Computer Language Benchmarks Game fannkuch-redux
+# specification and its portable single-threaded C implementation.
+# See ../../licenses/fannkuch-nbody.txt.
+
+import trb/std/process
+
+record FannkuchResult
+	checksum: Integer
+	max_flips: Integer
+end
+
+def fannkuch(n: Integer): FannkuchResult
+	mut permutation: Array<Integer> := []
+	mut next_permutation: Array<Integer> := []
+	mut counts: Array<Integer> := []
+	mut index := 0
+	while index < n
+		permutation.push(0)
+		next_permutation.push(index)
+		counts.push(0)
+		index += 1
+	end
+
+	mut maximum := 0
+	mut permutation_index := 0
+	mut checksum := 0
+	mut rotation := n
+
+	while true
+		while rotation != 1
+			counts[rotation - 1] = rotation
+			rotation -= 1
+		end
+
+		index = 0
+		while index < n
+			permutation[index] = next_permutation[index]
+			index += 1
+		end
+
+		mut flips := 0
+		mut first := permutation[0]
+		while first != 0
+			limit := (first + 1) / 2
+			index = 0
+			while index < limit
+				right := first - index
+				temporary := permutation[index]
+				permutation[index] = permutation[right]
+				permutation[right] = temporary
+				index += 1
+			end
+			flips += 1
+			first = permutation[0]
+		end
+
+		if flips > maximum
+			maximum = flips
+		end
+		if permutation_index % 2 == 0
+			checksum += flips
+		else
+			checksum -= flips
+		end
+
+		mut searching := true
+		while searching
+			if rotation == n
+				return FannkuchResult.new(checksum: checksum, max_flips: maximum)
+			end
+			first = next_permutation[0]
+			index = 0
+			while index < rotation
+				next_index := index + 1
+				next_permutation[index] = next_permutation[next_index]
+				index = next_index
+			end
+			next_permutation[rotation] = first
+			counts[rotation] -= 1
+			if counts[rotation] > 0
+				searching = false
+			else
+				rotation += 1
+			end
+		end
+		permutation_index += 1
+	end
+	return FannkuchResult.new(checksum: checksum, max_flips: maximum)
+end
+
+def main()
+	arguments := Process.argv()
+	mut n := 7
+	if arguments.size() > 0
+		n = arguments[0].to_i()
+	end
+	result := fannkuch(n)
+	puts(result.checksum.to_s())
+	puts("Pfannkuchen(" + n.to_s() + ") = " + result.max_flips.to_s())
+	return
+end

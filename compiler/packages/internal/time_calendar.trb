@@ -1,0 +1,119 @@
+# Gregorian calendar and normalized second arithmetic, independent of the host.
+def floor_div(value: Integer, divisor: Integer): Integer
+	mut quotient := value / divisor
+	if value % divisor < 0
+		quotient -= 1
+	end
+	return quotient
+end
+
+def leap(year: Integer): Boolean
+	return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+end
+
+def month_days(year: Integer, month: Integer): Integer
+	if month < 1 || month > 12
+		return 0
+	end
+	if month == 2 && leap(year)
+		return 29
+	end
+	return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+end
+
+def date_valid(year: Integer, month: Integer, day: Integer): Boolean
+	return year >= 1 && year <= 9999 && day >= 1 && day <= month_days(year, month)
+end
+
+def clock_valid(hour: Integer, minute: Integer, second: Integer, nanos: Integer): Boolean
+	return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59 && nanos >= 0 && nanos < 1000000000
+end
+
+def year_days(year: Integer): Integer
+	prior := year - 1
+	return prior * 365 + floor_div(prior, 4) - floor_div(prior, 100) + floor_div(prior, 400)
+end
+
+def civil_days(year: Integer, month: Integer, day: Integer): Integer
+	mut days := year_days(year) - 719162 + day - 1
+	mut current := 1
+	while current < month
+		days += month_days(year, current)
+		current += 1
+	end
+	return days
+end
+
+def day_parts(days: Integer): Array<Integer>
+	absolute := days + 719162
+	# A 400-year cycle always has 146097 days. The bounded search handles
+	# negative epochs without depending on truncating integer division.
+	cycle := floor_div(absolute, 146097)
+	mut low := cycle * 400 + 1
+	mut high := low + 400
+	while low + 1 < high
+		middle := floor_div(low + high, 2)
+		if year_days(middle) <= absolute
+			low = middle
+		else
+			high = middle
+		end
+	end
+	mut remaining := absolute - year_days(low)
+	mut month := 1
+	while remaining >= month_days(low, month)
+		remaining -= month_days(low, month)
+		month += 1
+	end
+	return [low, month, remaining + 1]
+end
+
+def epoch_parts(seconds: Integer): Array<Integer>
+	days := floor_div(seconds, 86400)
+	clock := seconds - days * 86400
+	parts := day_parts(days)
+	return [parts[0], parts[1], parts[2], clock / 3600, (clock / 60) % 60, clock % 60]
+end
+
+def normalize(seconds: Integer, nanos: Integer): Array<Integer>
+	carry := floor_div(nanos, 1000000000)
+	return [seconds + carry, nanos - carry * 1000000000]
+end
+
+def compare(left: Integer, left_nanos: Integer, right: Integer, right_nanos: Integer): Integer
+	if left < right || (left == right && left_nanos < right_nanos)
+		return -1
+	end
+	if left > right || (left == right && left_nanos > right_nanos)
+		return 1
+	end
+	return 0
+end
+
+def padded(value: Integer, width: Integer): String
+	mut result := value.to_s()
+	while result.size() < width
+		result = "0" + result
+	end
+	return result
+end
+
+def fraction(nanos: Integer): String
+	if nanos == 0
+		return ""
+	end
+	value := padded(nanos, 9)
+	mut finish := value.size()
+	while finish > 0 && value[finish - 1] == "0"
+		finish -= 1
+	end
+	return "." + value.slice(0...finish)
+end
+
+def date_text(year: Integer, month: Integer, day: Integer): String
+	return padded(year, 4) + "-" + padded(month, 2) + "-" + padded(day, 2)
+end
+
+def clock_text(hour: Integer, minute: Integer, second: Integer, nanos: Integer): String
+	return padded(hour, 2) + ":" + padded(minute, 2) + ":" + padded(second, 2) + fraction(nanos)
+end

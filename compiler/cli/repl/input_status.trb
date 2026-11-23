@@ -1,0 +1,27 @@
+# Editing is active until submission or an input failure. A submitted edit
+# becomes an accepted ReplInput; only the editor uses the submitted tag.
+# These statuses are independent of OS exit codes and terminal key codes.
+
+def repl_editing_active(): Integer
+	return 0
+end
+
+def repl_editing_submitted(): Integer
+	return 4
+end
+
+def repl_input_accepted(): Integer
+	return 0
+end
+
+def repl_input_eof(): Integer
+	return 1
+end
+
+def repl_input_cancelled(): Integer
+	return 2
+end
+
+def repl_input_terminal_error(): Integer
+	return 3
+end

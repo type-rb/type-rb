@@ -1,0 +1,196 @@
+import { checking_program_fork, generic_program_fork } from frontend/checking/program/generic_fork
+import { CheckedLambda, LambdaSyntax } from frontend/types/callable_types
+import { MirNumericPlan } from mir/model/module
+import { checked_body_new } from state/checked_body
+import { CheckedSubmission } from state/source_state
+import { compiler_new, compiler_new_with_mode, diagnostic, has_diagnostic } from state/state
+import { integer_storage, load_integer, load_string, store_integer, store_string, string_storage } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Generic fork fresh owners") do
+	test("keeps the selected inference mode without changing generic fork isolation") do
+		[false, true].each do |interactive|
+			parent := compiler_new_with_mode(64, interactive)
+			inference := checking_program_fork(parent, parent.interactive)
+			alias_state := inference
+			expect(inference.interactive).to_equal(interactive)
+			expect(alias_state.interactive).to_equal(interactive)
+			expect(generic_program_fork(inference).interactive).to_be_false()
+			expect(parent.interactive).to_equal(interactive)
+		end
+	end
+
+	test("preserves zero and ordinary capacity defaults") do
+		[0, 64].each do |capacity|
+			state := compiler_new(capacity)
+			fork := generic_program_fork(state)
+			expect(fork.callables.lambda_phase[0]).to_equal(1)
+			expect(fork.type_resolution.generic_template_mode[0]).to_be_true()
+			[state, fork].each do |program|
+				expect(program.callables.checked.size()).to_equal(1)
+				expect(program.callables.checked[0].function).to_equal(-1)
+				expect(program.callables.checked[0].generic_binding[0]).to_equal(0)
+				expect(program.callables.checked_bodies.size()).to_equal(0)
+				expect(program.callables.checked_lambdas.size()).to_equal(0)
+				[program.callables.function_lambdas, program.callables.checked_body_indices,
+					program.callables.checked[0].generic_calls, program.type_resolution.alias_expansion_path].each do |storage|
+					expect(storage.origin).to_equal(0)
+					expect(storage.limit[0]).to_equal(capacity)
+					expect(storage.used[0]).to_equal(0)
+					expect(storage.chunks.size()).to_equal(0)
+				end
+				expect(program.callables.checked[0].resolved_names.origin).to_equal(0)
+				expect(program.callables.checked[0].resolved_names.limit[0]).to_equal(capacity)
+				expect(program.type_resolution.alias_expansion_depth[0]).to_equal(0)
+				expect(program.submissions.size()).to_equal(0)
+				expect(program.interactive).to_be_false()
+				expect(has_diagnostic(program)).to_be_false()
+				[program.diagnostics.codes, program.diagnostics.messages].each do |storage|
+					expect(storage.origin).to_equal(0)
+					expect(storage.limit[0]).to_equal(1)
+					expect(storage.used[0]).to_equal(0)
+				end
+				[program.diagnostics.lines, program.diagnostics.modules].each do |storage|
+					expect(storage.origin).to_equal(0)
+					expect(storage.limit[0]).to_equal(1)
+					expect(storage.used[0]).to_equal(0)
+				end
+				mir := program.scalar_mir
+				expect(mir.source_count[0]).to_equal(1)
+				expect(mir.entry_function[0]).to_equal(0)
+				expect(mir.numeric_plans.size()).to_equal(1)
+				expect(mir.numeric_plans[0].size()).to_equal(0)
+				[mir.object_methods.size(), mir.object_witnesses.size(), mir.objects.size(),
+					mir.newtypes.size(), mir.unions.size(), mir.globals.size(), mir.global_initialization.size(),
+					mir.callables.size(), mir.enums.size(), mir.enum_variants.size(), mir.enum_fields.size(),
+					mir.types.size(), mir.records.size(), mir.fields.size(), mir.root_plans.size(),
+					mir.enum_stack_functions.size(), mir.array_loops.size(), mir.array_check_reuse.size(), mir.array_joins.size(),
+					mir.signatures.size(), mir.calls.size(), mir.functions.size(), mir.blocks.size(),
+					mir.values.size(), mir.instructions.size(), mir.arguments.size(), mir.literal_texts.size()].each do |size|
+					expect(size).to_equal(0)
+				end
+			end
+		end
+	end
+
+	test("shares parsed lambda sources while resetting independent checked owners") do
+		mut parent := compiler_new(64)
+		parent.callables.lambdas.push(LambdaSyntax.new(origin: 3, parameters: [], result_type: "Integer", body_start: 4, body_finish: 5, finish: 6))
+		store_integer(parent.callables.lambda_origins, 3, 1)
+		store_integer(parent.callables.function_lambdas, 0, 9)
+		store_integer(parent.callables.checked_body_indices, 0, 1)
+		store_string(parent.callables.checked[0].resolved_names, 2, "parent")
+		parent.callables.checked[0].generic_binding[0] = 7
+		parent.callables.collection_inference_only[0] = true
+		store_string(parent.callables.checked[0].collection_contexts[0], 3, "Array<String>?")
+		store_string(parent.callables.checked[0].collection_witnesses[0], 3, "Array<String>")
+		mut fork := generic_program_fork(parent)
+		mut sibling := generic_program_fork(parent)
+		expect(fork.callables.lambdas[0].origin).to_equal(3)
+		expect(load_integer(fork.callables.lambda_origins, 3)).to_equal(1)
+		expect(fork.callables.function_lambdas.used[0]).to_equal(0)
+		expect(fork.callables.checked_body_indices.used[0]).to_equal(0)
+		expect(fork.callables.checked[0].resolved_names.used[0]).to_equal(0)
+		expect(fork.callables.checked[0].generic_binding[0]).to_equal(0)
+		expect(fork.callables.collection_inference_only[0]).to_be_false()
+		expect(fork.callables.checked[0].collection_contexts[0].used[0]).to_equal(0)
+		expect(fork.callables.checked[0].collection_witnesses[0].used[0]).to_equal(0)
+		fork.callables.collection_inference_only[0] = true
+		store_string(fork.callables.checked[0].collection_contexts[0], 3, "Hash<Integer, String>?")
+		store_string(fork.callables.checked[0].collection_witnesses[0], 3, "Hash<Integer, String>")
+		store_integer(fork.callables.function_lambdas, 0, 2)
+		store_integer(fork.callables.checked_body_indices, 0, 3)
+		store_string(fork.callables.checked[0].resolved_names, 2, "fork")
+		fork.callables.checked[0].generic_binding[0] = 8
+		fork.callables.checked_bodies.push(checked_body_new(2, 4, 8))
+		fork.callables.checked_lambdas.push(CheckedLambda.new(origin: 3, type_name: "Integer", body: 0, inherited_count: 0, function: [-1], captures: []))
+		fork.callables.lambda_phase[0] = 2
+		expect(load_integer(parent.callables.function_lambdas, 0)).to_equal(9)
+		expect(load_integer(parent.callables.checked_body_indices, 0)).to_equal(1)
+		expect(load_string(parent.callables.checked[0].resolved_names, 2)).to_equal("parent")
+		expect(parent.callables.checked[0].generic_binding[0]).to_equal(7)
+		expect(sibling.callables.function_lambdas.used[0]).to_equal(0)
+		expect(sibling.callables.checked_body_indices.used[0]).to_equal(0)
+		expect(sibling.callables.checked[0].resolved_names.used[0]).to_equal(0)
+		expect(sibling.callables.checked[0].generic_binding[0]).to_equal(0)
+		expect(sibling.callables.collection_inference_only[0]).to_be_false()
+		expect(sibling.callables.checked[0].collection_contexts[0].used[0]).to_equal(0)
+		expect(sibling.callables.checked[0].collection_witnesses[0].used[0]).to_equal(0)
+		expect(load_string(parent.callables.checked[0].collection_contexts[0], 3)).to_equal("Array<String>?")
+		expect(load_string(parent.callables.checked[0].collection_witnesses[0], 3)).to_equal("Array<String>")
+		[parent, sibling].each do |program|
+			expect(program.callables.checked_bodies.size()).to_equal(0)
+			expect(program.callables.checked_lambdas.size()).to_equal(0)
+		end
+		expect(parent.callables.lambda_phase[0]).to_equal(0)
+		expect(sibling.callables.lambda_phase[0]).to_equal(1)
+		fork.callables.checked[0] = checked_body_new(4, 8, 12)
+		expect(parent.callables.checked[0].function).to_equal(-1)
+		expect(sibling.callables.checked[0].function).to_equal(-1)
+		# The parsed table intentionally retains the parent storage identity.
+		store_integer(parent.callables.lambda_origins, 3, 2)
+		expect(load_integer(fork.callables.lambda_origins, 3)).to_equal(2)
+		expect(load_integer(sibling.callables.lambda_origins, 3)).to_equal(2)
+	end
+
+	test("isolates alias paths, submissions, checking mode and first errors") do
+		mut parent := compiler_new_with_mode(64, true)
+		store_integer(parent.type_resolution.alias_expansion_path, 0, 9)
+		diagnostic(parent, "PARENT", 1, "parent error")
+		mut fork := generic_program_fork(parent)
+		sibling := generic_program_fork(parent)
+		expect(fork.type_resolution.alias_expansion_path.used[0]).to_equal(0)
+		expect(fork.interactive).to_be_false()
+		expect(has_diagnostic(fork)).to_be_false()
+		store_integer(fork.type_resolution.alias_expansion_path, 0, 4)
+		fork.type_resolution.alias_expansion_depth[0] = 1
+		fork.submissions.push(CheckedSubmission.new(presentations: string_storage(1), retained_presentations: [], start: 0, finish: 1, before: [], after: [], types: string_storage(1), mutable: integer_storage(1), resets: [], captured: []))
+		mut shared := fork
+		expect(shared.interactive).to_be_false()
+		expect(parent.interactive).to_be_true()
+		diagnostic(shared, "FIRST", 3, "first error")
+		diagnostic(fork, "SECOND", 4, "second error")
+		expect(load_string(fork.diagnostics.codes, 0)).to_equal("FIRST")
+		expect(load_integer(fork.diagnostics.lines, 0)).to_equal(3)
+		expect(load_string(parent.diagnostics.codes, 0)).to_equal("PARENT")
+		expect(has_diagnostic(sibling)).to_be_false()
+		expect(load_integer(parent.type_resolution.alias_expansion_path, 0)).to_equal(9)
+		expect(sibling.type_resolution.alias_expansion_path.used[0]).to_equal(0)
+		expect(parent.type_resolution.alias_expansion_depth[0]).to_equal(0)
+		expect(sibling.type_resolution.alias_expansion_depth[0]).to_equal(0)
+		expect(sibling.interactive).to_be_false()
+		expect(parent.submissions.size()).to_equal(0)
+		expect(sibling.submissions.size()).to_equal(0)
+	end
+
+	test("owns nested scalar MIR defaults separately from its parent and siblings") do
+		mut parent := compiler_new(64)
+		parent.scalar_mir.source_count[0] = 4
+		parent.scalar_mir.entry_function[0] = 3
+		parent.scalar_mir.numeric_plans[0].push(MirNumericPlan.new(witness: -1, function_id: 2, caller: -1, call_instruction: -1, operations: []))
+		mut fork := generic_program_fork(parent)
+		sibling := generic_program_fork(parent)
+		expect(fork.scalar_mir.source_count[0]).to_equal(1)
+		expect(fork.scalar_mir.entry_function[0]).to_equal(0)
+		expect(fork.scalar_mir.numeric_plans[0].size()).to_equal(0)
+		fork.scalar_mir.numeric_plans[0].push(MirNumericPlan.new(witness: -1, function_id: 1, caller: -1, call_instruction: -1, operations: []))
+		fork.scalar_mir.numeric_plans.push([])
+		fork.scalar_mir.source_count[0] = 2
+		fork.scalar_mir.entry_function[0] = 1
+		fork.scalar_mir.arguments.push(7)
+		fork.scalar_mir.literal_texts.push("fork")
+		expect(parent.scalar_mir.numeric_plans.size()).to_equal(1)
+		expect(parent.scalar_mir.numeric_plans[0].size()).to_equal(1)
+		expect(parent.scalar_mir.numeric_plans[0][0].function_id).to_equal(2)
+		expect(parent.scalar_mir.source_count[0]).to_equal(4)
+		expect(parent.scalar_mir.entry_function[0]).to_equal(3)
+		expect(sibling.scalar_mir.numeric_plans.size()).to_equal(1)
+		expect(sibling.scalar_mir.numeric_plans[0].size()).to_equal(0)
+		expect(sibling.scalar_mir.source_count[0]).to_equal(1)
+		expect(sibling.scalar_mir.entry_function[0]).to_equal(0)
+		[parent, sibling].each do |program|
+			expect(program.scalar_mir.arguments.size()).to_equal(0)
+			expect(program.scalar_mir.literal_texts.size()).to_equal(0)
+		end
+	end
+end

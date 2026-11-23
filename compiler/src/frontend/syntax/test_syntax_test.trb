@@ -1,0 +1,130 @@
+import { lex_module } from frontend/syntax/lexer
+import { parse_module, parse_module_with_tests } from frontend/syntax/parser
+import { CompilerState, add_module, compiler_new, has_diagnostic } from state/state
+import { compiler_parsed_program_fork } from state/source_state
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def parsed_test_source(source: String): CompilerState
+	mut state := compiler_new(16384)
+	add_module(state, "sample_test", "/project/sample_test.trb")
+	if lex_module(state, source, 0)
+		parse_module_with_tests(state, 0, 0, true)
+	end
+	return state
+end
+
+def test_source_header(): String
+	return "import { describe, test, expect } from trb/std/test\n"
+end
+
+describe("Compiler-owned test declarations") do
+	test("keeps generated case identities outside authored function lookup") do
+		source := test_source_header() + "describe(\"A\") do\ntest(\"B\") do\nputs(1)\nend\nend\ndef trb_test_0()\nend\n"
+		state := parsed_test_source(source)
+		expect(has_diagnostic(state)).to_be_false()
+		case_id := state.parsed.tests[1].function_id
+		expect(case_id).to_equal(0)
+		expect(load_string(state.declarations.function_names, case_id)).to_equal("$test:0")
+		expect(find_function_in_module(state, 0, "$test:0")).to_equal(-1)
+		expect(find_function_in_module(state, 0, "trb_test_0")).to_equal(1)
+	end
+
+	test("retains nested order, parents, labels and authored function bodies") do
+		source := test_source_header() + "describe(\"Numbers\") do\n test(\"first\") do\n expect(1).to_equal(1)\n end\n describe(\"nested\") do\n test(\"second\") do\n puts(\"ok\")\n end\n end\nend\n"
+		state := parsed_test_source(source)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.parsed.tests.size()).to_equal(4)
+		expect(state.parsed.tests[0].parent).to_equal(-1)
+		expect(state.parsed.tests[1].full_name).to_equal("Numbers / first")
+		expect(state.parsed.tests[1].parent).to_equal(0)
+		expect(state.parsed.tests[2].parent).to_equal(0)
+		expect(state.parsed.tests[3].parent).to_equal(2)
+		expect(state.parsed.tests[3].full_name).to_equal("Numbers / nested / second")
+		expect(state.declarations.function_count[0]).to_equal(2)
+		function_id := state.parsed.tests[1].function_id
+		body := load_integer(state.declarations.function_body_starts, function_id)
+		expect(load_string(state.source_tokens.token_texts, body)).to_equal("expect")
+		expect(load_integer(state.source_tokens.token_lines, body)).to_equal(4)
+		expect(load_string(state.declarations.function_result_types, function_id)).to_equal("Void")
+		expect(compiler_parsed_program_fork(state.parsed).tests).to_equal(state.parsed.tests)
+	end
+
+	test("keeps declarations and ordinary source parsing separate from the test adapter") do
+		source := test_source_header() + "def helper(): Integer\nreturn 42\nend\ndescribe(\"A\") do\ntest(\"B\") do\nexpect(helper()).to_equal(42)\nend\nend\n"
+		state := parsed_test_source(source)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.declarations.function_count[0]).to_equal(2)
+		expect(load_string(state.declarations.function_names, 0)).to_equal("helper")
+		mut ordinary := compiler_new(16384)
+		add_module(ordinary, "sample", "/project/sample.trb")
+		expect(lex_module(ordinary, source, 0)).to_be_true()
+		expect(parse_module(ordinary, 0, 0)).to_be_false()
+		expect(ordinary.parsed.tests.size()).to_equal(0)
+	end
+
+	test("requires literal labels instead of accepting folded string expressions") do
+		labels := ["label", "\"A\" + \"B\"", "1", "nil"]
+		labels.each do |label|
+			state := parsed_test_source(test_source_header() + "describe(" + label + ") do\ntest(\"case\") do\nreturn\nend\nend\n")
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("describe() name must be a String literal")
+		end
+	end
+
+	test("rejects namespaces and declarations with no suite") do
+		namespaced := parsed_test_source("import trb/std/test\nTest.describe(\"A\") do\nend\n")
+		expect(load_string(namespaced.diagnostics.messages, 0)).to_equal("test suites require named imports from trb/std/test")
+		empty := parsed_test_source(test_source_header())
+		expect(load_string(empty.diagnostics.messages, 0)).to_equal("test files must declare at least one top-level describe() suite")
+		forged := parsed_test_source("import { describe, test } from local/test\ndescribe(\"A\") do\ntest(\"B\") do\nreturn\nend\nend\n")
+		expect(has_diagnostic(forged)).to_be_true()
+		expect(load_string(forged.diagnostics.messages, 0)).to_equal("describe() requires a named import from trb/std/test")
+		bare := parsed_test_source("import trb/std/test\n")
+		expect(load_string(bare.diagnostics.messages, 0)).to_equal("test suites require named imports from trb/std/test")
+	end
+
+	test("resolves test imports after all declarations without accepting local names") do
+		body := "describe(\"A\") do\ntest(\"B\") do\nreturn\nend\nend\n"
+		state := parsed_test_source(body + test_source_header())
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.parsed.tests.size()).to_equal(2)
+		expect(load_integer(state.module_graph.import_used, 0)).to_equal(1)
+		expect(load_integer(state.module_graph.import_used, 1)).to_equal(1)
+		missing := parsed_test_source(body + "import { describe, test } from local/test\n")
+		expect(has_diagnostic(missing)).to_be_true()
+		aliased := parsed_test_source(body + "import { describe as suite, test } from trb/std/test\n")
+		expect(has_diagnostic(aliased)).to_be_true()
+		index_path := parsed_test_source(body + "import { describe, test } from trb/std/test/index\n")
+		expect(has_diagnostic(index_path)).to_be_false()
+	end
+
+	test("rejects duplicate full names within a source") do
+		state := parsed_test_source(test_source_header() + "describe(\"A\") do\ntest(\"B\") do\nreturn\nend\ntest(\"B\") do\nreturn\nend\nend\n")
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("test name \"A / B\" is already declared")
+	end
+
+	test("rejects executable suite setup, empty suites and outer test calls") do
+		setup := parsed_test_source(test_source_header() + "describe(\"A\") do\nvalue := 1\nend\n")
+		expect(load_string(setup.diagnostics.messages, 0)).to_equal("describe() may contain only nested describe() or test() declarations")
+		empty := parsed_test_source(test_source_header() + "describe(\"A\") do\nend\n")
+		expect(load_string(empty.diagnostics.messages, 0)).to_equal("describe() must contain at least one test() or nested describe()")
+		outer := parsed_test_source(test_source_header() + "test(\"A\") do\nreturn\nend\n")
+		expect(load_string(outer.diagnostics.messages, 0)).to_equal("test() must be nested inside describe()")
+	end
+
+	test("rejects case children and parameterized blocks") do
+		nested := parsed_test_source(test_source_header() + "describe(\"A\") do\ntest(\"B\") do\ntest(\"C\") do\nreturn\nend\nend\nend\n")
+		expect(load_string(nested.diagnostics.messages, 0)).to_equal("describe() and test() cannot be nested inside test()")
+		parameter := parsed_test_source(test_source_header() + "describe(\"A\") do |value|\nend\n")
+		expect(load_string(parameter.diagnostics.messages, 0)).to_equal("describe() requires a parameterless block")
+	end
+
+	test("keeps precise label diagnostics and accepts empty parameter lists") do
+		state := parsed_test_source(test_source_header() + "  describe(label) do\nend\n")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+		expect(load_integer(state.diagnostics.columns, 0)).to_equal(12)
+		valid := parsed_test_source(test_source_header() + "describe(\"A\") do ||\ntest(\"B\") do ||\nreturn\nend\nend\n")
+		expect(has_diagnostic(valid)).to_be_false()
+	end
+end

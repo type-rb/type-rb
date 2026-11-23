@@ -1,0 +1,42 @@
+import { check } from compiler
+import { MirCall } from mir/model/module
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import { mir_test_instruction_with_cell, mir_test_module } from testing/mir/model
+
+describe("Named argument binding") do
+	test("rejects initializer calls missing a typed prefix operand") do
+		mut state := logical_checked_source("def select(first: Integer, second: Integer = first + 1): Integer\nreturn second\nend\ndef main()\nputs(select(1))\nend\n")
+		expect(check(state)).to_be_true()
+		call := state.scalar_mir.calls[0]
+		expect(call.callee).to_equal(state.parsed.default_functions[0])
+		state.scalar_mir.calls[0] = MirCall.new(callee: call.callee, argument_start: call.argument_start, argument_count: 0, effects: call.effects)
+		expect(verify_mir(state.scalar_mir, true).include?("arity")).to_be_true()
+	end
+end
+
+describe("Native MIR instruction carrier semantics") do
+	test("preserves instruction kind, origin, operands, payload and failure checks") do
+		changes := [[0, 0, 99], [0, 1, 99], [0, 2, 0], [0, 3, 0], [0, 5, 13], [0, 6, 1], [0, 7, 0], [1, 2, 99], [1, 4, 1], [2, 2, 99], [2, 4, 1], [3, 3, 99], [3, 4, 3], [3, 5, 99], [3, 5, 14], [5, 2, 8], [5, 4, 1]]
+		expected := [
+			"MIR instruction kind is unsupported", "MIR value definition count differs",
+			"MIR Integer constant shape differs", "MIR Integer constant shape differs", "MIR Integer constant shape differs",
+			"MIR instruction origin is invalid", "MIR instruction origin is invalid",
+			"MIR Array length type differs", "MIR Array length shape differs",
+			"MIR Integer comparison type differs", "MIR Integer comparison shape differs",
+			"MIR Array address type differs", "MIR Array address shape differs",
+			"MIR failure target does not exist", "MIR failure target is not a trap block",
+			"MIR checked Integer add type differs", "MIR checked Integer add shape differs",
+		]
+		mut index := 0
+		while index < changes.size()
+			mut native_module := mir_test_module(false, false)
+			change := changes[index]
+			native_module.instructions[change[0]] = mir_test_instruction_with_cell(native_module.instructions[change[0]], change[1], change[2])
+			expect(verify_mir(native_module, false)).to_equal(expected[index])
+			expect(verify_mir(native_module, true)).to_equal(expected[index])
+			index += 1
+		end
+	end
+end

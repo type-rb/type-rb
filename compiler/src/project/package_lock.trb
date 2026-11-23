@@ -1,0 +1,172 @@
+import { project_config_trimmed, project_config_valid_package_name } from project/config
+import { json_null, json_number, json_object, json_string } from project/json_kinds
+import { PackageJson, package_json_fail, package_json_member, package_json_parse, package_json_string_field, package_sorted_indices } from project/package_json
+import { package_version_valid } from project/package_manifest
+import { string_starts_with } from support/path
+
+record LockedPackage
+	name: String
+	version: String
+	source: String
+	revision: String
+	checksum: String
+	path: String
+	manifest_checksum: String
+	aliases: Array<String>
+	names: Array<String>
+end
+
+record PackageLock
+	checksum: String
+	aliases: Array<String>
+	names: Array<String>
+	packages: Array<LockedPackage>
+	error: String
+end
+
+def package_checksum_valid(value: String): Boolean
+	if value.size() != 71 || !string_starts_with(value, "sha256:")
+		return false
+	end
+	mut index := 7
+	while index < value.size()
+		mut valid := false
+		digits := "0123456789abcdefABCDEF"
+		mut digit := 0
+		while digit < digits.size()
+			if value[index] == digits[digit]
+				valid = true
+			end
+			digit += 1
+		end
+		if !valid
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def package_lock_index(lock: PackageLock, name: String): Integer
+	mut index := 0
+	while index < lock.packages.size()
+		if lock.packages[index].name == name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def package_lock_fields(mut document: PackageJson, id: Integer, allowed: Array<String>)
+	if id < 0 || document.nodes[id].kind != json_object()
+		package_json_fail(document, "lock entry must be an object")
+		return
+	end
+	document.nodes[id].keys.each do |key|
+		mut valid := false
+		allowed.each do |field|
+			if field == key
+				valid = true
+			end
+		end
+		if !valid
+			package_json_fail(document, "unknown lock field " + key)
+		end
+	end
+end
+
+def package_lock_mapping(mut document: PackageJson, id: Integer, mut aliases: Array<String>, mut names: Array<String>, required: Boolean)
+	if id < 0 || document.nodes[id].kind == json_null()
+		if required
+			package_json_fail(document, "imports and packages are required")
+		end
+		return
+	end
+	node := document.nodes[id]
+	if node.kind != json_object()
+		package_json_fail(document, "lock mapping must be an object")
+		return
+	end
+	package_sorted_indices(node.keys).each do |index|
+		value := document.nodes[node.children[index]]
+		if value.kind != json_string() || !project_config_valid_package_name(value.text) || !project_config_valid_package_name(node.keys[index])
+			package_json_fail(document, "invalid lock import mapping")
+		else
+			aliases.push(node.keys[index])
+			names.push(value.text)
+		end
+	end
+end
+
+def package_lock_parse(source: String): PackageLock
+	mut document := package_json_parse(source)
+	package_lock_fields(document, 0, ["formatVersion", "configChecksum", "imports", "packages"])
+	format := package_json_member(document, 0, "formatVersion")
+	if format < 0 || document.nodes[format].kind != json_number() || document.nodes[format].text != "1"
+		package_json_fail(document, "unsupported package lock formatVersion")
+	end
+	checksum := package_json_string_field(document, 0, "configChecksum")
+	if !package_checksum_valid(checksum)
+		package_json_fail(document, "configChecksum must use sha256")
+	end
+	mut aliases: Array<String> := []
+	mut names: Array<String> := []
+	package_lock_mapping(document, package_json_member(document, 0, "imports"), aliases, names, true)
+	mut packages: Array<LockedPackage> := []
+	entries := package_json_member(document, 0, "packages")
+	if entries < 0 || document.nodes[entries].kind != json_object()
+		package_json_fail(document, "imports and packages are required")
+	else
+		node := document.nodes[entries]
+		package_sorted_indices(node.keys).each do |index|
+			name := node.keys[index]
+			id := node.children[index]
+			package_lock_fields(document, id, ["version", "source", "revision", "checksum", "path", "manifestChecksum", "dependencies"])
+			version := package_json_string_field(document, id, "version")
+			origin := package_json_string_field(document, id, "source")
+			revision := package_json_string_field(document, id, "revision")
+			content := package_json_string_field(document, id, "checksum")
+			path := package_json_string_field(document, id, "path")
+			manifest := package_json_string_field(document, id, "manifestChecksum")
+			if !project_config_valid_package_name(name) || !package_version_valid(version)
+				package_json_fail(document, "invalid locked package identity")
+			end
+			if project_config_trimmed(path) != ""
+				if origin != "" || revision != "" || content != ""
+					package_json_fail(document, "local package cannot contain source, revision, or checksum")
+				end
+				if !package_checksum_valid(manifest)
+					package_json_fail(document, "local package requires a manifest checksum")
+				end
+			else
+				if origin == "" || revision == "" || !package_checksum_valid(content)
+					package_json_fail(document, "remote package requires source, revision, and sha256 checksum")
+				end
+				if manifest != ""
+					package_json_fail(document, "remote package cannot contain a separate manifest checksum")
+				end
+			end
+			mut dependencies: Array<String> := []
+			mut targets: Array<String> := []
+			package_lock_mapping(document, package_json_member(document, id, "dependencies"), dependencies, targets, false)
+			packages.push(LockedPackage.new(name: name, version: version, source: origin, revision: revision, checksum: content, path: path, manifest_checksum: manifest, aliases: dependencies, names: targets))
+		end
+	end
+	lock := PackageLock.new(checksum: checksum, aliases: aliases, names: names, packages: packages, error: "")
+	mut references: Array<String> := []
+	names.each do |name|
+		references.push(name)
+	end
+	packages.each do |package|
+		package.names.each do |name|
+			references.push(name)
+		end
+	end
+	references.each do |name|
+		if package_lock_index(lock, name) < 0
+			package_json_fail(document, "lock references missing package " + name)
+		end
+	end
+	return PackageLock.new(checksum: checksum, aliases: aliases, names: names, packages: packages, error: document.error[0])
+end

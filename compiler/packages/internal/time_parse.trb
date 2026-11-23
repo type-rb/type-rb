@@ -1,0 +1,251 @@
+import { month_days } from trb/internal/time_calendar
+
+record ParsedTime
+	parts: Array<Integer>
+	error: String
+end
+
+# Match the pinned time parser's byte-oriented diagnostic quoting, including
+# non-ASCII UTF-8 and control bytes. This is distinct from JSON string quoting.
+def quoted(value: String): String
+	mut result := "\""
+	bytes := value.to_bytes()
+	printable := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~\x7f"
+	hex := "0123456789abcdef"
+	mut index := 0
+	while index < bytes.size()
+		octet := bytes.at(index)
+		if octet < 32 || octet >= 128
+			result += "\\x" + hex[octet / 16] + hex[octet % 16]
+		else
+			if octet == 34 || octet == 92
+				result += "\\"
+			end
+			result += printable[octet - 32]
+		end
+		index += 1
+	end
+	return result + "\""
+end
+
+def digit(value: String): Integer
+	mut index := 0
+	while index < 10
+		if value == "0123456789"[index]
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def number(value: String, mut position: Array<Integer>, minimum: Integer, maximum: Integer): Integer
+	start := position[0]
+	mut result := 0
+	while position[0] < value.size() && position[0] - start < maximum
+		part := digit(value[position[0]])
+		if part < 0
+			break
+		end
+		result = result * 10 + part
+		position[0] += 1
+	end
+	if position[0] - start < minimum
+		position[0] = start
+		return -1
+	end
+	return result
+end
+
+def mismatch(value: String, layout: String, position: Integer, token: String): String
+	return "parsing time " + quoted(value) + " as " + quoted(layout) + ": cannot parse " + quoted(value.slice(position...value.size())) + " as " + quoted(token)
+end
+
+def range_error(value: String, field: String): String
+	return "parsing time " + quoted(value) + ": " + field + " out of range"
+end
+
+def failed(message: String): ParsedTime
+	return ParsedTime.new(parts: [], error: message)
+end
+
+def separator(value: String, mut position: Array<Integer>, token: String): Boolean
+	if position[0] >= value.size() || value[position[0]] != token
+		return false
+	end
+	position[0] += 1
+	return true
+end
+
+# The pinned parser accepts the ISO-shaped Go layouts, including a one-digit
+# hour and a decimal comma. It truncates excess fractional digits to nanos.
+def iso(value: String, kind: Integer): ParsedTime
+	mut layout := "2006-01-02"
+	if kind == 1
+		layout = "15:04:05.999999999"
+	elsif kind == 2
+		layout += "T15:04:05.999999999"
+	elsif kind == 3
+		layout += "T15:04:05.999999999Z07:00"
+	end
+	mut parts := [0, 1, 1, 0, 0, 0, 0, 0]
+	mut position := [0]
+	mut had_seconds := false
+	if kind != 1
+		parts[0] = number(value, position, 4, 4)
+		if parts[0] < 0
+			return failed(mismatch(value, layout, position[0], "2006"))
+		end
+		if !separator(value, position, "-")
+			return failed(mismatch(value, layout, position[0], "-"))
+		end
+		parts[1] = number(value, position, 2, 2)
+		if parts[1] < 0
+			return failed(mismatch(value, layout, position[0], "01"))
+		end
+		if parts[1] < 1 || parts[1] > 12
+			return failed(range_error(value, "month"))
+		end
+		if !separator(value, position, "-")
+			return failed(mismatch(value, layout, position[0], "-"))
+		end
+		parts[2] = number(value, position, 2, 2)
+		if parts[2] < 0
+			return failed(mismatch(value, layout, position[0], "02"))
+		end
+		if kind > 1 && !separator(value, position, "T")
+			return failed(mismatch(value, layout, position[0], "T"))
+		end
+	end
+	if kind > 0
+		parts[3] = number(value, position, 1, 2)
+		if parts[3] < 0
+			return failed(mismatch(value, layout, position[0], "15"))
+		end
+		if parts[3] > 23
+			return failed(range_error(value, "hour"))
+		end
+		if !separator(value, position, ":")
+			return failed(mismatch(value, layout, position[0], ":"))
+		end
+		parts[4] = number(value, position, 2, 2)
+		if parts[4] < 0
+			return failed(mismatch(value, layout, position[0], "04"))
+		end
+		if parts[4] > 59
+			return failed(range_error(value, "minute"))
+		end
+		if position[0] < value.size() || kind == 3
+			if !separator(value, position, ":")
+				return failed(mismatch(value, layout, position[0], ":"))
+			end
+			had_seconds = true
+			parts[5] = number(value, position, 2, 2)
+			if parts[5] < 0
+				return failed(mismatch(value, layout, position[0], "05"))
+			end
+			if parts[5] > 59
+				return failed(range_error(value, "second"))
+			end
+			if position[0] + 1 < value.size() && (value[position[0]] == "." || value[position[0]] == ",") && digit(value[position[0] + 1]) >= 0
+				position[0] += 1
+				mut scale := 100000000
+				while position[0] < value.size() && digit(value[position[0]]) >= 0
+					parts[6] += digit(value[position[0]]) * scale
+					scale /= 10
+					position[0] += 1
+				end
+			end
+		end
+	end
+	if kind == 3
+		start := position[0]
+		if !separator(value, position, "Z")
+			mut sign := 1
+			if separator(value, position, "-")
+				sign = -1
+			elsif !separator(value, position, "+")
+				return failed(mismatch(value, layout, start, "Z07:00"))
+			end
+			hour := number(value, position, 2, 2)
+			if hour < 0 || !separator(value, position, ":")
+				return failed(mismatch(value, layout, start, "Z07:00"))
+			end
+			minute := number(value, position, 2, 2)
+			if minute < 0
+				return failed(mismatch(value, layout, start, "Z07:00"))
+			end
+			if hour > 24
+				return failed(range_error(value, "time zone offset hour"))
+			end
+			if minute > 60
+				return failed(range_error(value, "time zone offset minute"))
+			end
+			parts[7] = sign * (hour * 3600 + minute * 60)
+		end
+	end
+	if position[0] != value.size()
+		return failed("parsing time " + quoted(value) + ": extra text: " + quoted(value.slice(position[0]...value.size())))
+	end
+	if kind != 1 && (parts[2] < 1 || parts[2] > month_days(parts[0], parts[1]))
+		if kind == 2 && !had_seconds
+			return failed(mismatch(value, layout, position[0], ":"))
+		end
+		return failed(range_error(value, "day"))
+	end
+	return ParsedTime.new(parts: parts, error: "")
+end
+
+def duration(value: String): ParsedTime
+	mut position := 0
+	mut negative := false
+	if value.start_with?("-")
+		negative = true
+		position = 1
+	end
+	if value.size() < position + 4 || value.slice(position...position + 2) != "PT" || !value.end_with?("S")
+		return failed("invalid Duration")
+	end
+	position += 2
+	start := position
+	mut seconds := 0
+	while position < value.size() - 1 && digit(value[position]) >= 0
+		part := digit(value[position])
+		if seconds > (9007199254740991 - part) / 10
+			return failed("invalid Duration")
+		end
+		seconds = seconds * 10 + part
+		position += 1
+	end
+	if position == start
+		return failed("invalid Duration")
+	end
+	mut nanos := 0
+	if position < value.size() - 1 && value[position] == "."
+		position += 1
+		fraction_start := position
+		mut scale := 100000000
+		while position < value.size() - 1 && digit(value[position]) >= 0
+			if scale == 0
+				return failed("invalid Duration")
+			end
+			nanos += digit(value[position]) * scale
+			scale /= 10
+			position += 1
+		end
+		if position == fraction_start
+			return failed("invalid Duration")
+		end
+	end
+	if position != value.size() - 1
+		return failed("invalid Duration")
+	end
+	if negative
+		seconds = -seconds
+		if nanos != 0
+			seconds -= 1
+			nanos = 1000000000 - nanos
+		end
+	end
+	return ParsedTime.new(parts: [seconds, nanos], error: "")
+end

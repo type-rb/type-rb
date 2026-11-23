@@ -1,0 +1,9 @@
+class Answer
+	def self.value(): Integer
+		return 42
+	end
+end
+
+def main()
+	puts(Answer.value())
+end

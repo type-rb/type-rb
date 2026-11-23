@@ -1,0 +1,32 @@
+{
+  "artifact": null,
+  "clock": "time.monotonic_ns",
+  "clockInfo": {
+    "adjustable": false,
+    "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+    "monotonic": true,
+    "resolutionSeconds": 1e-09
+  },
+  "command": [
+    "/home/runner/work/_temp/gate6n-linux-amd64-workspace/go/program",
+    "144"
+  ],
+  "elapsedNanoseconds": 1801863,
+  "elapsedSeconds": "0.001801863",
+  "inputExecutableAfter": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-workspace/go/program",
+    "sha256": "22288b1007ff8397228f172f5ba32e901fbcac42754fff2e578834b4dd0a06de",
+    "size": 2876901
+  },
+  "inputExecutableBefore": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-workspace/go/program",
+    "sha256": "22288b1007ff8397228f172f5ba32e901fbcac42754fff2e578834b4dd0a06de",
+    "size": 2876901
+  },
+  "schemaVersion": 1,
+  "status": 0
+}

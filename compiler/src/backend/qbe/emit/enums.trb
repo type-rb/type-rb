@@ -1,0 +1,102 @@
+import { binary_not_equal } from frontend/types/operators
+import { mir_op_enum_compare, mir_op_enum_new, mir_op_enum_test } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirInstruction } from mir/model/module
+import { mir_managed_type, mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_address, emit_label, emit_temporary, emit_typed_load, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+# Each immutable variant has one traced layout: header, tag, canonical fields.
+# Payload roots derive only from verified MIR field types.
+def emit_enum_descriptors(state: CompilerState, mut output: QbeOutput)
+	mut variant := 0
+	state.scalar_mir.enum_variants.each do |row|
+		mut managed := 0
+		mut offsets := ""
+		mut field := 0
+		while field < row.field_count
+			if mir_managed_type(state.scalar_mir, state.scalar_mir.enum_fields[row.field_start + field].type_id)
+				managed += 1
+				offsets += ", l " + integer_string(16 + field * 8)
+			end
+			field += 1
+		end
+		qbe_output_line(output, "data $trbn_desc_enum" + integer_string(variant) + " = align 8 { l 1, l " + integer_string(managed) + ", l " + integer_string(8 + row.field_count * 8) + offsets + " }")
+		# A payloadless variant is immutable and has no children for the GC to trace.
+		# Descriptor zero is the runtime's existing static-object sentinel.
+		if row.field_count == 0
+			qbe_output_line(output, "data $trbn_static_enum" + integer_string(variant) + " = align 8 { l 0, l " + integer_string(variant) + " }")
+		end
+		variant += 1
+	end
+	if variant > 0
+		qbe_output_line(output, "data $trbn_enum_error = { b \"panic: enum payload is unavailable\" }")
+	end
+end
+
+def emit_mir_enum_instruction(state: CompilerState, types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	native_module := state.scalar_mir
+	type_name := mir_storage_type_name(native_module, mir_operand_type(types, instruction.result))
+	result := emit_temporary(context)
+	mut variant := instruction.payload
+	if instruction.kind == mir_op_enum_new()
+		row := native_module.enum_variants[variant]
+		stack_slot := context.enum_stack_type[0] == mir_operand_type(types, instruction.result)
+		if row.field_count == 0 && !stack_slot
+			qbe_output_line(output, "\t" + result + " =l copy $trbn_static_enum" + integer_string(variant))
+			return emitted_value(result, type_name)
+		end
+		if stack_slot
+			qbe_output_line(output, "\t" + result + " =l copy %enum_slot" + integer_string(instruction.result))
+		else
+			qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_enum" + integer_string(variant) + ", l " + integer_string(8 + row.field_count * 8) + ", l 0)")
+		end
+		tag := emit_address(context, output, result, 8)
+		qbe_output_line(output, "\tstorel " + integer_string(variant) + ", " + tag)
+		if row.field_count == 0
+			# The selected return copies a full 24-byte caller slot. Never read
+			# payload bytes from the ordinary 16-byte static singleton.
+			payload := emit_address(context, output, result, 16)
+			qbe_output_line(output, "\tstorel 0, " + payload)
+		end
+		mut field := 0
+		while field < row.field_count
+			item := native_module.enum_fields[row.field_start + field]
+			address := emit_address(context, output, result, 16 + field * 8)
+			emit_typed_store(output, mir_storage_type_name(native_module, item.type_id), operands[native_module.arguments[instruction.first + field]], address)
+			field += 1
+		end
+		return emitted_value(result, type_name)
+	end
+	address := emit_address(context, output, operands[instruction.first], 8)
+	tag := emit_temporary(context)
+	qbe_output_line(output, "\t" + tag + " =l loadl " + address)
+	if instruction.kind == mir_op_enum_compare()
+		other_address := emit_address(context, output, operands[instruction.second], 8)
+		other := emit_temporary(context)
+		qbe_output_line(output, "\t" + other + " =l loadl " + other_address)
+		mut operation := "ceql"
+		if instruction.payload == binary_not_equal()
+			operation = "cnel"
+		end
+		qbe_output_line(output, "\t" + result + " =l " + operation + " " + tag + ", " + other)
+	elsif instruction.kind == mir_op_enum_test()
+		qbe_output_line(output, "\t" + result + " =l ceql " + tag + ", " + integer_string(variant))
+	else
+		field := native_module.enum_fields[instruction.payload]
+		variant = field.owner
+		valid := emit_temporary(context)
+		present := emit_label(context)
+		invalid := emit_label(context)
+		qbe_output_line(output, "\t" + valid + " =w ceql " + tag + ", " + integer_string(variant))
+		qbe_output_branch(output, valid, present, invalid)
+		qbe_output_line(output, invalid)
+		qbe_output_line(output, "\tcall $trbn_fatal(l $trbn_enum_error, l 34)")
+		qbe_output_line(output, "\thlt")
+		qbe_output_line(output, present)
+		payload := emit_address(context, output, operands[instruction.first], 16 + (instruction.payload - native_module.enum_variants[variant].field_start) * 8)
+		emit_typed_load(output, result, type_name, payload)
+	end
+	return emitted_value(result, type_name)
+end

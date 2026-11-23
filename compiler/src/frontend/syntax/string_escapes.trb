@@ -1,0 +1,131 @@
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+
+# A compiler-owned byte constructor, resolved through the lexer's declaration.
+# The preceding seed and recovery body support their existing ASCII source;
+# ordinary replacement compilers use the verified byte-preserving adapter.
+def compiler_literal_byte(value: Integer): String
+	if value == 9
+		return "\t"
+	elsif value == 10
+		return "\n"
+	elsif value == 13
+		return "\r"
+	end
+	if value >= 32 && value <= 126
+		characters := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+		return characters[value - 32]
+	end
+	return ""
+end
+
+def escape_digit(character: String): Integer
+	mut index := 0
+	lower := "0123456789abcdef"
+	upper := "0123456789ABCDEF"
+	while index < 16
+		if character == lower[index] || character == upper[index]
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# The cursor starts at the first digit and finishes after exactly the required
+# digits. A decoded hash or quote never re-enters the source scanner.
+def escape_number(mut state: CompilerState, source: String, mut position: Array<Integer>, count: Integer, base: Integer, line: Integer): Integer
+	mut value := 0
+	mut index := 0
+	while index < count
+		if position[0] >= source.size()
+			diagnostic(state, "TRBN4001", line, "incomplete String escape")
+			return -1
+		end
+		digit := escape_digit(source[position[0]])
+		if digit < 0 || digit >= base
+			diagnostic(state, "TRBN4001", line, "invalid String escape digit")
+			return -1
+		end
+		value = value * base + digit
+		position[0] += 1
+		index += 1
+	end
+	return value
+end
+
+def escape_byte(mut state: CompilerState, value: Integer, line: Integer): String
+	text := compiler_literal_byte(value)
+	if text.size() == 0
+		diagnostic(state, "TRBN4005", line, "bootstrap String byte construction does not support this escape")
+	end
+	return text
+end
+
+def escape_scalar(mut state: CompilerState, value: Integer, line: Integer): String
+	if value > 1114111 || (value >= 55296 && value <= 57343)
+		diagnostic(state, "TRBN4001", line, "invalid Unicode scalar escape")
+		return ""
+	end
+	if value < 128
+		return escape_byte(state, value, line)
+	elsif value < 2048
+		return escape_byte(state, 192 + value / 64, line) + escape_byte(state, 128 + value % 64, line)
+	elsif value < 65536
+		return escape_byte(state, 224 + value / 4096, line) + escape_byte(state, 128 + (value / 64) % 64, line) + escape_byte(state, 128 + value % 64, line)
+	end
+	return escape_byte(state, 240 + value / 262144, line) + escape_byte(state, 128 + (value / 4096) % 64, line) + escape_byte(state, 128 + (value / 64) % 64, line) + escape_byte(state, 128 + value % 64, line)
+end
+
+def decode_escape(mut state: CompilerState, source: String, mut position: Array<Integer>, line: Integer, quote: String): String
+	escaped := source[position[0]]
+	position[0] += 1
+	if escaped == "n"
+		return "\n"
+	elsif escaped == "t"
+		return "\t"
+	elsif escaped == "r"
+		return "\r"
+	elsif escaped == "\""
+		return "\""
+	elsif escaped == "'" && quote == "'"
+		return "'"
+	elsif escaped == "\\"
+		return "\\"
+	elsif escaped == "a"
+		return escape_byte(state, 7, line)
+	elsif escaped == "b"
+		return escape_byte(state, 8, line)
+	elsif escaped == "f"
+		return escape_byte(state, 12, line)
+	elsif escaped == "v"
+		return escape_byte(state, 11, line)
+	end
+	mut digits := 2
+	mut base := 16
+	if escaped == "u"
+		digits = 4
+	elsif escaped == "U"
+		digits = 8
+	elsif escaped != "x"
+		digit := escape_digit(escaped)
+		if digit < 0 || digit > 7
+			diagnostic(state, "TRBN4001", line, "unsupported String escape")
+			return ""
+		end
+		position[0] -= 1
+		digits = 3
+		base = 8
+	end
+	value := escape_number(state, source, position, digits, base, line)
+	if has_diagnostic(state)
+		return ""
+	end
+	if escaped == "u" || escaped == "U"
+		return escape_scalar(state, value, line)
+	end
+	if value > 255
+		diagnostic(state, "TRBN4001", line, "String byte escape exceeds 255")
+		return ""
+	end
+	return escape_byte(state, value, line)
+end

@@ -1,0 +1,6 @@
+{
+  "name": "native-example",
+  "mode": "trb",
+  "sourceDir": "examples",
+  "outDir": "build/example"
+}

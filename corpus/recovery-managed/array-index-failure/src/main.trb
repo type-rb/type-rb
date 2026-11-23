@@ -1,0 +1,7 @@
+def main()
+	values := [1, 2]
+	if values[2] == 0
+		puts("unreachable")
+	end
+	return
+end

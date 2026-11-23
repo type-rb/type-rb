@@ -1,0 +1,30 @@
+def main()
+	value := "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	same := "abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345abcdefghijklmnopqrstuvwxyz012345"
+	escaped := "ab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\ghab\ncd\"ef\\gh"
+	puts(value.size().to_s())
+	puts(value[0])
+	puts(value[-1])
+	puts(escaped.size().to_s())
+	if escaped[2] == "\n"
+		puts("newline")
+	else
+		puts("bad newline")
+	end
+	if escaped[5] == "\""
+		puts("quote")
+	else
+		puts("bad quote")
+	end
+	if escaped[8] == "\\"
+		puts("backslash")
+	else
+		puts("bad backslash")
+	end
+	if value == same
+		puts("same")
+	else
+		puts("different")
+	end
+	return
+end

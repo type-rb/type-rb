@@ -1,0 +1,67 @@
+import { check, emit_qbe } from compiler
+import { mir_literal_fragment } from mir/analysis/string_splits
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Bounded UTF-8 runtime counting") do
+	test("preserves code-point counts at every byte boundary including invalid input") do
+		# Include NUL, all widths, overlong forms, surrogates, out-of-range and
+		# isolated continuation bytes. Every subspan also exercises truncation.
+		cases := [
+			[65, 0, 194, 162, 226, 130, 172, 240, 159, 152, 128, 255],
+			[192, 128, 224, 128, 128, 237, 160, 128],
+			[240, 128, 128, 128, 244, 144, 128, 128, 245, 128, 128, 128],
+			[223, 191, 224, 160, 128, 237, 159, 191, 239, 191, 191],
+			[240, 144, 128, 128, 244, 143, 191, 191, 128, 191],
+			[65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
+			[65, 66, 67, 68, 69, 70, 71, 240, 159, 152, 128, 65, 66, 67, 68, 69, 70, 71, 72],
+		]
+		mut state := logical_checked_source("def main()\nputs(0)\nend\n")
+		expect(check(state)).to_be_true()
+		original := output_source(emit_qbe(state))
+		mut output := original.split("export function w $main(").join("function w $unused_main(")
+		mut data := "\ndata $count_format = { b \"%ld\\n\", b 0 }\n"
+		output += "\nexport function w $main() {\n@start\n"
+		mut expected := ""
+		mut fixture := 0
+		mut sample := 0
+		cases.each do |bytes|
+			symbol := "$bytes_" + fixture.to_s()
+			data += "data " + symbol + " = { "
+			bytes.each do |byte|
+				data += "b " + byte.to_s() + ", "
+			end
+			data += "b 0 }\n"
+			mut start := 0
+			while start <= bytes.size()
+				mut finish := start
+				while finish <= bytes.size()
+					name := sample.to_s()
+					output += " %address" + name + " =l add " + symbol + ", " + start.to_s() + "\n"
+					output += " %count" + name + " =l call $trbn_utf8_count(l %address" + name + ", l " + (finish - start).to_s() + ")\n"
+					output += " call $printf(l $count_format, ..., l %count" + name + ")\n"
+					expected += mir_literal_fragment(bytes, start, finish).points.to_s() + "\n"
+					sample += 1
+					finish += 1
+				end
+				start += 1
+			end
+			fixture += 1
+		end
+		output += " ret 0\n}\n" + data
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

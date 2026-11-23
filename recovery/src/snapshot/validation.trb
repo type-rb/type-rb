@@ -1,0 +1,11 @@
+import support/diagnostic
+import { NativeModule, lower_snapshot, verify_native_mir } from snapshot/mir
+import { decode_snapshot } from snapshot/schema
+import trb/std/result
+
+def validate_and_lower(source: String): Result<NativeModule, Diagnostic>
+	snapshot := try decode_snapshot(source)
+	native_module := lower_snapshot(snapshot)
+	try verify_native_mir(native_module)
+	return Result<NativeModule, Diagnostic>::Ok(native_module)
+end

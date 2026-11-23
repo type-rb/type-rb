@@ -1,0 +1,74 @@
+import { integer_string } from support/literals
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+record QbeEmitContext
+	temporary_count: Array<Integer>
+	label_count: Array<Integer>
+	integer_range_failure_used: Array<Boolean>
+	enum_stack_type: Array<Integer>
+end
+
+record QbeValue
+	operand: String
+	type_name: String
+end
+
+def emit_context_new(): QbeEmitContext
+	return QbeEmitContext.new(temporary_count: [0], label_count: [0], integer_range_failure_used: [false], enum_stack_type: [0])
+end
+
+def emitted_value(operand: String, type_name: String): QbeValue
+	return QbeValue.new(operand: operand, type_name: type_name)
+end
+
+def qbe_type(type_name: String): String
+	if type_name == "Float"
+		return "d"
+	end
+	return "l"
+end
+
+def emit_typed_load(
+		mut output: QbeOutput,
+		result: String,
+		type_name: String,
+		address: String,
+	)
+	qbe_type := qbe_type(type_name)
+	qbe_output_line(output, "\t" + result + " =" + qbe_type + " load" + qbe_type + " " + address)
+end
+
+def emit_typed_store(
+		mut output: QbeOutput,
+		type_name: String,
+		value: String,
+		address: String,
+	)
+	qbe_output_line(output, "\tstore" + qbe_type(type_name) + " " + value + ", " + address)
+end
+
+def emit_temporary(mut context: QbeEmitContext): String
+	index := context.temporary_count[0]
+	context.temporary_count[0] = index + 1
+	return "%t" + integer_string(index)
+end
+
+def emit_label(mut context: QbeEmitContext): String
+	index := context.label_count[0]
+	context.label_count[0] = index + 1
+	return "@l" + integer_string(index)
+end
+
+def emit_address(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		base: String,
+		offset: Integer,
+	): String
+	if offset == 0
+		return base
+	end
+	address := emit_temporary(context)
+	qbe_output_line(output, "\t" + address + " =l add " + base + ", " + integer_string(offset))
+	return address
+end

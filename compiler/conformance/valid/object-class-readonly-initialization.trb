@@ -1,0 +1,11 @@
+class Label
+	readonly @name: String
+	def initialize(value: String)
+		@name = value
+	end
+end
+
+def main()
+	label := Label.new("label")
+	puts(label.name)
+end

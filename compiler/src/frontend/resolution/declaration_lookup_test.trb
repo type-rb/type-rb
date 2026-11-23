@@ -1,0 +1,55 @@
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { CompilerState, compiler_new } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("rejects duplicate declarations during resolution") do
+		source := "def main()\n\treturn\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4003")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(5)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("duplicate function declaration main")
+	end
+
+	test("reports the first repeated function while retaining last-match lookup") do
+		source := "def value(): Integer\n\treturn 1\nend\n\ndef value(): Integer\n\treturn 2\nend\n\ndef value(): Integer\n\treturn 3\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(find_function_in_module(state, state.module_graph.entry_module[0], "value")).to_equal(2)
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4003")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(5)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("duplicate function declaration value")
+		expect(find_function_in_module(state, state.module_graph.entry_module[0], "value")).to_equal(2)
+	end
+
+	test("preserves an earlier declaration error before a duplicate function") do
+		source := "def value(item: Missing): Integer\n\treturn 1\nend\n\ndef value(): Integer\n\treturn 2\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4003")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(1)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("unknown parameter type Missing")
+	end
+
+	test("rejects an unresolved direct call during resolution") do
+		source := "def main()\n\tmissing()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4003")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("unresolved function missing")
+	end
+end

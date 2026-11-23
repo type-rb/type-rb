@@ -1,0 +1,9 @@
+import { parse } from parser
+import { describe, expect, expect_ok, test } from trb/std/test
+
+describe("Parser") do
+	test("ok") do
+		value := expect_ok(parse("two"))
+		expect(value).to_equal(1)
+	end
+end

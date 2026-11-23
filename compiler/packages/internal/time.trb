@@ -1,0 +1,318 @@
+import { Date, TimeOfDay, DateTime, Instant, Duration, TimeZone, DateTimeError, DateTimeErrorKind } from trb/std/time
+import { Result } from trb/std/result
+import trb/internal/runtime
+import { civil_days, clock_text, clock_valid, compare, date_text, date_valid, day_parts, epoch_parts, fraction, normalize } from trb/internal/time_calendar
+import { iso, duration } from trb/internal/time_parse
+import { load, offset } from trb/internal/time_zones
+import trb/internal/time_host as Host
+
+module Time
+end
+
+def _error(kind: DateTimeErrorKind, input: String, message: String): DateTimeError
+	return DateTimeError.new(kind: kind, input: input, message: message)
+end
+
+def validate_date(year: Integer, month: Integer, day: Integer)
+	if !date_valid(year, month, day)
+		Runtime.fail<Boolean>("invalid Date")
+	end
+end
+
+def date_try_new(year: Integer, month: Integer, day: Integer): Result<Date, DateTimeError>
+	if !date_valid(year, month, day)
+		return Result<Date, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidDate, "", "invalid Date"))
+	end
+	return Result<Date, DateTimeError>::Ok(Date.new(year, month, day))
+end
+
+def date_try_parse(value: String): Result<Date, DateTimeError>
+	parsed := iso(value, 0)
+	if parsed.error != ""
+		return Result<Date, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidDate, value, parsed.error))
+	end
+	return Result<Date, DateTimeError>::Ok(Date.new(parsed.parts[0], parsed.parts[1], parsed.parts[2]))
+end
+
+def date_parse(value: String): Date
+	return date_try_parse(value) catch |error|
+		Runtime.fail<Date>("invalid Date: " + error.message)
+	end
+end
+
+def date_to_string(value: Date): String
+	return date_text(value.year(), value.month(), value.day())
+end
+
+def date_add_days(value: Date, days: Integer): Date
+	current := civil_days(value.year(), value.month(), value.day())
+	if days < -719162 - current || days > 2932896 - current
+		return Runtime.fail<Date>("Date is outside the portable range")
+	end
+	parts := day_parts(current + days)
+	return Date.new(parts[0], parts[1], parts[2])
+end
+
+def date_compare(left: Date, right: Date): Integer
+	return compare(civil_days(left.year(), left.month(), left.day()), 0, civil_days(right.year(), right.month(), right.day()), 0)
+end
+
+def validate_time(hour: Integer, minute: Integer, second: Integer, nanos: Integer)
+	if !clock_valid(hour, minute, second, nanos)
+		Runtime.fail<Boolean>("invalid TimeOfDay")
+	end
+end
+
+def time_of_day_try_new(hour: Integer, minute: Integer, second: Integer, nanos: Integer): Result<TimeOfDay, DateTimeError>
+	if !clock_valid(hour, minute, second, nanos)
+		return Result<TimeOfDay, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidTime, "", "invalid TimeOfDay"))
+	end
+	return Result<TimeOfDay, DateTimeError>::Ok(TimeOfDay.new(hour, minute, second, nanos))
+end
+
+def time_of_day_try_parse(value: String): Result<TimeOfDay, DateTimeError>
+	parsed := iso(value, 1)
+	if parsed.error != ""
+		return Result<TimeOfDay, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidTime, value, parsed.error))
+	end
+	return Result<TimeOfDay, DateTimeError>::Ok(TimeOfDay.new(parsed.parts[3], parsed.parts[4], parsed.parts[5], parsed.parts[6]))
+end
+
+def time_of_day_parse(value: String): TimeOfDay
+	return time_of_day_try_parse(value) catch |error|
+		Runtime.fail<TimeOfDay>("invalid date/time value: " + error.message)
+	end
+end
+
+def time_of_day_to_string(value: TimeOfDay): String
+	return clock_text(value.hour(), value.minute(), value.second(), value.nanosecond())
+end
+
+def time_of_day_compare(left: TimeOfDay, right: TimeOfDay): Integer
+	return compare(left.hour() * 3600 + left.minute() * 60 + left.second(), left.nanosecond(), right.hour() * 3600 + right.minute() * 60 + right.second(), right.nanosecond())
+end
+
+def validate_datetime(year: Integer, month: Integer, day: Integer, hour: Integer, minute: Integer, second: Integer, nanos: Integer)
+	if !date_valid(year, month, day) || !clock_valid(hour, minute, second, nanos)
+		Runtime.fail<Boolean>("invalid DateTime")
+	end
+end
+
+def datetime_try_new(year: Integer, month: Integer, day: Integer, hour: Integer, minute: Integer, second: Integer, nanos: Integer): Result<DateTime, DateTimeError>
+	if !date_valid(year, month, day) || !clock_valid(hour, minute, second, nanos)
+		return Result<DateTime, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidDateTime, "", "invalid DateTime"))
+	end
+	return Result<DateTime, DateTimeError>::Ok(DateTime.new(year, month, day, hour, minute, second, nanos))
+end
+
+def datetime_try_parse(value: String): Result<DateTime, DateTimeError>
+	parsed := iso(value, 2)
+	if parsed.error != ""
+		return Result<DateTime, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidDateTime, value, parsed.error))
+	end
+	parts := parsed.parts
+	return Result<DateTime, DateTimeError>::Ok(DateTime.new(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]))
+end
+
+def datetime_parse(value: String): DateTime
+	return datetime_try_parse(value) catch |error|
+		Runtime.fail<DateTime>("invalid date/time value: " + error.message)
+	end
+end
+
+def datetime_to_string(value: DateTime): String
+	return date_text(value.year(), value.month(), value.day()) + "T" + clock_text(value.hour(), value.minute(), value.second(), value.nanosecond())
+end
+
+def _civil_seconds(value: DateTime): Integer
+	return civil_days(value.year(), value.month(), value.day()) * 86400 + value.hour() * 3600 + value.minute() * 60 + value.second()
+end
+
+def datetime_compare(left: DateTime, right: DateTime): Integer
+	return compare(_civil_seconds(left), left.nanosecond(), _civil_seconds(right), right.nanosecond())
+end
+
+def datetime_try_to_instant(value: DateTime, time_zone: TimeZone): Result<Instant, DateTimeError>
+	zone := load(time_zone.identifier())
+	if zone.error != ""
+		return Result<Instant, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidTimeZone, time_zone.identifier(), "invalid TimeZone"))
+	end
+	civil := _civil_seconds(value)
+	mut offsets: Array<Integer> := []
+	mut hour := -36
+	while hour <= 36
+		current := offset(zone, civil + hour * 3600)
+		if !offsets.include?(current)
+			offsets.push(current)
+		end
+		hour += 1
+	end
+	mut matches: Array<Integer> := []
+	offsets.each do |current|
+		candidate := civil - current
+		if offset(zone, candidate) == current
+			matches.push(candidate)
+		end
+	end
+	if matches.size() == 0
+		return Result<Instant, DateTimeError>::Err(_error(DateTimeErrorKind::NonexistentLocalTime, time_zone.identifier(), "local DateTime does not exist in TimeZone"))
+	end
+	if matches.size() > 1
+		return Result<Instant, DateTimeError>::Err(_error(DateTimeErrorKind::AmbiguousLocalTime, time_zone.identifier(), "local DateTime is ambiguous in TimeZone"))
+	end
+	return Result<Instant, DateTimeError>::Ok(Instant.new(matches[0], value.nanosecond()))
+end
+
+def datetime_to_instant(value: DateTime, time_zone: TimeZone): Instant
+	return datetime_try_to_instant(value, time_zone) catch |error|
+		Runtime.fail<Instant>(error.message)
+	end
+end
+
+def validate_duration(_seconds: Integer, nanos: Integer)
+	if nanos < 0 || nanos >= 1000000000
+		Runtime.fail<Boolean>("Duration is outside the portable range")
+	end
+end
+
+def duration_from_seconds(value: Integer): Duration
+	return Duration.new(value)
+end
+
+def duration_from_milliseconds(value: Integer): Duration
+	parts := normalize(value / 1000, (value % 1000) * 1000000)
+	return Duration.new(parts[0], parts[1])
+end
+
+def duration_try_parse(value: String): Result<Duration, DateTimeError>
+	parsed := duration(value)
+	if parsed.error != ""
+		return Result<Duration, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidDuration, value, parsed.error))
+	end
+	return Result<Duration, DateTimeError>::Ok(Duration.new(parsed.parts[0], parsed.parts[1]))
+end
+
+def duration_parse(value: String): Duration
+	return duration_try_parse(value) catch |_error|
+		Runtime.fail<Duration>("invalid Duration")
+	end
+end
+
+def duration_add(left: Duration, right: Duration): Duration
+	parts := normalize(left.whole_seconds() + right.whole_seconds(), left.nanosecond() + right.nanosecond())
+	return Duration.new(parts[0], parts[1])
+end
+
+def duration_subtract(left: Duration, right: Duration): Duration
+	parts := normalize(left.whole_seconds() - right.whole_seconds(), left.nanosecond() - right.nanosecond())
+	return Duration.new(parts[0], parts[1])
+end
+
+def duration_negative(value: Duration): Duration
+	parts := normalize(-value.whole_seconds(), -value.nanosecond())
+	return Duration.new(parts[0], parts[1])
+end
+
+def duration_to_string(value: Duration): String
+	mut seconds := value.whole_seconds()
+	mut nanos := value.nanosecond()
+	mut sign := ""
+	if seconds < 0
+		sign = "-"
+		seconds = -seconds
+		if nanos != 0
+			seconds -= 1
+			nanos = 1000000000 - nanos
+		end
+	end
+	return sign + "PT" + seconds.to_s() + fraction(nanos) + "S"
+end
+
+def duration_compare(left: Duration, right: Duration): Integer
+	return compare(left.whole_seconds(), left.nanosecond(), right.whole_seconds(), right.nanosecond())
+end
+
+def validate_time_zone(identifier: String)
+	# The Local handle is valid before its data is first needed.
+	if identifier == "Local"
+		return
+	end
+	zone := load(identifier)
+	if zone.error != ""
+		Runtime.fail<Boolean>("invalid TimeZone: " + zone.error)
+	end
+end
+
+def time_zone_try_get(identifier: String): Result<TimeZone, DateTimeError>
+	if identifier == "Local"
+		return Result<TimeZone, DateTimeError>::Ok(TimeZone.new(identifier))
+	end
+	zone := load(identifier)
+	if zone.error != ""
+		return Result<TimeZone, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidTimeZone, identifier, zone.error))
+	end
+	return Result<TimeZone, DateTimeError>::Ok(TimeZone.new(identifier))
+end
+
+def validate_instant(seconds: Integer, nanos: Integer)
+	if seconds < -62135596800 || seconds > 253402300799 || nanos < 0 || nanos >= 1000000000
+		Runtime.fail<Boolean>("Instant is outside the portable range")
+	end
+end
+
+def instant_now(): Instant
+	mut parts := [0, 0]
+	if !Host.clock(parts)
+		return Runtime.fail<Instant>("system clock unavailable")
+	end
+	return Instant.new(parts[0], parts[1])
+end
+
+def instant_try_parse(value: String): Result<Instant, DateTimeError>
+	parsed := iso(value, 3)
+	if parsed.error != ""
+		return Result<Instant, DateTimeError>::Err(_error(DateTimeErrorKind::InvalidInstant, value, parsed.error))
+	end
+	parts := parsed.parts
+	seconds := civil_days(parts[0], parts[1], parts[2]) * 86400 + parts[3] * 3600 + parts[4] * 60 + parts[5] - parts[7]
+	return Result<Instant, DateTimeError>::Ok(Instant.new(seconds, parts[6]))
+end
+
+def instant_parse(value: String): Instant
+	return instant_try_parse(value) catch |error|
+		Runtime.fail<Instant>("invalid Instant: " + error.message)
+	end
+end
+
+def instant_to_string(value: Instant): String
+	parts := epoch_parts(value.epoch_seconds())
+	return date_text(parts[0], parts[1], parts[2]) + "T" + clock_text(parts[3], parts[4], parts[5], value.nanosecond()) + "Z"
+end
+
+def instant_to_datetime(value: Instant, time_zone: TimeZone): DateTime
+	zone := load(time_zone.identifier())
+	if zone.error != ""
+		return Runtime.fail<DateTime>("invalid TimeZone: " + zone.error)
+	end
+	parts := epoch_parts(value.epoch_seconds() + offset(zone, value.epoch_seconds()))
+	return DateTime.new(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], value.nanosecond())
+end
+
+def instant_add(value: Instant, amount: Duration): Instant
+	parts := normalize(value.epoch_seconds() + amount.whole_seconds(), value.nanosecond() + amount.nanosecond())
+	return Instant.new(parts[0], parts[1])
+end
+
+def instant_subtract(value: Instant, amount: Duration): Instant
+	parts := normalize(value.epoch_seconds() - amount.whole_seconds(), value.nanosecond() - amount.nanosecond())
+	return Instant.new(parts[0], parts[1])
+end
+
+def instant_duration_since(left: Instant, right: Instant): Duration
+	parts := normalize(left.epoch_seconds() - right.epoch_seconds(), left.nanosecond() - right.nanosecond())
+	return Duration.new(parts[0], parts[1])
+end
+
+def instant_compare(left: Instant, right: Instant): Integer
+	return compare(left.epoch_seconds(), left.nanosecond(), right.epoch_seconds(), right.nanosecond())
+end

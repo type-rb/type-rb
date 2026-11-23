@@ -1,0 +1,102 @@
+# Binary and unary operators have separate domains. Their literal definitions
+# are shared by source checking and verified scalar MIR consumers.
+
+def binary_invalid(): Integer
+	return 0
+end
+
+def binary_add(): Integer
+	return 1
+end
+
+def binary_subtract(): Integer
+	return 2
+end
+
+def binary_multiply(): Integer
+	return 3
+end
+
+def binary_divide(): Integer
+	return 4
+end
+
+def binary_remainder(): Integer
+	return 5
+end
+
+def binary_equal(): Integer
+	return 6
+end
+
+def binary_not_equal(): Integer
+	return 7
+end
+
+def binary_less(): Integer
+	return 8
+end
+
+def binary_less_equal(): Integer
+	return 9
+end
+
+def binary_greater(): Integer
+	return 10
+end
+
+def binary_greater_equal(): Integer
+	return 11
+end
+
+def binary_or(): Integer
+	return 12
+end
+
+def binary_and(): Integer
+	return 13
+end
+
+def binary_power(): Integer
+	return 14
+end
+
+def binary_add_assign(): Integer
+	return 17
+end
+
+def binary_subtract_assign(): Integer
+	return 18
+end
+
+def binary_multiply_assign(): Integer
+	return 19
+end
+
+def binary_divide_assign(): Integer
+	return 20
+end
+
+def binary_or_assign(): Integer
+	return 21
+end
+
+def binary_and_assign(): Integer
+	return 22
+end
+
+def unary_invalid(): Integer
+	return 0
+end
+
+def unary_not(): Integer
+	return 1
+end
+
+def unary_negate(): Integer
+	return 2
+end
+
+def unary_positive(): Integer
+	return 3
+end

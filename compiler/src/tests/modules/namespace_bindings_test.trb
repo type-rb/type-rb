@@ -1,0 +1,77 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { namespace_test_check } from testing/namespaces
+import { load_string } from support/storage
+import { has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Native namespace bindings") do
+	test("retains nested and reopened storage after source erasure and collection") do
+		source := "module Counter\nmut value := \"first\" + \" value\"\ndef self.replace(): String\nold := value\nvalue = \"last\" + \" value\"\nreturn old\nend\ndef self.read(): String\nreturn value\nend\nmodule Inner\nmut value := 10\ndef self.bump(): Integer\nvalue += 1\nreturn value\nend\nend\nend\nmodule Counter\ndef self.shadow(): String\nsaved := fn(): String; return value; end\nvalue := \"local\"\nreturn saved() + \" / \" + value\nend\nend\ndef main()\nputs(Counter.replace())\nputs(Counter.read())\nputs(Counter::Inner.bump())\nputs(Counter.shadow())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			expect(state.scalar_mir.globals[0].name).to_equal("Counter::value")
+			expect(state.scalar_mir.globals[1].name).to_equal("Counter::Inner::value")
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			mut forced := ""
+			before.split("\n").each do |line|
+				if line.include?("call $trbnf")
+					forced += "\tcall $trbn_gc_collect(w 0)\n"
+				end
+				forced += line + "\n"
+			end
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("first value\nlast value\n11\nlast value / local\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("uses the earlier outer binding before an inner declaration") do
+		source := "value := 1\nmodule Outer\ndef self.before(): Integer\nreturn value\nend\nvalue := 2\nmodule Inner\ndef self.before(): Integer\nreturn value\nend\nvalue := 3\ndef self.after(): Integer\nreturn value\nend\nend\ndef self.after(): Integer\nreturn value\nend\nend\ndef main()\nputs(Outer.before())\nputs(Outer.after())\nputs(Outer::Inner.before())\nputs(Outer::Inner.after())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if valid
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("1\n2\n2\n3\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("rejects forward reads immutable writes and stale nullable proofs") do
+		bodies := ["def self.read(): Integer\nreturn value\nend\nvalue := 2\n", "value := 2\ndef self.write()\nvalue = 3\nend\n", "mut value: Integer? := 1\ndef self.clear()\nvalue = nil\nend\ndef self.read()\nif value != nil\nState.clear()\nputs(value + 1)\nend\nend\n"]
+		bodies.each do |body|
+			state := namespace_test_check("module State\n" + body + "end\ndef main()\nputs(1)\nend\n")
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+end

@@ -1,0 +1,78 @@
+import { abstract_generic_arguments } from frontend/types/generic_bindings
+import { generic_application, generic_arguments, generic_base } from frontend/types/generic_arguments
+import { generic_instance_for_type } from frontend/resolution/type_resolution
+import { nullable_element } from frontend/types/nullable_types
+import { integer_string } from support/literals
+import { CompilerState } from state/state
+import { load_string } from support/storage
+
+# Structural declaration identities survive differences between validation and
+# concrete nominal catalogs. These patterns never describe runtime layouts.
+def alias_pattern_type(state: CompilerState, type_name: String): String
+	optional := nullable_element(type_name)
+	if optional != ""
+		return alias_pattern_type(state, optional) + "?"
+	end
+	instance := generic_instance_for_type(state, type_name)
+	mut arguments := generic_arguments(type_name)
+	mut base := generic_base(type_name)
+	if instance >= 0
+		row := state.type_resolution.generic_instances[instance]
+		base = "Generic#" + integer_string(row.definition)
+		arguments = row.arguments
+	end
+	if arguments.size() == 0
+		return base
+	end
+	mut patterns: Array<String> := []
+	arguments.each do |argument|
+		patterns.push(alias_pattern_type(state, argument))
+	end
+	return generic_application(base, patterns)
+end
+
+def alias_pattern_match(pattern: String, actual: String, parameters: Array<String>, mut bindings: Array<String>): Boolean
+	mut index := 0
+	while index < parameters.size()
+		if pattern == parameters[index]
+			if bindings[index] == ""
+				bindings[index] = actual
+			end
+			return bindings[index] == actual
+		end
+		index += 1
+	end
+	left := nullable_element(pattern)
+	right := nullable_element(actual)
+	if left != "" || right != ""
+		if left == "" || right == ""
+			return false
+		end
+		return alias_pattern_match(left, right, parameters, bindings)
+	end
+	if generic_base(pattern) != generic_base(actual)
+		return false
+	end
+	expected := generic_arguments(pattern)
+	arguments := generic_arguments(actual)
+	if expected.size() != arguments.size()
+		return false
+	end
+	index = 0
+	while index < expected.size()
+		if !alias_pattern_match(expected[index], arguments[index], parameters, bindings)
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def alias_matches_type(state: CompilerState, index: Integer, type_name: String): Boolean
+	parameters := abstract_generic_arguments("alias", index, state.type_resolution.type_aliases[index].parameters)
+	mut bindings: Array<String> := []
+	parameters.each do |_parameter|
+		bindings.push("")
+	end
+	return alias_pattern_match(load_string(state.type_resolution.alias_patterns, index), alias_pattern_type(state, type_name), parameters, bindings)
+end

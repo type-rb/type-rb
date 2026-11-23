@@ -1,0 +1,16 @@
+{
+  "name": "scenario",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "example.com/scenario"
+  },
+  "packageOptions": {
+    "trb/orm": {
+      "adapter": "sqlite",
+      "database": {
+        "environment": "DATABASE_URL"
+      }
+    }
+  }
+}

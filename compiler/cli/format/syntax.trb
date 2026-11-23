@@ -1,0 +1,39 @@
+import { CompilerState, has_diagnostic, terminal_token } from state/state
+import { parse_bare_import, parse_declaration, parse_named_import } from frontend/syntax/parser
+import { parse_statement_syntax } from frontend/syntax/body_syntax
+import { advance, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { parse_test_declaration, test_declaration_name } from frontend/syntax/test_syntax
+import { load_integer, load_string } from support/storage
+import { format_one_of } from format/printer
+
+# Tooling accepts declarations and executable statements in the same source.
+# Reuse the ordinary grammar without wrapping authored input in a function or
+# running name resolution, type checking, imports or user code.
+def format_parse(mut state: CompilerState): Boolean
+	mut position := [0]
+	skip_newlines(state, position)
+	while !terminal_token(state, position[0])
+		word := load_string(state.source_tokens.token_texts, position[0])
+		if word == "import"
+			line := load_integer(state.source_tokens.token_lines, position[0])
+			advance(position)
+			skip_newlines(state, position)
+			if token_is(state, position[0], "{")
+				parse_named_import(state, position, line)
+			else
+				parse_bare_import(state, position, line)
+			end
+		elsif format_one_of(word, ["def", "class", "interface", "record", "enum", "newtype", "module", "alias"])
+			parse_declaration(state, position)
+		elsif test_declaration_name(state, position[0]) != ""
+			parse_test_declaration(state, position, -1, "")
+		else
+			parse_statement_syntax(state, position)
+		end
+		if has_diagnostic(state)
+			return false
+		end
+		skip_newlines(state, position)
+	end
+	return true
+end

@@ -1,0 +1,39 @@
+import { MirBlock } from mir/model/module
+
+def mir_block(
+		block_id: Integer,
+		source: Integer,
+		line: Integer,
+		parameter_start: Integer,
+		parameter_count: Integer,
+		instruction_start: Integer,
+		instruction_count: Integer,
+		terminator: Integer,
+		condition: Integer,
+		first_target: Integer,
+		second_target: Integer,
+		first_argument_start: Integer,
+		first_argument_count: Integer,
+		second_argument_start: Integer,
+		second_argument_count: Integer,
+		return_value: Integer,
+	): MirBlock
+	return MirBlock.new(
+		id: block_id,
+		source_id: source,
+		line: line,
+		parameter_start: parameter_start,
+		parameter_count: parameter_count,
+		instruction_start: instruction_start,
+		instruction_count: instruction_count,
+		terminator: terminator,
+		condition: condition,
+		first_target: first_target,
+		second_target: second_target,
+		first_argument_start: first_argument_start,
+		first_argument_count: first_argument_count,
+		second_argument_start: second_argument_start,
+		second_argument_count: second_argument_count,
+		return_value: return_value,
+	)
+end

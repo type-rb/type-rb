@@ -1,0 +1,34 @@
+def main()
+	mut values := { 1 => 10, 2 => 20 }
+	view := values
+	mut total := 0
+	mut count := 0
+	view.each do |key, value|
+		if count == 0
+			values.delete(1)
+			values.delete(2)
+			(3..100).each { |number| values[number] = number }
+		end
+		total += key + value
+		count += 1
+	end
+	puts(total)
+	puts(count)
+	puts(values.size())
+	mut sum := 0
+	{ a: 1, b: 2, c: 3 }.each do |_key, value|
+		if value == 2
+			next
+		end
+		(1..2).each { |number| sum += number * value }
+	end
+	puts(sum)
+	mut visits := 0
+	values.each do |_key, _value|
+		visits += 1
+		break
+	end
+	puts(visits)
+	{ a: 1 }.each { |_key, _value| return }
+	puts("unreachable")
+end

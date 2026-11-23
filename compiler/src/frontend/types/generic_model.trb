@@ -1,0 +1,67 @@
+# Authored generic declarations remain separate from concrete runtime catalogs.
+record GenericField
+	name: String
+	type_name: String
+	line: Integer
+	named_only: Boolean
+	default_start: Integer
+	default_finish: Integer
+end
+
+record GenericVariant
+	name: String
+	line: Integer
+	fields: Array<GenericField>
+end
+
+record GenericDefinition
+	kind: Integer
+	name: String
+	source_id: Integer
+	line: Integer
+	parameters: Array<String>
+	variants: Array<GenericVariant>
+end
+
+record GenericInstance
+	definition: Integer
+	arguments: Array<String>
+	type_name: String
+end
+
+record GenericParameter
+	name: String
+	type_name: String
+	line: Integer
+	mutable: Integer
+	named_only: Integer
+	default_start: Integer
+	default_finish: Integer
+end
+
+record GenericFunction
+	receiver_type: String
+	name: String
+	source_id: Integer
+	line: Integer
+	type_parameters: Array<String>
+	parameters: Array<GenericParameter>
+	result_type: String
+	body_start: Integer
+	body_finish: Integer
+end
+
+record GenericFunctionInstance
+	application_key: String
+	definition: Integer
+	arguments: Array<String>
+	function: Integer
+end
+
+# Declaration-owned type substitutions for functions and nominal initializers.
+record GenericBinding
+	source_id: Integer
+	parameters: Array<String>
+	arguments: Array<String>
+	depth: Integer
+end

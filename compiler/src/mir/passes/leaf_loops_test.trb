@@ -1,0 +1,122 @@
+import { emit_qbe } from compiler
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR leaf loop calls") do
+	test("inlines mutation with early returns and preserves caller roots after joining") do
+		mut state := array_loop_mir_check("def update(mut values: Array<Integer>, count: Integer)\nif count < 0\nreturn\nend\nmut index := 0\nwhile index < count\nvalues[index] += index + 1\nindex += 1\nend\nreturn\nend\ndef main()\nmut values := [3000, 4000]\nmut index := -1\nwhile index < 3\nupdate(values, index)\nindex += 1\nend\nputs(values[0].to_s() + \"!\")\nputs(values[1])\nend\n")
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbnf0")).to_be_false()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		function := state.scalar_mir.functions[1]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			saved := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = saved
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		expect(output.split(allocation).size()).to_equal(2)
+		forced := output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			[output, forced].each do |program|
+				case logical_run_qbe(qbe, program)
+				when Result::Ok(actual)
+					expect(actual).to_equal("3002!\n4002\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("preserves aliased Float element stores and negative indexes") do
+		state := array_loop_mir_check("record Pair\nfirst: Array<Float>\nsecond: Array<Float>\nend\ndef update(pair: Pair, scale: Float)\nmut first := pair.first\nmut second := pair.second\nfirst[-1] = first[0] * scale\nsecond[0] = second[-1] + 0.5\nreturn\nend\ndef main()\nmut values := [2.0]\npair := Pair.new(first: values, second: values)\nmut index := 0\nwhile index < 2\nupdate(pair, 2.0)\nindex += 1\nend\nputs(values[0])\nend\n")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbnf0")).to_be_false()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("9.5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains allocating recursive unknown and value-returning callees") do
+		bodies := ["values.push(index)\nreturn", "if index > 0\nupdate(values, index - 1)\nend\nreturn", "puts(index)\nreturn"]
+		bodies.each do |body|
+			state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer)\n" + body + "\nend\ndef main()\nmut values := [0]\nmut index := 0\nwhile index < 2\nupdate(values, index)\nindex += 1\nend\nend\n")
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+		end
+		state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer): Integer\nvalues[0] += index\nreturn values[0]\nend\ndef main()\nmut values := [0]\nmut index := 0\nwhile index < 2\nputs(update(values, index))\nindex += 1\nend\nend\n")
+		expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+	end
+
+	test("retains repeated call sites and calls outside loops") do
+		["update(values, 1)", "mut index := 0\nwhile index < 2\nupdate(values, index)\nupdate(values, index)\nindex += 1\nend"].each do |body|
+			state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer)\nvalues[0] += index\nreturn\nend\ndef main()\nmut values := [0]\n" + body + "\nend\n")
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+		end
+	end
+
+	test("retains invariant scalar calls so their results can be reused") do
+		state := array_loop_mir_check("def sum(values: Array<Integer>): Integer\nmut total := 0\nvalues.each do |value|\ntotal += value\nend\nreturn total\nend\ndef main()\nvalues := [3, 5, 7]\nmut index := 0\nmut total := 0\nwhile index < 4\ntotal += sum(values)\nindex += 1\nend\nputs(total)\nend\n")
+		expect(state.scalar_mir.loop_calls[1].size()).to_equal(1)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbnf0(")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("60\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps bounds and portable overflow failures in the expanded body") do
+		bodies := ["values[-2] = 7", "values[0] += index"]
+		bodies.each.with_index do |body, choice|
+			state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer)\n" + body + "\nreturn\nend\ndef main()\nmut values := [9007199254740991]\nmut index := 1\nwhile index < 2\nupdate(values, index)\nindex += 1\nend\nend\n")
+			output := control_test_output(emit_qbe(state))
+			expect(output.include?("call $trbnf0")).to_be_false()
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					if choice == 0
+						expect(error.include?("index is out of bounds")).to_be_true()
+					else
+						expect(error.include?("Integer")).to_be_true()
+					end
+				end
+			end
+		end
+	end
+end

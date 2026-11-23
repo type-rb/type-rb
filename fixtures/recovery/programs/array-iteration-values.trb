@@ -1,0 +1,106 @@
+def probe_0(): Integer
+	mut values := [1, 2]
+	mut original := values
+	mut total := 0
+	values.each.with_index do |value, index|
+		total += value + index
+		if index == 0
+			values.push(3)
+			values[1] = 7
+			values = [90]
+		end
+		index = 100
+	end
+	return total + original.size()
+end
+
+def probe_1(): Integer
+	mut value := 40
+	mut index := 50
+	mut total := 0
+	[1, 2].each.with_index do |value, index|
+		value += 10
+		index += 20
+		total += value + index
+	end
+	return total + value + index
+end
+
+def probe_2(): Integer
+	mut total := 0
+	[1, 2, 3].each do |value|
+		if value == 2
+			next
+		end
+		[10, 20].each do |inner|
+			total += value + inner
+			break
+		end
+	end
+	return total
+end
+
+def probe_3(): Integer
+	mut outer := 0
+	mut total := 0
+	while outer < 3
+		outer += 1
+		[1, 2, 3].each do |value|
+			if value == 2
+				next
+			end
+			mut inner := 0
+			while inner < 3
+				inner += 1
+				if inner == 1
+					next
+				end
+				total += value + outer
+				break
+			end
+		end
+		if outer == 2
+			break
+		end
+	end
+	return total
+end
+
+def probe_4(): Integer
+	[1, 2, 3].each do |value|
+		if value == 2
+			return value
+		end
+	end
+	return 0
+end
+
+def probe_5(): Integer
+	mut values: Array<Integer> := []
+	mut count := 8
+	values.each do |value|
+		count += value
+	end
+	return count
+end
+
+def choose(mut calls: Array<Integer>, values: Array<Integer>): Array<Integer>
+	calls[0] += 1
+	return values
+end
+def probe(): Integer
+	mut calls := [0]
+	mut sum := 0
+	choose(calls, [1, 2]).each do |value|
+		sum += value
+	end
+	return sum + calls[0]
+end
+
+def main()
+	if probe_0() == 17 && probe_1() == 154 && probe_2() == 24 && probe_3() == 14 && probe_4() == 2 && probe_5() == 8 && probe() == 4
+		puts("iteration-values-ok")
+	else
+		puts("wrong")
+	end
+end

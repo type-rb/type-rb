@@ -1,0 +1,67 @@
+import { infer_global_types } from frontend/checking/program/globals
+import { CompilerState, compiler_new, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def empty_global_inference_state(phase: Integer): CompilerState
+	mut state := compiler_new(4)
+	state.callables.lambda_phase[0] = phase
+	state.module_graph.module_count[0] = 3
+	state.module_graph.active_module[0] = 2
+	state.global_bindings.module_components.push(0)
+	state.global_bindings.module_components.push(1)
+	state.global_bindings.module_components.push(1)
+	state.global_bindings.component_modules.push([0])
+	state.global_bindings.component_modules.push([1, 2])
+	state.global_bindings.component_cyclic.push(0)
+	state.global_bindings.component_cyclic.push(1)
+	return state
+end
+
+def expect_empty_global_inference_state(state: CompilerState, phase: Integer)
+	expect(state.callables.lambda_phase[0]).to_equal(phase)
+	expect(state.module_graph.module_count[0]).to_equal(3)
+	expect(state.module_graph.active_module[0]).to_equal(2)
+	expect(state.global_bindings.globals.size()).to_equal(0)
+	expect(state.global_bindings.global_order.size()).to_equal(0)
+	expect(state.global_bindings.global_types.size()).to_equal(0)
+	expect(state.global_bindings.global_functions.size()).to_equal(0)
+	expect(state.global_bindings.module_components.size()).to_equal(3)
+	expect(state.global_bindings.module_components[0]).to_equal(0)
+	expect(state.global_bindings.module_components[1]).to_equal(1)
+	expect(state.global_bindings.module_components[2]).to_equal(1)
+	expect(state.global_bindings.component_modules.size()).to_equal(2)
+	expect(state.global_bindings.component_modules[0].size()).to_equal(1)
+	expect(state.global_bindings.component_modules[0][0]).to_equal(0)
+	expect(state.global_bindings.component_modules[1].size()).to_equal(2)
+	expect(state.global_bindings.component_modules[1][0]).to_equal(1)
+	expect(state.global_bindings.component_modules[1][1]).to_equal(2)
+	expect(state.global_bindings.component_cyclic.size()).to_equal(2)
+	expect(state.global_bindings.component_cyclic[0]).to_equal(0)
+	expect(state.global_bindings.component_cyclic[1]).to_equal(1)
+end
+
+describe("Empty global inference") do
+	test("preserves phases and mixed module components without initializers") do
+		[0, 1, 2].each do |phase|
+			mut state := empty_global_inference_state(phase)
+			expect(infer_global_types(state)).to_be_true()
+			expect(has_diagnostic(state)).to_be_false()
+			expect_empty_global_inference_state(state, phase)
+		end
+	end
+
+	test("retains an existing error and returns failure without initializers") do
+		[0, 1, 2].each do |phase|
+			mut state := empty_global_inference_state(phase)
+			diagnostic(state, "TRBN4004", 17, "existing error")
+			expect(infer_global_types(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("existing error")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(17)
+			expect(load_integer(state.diagnostics.modules, 0)).to_equal(2)
+			expect_empty_global_inference_state(state, phase)
+		end
+	end
+end

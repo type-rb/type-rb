@@ -1,0 +1,115 @@
+import { checked_hash_verify } from frontend/checking/collections/hashes
+import { mir_hash_operation } from mir/model/hashes
+import { checked_body_new } from state/checked_body
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, select_checked_body } from state/state
+import { load_integer, load_string, sparse_integer_at, sparse_string_at, store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Checked function body ownership") do
+	test("stores large absolute origins in bounded body-local chunks") do
+		mut body := checked_body_new(0, 1000001, 1000514)
+		expect(store_integer(body.safe_finishes, 1000000, 3)).to_be_false()
+		expect(store_integer(body.safe_finishes, 1000514, 3)).to_be_false()
+		expect(sparse_integer_at(body.safe_finishes, 1000001)).to_equal(0)
+		expect(store_integer(body.safe_finishes, 1000001, 7)).to_be_true()
+		expect(store_integer(body.safe_finishes, 1000513, 9)).to_be_true()
+		expect(load_integer(body.safe_finishes, 1000001)).to_equal(7)
+		expect(load_integer(body.safe_finishes, 1000513)).to_equal(9)
+		expect(sparse_integer_at(body.safe_finishes, 1000257)).to_equal(0)
+		expect(body.safe_finishes.chunks.size()).to_equal(3)
+		expect(body.safe_finishes.chunks[1].size()).to_equal(0)
+		expect(store_string(body.safe_types, 1000513, "String?")).to_be_true()
+		expect(load_string(body.safe_types, 1000513)).to_equal("String?")
+		expect(sparse_string_at(body.safe_types, 1000001)).to_equal("")
+		expect(sparse_string_at(body.safe_types, 1000000)).to_equal("")
+		expect(store_string(body.safe_types, 1000514, "outside")).to_be_false()
+		expect(body.safe_types.chunks.size()).to_equal(3)
+	end
+
+	test("keeps distinct typed projections for shared authored source origins") do
+		body := "if input != nil\nvalues := [input]\ntable := {1 => values[0]}\nfound := table[1]\nputs(found)\nend\n"
+		source := "def first(input: Integer?)\n" + body + "end\ndef second(input: String?)\n" + body + "end\ndef main()\nfirst(7)\nsecond(\"held\")\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		# Model two semantic bodies referring to one authored region. No source
+		# tokens are cloned or rewritten; ordinary parameter/MIR types differ.
+		store_integer(state.declarations.function_body_starts, 1, load_integer(state.declarations.function_body_starts, 0))
+		store_integer(state.declarations.function_body_ends, 1, load_integer(state.declarations.function_body_ends, 0))
+		expect(resolve(state) && check(state)).to_be_true()
+		select_checked_body(state, 0)
+		first := state.callables.checked[0]
+		expect(first.function).to_equal(0)
+		expect(first.hash_operations[0].type_name).to_equal("Hash<Integer,Integer>")
+		select_checked_body(state, 1)
+		second := state.callables.checked[0]
+		expect(second.function).to_equal(1)
+		expect(second.hash_operations[0].type_name).to_equal("Hash<Integer,String>")
+		expect(first.hash_operations[0].origin).to_equal(second.hash_operations[0].origin)
+		mut origin := load_integer(state.declarations.function_body_starts, 0)
+		while load_string(state.source_tokens.token_texts, origin) != "["
+			origin += 1
+		end
+		expect(load_string(first.nullable_reads, origin + 1)).to_equal("Integer")
+		expect(load_string(second.nullable_reads, origin + 1)).to_equal("String")
+		previous := select_checked_body(state, 0)
+		state.callables.checked[0] = previous
+		expect(state.callables.checked[0].function).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("7\nheld\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("validates Hash projections outside the selected body") do
+		source := "def first()\nvalues := {1 => 7}\nputs(values[1])\nend\ndef main()\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)).to_be_true()
+		select_checked_body(state, 0)
+		state.callables.checked[0].hash_operations[0] = mir_hash_operation(0, 0, 0, 0, "", false, 0)
+		select_checked_body(state, 1)
+		expect(checked_hash_verify(state)).to_be_false()
+		expect(state.callables.checked[0].function).to_equal(1)
+	end
+
+	test("emits unchanged MIR after discarding every checked body projection") do
+		source := "import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(2)\nend\ndef helper(input: Integer?)\nif input != nil\nputs(input)\nend\nend\ndef main()\nvalue := operation() catch |_error|\n3\nend\nitems := {1 => value}\nhelper(items[1])\n(1..2).each do |item|\nputs(item)\nend\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		mut index := 0
+		while index < state.callables.checked_bodies.size()
+			state.callables.checked_bodies[index] = checked_body_new(state.callables.checked_bodies[index].function, 0, 0)
+			index += 1
+		end
+		state.callables.checked[0] = checked_body_new(-1, 0, 0)
+		state.callables.checked_body_indices.used[0] = 0
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		expect(before.include?("data $trbn_desc_range")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("2\n1\n2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

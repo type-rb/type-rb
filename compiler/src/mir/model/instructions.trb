@@ -1,0 +1,321 @@
+# Instruction identities are independent of operand types and payload domains.
+# Keep the established encoding for verifier, lowering and backend consumers.
+# Named literal-return functions fold away after independent MIR verification.
+def mir_op_integer_immediate(): Integer
+	return 1
+end
+
+def mir_op_integer_add(): Integer
+	return 2
+end
+
+def mir_op_integer_less(): Integer
+	return 3
+end
+
+def mir_op_array_length(): Integer
+	return 4
+end
+
+def mir_op_array_address(): Integer
+	return 5
+end
+
+def mir_op_scalar_literal(): Integer
+	return 6
+end
+
+def mir_op_scalar_binary(): Integer
+	return 7
+end
+
+def mir_op_scalar_unary(): Integer
+	return 8
+end
+
+def mir_op_integer_to_float(): Integer
+	return 9
+end
+
+def mir_op_array_address_load(): Integer
+	return 10
+end
+
+def mir_op_direct_call(): Integer
+	return 11
+end
+
+def mir_op_string_literal(): Integer
+	return 12
+end
+
+def mir_op_string_concat(): Integer
+	return 13
+end
+
+def mir_op_string_compare(): Integer
+	return 14
+end
+
+def mir_op_string_size(): Integer
+	return 15
+end
+
+def mir_op_string_index(): Integer
+	return 16
+end
+
+def mir_op_scalar_conversion(): Integer
+	return 17
+end
+
+def mir_op_puts(): Integer
+	return 18
+end
+
+def mir_op_array_new(): Integer
+	return 19
+end
+
+def mir_op_array_size(): Integer
+	return 20
+end
+
+def mir_op_array_position(): Integer
+	return 21
+end
+
+def mir_op_array_load(): Integer
+	return 22
+end
+
+def mir_op_array_store(): Integer
+	return 23
+end
+
+def mir_op_array_push(): Integer
+	return 24
+end
+
+def mir_op_record_new(): Integer
+	return 25
+end
+
+def mir_op_record_field(): Integer
+	return 26
+end
+
+def mir_op_hash_new(): Integer
+	return 27
+end
+
+def mir_op_hash_get(): Integer
+	return 28
+end
+
+def mir_op_hash_set(): Integer
+	return 29
+end
+
+def mir_op_hash_method(): Integer
+	return 30
+end
+
+def mir_op_range_new(): Integer
+	return 31
+end
+
+def mir_op_range_field(): Integer
+	return 32
+end
+
+def mir_op_nullable_none(): Integer
+	return 33
+end
+
+def mir_op_nullable_inject(): Integer
+	return 34
+end
+
+def mir_op_nil_test(): Integer
+	return 35
+end
+
+def mir_op_nullable_extract(): Integer
+	return 36
+end
+
+def mir_op_enum_new(): Integer
+	return 37
+end
+
+def mir_op_enum_test(): Integer
+	return 38
+end
+
+def mir_op_enum_field(): Integer
+	return 39
+end
+
+def mir_op_enum_compare(): Integer
+	return 40
+end
+
+def mir_op_callable_new(): Integer
+	return 41
+end
+
+def mir_op_indirect_call(): Integer
+	return 42
+end
+
+def mir_op_guard(): Integer
+	return 43
+end
+
+def mir_op_string_query(): Integer
+	return 44
+end
+
+def mir_op_string_sequence(): Integer
+	return 45
+end
+
+def mir_op_string_slice(): Integer
+	return 46
+end
+
+def mir_op_array_copy(): Integer
+	return 47
+end
+
+def mir_op_array_mutate(): Integer
+	return 48
+end
+
+def mir_op_array_join(): Integer
+	return 49
+end
+
+def mir_op_string_trim(): Integer
+	return 50
+end
+
+def mir_op_global_read(): Integer
+	return 51
+end
+
+def mir_op_union_inject(): Integer
+	return 52
+end
+
+def mir_op_union_test(): Integer
+	return 53
+end
+
+def mir_op_union_extract(): Integer
+	return 54
+end
+
+def mir_op_newtype_construct(): Integer
+	return 55
+end
+
+def mir_op_newtype_project(): Integer
+	return 56
+end
+
+def mir_op_singleton_literal(): Integer
+	return 57
+end
+
+def mir_op_literal_widen(): Integer
+	return 58
+end
+
+def mir_op_global_write(): Integer
+	return 59
+end
+
+def mir_op_string_split(): Integer
+	return 60
+end
+
+def mir_op_string_replace(): Integer
+	return 61
+end
+
+def mir_op_string_case(): Integer
+	return 62
+end
+
+def mir_op_object_new(): Integer
+	return 63
+end
+
+def mir_op_object_field(): Integer
+	return 64
+end
+
+def mir_op_object_store(): Integer
+	return 65
+end
+
+def mir_op_object_convert(): Integer
+	return 66
+end
+
+def mir_op_string_to_bytes(): Integer
+	return 67
+end
+
+def mir_op_bytes_size(): Integer
+	return 68
+end
+
+def mir_op_bytes_at(): Integer
+	return 69
+end
+
+def mir_op_bytes_concat(): Integer
+	return 70
+end
+
+def mir_op_bytes_to_string(): Integer
+	return 71
+end
+
+def mir_op_bytes_valid_utf8(): Integer
+	return 72
+end
+
+def mir_op_value_copy(): Integer
+	return 73
+end
+
+# Bytes method IDs 1..6 map to the contiguous String-to-Bytes/Bytes opcodes.
+# Keep the same offset in lowering and independent verification.
+def mir_bytes_opcode_offset(): Integer
+	return 66
+end
+
+# Copy initialized class storage and replace one typed field without mutation.
+def mir_op_object_copy(): Integer
+	return 74
+end
+
+# Instance identity is independent of user-visible field equality.
+def mir_op_object_identity(): Integer
+	return 75
+end
+
+# One synchronous acquisition/body/cleanup operation. No open handle is a
+# caller-visible SSA result; only the body's checked ordinary Result escapes.
+def mir_op_file_scope(): Integer
+	return 76
+end
+
+# An observable monotonic read and potential nonlocal deadline unwind.
+def mir_op_deadline_checkpoint(): Integer
+	return 77
+end

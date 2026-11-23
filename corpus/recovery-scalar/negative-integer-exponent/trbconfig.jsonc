@@ -1,0 +1,8 @@
+{
+  "name": "recovery-scalar-negative-integer-exponent",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-scalar/negative-integer-exponent"
+  }
+}

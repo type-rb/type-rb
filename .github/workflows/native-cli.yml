@@ -1,0 +1,463 @@
+name: Native CLI validation
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      scope:
+        description: complete, or pull-request to leave cache invalidation to main
+        type: string
+        default: complete
+
+permissions:
+  contents: read
+
+# Keep scheduled and push Main validation independent, including their CLI jobs.
+# The caller serializes Main runs; only PR and manual runs supersede active work.
+concurrency:
+  group: native-cli-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  network-artifacts:
+    # Archive ABI qualification does not claim an ordinary compiler/seed for
+    # darwin-amd64. Keep that release-host gap visible independently.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin-amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - runner: ubuntu-24.04
+            platform: linux-amd64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Go for the independent HTTP/2 test server
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Qualify platform filesystem layouts and header-selected symbols
+        run: |
+          mkdir -p dist
+          python3 tools/native-filesystem-abi-harness-test.py
+          python3 tools/native-filesystem-abi-test.py --receipt dist/filesystem-abi.json
+      - name: Retain filesystem ABI qualification
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: filesystem-abi-${{ matrix.platform }}
+          path: dist/filesystem-abi.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Qualify portable Float decimal arithmetic
+        run: |
+          python3 tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-1.3"
+          python3 tools/float-decimal-powers.py
+          python3 tools/native-float-decimal-test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe" --receipt dist/float-decimal.json
+          python3 tools/native-float-parsing-test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe" --receipt dist/float-parsing.json
+      - name: Qualify time environment and byte-range adapters
+        run: python3 tools/native-time-host-test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe" --receipt dist/time-host.json
+      - name: Retain time adapter qualification
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: time-host-${{ matrix.platform }}
+          path: dist/time-host.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain Float arithmetic qualification
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: float-decimal-${{ matrix.platform }}
+          path: dist/float-decimal.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Test artifact integrity and bounded extraction
+        run: |
+          python3 tools/network_artifacts_test.py
+          python3 tools/compression_artifacts_test.py
+          python3 tools/crypto_artifacts_test.py
+          python3 tools/oidc_artifacts_test.py
+          python3 tools/oidc_builder_test.py
+      - name: Build and qualify host archives
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p dist
+          python3 tools/build-network-dependencies.py --archives "$RUNNER_TEMP/network-sources" \
+            --output "$RUNNER_TEMP/network"
+          python3 tools/network_artifacts.py verify "$RUNNER_TEMP/network" --target "$PLATFORM" > "dist/network-build.json"
+          python3 tools/network_artifact_smoke.py "$RUNNER_TEMP/network" --receipt dist/static-link.json
+          python3 tools/network_artifacts.py pack "$RUNNER_TEMP/network" "dist/network-$PLATFORM.tar.gz"
+          cp tools/network-dependencies.json dist/source-pins.json
+          cp "$RUNNER_TEMP/network-sources/"*.tar.gz dist/
+          python3 tools/build-compression-dependencies.py --archives "$RUNNER_TEMP/compression-sources" \
+            --output "$RUNNER_TEMP/compression"
+          python3 tools/compression_artifacts.py verify "$RUNNER_TEMP/compression" --target "$PLATFORM" > dist/compression-build.json
+          python3 tools/compression_artifact_smoke.py "$RUNNER_TEMP/compression" --receipt dist/compression-static-link.json
+          python3 tools/compression_artifacts.py pack "$RUNNER_TEMP/compression" "dist/compression-$PLATFORM.tar.gz"
+          cp tools/compression-dependencies.json dist/compression-source-pins.json
+          cp "$RUNNER_TEMP/compression-sources/"*.tar.gz dist/
+          python3 tools/build-crypto-dependencies.py --archives "$RUNNER_TEMP/crypto-sources" \
+            --output "$RUNNER_TEMP/crypto"
+          python3 tools/crypto_artifacts.py verify "$RUNNER_TEMP/crypto" --target "$PLATFORM" > dist/crypto-build.json
+          python3 tools/crypto_artifact_smoke.py "$RUNNER_TEMP/crypto" --receipt dist/crypto-static-link.json
+          python3 tools/crypto_artifacts.py pack "$RUNNER_TEMP/crypto" "dist/crypto-$PLATFORM.tar.gz"
+          cp tools/crypto-dependencies.json dist/crypto-source-pins.json
+          cp "$RUNNER_TEMP/crypto-sources/"*.tar.gz dist/
+          python3 tools/build-oidc-dependencies.py --archives "$RUNNER_TEMP/oidc-sources" \
+            --crypto-archives "$RUNNER_TEMP/crypto-sources" --crypto "$RUNNER_TEMP/crypto" --output "$RUNNER_TEMP/oidc"
+          python3 tools/oidc_artifacts.py verify "$RUNNER_TEMP/oidc" --target "$PLATFORM" > dist/oidc-build.json
+          python3 tools/oidc_artifact_smoke.py "$RUNNER_TEMP/oidc" --crypto "$RUNNER_TEMP/crypto" --receipt dist/oidc-static-link.json
+          python3 tools/oidc_artifacts.py pack "$RUNNER_TEMP/oidc" "dist/oidc-$PLATFORM.tar.gz"
+          cp tools/oidc-dependencies.json dist/oidc-source-pins.json
+          cp "$RUNNER_TEMP/oidc-sources/"*.tar.* dist/
+          python3 tools/build-sqlite-dependencies.py --output "$RUNNER_TEMP/sqlite"
+          python3 tools/sqlite_artifacts.py verify "$RUNNER_TEMP/sqlite" --target "$PLATFORM" > dist/sqlite-build.json
+          python3 tools/sqlite_artifacts.py pack "$RUNNER_TEMP/sqlite" "dist/sqlite-$PLATFORM.tar.gz"
+          cp tools/sqlite-dependencies.json dist/sqlite-source-pins.json
+      - uses: actions/upload-artifact@v6
+        with:
+          name: network-${{ matrix.platform }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    # The smoke authority includes source/REPL coverage and packaged binaries.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Linux linker and measurement utility
+        if: runner.os == 'Linux'
+        run: python3 tools/ci-linux-prerequisites.py cli --bin-dir "$RUNNER_TEMP/native-ci-bin" --receipt "$RUNNER_TEMP/linux-prerequisites.json"
+      - name: Retain Linux prerequisite evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-prerequisites-cli
+          path: ${{ runner.temp }}/linux-prerequisites.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build from the pinned native seed and verify fixed points
+        run: |
+          python3 tools/build-crypto-dependencies.py --archives "$RUNNER_TEMP/crypto-sources" --output bin/crypto
+          ./trbn --version
+      - name: Exercise scoped File, ambient Dir and retained REPL
+        run: |
+          python3 tools/native-filesystem-test.py bin/trbn --report "$RUNNER_TEMP/filesystem.json"
+          python3 tools/native-filesystem-check-test.py bin/trbn --report "$RUNNER_TEMP/filesystem-check.json"
+      - name: Retain filesystem observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-filesystem-${{ matrix.platform }}
+          path: ${{ runner.temp }}/filesystem*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Exercise Native project tests without a reference compiler
+        run: |
+          python3 tools/native-test-cli-test.py bin/trbn --report "$RUNNER_TEMP/test-cli.json"
+          python3 tools/native-test-comparison-runtime-test.py --qbe bin/qbe
+          python3 tools/native-test-values-test.py --native bin/trbn --report "$RUNNER_TEMP/test-values.json"
+          python3 tools/native-test-runner-test.py --native bin/trbn --report "$RUNNER_TEMP/test-manifest.json"
+      - name: Retain project test observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-project-tests-${{ matrix.platform }}
+          path: ${{ runner.temp }}/test-*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Build pinned HTTP transport dependencies and verify their ABI
+        run: |
+          python3 tools/build-network-dependencies.py \
+            --archives "$RUNNER_TEMP/network-archives" --output bin/network
+          python3 tools/build-compression-dependencies.py \
+            --archives "$RUNNER_TEMP/compression-archives" --output bin/compression
+          python3 tools/build-oidc-dependencies.py --archives "$RUNNER_TEMP/oidc-sources" \
+            --crypto-archives "$RUNNER_TEMP/crypto-sources" --crypto bin/crypto --output bin/oidc
+      - name: Exercise application payload and time services
+        run: python3 tools/native-time-service-test.py --native bin/trbn --report "$RUNNER_TEMP/time-services.json" --gc-stress
+      - name: Retain application service observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-time-services-${{ matrix.platform }}
+          path: ${{ runner.temp }}/time-services.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Exercise real HTTP transport and forced collection
+        run: |
+          python3 tools/native-network-distribution-test.py bin/trbn --libraries bin/network \
+            --receipt "$RUNNER_TEMP/network-distribution.json"
+          python3 tools/native-web-network-test.py bin/trbn --libraries bin/network
+          python3 tools/native-web-network-test.py bin/trbn --libraries bin/network --gc-stress
+          python3 tools/native-web-network-test.py bin/trbn --libraries bin/network --host localhost
+          python3 tools/native-web-network-test.py bin/trbn --libraries bin/network --host ::1
+          python3 tools/native-web-network-repl-test.py bin/trbn
+          python3 tools/native-web-compression-test.py bin/trbn --libraries bin/network \
+            --compression bin/compression --receipt "$RUNNER_TEMP/web-compression.json"
+          python3 tools/native-crypto-test.py bin/trbn --libraries bin/crypto --receipt "$RUNNER_TEMP/crypto.json"
+      - name: Exercise OIDC HTTPS, proxy, trust and foreign cleanup
+        run: |
+          python3 tools/native-oidc-distribution-test.py bin/trbn --libraries bin/oidc --receipt "$RUNNER_TEMP/oidc-distribution.json"
+          python3 tools/native-oidc-test.py bin/trbn --transport --cli-paths --receipt "$RUNNER_TEMP/oidc-http.json"
+          python3 tools/native-oidc-test.py bin/trbn --tls --transport --receipt "$RUNNER_TEMP/oidc-https.json"
+          python3 tools/native-oidc-test.py bin/trbn --tls --trust directory --receipt "$RUNNER_TEMP/oidc-directory.json"
+          python3 tools/native-oidc-test.py bin/trbn --tls --trust untrusted --receipt "$RUNNER_TEMP/oidc-untrusted.json"
+          python3 tools/native-oidc-test.py bin/trbn --tls --transport --stress --receipt "$RUNNER_TEMP/oidc-stress.json"
+          python3 tools/native-oidc-hostname-test.py bin/trbn --receipt "$RUNNER_TEMP/oidc-hostnames.json"
+          python3 tools/native-oidc-hostname-test.py bin/trbn --stress --receipt "$RUNNER_TEMP/oidc-hostnames-stress.json"
+      - name: Set up Go for the independent HTTP/2 test server
+        # This runs after the ordinary Native chain. Application compilation
+        # blocks go/trb, and application execution has an empty PATH.
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Exercise OIDC HTTP/2 and HTTP/1.1 fallback
+        run: |
+          python3 tools/native-oidc-http2-test.py bin/trbn --receipt "$RUNNER_TEMP/oidc-http2.json"
+          python3 tools/native-oidc-http2-test.py bin/trbn --stress --receipt "$RUNNER_TEMP/oidc-http2-stress.json"
+      - name: Exercise Web deadlines and deterministic cancellation cleanup
+        # Runtime unwind controls run in Complete compiler units with the
+        # reference test driver and QBE; this lane uses only the Native CLI.
+        run: |
+          python3 tools/native-web-deadline-test.py bin/trbn --scope applications \
+            --libraries bin/network --output "$RUNNER_TEMP/web-deadlines"
+      - name: Retain application distribution observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: network-distribution-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/network-distribution.json
+            ${{ runner.temp }}/web-compression.json
+            ${{ runner.temp }}/crypto.json
+            ${{ runner.temp }}/oidc-*.json
+            ${{ runner.temp }}/web-deadlines/*.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Check every reviewed conformance source with the built core compiler
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          python3 tools/check-conformance-sources.py .trb/bootstrap/core/compiler
+          python3 tools/bootstrap-module-cycles.py --compiler .trb/bootstrap/core/compiler \
+            --qbe bin/qbe --profile "$PLATFORM-v0" --evidence "$RUNNER_TEMP/module-cycles"
+      - name: Verify static link path failures
+        run: python3 tools/native-link-path-test.py --qbe bin/qbe
+      - name: Verify full-width runtime conditions
+        run: python3 tools/native-runtime-branch-test.py --qbe bin/qbe --compiler bin/trbn
+      - name: Verify deterministic key-reader interruption boundaries
+        run: python3 tools/native-cli-key-test.py --qbe bin/qbe --output "$RUNNER_TEMP/native-cli-key.json"
+      - name: Retain key-reader boundary observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-cli-key-${{ matrix.platform }}
+          path: ${{ runner.temp }}/native-cli-key.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Exercise CLI, REPL, terminal editing and project configuration
+        run: |
+          python3 tools/native-cli-test.py bin/trbn
+          python3 tools/native-lsp-test.py bin/trbn
+          python3 tools/native-hash-test.py bin/trbn
+          python3 tools/native-string-builder-test.py bin/trbn
+      - name: Exercise scalar puts and source diagnostics
+        run: |
+          python3 tools/native-puts-test.py bin/trbn
+          python3 tools/native-puts-writev-test.py --qbe bin/qbe
+          python3 tools/native-string-index-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-string-allocation-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-float-decimal-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-scalar-strings-test.py bin/trbn
+          python3 tools/native-root-buffer-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-managed-storage-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-array-backing-test.py --qbe bin/qbe
+          python3 tools/native-gc-sweep-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-gc-mark-test.py --qbe bin/qbe --compiler .trb/bootstrap/core/compiler
+          python3 tools/native-bytes-allocation-test.py bin/trbn
+          python3 tools/native-bytes-boundary-test.py --qbe bin/qbe
+          python3 tools/native-official-import-test.py bin/trbn
+          python3 tools/native-url-test.py bin/trbn
+          python3 tools/native-json-test.py bin/trbn
+          python3 tools/native-utf8-test.py bin/trbn
+          python3 tools/native-diagnostics-test.py bin/trbn
+          python3 tools/native-interpolation-test.py bin/trbn
+      - name: Verify Process results and owned child cleanup
+        run: python3 tools/native-process-test.py bin/trbn
+      - name: Verify SQLite Jobs execution and joined shutdown
+        run: |
+          python3 tools/build-sqlite-dependencies.py --output bin/sqlite
+          python3 tools/native-worker-lifecycle-test.py --native bin/trbn --report "$RUNNER_TEMP/jobs-lifecycle.json"
+      - name: Verify offline SQLite model builds and runtime CRUD
+        run: python3 tools/native-orm-schema-test.py --native bin/trbn
+      - name: Retain SQLite Jobs lifecycle and archive observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: jobs-lifecycle-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/jobs-lifecycle.json
+            bin/sqlite/sqlite-build.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Verify ordinary language coverage without a reference compiler
+        run: |
+          python3 tools/native-language-coverage-test.py
+          python3 tools/native-language-coverage.py --native bin/trbn --jobs 2 \
+            > "$RUNNER_TEMP/native-language.json"
+      - name: Verify Linux resource attribution and controller failures
+        if: runner.os == 'Linux'
+        timeout-minutes: 1
+        run: python3 -m unittest discover -s tools/representative-performance -p test_measure.py
+      - name: Verify representative workloads with small inputs
+        timeout-minutes: 2
+        run: |
+          python3 tools/representative-performance/measure.py --native bin/trbn --smoke \
+            --evidence "$RUNNER_TEMP/representative-smoke"
+      - name: Retain representative correctness observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: representative-smoke-${{ matrix.platform }}
+          path: ${{ runner.temp }}/representative-smoke
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report project scenarios without a reference compiler
+        run: |
+          python3 tools/project-scenarios.py --native bin/trbn --jobs 2 \
+            > "$RUNNER_TEMP/native-projects.json"
+      - name: Retain ordinary language observations
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-language-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/native-language.json
+            ${{ runner.temp }}/native-projects.json
+            ${{ runner.temp }}/module-cycles
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Exercise REPL screen rendering and terminal restoration
+        run: |
+          python3 -m venv "$RUNNER_TEMP/repl-tests"
+          "$RUNNER_TEMP/repl-tests/bin/pip" install -r tools/repl-test-requirements.txt
+          "$RUNNER_TEMP/repl-tests/bin/python" tools/native-repl-editor-test.py bin/trbn
+          "$RUNNER_TEMP/repl-tests/bin/python" tools/native-repl-usability-test.py bin/trbn
+      - name: Verify unchanged inputs reuse the binary
+        run: |
+          cp bin/trbn "$RUNNER_TEMP/trbn-before"
+          ./trbn --version
+          cmp bin/trbn "$RUNNER_TEMP/trbn-before"
+      - name: Package the development compiler and QBE sidecar
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p dist/package
+          native_version=$(cat NATIVE_VERSION)
+          test "$(bin/trbn --version)" = "trbn $native_version (development; default mode: trb)"
+          cp bin/trbn bin/qbe bin/build-info.txt bin/qbe-backend.json dist/package/
+          printf 'version=%s\n' "$native_version" >> dist/package/build-info.txt
+          cp docs/native-cli.md dist/package/README.md
+          cp LICENSE dist/package/LICENSE
+          cp docs/licenses/qbe-1.3.txt dist/package/QBE-LICENSE
+          cp third_party/go-float/LICENSE dist/package/GO-FLOAT-LICENSE
+          cp third_party/go-float/source.json dist/package/float-decimal-source.json
+          cp docs/native-float-decimal.md dist/package/FLOAT-DECIMAL.md
+          cp docs/native-network.md dist/package/HTTP-NETWORK.md
+          cp -R bin/network dist/package/network
+          cp docs/native-compression.md dist/package/COMPRESSION.md
+          cp -R bin/compression dist/package/compression
+          cp docs/native-crypto.md dist/package/CRYPTO.md
+          cp -R bin/crypto dist/package/crypto
+          cp docs/native-oidc.md dist/package/OIDC.md
+          cp -R bin/oidc dist/package/oidc
+          cp -R bin/sqlite dist/package/sqlite
+          tar -czf "dist/trbn-$PLATFORM.tar.gz" -C dist/package .
+          cd dist
+          shasum -a 256 "trbn-$PLATFORM.tar.gz" > "trbn-$PLATFORM.tar.gz.sha256"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: trbn-${{ matrix.platform }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: Retain the actual compiler after a failed CLI validation
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: failed-compiler-${{ matrix.platform }}
+          path: |
+            bin/trbn
+            bin/qbe
+            bin/build-info.txt
+            bin/qbe-backend.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  cache:
+    # Tiered PRs leave cache invalidation to Main validation.
+    if: inputs.scope != 'pull-request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: darwin-arm64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    # The one CLI-only rebuild is independently retryable from CLI smoke.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify Linux linker
+        if: runner.os == 'Linux'
+        run: python3 tools/ci-linux-prerequisites.py linker --bin-dir "$RUNNER_TEMP/native-ci-bin" --receipt "$RUNNER_TEMP/linux-prerequisites.json"
+      - name: Retain Linux prerequisite evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-prerequisites-cache
+          path: ${{ runner.temp }}/linux-prerequisites.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build from the pinned native seed and verify fixed points
+        run: |
+          python3 tools/build-crypto-dependencies.py --archives "$RUNNER_TEMP/crypto-sources" --output bin/crypto
+          ./trbn --version
+      - name: Exercise checkout cache invalidation
+        run: |
+          set -o pipefail
+          python3 tools/native-bootstrap-test.py 2>&1 | tee "$RUNNER_TEMP/native-bootstrap-cache.log"
+      - name: Retain cache-invalidation evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-cli-cache-${{ matrix.platform }}
+          path: ${{ runner.temp }}/native-bootstrap-cache.log
+          if-no-files-found: error
+          retention-days: 30

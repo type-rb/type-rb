@@ -1,0 +1,13 @@
+class Pair
+	@left: Integer
+	@right: Integer
+	def initialize(left: Integer, right: Integer = 2)
+		@left = left
+		@right = right
+	end
+end
+
+def main()
+	item := Pair.new(3)
+	puts(item.left + item.right)
+end

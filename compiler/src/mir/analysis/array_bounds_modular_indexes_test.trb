@@ -1,0 +1,99 @@
+import { emit_qbe } from compiler
+import { mir_op_array_load, mir_op_array_position } from mir/model/instructions
+import { mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def modular_array_access_proven(state: CompilerState): Boolean
+	index := mir_function_index(state.scalar_mir, 0)
+	state.scalar_mir.array_check_reuse[index].each do |site|
+		kind := state.scalar_mir.instructions[site].kind
+		if kind == mir_op_array_load() || kind == mir_op_array_position()
+			return true
+		end
+	end
+	return false
+end
+
+describe("MIR fixed Array modular indexes") do
+	test("proves fresh storage while mutable elements allocate under collection") do
+		source := "def run(): Integer\nvalues := [Counter.new(100), Counter.new(200)]\nmut index := 0\nmut total := 0\nwhile index < 8\ntotal += values[index % values.size()].step()\nindex += 1\nend\nreturn total\nend\nclass Counter\n@value: Integer\ndef initialize(value: Integer)\n@value = value\nend\ndef step(): Integer\n@value += 1\nreturn @value.to_s().size()\nend\nend\ndef main()\nputs(run())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(modular_array_access_proven(state)).to_be_true()
+		output := control_test_output(emit_qbe(state))
+		marker := " %string =l call $trbn_string_alloc(l %size)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("24\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains negative unknown and out-of-range modular indexes") do
+		["-1", "unknown"].each do |start|
+			state := array_loop_mir_check("def run(unknown: Integer): Integer\nvalues := [10, 20, 30, 40]\nmut index := " + start + "\nmut total := 0\nwhile index < 3\ntotal += values[index % values.size()]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+			expect(modular_array_access_proven(state)).to_be_false()
+		end
+		["0", "5", "other.size()", "values[0]"].each do |divisor|
+			state := array_loop_mir_check("def run(other: Array<Integer>): Integer\nvalues := [10, 20, 30, 40]\nmut index := 0\nmut total := 0\nwhile index < 3\ntotal += values[index % " + divisor + "]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+			expect(modular_array_access_proven(state)).to_be_false()
+		end
+	end
+
+	test("does not equate an element value to its container length") do
+		state := array_loop_mir_check("def run(): Integer\nvalues := [7, 9, 11, 13]\nreturn 23 % values[0]\nend\ndef main()\nputs(run())\nend\n")
+		state.scalar_mir.numeric_plans[0].each do |plan|
+			plan.operations.each do |operation|
+				expect(operation.divisor).to_equal(0)
+			end
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains resize and escape paths and rejects a stale modular proof") do
+		["values.push(5)", "touch(values)", "mut view := values\nview.pop()"].each do |mutation|
+			mut state := array_loop_mir_check("def run(): Integer\nmut values := [10, 20, 30, 40]\nmut index := 0\nmut total := 0\nwhile index < 3\n" + mutation + "\ntotal += values[index % 4]\nindex += 1\nend\nreturn total\nend\ndef touch(mut values: Array<Integer>)\nvalues.push(5)\nend\ndef main()\nend\n")
+			expect(modular_array_access_proven(state)).to_be_false()
+		end
+		mut state := array_loop_mir_check("def run(): Integer\nvalues := [10, 20, 30, 40]\nmut index := 0\nmut total := 0\nwhile index < 3\ntotal += values[index % 4]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+		expect(modular_array_access_proven(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		stale := state.scalar_mir.array_check_reuse[index]
+		mut literal := 0
+		while literal < state.scalar_mir.literal_texts.size()
+			if state.scalar_mir.literal_texts[literal] == "4"
+				state.scalar_mir.literal_texts[literal] = "5"
+			end
+			literal += 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(modular_array_access_proven(state)).to_be_false()
+		state.scalar_mir.array_check_reuse[index] = stale
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array check-reuse plan differs")
+	end
+end

@@ -1,0 +1,427 @@
+import { json_array, json_boolean, json_null, json_number, json_object, json_string } from project/json_kinds
+import { compiler_string_bytes } from support/compiler_bytes
+import { compiler_literal_byte, escape_digit } from frontend/syntax/string_escapes
+
+record PackageJsonNode
+	kind: Integer
+	text: String
+	keys: Array<String>
+	children: Array<Integer>
+end
+
+record PackageJson
+	nodes: Array<PackageJsonNode>
+	error: Array<String>
+end
+
+def package_json_fail(mut document: PackageJson, message: String)
+	if document.error[0] == ""
+		document.error[0] = message
+	end
+end
+
+def package_json_space(source: String, mut position: Array<Integer>)
+	while position[0] < source.size()
+		character := source[position[0]]
+		if character != " " && character != "\t" && character != "\r" && character != "\n"
+			return
+		end
+		position[0] += 1
+	end
+end
+
+def package_json_value(mut document: PackageJson, source: String, mut position: Array<Integer>, depth: Integer): Integer
+	id := document.nodes.size()
+	document.nodes.push(PackageJsonNode.new(kind: json_null(), text: "null", keys: [], children: []))
+	package_json_space(source, position)
+	if depth > 128 || position[0] >= source.size()
+		package_json_fail(document, "invalid or excessively nested JSON value")
+		return id
+	end
+	character := source[position[0]]
+	mut kind := json_number()
+	mut value := ""
+	mut keys: Array<String> := []
+	mut children: Array<Integer> := []
+	if character == "{" || character == "["
+		kind = json_object()
+		mut finish := "}"
+		if character == "["
+			kind = json_array()
+			finish = "]"
+		end
+		position[0] += 1
+		package_json_space(source, position)
+		mut done := false
+		if position[0] < source.size() && source[position[0]] == finish
+			position[0] += 1
+			done = true
+		end
+		while !done && document.error[0] == ""
+			mut key := ""
+			if kind == json_object()
+				key = package_json_read_string(document, source, position)
+				package_json_space(source, position)
+				if position[0] >= source.size() || source[position[0]] != ":"
+					package_json_fail(document, "expected JSON colon")
+				else
+					position[0] += 1
+				end
+			end
+			if document.error[0] != ""
+				return id
+			end
+			child := package_json_value(document, source, position, depth + 1)
+			mut previous := -1
+			mut index := 0
+			while index < keys.size()
+				if keys[index] == key
+					previous = index
+				end
+				index += 1
+			end
+			if kind == json_object() && previous >= 0
+				children[previous] = child
+			else
+				if kind == json_object()
+					keys.push(key)
+				end
+				children.push(child)
+			end
+			package_json_space(source, position)
+			if position[0] >= source.size()
+				package_json_fail(document, "unterminated JSON container")
+			elsif source[position[0]] == finish
+				position[0] += 1
+				done = true
+			elsif source[position[0]] == ","
+				position[0] += 1
+				package_json_space(source, position)
+				if position[0] < source.size() && source[position[0]] == finish
+					package_json_fail(document, "trailing comma in JSON container")
+				end
+			else
+				package_json_fail(document, "expected JSON comma or closing delimiter")
+			end
+		end
+	elsif character == "\""
+		kind = json_string()
+		value = package_json_read_string(document, source, position)
+	else
+		mut scanning := true
+		while position[0] < source.size() && scanning
+			current := source[position[0]]
+			if current == " " || current == "\n" || current == "\r" || current == "\t" || current == "," || current == "]" || current == "}"
+				scanning = false
+			else
+				value += current
+				position[0] += 1
+			end
+		end
+		if value == "null"
+			kind = json_null()
+		elsif value == "true" || value == "false"
+			kind = json_boolean()
+		elsif !package_json_number(value)
+			package_json_fail(document, "invalid JSON value")
+		end
+	end
+	document.nodes[id] = PackageJsonNode.new(kind: kind, text: value, keys: keys, children: children)
+	return id
+end
+
+def package_json_digit(character: String): Boolean
+	mut index := 0
+	while index < 10
+		if "0123456789"[index] == character
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def package_json_number(value: String): Boolean
+	mut position := 0
+	if value.size() > 0 && value[0] == "-"
+		position += 1
+	end
+	if position >= value.size() || !package_json_digit(value[position])
+		return false
+	end
+	if value[position] == "0"
+		position += 1
+	else
+		while position < value.size() && package_json_digit(value[position])
+			position += 1
+		end
+	end
+	if position < value.size() && value[position] == "."
+		position += 1
+		start := position
+		while position < value.size() && package_json_digit(value[position])
+			position += 1
+		end
+		if position == start
+			return false
+		end
+	end
+	if position < value.size() && (value[position] == "e" || value[position] == "E")
+		position += 1
+		if position < value.size() && (value[position] == "+" || value[position] == "-")
+			position += 1
+		end
+		start := position
+		while position < value.size() && package_json_digit(value[position])
+			position += 1
+		end
+		if position == start
+			return false
+		end
+	end
+	return position == value.size()
+end
+
+def package_json_parse(source: String): PackageJson
+	mut document := PackageJson.new(nodes: [], error: [""])
+	mut position := [0]
+	package_json_value(document, source, position, 0)
+	package_json_space(source, position)
+	if position[0] != source.size()
+		package_json_fail(document, "trailing JSON content")
+	end
+	return document
+end
+
+def package_json_member(document: PackageJson, id: Integer, key: String): Integer
+	if id < 0 || document.nodes[id].kind != json_object()
+		return -1
+	end
+	node := document.nodes[id]
+	mut index := 0
+	while index < node.keys.size()
+		if node.keys[index] == key
+			return node.children[index]
+		end
+		index += 1
+	end
+	return -1
+end
+
+def package_json_string_field(mut document: PackageJson, id: Integer, key: String): String
+	child := package_json_member(document, id, key)
+	if child < 0 || document.nodes[child].kind == json_null()
+		return ""
+	end
+	if document.nodes[child].kind != json_string()
+		package_json_fail(document, key + " must be a string")
+		return ""
+	end
+	return document.nodes[child].text
+end
+
+def package_json_quote(value: String): String
+	mut result := "\""
+	mut index := 0
+	while index < value.size()
+		character := value[index]
+		bytes := compiler_string_bytes(character)
+		if character == "\"" || character == "\\"
+			result += "\\" + character
+		elsif character == "\n"
+			result += "\\n"
+		elsif character == "\r"
+			result += "\\r"
+		elsif character == "\t"
+			result += "\\t"
+		elsif bytes.size() == 3 && bytes[0] == 226 && bytes[1] == 128 && bytes[2] == 168
+			result += "\\u2028"
+		elsif bytes.size() == 3 && bytes[0] == 226 && bytes[1] == 128 && bytes[2] == 169
+			result += "\\u2029"
+		elsif bytes.size() == 1 && bytes[0] == 8
+			result += "\\b"
+		elsif bytes.size() == 1 && bytes[0] == 12
+			result += "\\f"
+		else
+			if bytes.size() == 1 && bytes[0] < 32
+				result += "\\u00" + "0123456789abcdef"[bytes[0] / 16] + "0123456789abcdef"[bytes[0] % 16]
+			else
+				result += character
+			end
+		end
+		index += 1
+	end
+	return result + "\""
+end
+
+def package_name_less(left: String, right: String): Boolean
+	left_bytes := compiler_string_bytes(left)
+	right_bytes := compiler_string_bytes(right)
+	mut index := 0
+	while index < left_bytes.size() && index < right_bytes.size()
+		if left_bytes[index] != right_bytes[index]
+			return left_bytes[index] < right_bytes[index]
+		end
+		index += 1
+	end
+	return left_bytes.size() < right_bytes.size()
+end
+
+def package_sorted_indices(names: Array<String>): Array<Integer>
+	mut order: Array<Integer> := []
+	mut index := 0
+	while index < names.size()
+		order.push(index)
+		mut position := order.size() - 1
+		while position > 0 && package_name_less(names[order[position]], names[order[position - 1]])
+			previous := order[position - 1]
+			order[position - 1] = order[position]
+			order[position] = previous
+			position -= 1
+		end
+		index += 1
+	end
+	return order
+end
+
+# Canonical object ordering is used only for structural lock comparisons.
+def package_json_canonical(document: PackageJson, id: Integer): String
+	node := document.nodes[id]
+	if node.kind == json_string()
+		return package_json_quote(node.text)
+	end
+	if node.kind != json_object() && node.kind != json_array()
+		return node.text
+	end
+	mut result := "["
+	mut finish := "]"
+	mut order: Array<Integer> := []
+	if node.kind == json_object()
+		result = "{"
+		finish = "}"
+		order = package_sorted_indices(node.keys)
+	else
+		mut index := 0
+		while index < node.children.size()
+			order.push(index)
+			index += 1
+		end
+	end
+	mut index := 0
+	while index < order.size()
+		if index > 0
+			result += ","
+		end
+		selected := order[index]
+		if node.kind == json_object()
+			result += package_json_quote(node.keys[selected]) + ":"
+		end
+		result += package_json_canonical(document, node.children[selected])
+		index += 1
+	end
+	return result + finish
+end
+
+def package_json_scalar(value: Integer): String
+	if value < 128
+		return compiler_literal_byte(value)
+	elsif value < 2048
+		return compiler_literal_byte(192 + value / 64) + compiler_literal_byte(128 + value % 64)
+	elsif value < 65536
+		return compiler_literal_byte(224 + value / 4096) + compiler_literal_byte(128 + (value / 64) % 64) + compiler_literal_byte(128 + value % 64)
+	end
+	return compiler_literal_byte(240 + value / 262144) + compiler_literal_byte(128 + (value / 4096) % 64) + compiler_literal_byte(128 + (value / 64) % 64) + compiler_literal_byte(128 + value % 64)
+end
+
+def package_json_hex(source: String, start: Integer): Integer
+	if start + 4 > source.size()
+		return -1
+	end
+	mut result := 0
+	mut index := 0
+	while index < 4
+		digit := escape_digit(source[start + index])
+		if digit < 0
+			return -1
+		end
+		result = result * 16 + digit
+		index += 1
+	end
+	return result
+end
+
+def package_json_read_string(mut document: PackageJson, source: String, mut position: Array<Integer>): String
+	if position[0] >= source.size() || source[position[0]] != "\""
+		package_json_fail(document, "expected JSON string")
+		return ""
+	end
+	position[0] += 1
+	mut result := ""
+	while position[0] < source.size()
+		character := source[position[0]]
+		position[0] += 1
+		if character == "\""
+			return result
+		end
+		if character == "\\"
+			if position[0] >= source.size()
+				package_json_fail(document, "incomplete JSON escape")
+				return result
+			end
+			escaped := source[position[0]]
+			position[0] += 1
+			if escaped == "\"" || escaped == "\\" || escaped == "/"
+				result += escaped
+			elsif escaped == "n"
+				result += "\n"
+			elsif escaped == "r"
+				result += "\r"
+			elsif escaped == "t"
+				result += "\t"
+			elsif escaped == "b"
+				result += compiler_literal_byte(8)
+			elsif escaped == "f"
+				result += compiler_literal_byte(12)
+			elsif escaped == "u"
+				mut point := package_json_hex(source, position[0])
+				if point < 0
+					package_json_fail(document, "invalid JSON Unicode escape")
+					return result
+				end
+				position[0] += 4
+				if point >= 55296 && point <= 56319
+					mut low := -1
+					if position[0] + 6 <= source.size() && source[position[0]] == "\\" && source[position[0] + 1] == "u"
+						low = package_json_hex(source, position[0] + 2)
+					end
+					if low >= 56320 && low <= 57343
+						point = 65536 + (point - 55296) * 1024 + low - 56320
+						position[0] += 6
+					else
+						point = 65533
+					end
+				elsif point >= 56320 && point <= 57343
+					point = 65533
+				end
+				decoded := package_json_scalar(point)
+				if decoded == ""
+					package_json_fail(document, "bootstrap JSON Unicode construction is not supported")
+					return result
+				end
+				result += decoded
+			else
+				package_json_fail(document, "invalid JSON escape")
+				return result
+			end
+		else
+			bytes := compiler_string_bytes(character)
+			if bytes.size() == 1 && bytes[0] < 32
+				package_json_fail(document, "control character in JSON string")
+				return result
+			end
+			result += character
+		end
+	end
+	package_json_fail(document, "unterminated JSON string")
+	return result
+end

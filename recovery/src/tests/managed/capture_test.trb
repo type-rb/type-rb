@@ -1,0 +1,226 @@
+import { ComparisonOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedField, RecoveryManagedTypeDefinition, RecoveryManagedValueType } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedTerminator } from managed/mir
+import { build_recovery_managed_executable } from managed/toolchain
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_capture_module(): RecoveryManagedModule
+	origin := SourceOrigin.new(
+		source_id: "main",
+		start_line: 1,
+		start_column: 1,
+		end_line: 12,
+		end_column: 4,
+	)
+	integer_type := RecoveryManagedValueType::Scalar(ScalarType::Integer)
+	pair_type := RecoveryManagedValueType::Aggregate("capture#Pair")
+	return RecoveryManagedModule.new(
+		id: "capture",
+		entry_function: "capture#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: [
+			RecoveryManagedTypeDefinition::Record(
+				"capture#Pair",
+				[
+					RecoveryManagedField.new(name: "left", value_type: integer_type),
+					RecoveryManagedField.new(name: "right", value_type: integer_type),
+				],
+			),
+			RecoveryManagedTypeDefinition::Function("() -> Integer", [], integer_type),
+			RecoveryManagedTypeDefinition::Function("(Integer) -> Integer", [integer_type], integer_type),
+		],
+		functions: [
+			RecoveryManagedFunction.new(
+				id: "capture#body",
+				name: "body",
+				parameters: [],
+				result_type: RecoveryManagedResultType::Value(integer_type),
+				entry: "entry",
+				origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry",
+						parameters: [],
+						origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::RecordProject("value", "capture#Pair", "pair", "left", origin),
+						],
+						terminator: RecoveryManagedTerminator::Return("value", origin),
+					),
+				],
+				captures: [RecoveryManagedParameter.new(id: "pair", value_type: pair_type, origin: origin)],
+			),
+			RecoveryManagedFunction.new(
+				id: "capture#identity",
+				name: "identity",
+				parameters: [RecoveryManagedParameter.new(id: "value", value_type: integer_type, origin: origin)],
+				result_type: RecoveryManagedResultType::Value(integer_type),
+				entry: "entry",
+				origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry",
+						parameters: [],
+						origin: origin,
+						instructions: [],
+						terminator: RecoveryManagedTerminator::Return("value", origin),
+					),
+				],
+				captures: [],
+			),
+			RecoveryManagedFunction.new(
+				id: "capture#main",
+				name: "main",
+				parameters: [],
+				result_type: RecoveryManagedResultType::Void,
+				entry: "entry",
+				origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry",
+						parameters: [],
+						origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("fortyTwo", 42, origin)),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("one", 1, origin)),
+							RecoveryManagedInstruction::RecordConstruct(
+								"pair",
+								"capture#Pair",
+								["fortyTwo", "one"],
+								origin,
+							),
+							RecoveryManagedInstruction::ClosureConstruct(
+								"closure",
+								"() -> Integer",
+								"capture#body",
+								["pair"],
+								origin,
+							),
+							RecoveryManagedInstruction::ClosureCall(
+								"actual",
+								"() -> Integer",
+								"closure",
+								[],
+								origin,
+							),
+							RecoveryManagedInstruction::Scalar(
+								RecoveryScalarInstruction::IntegerCompare(
+									"matches",
+									ComparisonOperator::Equal,
+									"actual",
+									"fortyTwo",
+									origin,
+								)
+							),
+							RecoveryManagedInstruction::ClosureConstruct(
+								"identity",
+								"(Integer) -> Integer",
+								"capture#identity",
+								[],
+								origin,
+							),
+							RecoveryManagedInstruction::ClosureCall(
+								"identityActual",
+								"(Integer) -> Integer",
+								"identity",
+								["fortyTwo"],
+								origin,
+							),
+							RecoveryManagedInstruction::Scalar(
+								RecoveryScalarInstruction::IntegerCompare(
+									"identityMatches",
+									ComparisonOperator::Equal,
+									"identityActual",
+									"fortyTwo",
+									origin,
+								)
+							),
+						],
+						terminator: RecoveryManagedTerminator::Branch(
+							"matches",
+							"identity",
+							["identityMatches"],
+							"failure",
+							[],
+							origin,
+						),
+					),
+					RecoveryManagedBlock.new(
+						id: "identity",
+						parameters: [
+							RecoveryManagedParameter.new(
+								id: "identityResult",
+								value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean),
+								origin: origin,
+							),
+						],
+						origin: origin,
+						instructions: [],
+						terminator: RecoveryManagedTerminator::Branch(
+							"identityResult",
+							"success",
+							[],
+							"failure",
+							[],
+							origin,
+						),
+					),
+					RecoveryManagedBlock.new(
+						id: "success",
+						parameters: [],
+						origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("capture-ok\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "failure",
+						parameters: [],
+						origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("capture-fail\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+				],
+			),
+		],
+	)
+end
+
+describe("Managed recovery closure capture runtime") do
+	test("supports zero-capture and capturing closure ABIs") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-managed-capture"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_managed_executable(
+					_recovery_managed_capture_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/sample",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("capture-ok\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + "\n" + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

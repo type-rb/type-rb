@@ -1,0 +1,554 @@
+import { mir_type_none } from mir/model/type_ids
+import { mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { integer_string } from support/literals
+import { MirBlock, MirFunction, MirModule, MirValue } from mir/model/module
+
+# Derived from checked storage, never accepted as input optimization facts.
+# Compact function-local value and block IDs use bounded arrays; sparse IDs
+# use Hash. CFG storage grows with actual blocks and edges. Decimal keys
+# preserve sparse IDs within the recovery subset.
+# Immediate dominators avoid a quadratic dominance matrix.
+record MirFlow
+	blocks: Hash<String, Integer>
+	# The compact block index is relative to this function's minimum block ID.
+	dense_block_base: Integer
+	dense_blocks: Array<Integer>
+	# Parallel rows retain every incoming edge, including both branch arms.
+	predecessors: Array<Array<Integer>>
+	incoming_starts: Array<Array<Integer>>
+	entry: Integer
+	ranks: Array<Integer>
+	dominators: Array<Integer>
+	dense_definitions: Array<Integer>
+	dense_positions: Array<Integer>
+	definitions: Hash<String, Integer>
+	positions: Hash<String, Integer>
+	# Compiler-generated value IDs are dense; raw fixtures may be sparse.
+	dense_types: Array<Integer>
+	types: Hash<String, Integer>
+end
+
+# The verifier has already checked value ownership before optimization. Keep
+# function-local rows together for passes that inspect every function.
+def mir_function_value_groups(native_module: MirModule): Array<Array<MirValue>>
+	mut groups: Array<Array<MirValue>> := []
+	mut positions: Hash<String, Integer> := {}
+	native_module.functions.each do |function|
+		key := integer_string(function.id)
+		if !positions.key?(key)
+			# Keep the first identity match, as the general lookup does. Invalid
+			# duplicate declarations are diagnosed by the MIR verifier.
+			positions[key] = groups.size()
+		end
+		groups.push([])
+	end
+	native_module.values.each do |value|
+		key := integer_string(value.function_id)
+		if positions.key?(key)
+			index := positions[key]
+			mut group := groups[index]
+			group.push(value)
+		end
+	end
+	return groups
+end
+
+def mir_flow_blocks(native_module: MirModule, function: MirFunction): Hash<String, Integer>
+	mut blocks: Hash<String, Integer> := {}
+	mut index := 0
+	while index < function.block_count
+		blocks[integer_string(native_module.blocks[function.block_start + index].id)] = index
+		index += 1
+	end
+	return blocks
+end
+
+def mir_flow_block_index(flow: MirFlow, id: Integer): Integer
+	if id >= flow.dense_block_base && id - flow.dense_block_base < flow.dense_blocks.size()
+		index := flow.dense_blocks[id - flow.dense_block_base]
+		if index >= 0
+			return index
+		end
+	end
+	return flow.blocks[integer_string(id)]
+end
+
+def mir_flow_graph_error(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>): String
+	if !blocks.key?(integer_string(function.entry_block))
+		return "MIR function entry block does not exist"
+	end
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if blocks[integer_string(block.id)] != index
+			return "MIR block identifier is duplicated"
+		end
+		if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+			if !blocks.key?(integer_string(block.first_target))
+				return "MIR terminator target does not exist"
+			end
+		end
+		if block.terminator == mir_terminator_branch() && !blocks.key?(integer_string(block.second_target))
+			return "MIR terminator target does not exist"
+		end
+		index += 1
+	end
+	return ""
+end
+
+def mir_flow_order(entry: Integer, successors: Array<Array<Integer>>): Array<Integer>
+	mut seen: Array<Integer> := []
+	mut cursors: Array<Integer> := []
+	successors.each do |_edges|
+		seen.push(0)
+		cursors.push(0)
+	end
+	mut stack := [entry]
+	mut depth := 1
+	seen[entry] = 1
+	mut finished: Array<Integer> := []
+	while depth > 0
+		block := stack[depth - 1]
+		if cursors[block] < successors[block].size()
+			next_block := successors[block][cursors[block]]
+			cursors[block] += 1
+			if seen[next_block] == 0
+				seen[next_block] = 1
+				if depth == stack.size()
+					stack.push(next_block)
+				else
+					stack[depth] = next_block
+				end
+				depth += 1
+			end
+		else
+			finished.push(block)
+			depth -= 1
+		end
+	end
+	mut left := 0
+	mut right := finished.size() - 1
+	while left < right
+		value := finished[left]
+		finished[left] = finished[right]
+		finished[right] = value
+		left += 1
+		right -= 1
+	end
+	return finished
+end
+
+def mir_flow_intersect(dominators: Array<Integer>, ranks: Array<Integer>, mut first: Integer, mut second: Integer): Integer
+	while first != second
+		if ranks[first] > ranks[second]
+			first = dominators[first]
+		else
+			second = dominators[second]
+		end
+	end
+	return first
+end
+
+def mir_build_flow_with_values(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, values: Array<MirValue>): MirFlow
+	mut dense_block_base := 0
+	mut dense_blocks: Array<Integer> := []
+	if function.block_count > 0
+		mut minimum_id := native_module.blocks[function.block_start].id
+		mut maximum_id := minimum_id
+		mut block_index := 1
+		while block_index < function.block_count
+			id := native_module.blocks[function.block_start + block_index].id
+			if id < minimum_id
+				minimum_id = id
+			end
+			if id > maximum_id
+				maximum_id = id
+			end
+			block_index += 1
+		end
+		if minimum_id >= 0 && maximum_id - minimum_id < function.block_count * 2
+			dense_block_base = minimum_id
+			while dense_blocks.size() <= maximum_id - minimum_id
+				dense_blocks.push(-1)
+			end
+			block_index = 0
+			while block_index < function.block_count
+				id := native_module.blocks[function.block_start + block_index].id
+				dense_blocks[id - minimum_id] = block_index
+				block_index += 1
+			end
+		end
+	end
+	mut successors: Array<Array<Integer>> := []
+	mut predecessors: Array<Array<Integer>> := []
+	mut incoming_starts: Array<Array<Integer>> := []
+	mut ranks: Array<Integer> := []
+	mut dominators: Array<Integer> := []
+	mut definitions: Hash<String, Integer> := {}
+	mut positions: Hash<String, Integer> := {}
+	mut types: Hash<String, Integer> := {}
+	mut local_count := 0
+	mut maximum_id := -1
+	mut dense_possible := true
+	values.each do |value|
+		if value.function_id == function.id
+			local_count += 1
+			if value.id < 0
+				dense_possible = false
+			end
+			if value.id > maximum_id
+				maximum_id = value.id
+			end
+		end
+	end
+	mut dense_types: Array<Integer> := []
+	mut dense_definitions: Array<Integer> := []
+	mut dense_positions: Array<Integer> := []
+	if dense_possible && maximum_id >= 0 && maximum_id < local_count * 2
+		while dense_types.size() <= maximum_id
+			dense_types.push(0)
+			dense_definitions.push(-2)
+			dense_positions.push(-1)
+		end
+	end
+	values.each do |value|
+		if value.function_id == function.id
+			if dense_types.size() > 0
+				dense_types[value.id] = value.type_id
+			else
+				types[integer_string(value.id)] = value.type_id
+			end
+		end
+	end
+	mut index := 0
+	while index < function.block_count
+		successors.push([])
+		predecessors.push([])
+		incoming_starts.push([])
+		ranks.push(-1)
+		dominators.push(-1)
+		index += 1
+	end
+	index = 0
+	while index < function.parameter_count
+		value := native_module.arguments[function.parameter_start + index]
+		if value >= 0 && value < dense_definitions.size()
+			dense_definitions[value] = -1
+			dense_positions[value] = -1
+		else
+			key := integer_string(value)
+			definitions[key] = -1
+			positions[key] = -1
+		end
+		index += 1
+	end
+	index = 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		mut edges := successors[index]
+		if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+			target := blocks[integer_string(block.first_target)]
+			edges.push(target)
+			incoming_starts[target].push(block.first_argument_start)
+		end
+		if block.terminator == mir_terminator_branch()
+			target := blocks[integer_string(block.second_target)]
+			edges.push(target)
+			incoming_starts[target].push(block.second_argument_start)
+		end
+		edges.each do |target|
+			mut incoming := predecessors[target]
+			incoming.push(index)
+		end
+		mut parameter := 0
+		while parameter < block.parameter_count
+			value := native_module.arguments[block.parameter_start + parameter]
+			if value >= 0 && value < dense_definitions.size()
+				dense_definitions[value] = index
+				dense_positions[value] = -1
+			else
+				key := integer_string(value)
+				definitions[key] = index
+				positions[key] = -1
+			end
+			parameter += 1
+		end
+		mut instruction := block.instruction_start
+		while instruction < block.instruction_start + block.instruction_count
+			value := native_module.instructions[instruction].result
+			if value >= 0
+				if value < dense_definitions.size()
+					dense_definitions[value] = index
+					dense_positions[value] = instruction
+				else
+					key := integer_string(value)
+					definitions[key] = index
+					positions[key] = instruction
+				end
+			end
+			instruction += 1
+		end
+		index += 1
+	end
+	# Instruction failures terminate in empty trap blocks. They expose no values
+	# or continuations, so they are not ordinary CFG successors.
+	entry := blocks[integer_string(function.entry_block)]
+	order := mir_flow_order(entry, successors)
+	index = 0
+	while index < order.size()
+		ranks[order[index]] = index
+		index += 1
+	end
+	dominators[entry] = entry
+	mut changed := true
+	while changed
+		changed = false
+		index = 1
+		while index < order.size()
+			block := order[index]
+			mut parent := -1
+			predecessors[block].each do |previous|
+				if dominators[previous] >= 0
+					if parent < 0
+						parent = previous
+					else
+						parent = mir_flow_intersect(dominators, ranks, parent, previous)
+					end
+				end
+			end
+			if dominators[block] != parent
+				dominators[block] = parent
+				changed = true
+			end
+			index += 1
+		end
+	end
+	return MirFlow.new(blocks: blocks, dense_block_base: dense_block_base, dense_blocks: dense_blocks, predecessors: predecessors, incoming_starts: incoming_starts, entry: entry, ranks: ranks, dominators: dominators, dense_definitions: dense_definitions, dense_positions: dense_positions, definitions: definitions, positions: positions, dense_types: dense_types, types: types)
+end
+
+def mir_build_flow(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>): MirFlow
+	mut values: Array<MirValue> := []
+	native_module.values.each do |value|
+		if value.function_id == function.id
+			values.push(value)
+		end
+	end
+	return mir_build_flow_with_values(native_module, function, blocks, values)
+end
+
+def mir_value_available(flow: MirFlow, block: MirBlock, instruction_finish: Integer, value: Integer): Boolean
+	mut owner := -2
+	mut position := -1
+	if value >= 0 && value < flow.dense_definitions.size()
+		owner = flow.dense_definitions[value]
+		position = flow.dense_positions[value]
+	end
+	if owner == -2
+		key := integer_string(value)
+		if !flow.definitions.key?(key)
+			return false
+		end
+		owner = flow.definitions[key]
+		position = flow.positions[key]
+	end
+	if owner < 0
+		return true
+	end
+	mut current := mir_flow_block_index(flow, block.id)
+	if owner == current
+		return position < instruction_finish
+	end
+	if flow.ranks[current] < 0
+		return false
+	end
+	while current != flow.entry
+		current = flow.dominators[current]
+		if current == owner
+			return true
+		end
+	end
+	return false
+end
+
+def mir_flow_position(flow: MirFlow, value: Integer): Integer
+	if value >= 0 && value < flow.dense_definitions.size() && flow.dense_definitions[value] != -2
+		return flow.dense_positions[value]
+	end
+	key := integer_string(value)
+	if flow.positions.key?(key)
+		return flow.positions[key]
+	end
+	return -1
+end
+
+def mir_flow_definition_block(flow: MirFlow, value: Integer): Integer
+	if value >= 0 && value < flow.dense_definitions.size() && flow.dense_definitions[value] != -2
+		return flow.dense_definitions[value]
+	end
+	key := integer_string(value)
+	if flow.definitions.key?(key)
+		return flow.definitions[key]
+	end
+	return -2
+end
+
+# Rebuilt from the checked value table for each verification. A raw MIR edit
+# cannot retain a stale cached type, and sparse IDs do not allocate dense arrays.
+def mir_flow_type(flow: MirFlow, value: Integer): Integer
+	if flow.dense_types.size() > 0
+		if value >= 0 && value < flow.dense_types.size()
+			return flow.dense_types[value]
+		end
+		return mir_type_none()
+	end
+	key := integer_string(value)
+	if flow.types.key?(key)
+		return flow.types[key]
+	end
+	return mir_type_none()
+end
+
+# Dominance and unanimous aliases are derived only from verified CFG/SSA.
+# Unknown or conflicting identities never establish an optimization proof.
+def mir_flow_dominates(flow: MirFlow, owner: Integer, mut block: Integer): Boolean
+	if flow.ranks[block] < 0
+		return false
+	end
+	while block != owner && block != flow.entry
+		block = flow.dominators[block]
+	end
+	return block == owner
+end
+
+record MirFlowAliases
+	dense: Array<Integer>
+	sparse: Hash<String, Integer>
+end
+
+def mir_flow_alias_table(flow: MirFlow): MirFlowAliases
+	mut dense: Array<Integer> := []
+	# Reuse the flow owner's bounded compact-ID decision. Sparse identities must
+	# never make this allocation proportional to an arbitrary maximum value ID.
+	while dense.size() < flow.dense_types.size()
+		dense.push(-2)
+	end
+	return MirFlowAliases.new(dense: dense, sparse: {})
+end
+
+def mir_flow_alias(aliases: MirFlowAliases, value: Integer): Integer
+	if value >= 0 && value < aliases.dense.size()
+		return aliases.dense[value]
+	end
+	key := integer_string(value)
+	if aliases.sparse.key?(key)
+		return aliases.sparse[key]
+	end
+	return -2
+end
+
+def mir_flow_alias_store(mut aliases: MirFlowAliases, value: Integer, identity: Integer)
+	if value >= 0 && value < aliases.dense.size()
+		aliases.dense[value] = identity
+	else
+		aliases.sparse[integer_string(value)] = identity
+	end
+end
+
+# Hold the candidate header's parameters fixed while forwarding identities
+# through other block parameters. Bottom (-2), one value, and conflict (-1)
+# form a finite lattice; cycles with no incoming definition remain unknown.
+def mir_flow_aliases(native_module: MirModule, function: MirFunction, flow: MirFlow, header: MirBlock): MirFlowAliases
+	mut aliases := mir_flow_alias_table(flow)
+	mut index := function.parameter_start
+	while index < function.parameter_start + function.parameter_count
+		value := native_module.arguments[index]
+		mir_flow_alias_store(aliases, value, value)
+		index += 1
+	end
+	index = header.parameter_start
+	while index < header.parameter_start + header.parameter_count
+		value := native_module.arguments[index]
+		mir_flow_alias_store(aliases, value, value)
+		index += 1
+	end
+	index = function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut instruction := block.instruction_start
+		while instruction < block.instruction_start + block.instruction_count
+			value := native_module.instructions[instruction].result
+			if value >= 0
+				mir_flow_alias_store(aliases, value, value)
+			end
+			instruction += 1
+		end
+		index += 1
+	end
+	mut changed := true
+	while changed
+		changed = false
+		index = function.block_start
+		while index < function.block_start + function.block_count
+			block := native_module.blocks[index]
+			if block.id != header.id
+				mut slot := 0
+				while slot < block.parameter_count
+					value := native_module.arguments[block.parameter_start + slot]
+					old := mir_flow_alias(aliases, value)
+					mut merged := old
+					flow.incoming_starts[index - function.block_start].each do |start|
+						incoming := mir_flow_alias(aliases, native_module.arguments[start + slot])
+						if incoming != -2
+							if merged == -2
+								merged = incoming
+							elsif merged != incoming
+								merged = -1
+							end
+						end
+					end
+					if old != merged
+						mir_flow_alias_store(aliases, value, merged)
+						changed = true
+					end
+					slot += 1
+				end
+			end
+			index += 1
+		end
+	end
+	return aliases
+end
+
+# Count physical instruction ownership, including spans shared by logical functions.
+def mir_instruction_occurrences(native_module: MirModule): Array<Integer>
+	mut occurrences: Array<Integer> := []
+	mut cursor := 0
+	while cursor < native_module.instructions.size()
+		occurrences.push(0)
+		cursor += 1
+	end
+	native_module.functions.each do |function|
+		mut at := function.block_start
+		while at < function.block_start + function.block_count
+			block := native_module.blocks[at]
+			cursor = block.instruction_start
+			while cursor < block.instruction_start + block.instruction_count
+				occurrences[cursor] += 1
+				cursor += 1
+			end
+			at += 1
+		end
+	end
+	return occurrences
+end
+
+def mir_flow_parameter_slot(native_module: MirModule, header: MirBlock, value: Integer): Integer
+	mut slot := 0
+	while slot < header.parameter_count
+		if native_module.arguments[header.parameter_start + slot] == value
+			return slot
+		end
+		slot += 1
+	end
+	return -1
+end

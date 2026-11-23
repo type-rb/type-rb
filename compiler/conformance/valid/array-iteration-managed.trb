@@ -1,0 +1,33 @@
+record Item
+	label: String
+	values: Array<Integer>
+end
+
+def main()
+	mut entries := [Item.new(label: "original", values: [42])]
+	mut kept := entries
+	entries.each do |entry|
+		kept[0] = Item.new(label: "replacement", values: [99])
+		entries = []
+		mut index := 0
+		while index < 70000
+			kept[0] = Item.new(label: "new" + index.to_s(), values: [index])
+			index += 1
+		end
+		puts(entry.label)
+		puts(entry.values[0])
+	end
+	puts(kept[0].values[0])
+	puts(entries.size())
+	mut labels := ["saved" + 1.to_s()]
+	mut shared_labels := labels
+	labels.each do |label|
+		labels = []
+		mut index := 0
+		while index < 70000
+			shared_labels[0] = "new" + index.to_s()
+			index += 1
+		end
+		puts(label)
+	end
+end

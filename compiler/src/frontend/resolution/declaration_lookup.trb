@@ -1,0 +1,328 @@
+import { standard_source_function, standard_source_result, standard_source_root, standard_source_test_runner } from state/standard_source_kinds
+import { declaration_alias, declaration_enum, declaration_function, declaration_generic_function, declaration_generic_type, declaration_global, declaration_namespace, declaration_newtype, declaration_object, declaration_record } from frontend/types/declaration_kinds
+import { generic_base } from frontend/types/generic_arguments
+import { find_object_in_module } from frontend/types/object_types
+import { find_newtype_in_module } from frontend/types/newtype_types
+import { namespace_parent, namespace_qualify } from frontend/types/namespace_model
+import { find_enum_in_module } from frontend/types/enum_types
+import { CompilerState, find_name_index, function_index_key } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def find_generic_in_module(state: CompilerState, source: Integer, name: String): Integer
+	mut index := state.type_resolution.generic_definitions.size() - 1
+	while index >= 0
+		row := state.type_resolution.generic_definitions[index]
+		if row.source_id == source && row.name == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_visible_generic(mut state: CompilerState, source: Integer, name: String): Integer
+	return find_visible_declaration(state, source, name, declaration_generic_type())
+end
+
+# Generated conversion results permit the standard variant name in case patterns.
+# Authored annotations and constructors still require an explicit import.
+def find_result_pattern(mut state: CompilerState, source: Integer, name: String): Integer
+	visible := find_visible_declaration(state, source, name, declaration_generic_type())
+	if visible >= 0 || name != "Result" || state.nominal.raw_enum_values.size() == 0
+		return visible
+	end
+	if find_visible_declaration(state, source, name, declaration_record()) >= 0 || find_visible_declaration(state, source, name, declaration_enum()) >= 0 || find_visible_declaration(state, source, name, declaration_alias()) >= 0 || find_visible_declaration(state, source, name, declaration_namespace()) >= 0
+		return -1
+	end
+	mut module_index := 0
+	while module_index < state.module_graph.module_count[0]
+		if sparse_integer_at(state.standard_modules, module_index) == standard_source_result()
+			return find_generic_in_module(state, module_index, "Result")
+		end
+		module_index += 1
+	end
+	return -1
+end
+
+def find_record_in_module(state: CompilerState, module_index: Integer, name: String): Integer
+	mut index := state.declarations.record_count[0] - 1
+	while index >= 0
+		if load_integer(state.declarations.record_modules, index) == module_index
+			if load_string(state.declarations.record_names, index) == name
+				return index
+			end
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_function_in_module(state: CompilerState, module_index: Integer, name: String): Integer
+	# Only the compiler-owned runner can bind an unspellable parsed case.
+	# Authored declarations and imports never gain access through this path.
+	if sparse_integer_at(state.standard_modules, state.module_graph.active_module[0]) == standard_source_test_runner()
+		state.parsed.tests.each do |item|
+			if item.source_id == module_index && item.function_id >= 0 && load_string(state.declarations.function_names, item.function_id) == name
+				return item.function_id
+			end
+		end
+	end
+	return find_name_index(state.declarations.function_lookup, function_index_key(module_index, name))
+end
+
+def find_import_binding(state: CompilerState, module_index: Integer, name: String): Integer
+	start := load_integer(state.module_graph.module_import_starts, module_index)
+	mut index := start + load_integer(state.module_graph.module_import_counts, module_index) - 1
+	while index >= start
+		if load_string(state.module_graph.import_symbols, index) == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_visible_record(mut state: CompilerState, module_index: Integer, name: String): Integer
+	return find_visible_declaration(state, module_index, name, declaration_record())
+end
+
+def find_visible_function(mut state: CompilerState, module_index: Integer, name: String): Integer
+	return find_visible_declaration(state, module_index, name, declaration_function())
+end
+
+def find_visible_enum(mut state: CompilerState, source: Integer, name: String): Integer
+	return find_visible_declaration(state, source, name, declaration_enum())
+end
+
+def find_generic_function_in_module(state: CompilerState, source: Integer, name: String): Integer
+	mut index := state.type_resolution.generic_functions.size() - 1
+	while index >= 0
+		row := state.type_resolution.generic_functions[index]
+		if row.source_id == source && row.name == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_visible_generic_function(mut state: CompilerState, source: Integer, name: String): Integer
+	return find_visible_declaration(state, source, name, declaration_generic_function())
+end
+
+def find_alias_in_module(state: CompilerState, source: Integer, name: String): Integer
+	mut index := state.type_resolution.type_aliases.size() - 1
+	while index >= 0
+		row := state.type_resolution.type_aliases[index]
+		if row.source_id == source && row.name == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_visible_alias(mut state: CompilerState, source: Integer, name: String): Integer
+	return find_visible_declaration(state, source, name, declaration_alias())
+end
+
+# All declaration families share lexical namespace and import-alias selection.
+# The selected row retains its source/declaration identity; no spelling rewrite
+# is performed on the source token stream.
+def find_declaration_in_module(state: CompilerState, source: Integer, name: String, kind: Integer): Integer
+	if kind == declaration_object()
+		return find_object_in_module(state, source, name)
+	end
+	if kind == declaration_newtype()
+		return find_newtype_in_module(state, source, name)
+	end
+	if kind == declaration_function()
+		return find_function_in_module(state, source, name)
+	end
+	if kind == declaration_record()
+		return find_record_in_module(state, source, name)
+	end
+	if kind == declaration_enum()
+		return find_enum_in_module(state, source, name)
+	end
+	if kind == declaration_generic_type()
+		return find_generic_in_module(state, source, name)
+	end
+	if kind == declaration_generic_function()
+		return find_generic_function_in_module(state, source, name)
+	end
+	if kind == declaration_alias()
+		return find_alias_in_module(state, source, name)
+	end
+	if kind == declaration_global()
+		mut index := 0
+		while index < state.global_bindings.globals.size()
+			row := state.global_bindings.globals[index]
+			if row.source_id == source && row.name == name
+				return index
+			end
+			index += 1
+		end
+	end
+	if kind == declaration_namespace()
+		mut index := 0
+		while index < state.global_bindings.namespaces.size()
+			row := state.global_bindings.namespaces[index]
+			if row.source_id == source && row.name == name
+				return index
+			end
+			index += 1
+		end
+	end
+	return -1
+end
+
+def find_visible_declaration(mut state: CompilerState, source: Integer, name: String, kind: Integer): Integer
+	mut owner := state.global_bindings.declaration_owner[0]
+	while owner != ""
+		local := find_declaration_in_module(state, source, namespace_qualify(owner, name), kind)
+		if local >= 0
+			return local
+		end
+		owner = namespace_parent(owner)
+	end
+	local := find_declaration_in_module(state, source, name, kind)
+	if local >= 0
+		# A self import names the same declaration rather than a conflicting
+		# local binding. Record actual lookup usage just as for other imports.
+		binding := find_import_binding(state, source, name)
+		if binding >= 0 && load_integer(state.module_graph.import_targets, binding) == source && load_string(state.module_graph.import_declarations, binding) == name
+			store_integer(state.module_graph.import_used, binding, 1)
+		end
+		return local
+	end
+	mut root := ""
+	mut suffix := ""
+	mut index := 0
+	mut qualified := false
+	while index < name.size()
+		if name[index] == ":"
+			qualified = true
+		end
+		if qualified
+			suffix += name[index]
+		else
+			root += name[index]
+		end
+		index += 1
+	end
+	binding := find_import_binding(state, source, root)
+	if binding < 0
+		return -1
+	end
+	target := load_integer(state.module_graph.import_targets, binding)
+	if target < 0
+		return -1
+	end
+	mut resolved := find_declaration_in_module(state, target, load_string(state.module_graph.import_declarations, binding) + suffix, kind)
+	# Pinned service namespaces expose only their loader-owned export list.
+	# Preserve each function's source identity and reject private helper access.
+	if resolved < 0 && (kind == declaration_function() || kind == declaration_generic_function())
+		owned := sparse_integer_at(state.standard_modules, target)
+		if standard_source_root(owned) == load_string(state.module_graph.import_declarations, binding) && standard_source_function(owned, suffix)
+			mut leaf := ""
+			mut part := 2
+			while part < suffix.size()
+				leaf += suffix[part]
+				part += 1
+			end
+			resolved = find_declaration_in_module(state, target, leaf, kind)
+		end
+	end
+	if kind == declaration_global() && resolved >= 0 && !state.global_bindings.globals[resolved].constant
+		return -1
+	end
+	if resolved >= 0
+		store_integer(state.module_graph.import_used, binding, 1)
+	end
+	return resolved
+end
+
+def find_visible_newtype(mut state: CompilerState, source: Integer, name: String): Integer
+	return find_visible_declaration(state, source, name, declaration_newtype())
+end
+
+# File bindings enter lexical scope after their initializer. Named declarations
+# stay available independently, so an earlier use keeps its function identity.
+# A REPL projection supplies authored order without rewriting source tokens.
+def global_binding_precedes(state: CompilerState, identity: Integer, origin: Integer): Boolean
+	row := state.global_bindings.globals[identity]
+	binding_order := sparse_integer_at(state.global_bindings.global_scope_orders, row.origin)
+	use_order := sparse_integer_at(state.global_bindings.global_scope_orders, origin)
+	if binding_order > 0 && use_order > 0
+		if binding_order < use_order
+			return true
+		end
+		if binding_order > use_order
+			return false
+		end
+	end
+	return row.finish <= origin
+end
+
+def find_inherited_global(mut state: CompilerState, source: Integer, name: String): Integer
+	mut owner := namespace_parent(name)
+	mut leaf := name
+	if owner != ""
+		leaf = ""
+		mut index := owner.size() + 2
+		while index < name.size()
+			leaf += name[index]
+			index += 1
+		end
+	else
+		owner = state.global_bindings.declaration_owner[0]
+	end
+	mut definition := find_visible_declaration(state, source, owner, declaration_object())
+	mut visited := 0
+	while definition >= 0 && visited < state.nominal.objects.size()
+		row := state.nominal.objects[definition]
+		constant := find_declaration_in_module(state, row.source_id, namespace_qualify(row.name, leaf), declaration_global())
+		if constant >= 0
+			return constant
+		end
+		if row.superclass == ""
+			return -1
+		end
+		definition = find_visible_declaration(state, row.source_id, generic_base(row.superclass), declaration_object())
+		visited += 1
+	end
+	return -1
+end
+
+def find_visible_global(mut state: CompilerState, source: Integer, name: String, origin: Integer): Integer
+	mut identity := find_visible_declaration(state, source, name, declaration_global())
+	if identity < 0
+		identity = find_inherited_global(state, source, name)
+	end
+	if identity < 0
+		return -1
+	end
+	if state.global_bindings.globals[identity].constant
+		return identity
+	end
+	# Qualified lowercase members remain unsupported; the reference accepts
+	# them without executable member storage. Lexical uses keep the checked
+	# binding: a later inner declaration must not hide an earlier outer one.
+	if namespace_parent(name) != ""
+		return -1
+	end
+	mut owner := state.global_bindings.declaration_owner[0]
+	while owner != ""
+		local := find_declaration_in_module(state, source, namespace_qualify(owner, name), declaration_global())
+		if local >= 0 && global_binding_precedes(state, local, origin)
+			return local
+		end
+		owner = namespace_parent(owner)
+	end
+	local := find_declaration_in_module(state, source, name, declaration_global())
+	if local >= 0 && global_binding_precedes(state, local, origin)
+		return local
+	end
+	return -1
+end

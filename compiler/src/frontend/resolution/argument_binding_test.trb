@@ -1,0 +1,83 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { MirCall } from mir/model/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { compiler_new } from state/state
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Named argument binding") do
+	test("records the positional and named-only boundary without changing the ABI") do
+		mut state := logical_checked_source("def combine(first: Integer, *, right: Float, left: Integer): Float\nreturn first + left + right\nend\ndef main()\nvalue := combine(1, left: 2, right: 3)\nputs(value.to_i())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(load_integer(state.declarations.parameter_named_only, 0)).to_equal(0)
+		expect(load_integer(state.declarations.parameter_named_only, 1)).to_equal(1)
+		expect(load_integer(state.declarations.parameter_named_only, 2)).to_equal(1)
+		expect(state.scalar_mir.signatures[0].parameter_types).to_equal(["Integer", "Float", "Integer"])
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("checks private initializer bodies with only the preceding typed parameters") do
+		mut state := logical_checked_source("def select(first: Integer, second: Integer = first + 1, *, third: Integer = second + 1): Integer\nreturn first * 100 + second * 10 + third\nend\ndef main()\nputs(select(1, third: 8))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.parsed.default_functions.size()).to_equal(2)
+		expect(state.scalar_mir.functions.size()).to_equal(4)
+		first := state.parsed.default_functions[0]
+		second := state.parsed.default_functions[1]
+		expect(state.scalar_mir.signatures[first].parameter_types).to_equal(["Integer"])
+		expect(state.scalar_mir.signatures[second].parameter_types).to_equal(["Integer", "Integer"])
+		expect(find_function_in_module(state, state.module_graph.entry_module[0], load_string(state.declarations.function_names, first))).to_equal(-1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		# The unused default still owns a checked body; only the omitted slot calls it.
+		mut called: Array<Integer> := []
+		state.scalar_mir.calls.each do |call|
+			called.push(call.callee)
+		end
+		expect(called.include?(first)).to_be_true()
+		expect(called.include?(second)).to_be_false()
+	end
+
+	test("rejects invalid labels counts order and declaration boundaries") do
+		sources := [
+			"def f(first: Integer = 1, second: Integer): Integer\nreturn first+second\nend\ndef main()\nend\n",
+			"def f(*, first: Integer = 1, second: Integer): Integer\nreturn first+second\nend\ndef main()\nend\n",
+			"def f(first: Integer = second, second: Integer = 1): Integer\nreturn first\nend\ndef main()\nend\n",
+			"def f(first: Integer = \"bad\"): Integer\nreturn first\nend\ndef main()\nputs(f(1))\nend\n",
+			"record Entry\nfirst: Integer = second\nsecond: Integer = 1\nend\ndef main()\nend\n",
+			"record Entry\nfirst: Integer = 1\nsecond: Integer\nend\ndef main()\nend\n",
+			"record Entry\nfirst: Integer = \"bad\"\nend\ndef main()\nvalue := Entry.new(first: 1)\nend\n",
+			"def f(value: Integer = caller): Integer\nreturn value\nend\ndef main()\ncaller := 1\nputs(f())\nend\n",
+			"def select(value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select(value: 1))\nend\n",
+			"def select(*, value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select(value: 1, value: 2))\nend\n",
+			"def select(*, value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select(other: 1))\nend\n",
+			"def select(first: Integer, *, value: Integer): Integer\nreturn first + value\nend\ndef main()\nputs(select(value: 1, 2))\nend\n",
+			"def select(*, value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select())\nend\n",
+			"def select(*, value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select(1))\nend\n",
+			"def select(*, value: Integer): Integer\nreturn value\nend\ndef main()\nputs(select(value: true))\nend\n",
+			"def select(*, value: Integer, *, other: Integer)\nend\ndef main()\nend\n",
+			"def select(*,)\nend\ndef main()\nend\n",
+			"record Pair\nleft: String\nright: Integer\nend\ndef main()\nvalue := Pair.new(left: \"a\", left: \"b\")\nend\n",
+			"record Pair\nleft: String\nright: Integer\nend\ndef main()\nvalue := Pair.new(right: 1, other: \"a\")\nend\n",
+			"record Pair\nleft: String\nright: Integer\nend\ndef main()\nvalue := Pair.new(right: \"wrong\", left: \"a\")\nend\n",
+		]
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			mut accepted := lex(state, source)
+			if accepted
+				accepted = parse_module(state, 0, state.module_graph.entry_module[0])
+			end
+			if accepted
+				accepted = resolve(state)
+			end
+			if accepted
+				accepted = check(state)
+			end
+			expect(accepted).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0).empty?()).to_be_false()
+		end
+	end
+end

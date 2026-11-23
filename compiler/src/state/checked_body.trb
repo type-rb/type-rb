@@ -1,0 +1,157 @@
+import { hash_action_literal } from mir/model/hash_actions
+import { UnionPattern } from frontend/types/union_types
+import { MirTransform } from frontend/types/transform_model
+import { ResultOperation } from frontend/types/result_model
+import { CheckedFileBody, CheckedLambda } from frontend/types/callable_types
+import { EnumPattern, RawEnumConversion } from frontend/types/enum_model
+import { MirHashOperation } from mir/model/hashes
+import { MirIteration, MirRangeConstruction } from mir/model/iteration
+import { IntegerStorage, StringStorage, integer_storage_span, store_string, string_storage_span } from support/storage
+
+# Optional frontend/REPL projections for one concrete function body. MIR owns
+# executable semantics; these tables may be discarded after checking.
+record CheckedBody
+	raw_enum_conversions: Array<RawEnumConversion>
+	union_patterns: Array<UnionPattern>
+	union_pattern_origins: IntegerStorage
+	global_references: IntegerStorage
+	resolved_names: StringStorage
+	resolved_finishes: IntegerStorage
+	function: Integer
+	generic_binding: Array<Integer>
+	generic_calls: IntegerStorage
+	function_values: IntegerStorage
+	lambda_types: StringStorage
+	file_bodies: Array<CheckedFileBody>
+	lambdas: Array<CheckedLambda>
+	shared_bindings: Array<Integer>
+	local_types: StringStorage
+	collection_contexts: Array<StringStorage>
+	collection_witnesses: Array<StringStorage>
+	collection_context_regions: Array<IntegerStorage>
+	collection_contexts_checked: Array<Boolean>
+	array_literal_types: StringStorage
+	builtin_result_types: StringStorage
+	result_operations: Array<ResultOperation>
+	# Resolved authored application before alias expansion, for checked display.
+	generic_application_names: StringStorage
+	generic_application_types: StringStorage
+	generic_application_finishes: IntegerStorage
+	enum_patterns: Array<EnumPattern>
+	enum_pattern_origins: IntegerStorage
+	nullable_reads: StringStorage
+	safe_finishes: IntegerStorage
+	safe_types: StringStorage
+	control_types: StringStorage
+	ranges: Array<MirRangeConstruction>
+	range_origins: IntegerStorage
+	hash_operations: Array<MirHashOperation>
+	hash_origins: IntegerStorage
+	hash_initial_types: StringStorage
+	checked_operator_plans: IntegerStorage
+	loop_transfer_kinds: IntegerStorage
+	loop_transfer_targets: IntegerStorage
+	transforms: Array<MirTransform>
+	transform_origins: IntegerStorage
+	transform_types: StringStorage
+	transform_key_types: StringStorage
+	iterations: Array<MirIteration>
+	iteration_origins: IntegerStorage
+	diverging_hashes: IntegerStorage
+end
+
+def checked_body_new(function: Integer, origin: Integer, finish: Integer): CheckedBody
+	return CheckedBody.new(raw_enum_conversions: [],
+		union_patterns: [], union_pattern_origins: integer_storage_span(origin, finish),
+		global_references: integer_storage_span(origin, finish),
+		resolved_names: string_storage_span(origin, finish),
+		resolved_finishes: integer_storage_span(origin, finish),
+		function: function, generic_binding: [0], generic_calls: integer_storage_span(origin, finish),
+		function_values: integer_storage_span(origin, finish),
+		lambda_types: string_storage_span(origin, finish),
+		file_bodies: [], lambdas: [], shared_bindings: [],
+		local_types: string_storage_span(origin, finish),
+		collection_contexts: [string_storage_span(origin, finish)],
+		collection_witnesses: [string_storage_span(origin, finish)],
+		collection_context_regions: [integer_storage_span(origin, finish)],
+		collection_contexts_checked: [false],
+		array_literal_types: string_storage_span(origin, finish),
+		builtin_result_types: string_storage_span(origin, finish),
+		result_operations: [],
+		generic_application_names: string_storage_span(origin, finish),
+		generic_application_types: string_storage_span(origin, finish),
+		generic_application_finishes: integer_storage_span(origin, finish),
+		enum_patterns: [],
+		enum_pattern_origins: integer_storage_span(origin, finish),
+		nullable_reads: string_storage_span(origin, finish),
+		safe_finishes: integer_storage_span(origin, finish),
+		safe_types: string_storage_span(origin, finish),
+		control_types: string_storage_span(origin, finish),
+		ranges: [],
+		range_origins: integer_storage_span(origin, finish),
+		hash_operations: [],
+		hash_origins: integer_storage_span(origin, finish),
+		hash_initial_types: string_storage_span(origin, finish),
+		checked_operator_plans: integer_storage_span(origin, finish),
+		loop_transfer_kinds: integer_storage_span(origin, finish),
+		loop_transfer_targets: integer_storage_span(origin, finish),
+		transforms: [], transform_origins: integer_storage_span(origin, finish),
+		transform_types: string_storage_span(origin, finish),
+		transform_key_types: string_storage_span(origin, finish),
+		iterations: [],
+		iteration_origins: integer_storage_span(origin, finish),
+		diverging_hashes: integer_storage_span(origin, finish),
+	)
+end
+
+# Replay semantic checking into fresh operation tables; resolved declarations and
+# capture plans belong to analysis and retain their concrete function identity.
+def checked_body_lowering(previous: CheckedBody, function: Integer, origin: Integer, finish: Integer): CheckedBody
+	mut hash_initial_types := string_storage_span(origin, finish)
+	previous.hash_operations.each do |operation|
+		if operation.kind == hash_action_literal()
+			store_string(hash_initial_types, operation.origin, operation.type_name)
+		end
+	end
+	return CheckedBody.new(raw_enum_conversions: [],
+		union_patterns: [], union_pattern_origins: integer_storage_span(origin, finish),
+		global_references: previous.global_references,
+		resolved_names: previous.resolved_names,
+		resolved_finishes: previous.resolved_finishes,
+		function: function, generic_binding: previous.generic_binding, generic_calls: previous.generic_calls,
+		function_values: previous.function_values,
+		lambda_types: previous.lambda_types,
+		file_bodies: previous.file_bodies, lambdas: previous.lambdas, shared_bindings: previous.shared_bindings,
+		local_types: previous.local_types,
+		collection_contexts: previous.collection_contexts,
+		collection_witnesses: previous.collection_witnesses,
+		collection_context_regions: previous.collection_context_regions,
+		collection_contexts_checked: previous.collection_contexts_checked,
+		array_literal_types: string_storage_span(origin, finish),
+		builtin_result_types: string_storage_span(origin, finish),
+		result_operations: [],
+		generic_application_names: previous.generic_application_names,
+		generic_application_types: previous.generic_application_types,
+		generic_application_finishes: previous.generic_application_finishes,
+		enum_patterns: [],
+		enum_pattern_origins: integer_storage_span(origin, finish),
+		nullable_reads: string_storage_span(origin, finish),
+		safe_finishes: integer_storage_span(origin, finish),
+		safe_types: string_storage_span(origin, finish),
+		control_types: string_storage_span(origin, finish),
+		ranges: [],
+		range_origins: integer_storage_span(origin, finish),
+		hash_operations: [],
+		hash_origins: integer_storage_span(origin, finish),
+		hash_initial_types: hash_initial_types,
+		checked_operator_plans: integer_storage_span(origin, finish),
+		loop_transfer_kinds: integer_storage_span(origin, finish),
+		loop_transfer_targets: integer_storage_span(origin, finish),
+		transforms: [], transform_origins: integer_storage_span(origin, finish),
+		transform_types: previous.transform_types,
+		transform_key_types: previous.transform_key_types,
+		iterations: [],
+		iteration_origins: integer_storage_span(origin, finish),
+		diverging_hashes: integer_storage_span(origin, finish),
+	)
+end

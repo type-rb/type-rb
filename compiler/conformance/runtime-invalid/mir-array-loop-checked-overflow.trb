@@ -1,0 +1,14 @@
+def sum(input: Array<Integer>, other: Array<Integer>): Integer
+	mut total := 0
+	mut index := 0
+	while index < input.size()
+		total += input[index]
+		index += 1
+	end
+	return total + other.size()
+end
+
+def main()
+	puts(sum([9007199254740991, 1], []).to_s())
+	return
+end

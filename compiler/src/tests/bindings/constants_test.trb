@@ -1,0 +1,71 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def constant_expect_program(source: String, expected: String)
+	mut state := logical_checked_source(source)
+	valid := check(state)
+	if !valid
+		puts(load_integer(state.diagnostics.lines, 0))
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(valid).to_be_true()
+	if valid
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		output := control_test_output(emit_qbe(state))
+		expect(output).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(stdout)
+				expect(stdout).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end
+
+describe("MIR constant initialization") do
+	test("keeps unannotated empty collection constants and grouped forms") do
+		constant_expect_program("ITEMS := []\nWRAPPED := ([])\nTABLE := {}\nWRAPPED_TABLE := ({})\ndef main()\nputs(ITEMS.size())\nputs(WRAPPED.size())\nputs(TABLE.size())\nputs(WRAPPED_TABLE.empty?())\nend\n", "0\n0\n0\ntrue\n")
+	end
+
+	test("retains empty collection constants across module qualification") do
+		constant_expect_program("module Store\nITEMS := []\nTABLE := {}\nend\ndef main()\nputs(Store::ITEMS.size())\nputs(Store::TABLE.empty?())\nend\n", "0\ntrue\n")
+	end
+
+	test("keeps scalar and managed values after one initializer evaluation") do
+		constant_expect_program("def mark(value: String): String\nputs(value)\nreturn value\nend\nCOUNT := 3\nFIRST := mark(\"first\")\nSECOND := mark(FIRST + \" second\")\nVALUES: Array<String> := [FIRST, SECOND]\ndef main()\nputs(COUNT)\nputs(VALUES[0])\nputs(VALUES[1])\nputs(SECOND)\nend\n", "first\nfirst second\n3\nfirst\nfirst second\nfirst second\n")
+	end
+
+	test("resolves module constants and lexical parents") do
+		constant_expect_program("ROOT := 1\nmodule Outer\nVALUE := 2\nmodule Inner\nVALUE := 3\ndef self.read(): Integer\nreturn VALUE + ROOT + Outer::VALUE\nend\nend\nend\ndef main()\nputs(Outer::Inner.read())\nend\n", "6\n")
+	end
+
+	test("retains typed records enums nullable values and callable constants") do
+		constant_expect_program("record Box\nvalue: String\nend\nenum State\nReady\nDone\nend\nLABEL := \"hello\"\nBOX := Box.new(value: LABEL)\nSTATE := State::Ready\nMAYBE: Integer? := nil\nCALL := fn(value: Integer): Integer; return value + 1; end\ndef main()\nputs(BOX.value)\nputs(STATE == State::Ready)\nputs(MAYBE == nil)\nputs(CALL(3))\nend\n", "hello\ntrue\ntrue\n4\n")
+	end
+
+	test("allows scalar copies and immutable aliases") do
+		constant_expect_program("COUNT := 3\nITEMS := [1, 2]\ndef main()\nmut value := COUNT\nvalue += 1\nvalues := ITEMS\nputs(value)\nputs(values[1])\nend\n", "4\n2\n")
+	end
+
+	test("narrows stable global identities across qualification loops and closures") do
+		constant_expect_program("module Settings\nVALUE: Integer? := 3\nEMPTY: Integer? := nil\nend\nCALL := fn(value: Integer): Integer; return value + 1; end\nCOUNT := CALL(3)\ndef main()\nif Settings::VALUE != nil\nmut index := 0\nwhile index < 2\nputs(Settings::VALUE + index)\nindex += 1\nend\nend\ncallback := fn(): Integer\nif Settings::VALUE == nil\nreturn 0\nelse\nreturn Settings::VALUE\nend\nend\nputs(callback())\nif Settings::EMPTY == nil\nputs(COUNT)\nelse\nputs(Settings::EMPTY + 1)\nend\nend\n", "3\n4\n3\n4\n")
+	end
+
+	test("preserves parameter binding mutability without changing constant bindings") do
+		constant_expect_program("ITEMS := [1]\nTABLE := {\"a\" => 1}\ndef change(mut items: Array<Integer>, mut table: Hash<String, Integer>)\nitems.push(2)\ntable[\"a\"] = 2\nend\ndef main()\nchange(ITEMS, TABLE)\nputs(ITEMS.size())\nputs(TABLE[\"a\"])\nend\n", "2\n2\n")
+	end
+end

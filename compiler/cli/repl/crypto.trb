@@ -1,0 +1,37 @@
+import trb/std/digest
+import trb/std/hmac
+import trb/std/secure_compare
+import { compiler_literal_byte } from frontend/syntax/string_escapes
+import { ReplStore, repl_boolean, repl_value } from repl/model
+
+# The retained evaluator uses the same checked APIs and provider as applications.
+# Preserve raw digest octets instead of decoding them as UTF-8 text.
+def repl_crypto_call(mut store: ReplStore, operation: Integer, arguments: Array<Integer>): Integer
+	left := store.texts[arguments[0]].to_bytes()
+	if operation == 6
+		return repl_boolean(store, HMAC.equal(left, store.texts[arguments[1]].to_bytes()))
+	elsif operation == 7
+		return repl_boolean(store, SecureCompare.equal(left, store.texts[arguments[1]].to_bytes()))
+	end
+	mut value := "".to_bytes()
+	if operation == 0
+		value = Digest.md5(left)
+	elsif operation == 1
+		value = Digest.sha1(left)
+	elsif operation == 2
+		value = Digest.sha256(left)
+	elsif operation == 3
+		value = Digest.sha512(left)
+	elsif operation == 4
+		value = HMAC.sha256(left, store.texts[arguments[1]].to_bytes())
+	else
+		value = HMAC.sha512(left, store.texts[arguments[1]].to_bytes())
+	end
+	mut octets: Array<String> := []
+	mut index := 0
+	while index < value.size()
+		octets.push(compiler_literal_byte(value.at(index)))
+		index += 1
+	end
+	return repl_value(store, "Bytes", 0, 0.0, octets.join(""), [])
+end

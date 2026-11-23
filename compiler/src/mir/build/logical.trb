@@ -1,0 +1,58 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_control_parameter_count_slot } from state/local_slots
+import { mir_terminator_branch } from mir/model/control
+import { mir_type_boolean } from mir/model/type_ids
+import { CheckedValue, checked_mir_value, checked_value, mir_add_value, mir_checked_value, scalar_mir_disable } from frontend/checking/body/values
+import { mir_control_active, mir_control_allocate, mir_control_arguments, mir_control_enter, mir_control_finish, mir_control_jump_arguments, mir_control_prepare } from mir/build/control
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+def mir_logical_begin(state: CompilerState, mut locals: CheckedLocals, left: CheckedValue, short_value: Integer, origin: Integer): Integer
+	mir_control_prepare(state, locals)
+	value := checked_mir_value(left)
+	if value < 0 || left.type_name != "Boolean"
+		scalar_mir_disable(locals)
+	end
+	if !mir_control_active(locals)
+		return -1
+	end
+	right := mir_control_allocate(locals)
+	short := mir_control_allocate(locals)
+	mut first := right
+	mut second := short
+	if short_value == 1
+		first = short
+		second = right
+	end
+	arguments := mir_control_arguments(locals, locals.count[0])
+	mir_control_finish(state, locals, mir_terminator_branch(), value, first, second, arguments, locals.count[0], -1)
+	mir_control_enter(state, locals, right, load_integer(state.source_tokens.token_lines, origin))
+	return short
+end
+
+def mir_logical_join(state: CompilerState, mut locals: CheckedLocals, left: CheckedValue, right: CheckedValue, short: Integer, origin: Integer): CheckedValue
+	if right.type_name != "Never" && (checked_mir_value(right) < 0 || right.type_name != "Boolean")
+		scalar_mir_disable(locals)
+	end
+	if !mir_control_active(locals)
+		return checked_value("Boolean", checked_category_value(), 9007199254740991, 0)
+	end
+	join := mir_control_allocate(locals)
+	line := load_integer(state.source_tokens.token_lines, origin)
+	if right.type_name != "Never"
+		arguments := mir_control_arguments(locals, locals.count[0])
+		locals.mir_arguments.push(checked_mir_value(right))
+		mir_control_jump_arguments(state, locals, join, arguments, locals.count[0] + 1)
+	end
+	mir_control_enter(state, locals, short, line)
+	short_arguments := mir_control_arguments(locals, locals.count[0])
+	# The tested LHS already is the short-path result and dominates that edge.
+	locals.mir_arguments.push(checked_mir_value(left))
+	mir_control_jump_arguments(state, locals, join, short_arguments, locals.count[0] + 1)
+	mir_control_enter(state, locals, join, line)
+	result := mir_add_value(state, locals, mir_type_boolean(), line)
+	locals.mir_arguments.push(result)
+	locals.mir_control[mir_control_parameter_count_slot()] += 1
+	return mir_checked_value("Boolean", result, 9007199254740991, 0)
+end

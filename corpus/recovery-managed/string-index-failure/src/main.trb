@@ -1,0 +1,5 @@
+def main()
+	value := "A😀"
+	puts(value[2])
+	return
+end

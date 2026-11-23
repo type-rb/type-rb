@@ -1,0 +1,154 @@
+import { build_module_components } from frontend/resolution/module_components
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { checked_body_new } from state/checked_body
+import { add_module, compiler_new, compiler_new_with_mode, find_module, find_name_index, function_index_key } from state/state
+import { DefaultInitializer } from state/source_state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler checking mode ownership") do
+	test("selects ordinary and interactive modes before publishing state aliases") do
+		ordinary := compiler_new(64)
+		mut interactive := compiler_new_with_mode(64, true)
+		alias_state := interactive
+		expect(ordinary.interactive).to_be_false()
+		expect(interactive.interactive).to_be_true()
+		expect(alias_state.interactive).to_be_true()
+		add_module(interactive, "later", "later.trb")
+		expect(alias_state.interactive).to_be_true()
+		expect(find_module(alias_state, "later")).to_equal(0)
+		fork := generic_program_fork(alias_state)
+		expect(fork.interactive).to_be_false()
+		expect(interactive.interactive).to_be_true()
+	end
+end
+
+describe("Compiler Hash indexes") do
+	test("preserves content equality, latest entries and misses across growth") do
+		mut state := compiler_new(2048)
+		expect(find_module(state, "missing")).to_equal(-1)
+		add_module(state, "aa", "/first-aa.trb")
+		add_module(state, "aq", "/aq.trb")
+		add_module(state, "a" + "a", "/last-aa.trb")
+		expect(find_module(state, "aa")).to_equal(2)
+		expect(find_module(state, "aq")).to_equal(1)
+		mut index := 0
+		while index < 1000
+			name := "module" + index.to_s()
+			add_module(state, name, "/" + name + ".trb")
+			index += 1
+		end
+		index = 0
+		while index < 1000
+			expect(find_module(state, "module" + index.to_s())).to_equal(index + 3)
+			index += 1
+		end
+		expect(find_module(state, "aa")).to_equal(2)
+		expect(find_module(state, "missing")).to_equal(-1)
+	end
+
+	test("separates module identities and indexes parsed declarations without rebuilding") do
+		mut index: Hash<String, Integer> := {}
+		index[function_index_key(1, "23")] = 4
+		index[function_index_key(12, "3")] = 5
+		expect(find_name_index(index, function_index_key(1, "23"))).to_equal(4)
+		expect(find_name_index(index, function_index_key(12, "3"))).to_equal(5)
+		expect(find_name_index(index, function_index_key(2, "23"))).to_equal(-1)
+		mut state := compiler_new(512)
+		expect(lex(state, "def first(): Integer\n\treturn second()\nend\ndef second(): Integer\n\treturn 2\nend\ndef main()\n\treturn\nend\n")).to_be_true()
+		expect(parse_module(state, 0, 0)).to_be_true()
+		expect(find_function_in_module(state, 0, "second")).to_equal(1)
+		build_module_components(state)
+		expect(state.global_bindings.component_cyclic[0]).to_equal(0)
+		expect(find_function_in_module(state, 0, "second")).to_equal(1)
+		expect(resolve(state)).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(find_function_in_module(state, 0, "first")).to_equal(0)
+	end
+
+	test("isolates mutable declaration catalogs in template-checking forks") do
+		mut state := compiler_new(64)
+		store_string(state.declarations.record_names, 0, "Parent")
+		state.declarations.record_count[0] = 1
+		store_string(state.declarations.field_names, 0, "item")
+		state.declarations.field_count[0] = 1
+		store_string(state.declarations.function_names, 0, "run")
+		store_integer(state.declarations.function_modules, 0, 0)
+		state.declarations.function_count[0] = 1
+		state.declarations.function_lookup[function_index_key(0, "run")] = 0
+		store_string(state.declarations.parameter_names, 0, "value")
+		state.declarations.parameter_count[0] = 1
+		mut fork := generic_program_fork(state)
+		store_string(fork.declarations.record_names, 0, "Fork")
+		fork.declarations.record_count[0] = 2
+		store_string(fork.declarations.field_names, 0, "entry")
+		fork.declarations.field_count[0] = 2
+		store_string(fork.declarations.function_names, 0, "other")
+		fork.declarations.function_count[0] = 2
+		fork.declarations.function_lookup[function_index_key(0, "other")] = 1
+		store_string(fork.declarations.parameter_names, 0, "argument")
+		fork.declarations.parameter_count[0] = 2
+		expect(load_string(state.declarations.record_names, 0)).to_equal("Parent")
+		expect(state.declarations.record_count[0]).to_equal(1)
+		expect(load_string(state.declarations.field_names, 0)).to_equal("item")
+		expect(state.declarations.field_count[0]).to_equal(1)
+		expect(load_string(state.declarations.function_names, 0)).to_equal("run")
+		expect(state.declarations.function_count[0]).to_equal(1)
+		expect(find_name_index(state.declarations.function_lookup, function_index_key(0, "other"))).to_equal(-1)
+		expect(load_string(state.declarations.parameter_names, 0)).to_equal("value")
+		expect(state.declarations.parameter_count[0]).to_equal(1)
+		expect(find_name_index(fork.declarations.function_lookup, function_index_key(0, "run"))).to_equal(0)
+	end
+
+	test("shares parsed regions but isolates template default plans") do
+		mut state := compiler_new(64)
+		state.parsed.default_initializers.push(DefaultInitializer.new(kind: 1, owner: 0, slot: 0, start: 2, finish: 4))
+		state.parsed.default_functions.push(3)
+		store_integer(state.parsed.parameter_defaults, 0, 7)
+		store_integer(state.parsed.field_defaults, 0, 8)
+		store_integer(state.parsed.function_expression_bodies, 0, 9)
+		store_integer(state.parsed.record_default_parameters, 0, 10)
+		mut fork := generic_program_fork(state)
+		fork.parsed.default_initializers.push(DefaultInitializer.new(kind: 2, owner: 1, slot: 0, start: 5, finish: 6))
+		fork.parsed.default_functions.push(4)
+		store_integer(fork.parsed.parameter_defaults, 0, 17)
+		store_integer(fork.parsed.field_defaults, 0, 18)
+		store_integer(fork.parsed.function_expression_bodies, 0, 19)
+		store_integer(fork.parsed.record_default_parameters, 0, 20)
+		expect(state.parsed.default_initializers.size()).to_equal(1)
+		expect(state.parsed.default_functions.size()).to_equal(1)
+		expect(load_integer(state.parsed.parameter_defaults, 0)).to_equal(7)
+		expect(load_integer(state.parsed.field_defaults, 0)).to_equal(8)
+		expect(load_integer(state.parsed.function_expression_bodies, 0)).to_equal(9)
+		expect(load_integer(state.parsed.record_default_parameters, 0)).to_equal(10)
+	end
+
+	test("shares authored bindings and lambda origins while isolating checked fork state") do
+		mut state := compiler_new(64)
+		state.global_bindings.global_types.push("Integer")
+		state.global_bindings.global_functions.push(2)
+		state.global_bindings.declaration_owner[0] = "Parent"
+		store_integer(state.global_bindings.global_scope_orders, 0, 3)
+		store_integer(state.callables.lambda_origins, 0, 4)
+		store_integer(state.callables.function_lambdas, 0, 5)
+		mut fork := generic_program_fork(state)
+		fork.global_bindings.global_types[0] = "String"
+		fork.global_bindings.global_functions[0] = 6
+		fork.global_bindings.declaration_owner[0] = "Fork"
+		store_integer(fork.callables.function_lambdas, 0, 7)
+		fork.callables.checked_bodies.push(checked_body_new(-1, 0, 1))
+		expect(state.global_bindings.global_types[0]).to_equal("Integer")
+		expect(state.global_bindings.global_functions[0]).to_equal(2)
+		expect(state.global_bindings.declaration_owner[0]).to_equal("Parent")
+		expect(load_integer(fork.global_bindings.global_scope_orders, 0)).to_equal(3)
+		expect(load_integer(fork.callables.lambda_origins, 0)).to_equal(4)
+		expect(fork.callables.lambda_phase[0]).to_equal(1)
+		expect(state.callables.lambda_phase[0]).to_equal(0)
+		expect(load_integer(state.callables.function_lambdas, 0)).to_equal(5)
+		expect(state.callables.checked_bodies.size()).to_equal(0)
+	end
+end

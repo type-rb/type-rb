@@ -1,0 +1,101 @@
+import { find_object_type, find_object_in_module, object_instance_type } from frontend/types/object_types
+import { find_newtype_type, find_newtype_in_module, newtype_type } from frontend/types/newtype_types
+import { union_parts, union_type } from frontend/types/union_types
+import { callable_parts, callable_type } from frontend/types/callable_types
+import { generic_application } from frontend/types/generic_arguments
+import { nullable_element } from frontend/types/nullable_types
+import { hash_key_type, hash_value_type, hash_type } from frontend/types/hash_types
+import { CompilerState, find_module } from state/state
+import { load_integer, load_string } from support/storage
+import { enum_type, find_enum_in_module, find_enum_type } from frontend/types/enum_types
+import { find_record_in_module, find_generic_in_module } from frontend/resolution/declaration_lookup
+import { find_record_type, record_type, array_inner_name, generic_instance_for_type } from frontend/resolution/type_resolution
+import { integer_string } from support/literals
+
+# Pool payloads retain their originating checked program. Translate identities
+# at the execution boundary, never rewrite a suspended closure's type catalog.
+def repl_remap_type(previous: CompilerState, current: CompilerState, type_name: String): String
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut names: Array<String> := []
+		alternatives.each do |alternative|
+			names.push(repl_remap_type(previous, current, alternative))
+		end
+		return union_type(names)
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0 && nullable_element(type_name) == ""
+		mut parameters: Array<String> := []
+		mut index := 1
+		while index < parts.size()
+			parameters.push(repl_remap_type(previous, current, parts[index]))
+			index += 1
+		end
+		return callable_type(parameters, repl_remap_type(previous, current, parts[0]))
+	end
+	instance := generic_instance_for_type(previous, type_name)
+	if instance >= 0
+		row := previous.type_resolution.generic_instances[instance]
+		definition := previous.type_resolution.generic_definitions[row.definition]
+		source := find_module(current, load_string(previous.module_graph.module_names, definition.source_id))
+		next_definition := find_generic_in_module(current, source, definition.name)
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(repl_remap_type(previous, current, argument))
+		end
+		key := generic_application(integer_string(next_definition), arguments)
+		if current.type_resolution.generic_instance_lookup.key?(key)
+			return current.type_resolution.generic_instances[current.type_resolution.generic_instance_lookup[key]].type_name
+		end
+		return "Invalid"
+	end
+	if nullable_element(type_name) != ""
+		return repl_remap_type(previous, current, nullable_element(type_name)) + "?"
+	end
+	key := hash_key_type(type_name)
+	if key != ""
+		return hash_type(key, repl_remap_type(previous, current, hash_value_type(type_name)))
+	end
+	element := array_inner_name(type_name)
+	if element != ""
+		return "Array<" + repl_remap_type(previous, current, element) + ">"
+	end
+	object_index := find_object_type(previous, type_name)
+	if object_index >= 0
+		row := previous.nominal.object_instances[object_index]
+		definition := previous.nominal.objects[row.definition]
+		source := find_module(current, load_string(previous.module_graph.module_names, definition.source_id))
+		next_definition := find_object_in_module(current, source, definition.name)
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(repl_remap_type(previous, current, argument))
+		end
+		object_key := generic_application(integer_string(next_definition), arguments)
+		if current.nominal.object_instance_lookup.key?(object_key)
+			return object_instance_type(current, current.nominal.object_instance_lookup[object_key])
+		end
+		return "Invalid"
+	end
+	newtype_index := find_newtype_type(previous, type_name)
+	if newtype_index >= 0
+		definition := previous.nominal.newtypes[newtype_index]
+		module_name := load_string(previous.module_graph.module_names, definition.source_id)
+		return newtype_type(find_newtype_in_module(current, find_module(current, module_name), definition.name))
+	end
+	enum_index := find_enum_type(previous, type_name)
+	if enum_index >= 0
+		definition := previous.nominal.enums[enum_index]
+		module_name := load_string(previous.module_graph.module_names, definition.source_id)
+		return enum_type(find_enum_in_module(current, find_module(current, module_name), definition.name))
+	end
+	record_index := find_record_type(previous, type_name)
+	if record_index >= 0
+		module_index := load_integer(previous.declarations.record_modules, record_index)
+		module_name := load_string(previous.module_graph.module_names, module_index)
+		name := load_string(previous.declarations.record_names, record_index)
+		next_module := find_module(current, module_name)
+		next_record := find_record_in_module(current, next_module, name)
+		return record_type(next_record)
+	end
+	return type_name
+end

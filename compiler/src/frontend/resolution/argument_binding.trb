@@ -1,0 +1,119 @@
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { default_function } from frontend/resolution/default_arguments
+
+# Bind labels without evaluating or moving authored expressions. Consumers
+# evaluate each expression once, then put its value in the declaration slot.
+record ArgumentBindings
+	names: Array<String>
+	named_only: Array<Boolean>
+	provided: Array<Boolean>
+	values: Array<Integer>
+	defaults: Array<Integer>
+	position: Array<Integer>
+	named_seen: Array<Boolean>
+	error: Array<String>
+end
+
+def argument_bindings(names: Array<String>, named_only: Array<Boolean>): ArgumentBindings
+	mut provided: Array<Boolean> := []
+	mut values: Array<Integer> := []
+	mut defaults: Array<Integer> := []
+	names.each do |_name|
+		provided.push(false)
+		values.push(-1)
+		defaults.push(-1)
+	end
+	return ArgumentBindings.new(names: names, named_only: named_only, provided: provided, values: values, defaults: defaults, position: [0], named_seen: [false], error: [""])
+end
+
+def function_argument_bindings(state: CompilerState, function: Integer): ArgumentBindings
+	mut names: Array<String> := []
+	mut named: Array<Boolean> := []
+	if function < 0
+		names.push("value")
+		named.push(false)
+	else
+		start := load_integer(state.declarations.function_parameter_starts, function)
+		count := load_integer(state.declarations.function_parameter_counts, function)
+		mut index := 0
+		while index < count
+			names.push(load_string(state.declarations.parameter_names, start + index))
+			named.push(load_integer(state.declarations.parameter_named_only, start + index) == 1)
+			index += 1
+		end
+	end
+	mut bindings := argument_bindings(names, named)
+	if function >= 0
+		start := load_integer(state.declarations.function_parameter_starts, function)
+		mut index := 0
+		while index < names.size()
+			bindings.defaults[index] = default_function(state, sparse_integer_at(state.parsed.parameter_defaults, start + index))
+			index += 1
+		end
+	end
+	return bindings
+end
+
+def record_argument_bindings(state: CompilerState, record_index: Integer): ArgumentBindings
+	mut names: Array<String> := []
+	mut named: Array<Boolean> := []
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	count := load_integer(state.declarations.record_field_counts, record_index)
+	mut index := 0
+	while index < count
+		names.push(load_string(state.declarations.field_names, start + index))
+		named.push(true)
+		index += 1
+	end
+	mut bindings := argument_bindings(names, named)
+	index = 0
+	while index < names.size()
+		bindings.defaults[index] = default_function(state, sparse_integer_at(state.parsed.field_defaults, start + index))
+		index += 1
+	end
+	return bindings
+end
+
+def argument_binding_slot(mut bindings: ArgumentBindings, label: String): Integer
+	mut slot := -1
+	if label == ""
+		if bindings.named_seen[0]
+			bindings.error[0] = "positional argument cannot follow a named argument"
+			return -1
+		end
+		slot = bindings.position[0]
+		if slot >= bindings.names.size()
+			bindings.error[0] = "too many positional arguments"
+			return -1
+		end
+		if bindings.named_only[slot]
+			bindings.error[0] = "argument " + bindings.names[slot] + " must be supplied by name"
+			return -1
+		end
+		bindings.position[0] = slot + 1
+	else
+		bindings.named_seen[0] = true
+		mut index := 0
+		while index < bindings.names.size()
+			if bindings.names[index] == label
+				slot = index
+			end
+			index += 1
+		end
+		if slot < 0
+			bindings.error[0] = "unknown named argument " + label
+			return -1
+		end
+		if !bindings.named_only[slot]
+			bindings.error[0] = "argument " + label + " is positional-only"
+			return -1
+		end
+	end
+	if bindings.provided[slot]
+		bindings.error[0] = "argument " + bindings.names[slot] + " is supplied more than once"
+		return -1
+	end
+	bindings.provided[slot] = true
+	return slot
+end

@@ -1,0 +1,57 @@
+import { describe, expect, test } from trb/std/test
+newtype Flag = Boolean
+def dynamic(value: Any): Any
+ return value
+end
+describe("Predicates") do
+ test("plain scalars") do
+  expect(nil).to_be_nil()
+  expect(true).to_be_true()
+  expect(false).to_be_false()
+ end
+ test("optional absence") do
+  value: Boolean? := nil
+  expect(value).to_be_nil()
+ end
+ test("optional presence") do
+  value: Integer? := 7
+  expect(value).to_be_nil()
+ end
+ test("dynamic scalar identity") do
+  truth: Any := true
+  falsehood: Any := false
+  absent := dynamic(nil)
+  expect(truth).to_be_true()
+  expect(falsehood).to_be_false()
+  expect(absent).to_be_nil()
+ end
+ test("dynamic integer is not Boolean") do
+  value: Any := 1
+  expect(value).to_be_true()
+ end
+ test("union scalar identity") do
+  truth: Boolean | String := true
+  falsehood: Boolean | String := false
+  expect(truth).to_be_true()
+  expect(falsehood).to_be_false()
+ end
+ test("optional Boolean retains its wrapper") do
+  value: Boolean? := true
+  expect(value).to_be_true()
+ end
+ test("newtype uses its scalar representation") do
+  expect(Flag.new(true)).to_be_true()
+ end
+ test("dynamic optional retains its wrapper") do
+  optional: Boolean? := true
+  value: Any := optional
+  expect(value).to_be_true()
+ end
+ test("dynamic newtype uses its scalar representation") do
+  value: Any := Flag.new(false)
+  expect(value).to_be_false()
+ end
+ test("continued") do
+  expect(1).to_equal(1)
+ end
+end

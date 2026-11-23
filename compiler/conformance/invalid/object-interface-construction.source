@@ -1,0 +1,6 @@
+interface Named
+name(): String
+end
+def main()
+Named.new()
+end

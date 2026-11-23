@@ -1,0 +1,38 @@
+def mutate_then_rebind(mut values: Array<Integer>)
+	values.push(3)
+	values[0] = 10
+	values = [99]
+	values.push(100)
+	return
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut alias_values := values
+	values.push(1)
+	values.push(2)
+	mutate_then_rebind(values)
+	alias_values[1] = 20
+	mut ok := true
+	if values.size() != 3
+		ok = false
+	end
+	if alias_values.size() != 3
+		ok = false
+	end
+	if values[0] != 10
+		ok = false
+	end
+	if values[1] != 20
+		ok = false
+	end
+	if values[2] != 3
+		ok = false
+	end
+	if ok
+		puts("array-aliases-ok")
+	else
+		puts("array-aliases-bad")
+	end
+	return
+end

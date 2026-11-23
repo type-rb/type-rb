@@ -1,0 +1,6 @@
+alias Callback = (Integer) -> Integer
+def invoke(callback: Callback?): Integer
+return callback(1)
+end
+def main()
+end

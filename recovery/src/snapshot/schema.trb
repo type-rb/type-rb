@@ -1,0 +1,545 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import trb/std/json
+import trb/std/result
+
+MAX_INPUT_BYTES := 1048576
+MAX_IDENTIFIER_SIZE := 256
+MAX_SOURCE_PATH_SIZE := 4096
+MAX_SOURCES := 128
+MAX_FUNCTIONS := 256
+MAX_BLOCKS := 256
+MAX_INSTRUCTIONS := 4096
+
+record SourceOrigin
+	source_id: String
+	start_line: Integer
+	start_column: Integer
+	end_line: Integer
+	end_column: Integer
+end
+
+record SnapshotSource
+	id: String
+	path: String
+end
+
+enum SnapshotValueType
+	Integer
+end
+
+enum SnapshotInstruction
+	IntegerLiteral(result: String, value: Integer, origin: SourceOrigin)
+	IntegerAddChecked(result: String, left: String, right: String, origin: SourceOrigin)
+	Return(value: String, origin: SourceOrigin)
+end
+
+record SnapshotBlock
+	id: String
+	origin: SourceOrigin
+	instructions: Array<SnapshotInstruction>
+end
+
+record SnapshotFunction
+	id: String
+	name: String
+	result_type: SnapshotValueType
+	entry: String
+	origin: SourceOrigin
+	blocks: Array<SnapshotBlock>
+end
+
+record BootstrapSnapshot
+	module_id: String
+	sources: Array<SnapshotSource>
+	functions: Array<SnapshotFunction>
+end
+
+def decode_snapshot(source: String): Result<BootstrapSnapshot, Diagnostic>
+	if source.to_bytes().size() > MAX_INPUT_BYTES
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "", "snapshot exceeds the 1 MiB input limit")
+		)
+	end
+	parsed := JSON.parse(source)
+	root := case parsed
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			Diagnostic.new(
+				code: "TRBN0001",
+				path: error.path,
+				message: error.message,
+				start_line: error.line,
+				start_column: error.column,
+			)
+		)
+	end
+	fields := try _strict_object(
+		root,
+		"",
+		["format", "version", "module", "sources", "functions"],
+	)
+	format := try _required_string(fields, "format", "", false)
+	if format != "type-rb-bootstrap-snapshot"
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/format", "unsupported snapshot format")
+		)
+	end
+	version := try _required_integer(fields, "version", "")
+	if version != 1
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/version", "unsupported snapshot version")
+		)
+	end
+	module_id := try _required_string(fields, "module", "", true)
+	source_values := try _required_array(fields, "sources", "")
+	if source_values.size() > MAX_SOURCES
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/sources", "source count exceeds the Snapshot validation limit")
+		)
+	end
+	mut sources: Array<SnapshotSource> := []
+	mut source_index := 0
+	while source_index < source_values.size()
+		sources.push(try _decode_source(source_values[source_index], "/sources/" + source_index.to_s()))
+		source_index += 1
+	end
+	function_values := try _required_array(fields, "functions", "")
+	if function_values.size() > MAX_FUNCTIONS
+		return Result<BootstrapSnapshot, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/functions", "function count exceeds the Snapshot validation limit")
+		)
+	end
+	mut functions: Array<SnapshotFunction> := []
+	mut function_index := 0
+	while function_index < function_values.size()
+		functions.push(try _decode_function(function_values[function_index], "/functions/" + function_index.to_s()))
+		function_index += 1
+	end
+	snapshot := BootstrapSnapshot.new(module_id: module_id, sources: sources, functions: functions)
+	try verify_snapshot(snapshot)
+	return Result<BootstrapSnapshot, Diagnostic>::Ok(snapshot)
+end
+
+def verify_snapshot(snapshot: BootstrapSnapshot): Result<Boolean, Diagnostic>
+	if snapshot.sources.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/sources", "snapshot must declare at least one source")
+		)
+	end
+	if snapshot.functions.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/functions", "snapshot must contain at least one function")
+		)
+	end
+	mut source_ids: Hash<String, Boolean> := {}
+	mut source_index := 0
+	while source_index < snapshot.sources.size()
+		source := snapshot.sources[source_index]
+		if source_ids.key?(source.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/sources/" + source_index.to_s() + "/id", "duplicate source identifier")
+			)
+		end
+		source_ids[source.id] = true
+		source_index += 1
+	end
+	mut function_ids: Hash<String, Boolean> := {}
+	mut function_index := 0
+	while function_index < snapshot.functions.size()
+		function := snapshot.functions[function_index]
+		function_path := "/functions/" + function_index.to_s()
+		if function_ids.key?(function.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", function_path + "/id", "duplicate function identifier")
+			)
+		end
+		function_ids[function.id] = true
+		try _verify_origin(function.origin, source_ids, function_path + "/origin")
+		try _verify_snapshot_function(function, source_ids, function_path)
+		function_index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _decode_source(value: JSON::Value, path: String): Result<SnapshotSource, Diagnostic>
+	fields := try _strict_object(value, path, ["id", "path"])
+	source_path := try _required_string(fields, "path", path, false)
+	if source_path.empty?()
+		return Result<SnapshotSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/path", "source path must not be empty")
+		)
+	end
+	if source_path.size() > MAX_SOURCE_PATH_SIZE
+		return Result<SnapshotSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/path", "source path exceeds the Snapshot validation limit")
+		)
+	end
+	return Result<SnapshotSource, Diagnostic>::Ok(
+		SnapshotSource.new(
+			id: try _required_string(fields, "id", path, true),
+			path: source_path,
+		)
+	)
+end
+
+def _decode_function(value: JSON::Value, path: String): Result<SnapshotFunction, Diagnostic>
+	fields := try _strict_object(value, path, ["id", "name", "result", "entry", "origin", "blocks"])
+	result_name := try _required_string(fields, "result", path, false)
+	if result_name != "Integer"
+		return Result<SnapshotFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", path + "/result", "unsupported Snapshot validation result type")
+		)
+	end
+	block_values := try _required_array(fields, "blocks", path)
+	if block_values.size() > MAX_BLOCKS
+		return Result<SnapshotFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/blocks", "block count exceeds the Snapshot validation limit")
+		)
+	end
+	mut blocks: Array<SnapshotBlock> := []
+	mut index := 0
+	while index < block_values.size()
+		blocks.push(try _decode_block(block_values[index], path + "/blocks/" + index.to_s()))
+		index += 1
+	end
+	return Result<SnapshotFunction, Diagnostic>::Ok(
+		SnapshotFunction.new(
+			id: try _required_string(fields, "id", path, true),
+			name: try _required_string(fields, "name", path, true),
+			result_type: SnapshotValueType::Integer,
+			entry: try _required_string(fields, "entry", path, true),
+			origin: try decode_origin(try _required_field(fields, "origin", path), path + "/origin"),
+			blocks: blocks,
+		)
+	)
+end
+
+def _decode_block(value: JSON::Value, path: String): Result<SnapshotBlock, Diagnostic>
+	fields := try _strict_object(value, path, ["id", "origin", "instructions"])
+	instruction_values := try _required_array(fields, "instructions", path)
+	if instruction_values.size() > MAX_INSTRUCTIONS
+		return Result<SnapshotBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/instructions", "instruction count exceeds the Snapshot validation limit")
+		)
+	end
+	mut instructions: Array<SnapshotInstruction> := []
+	mut index := 0
+	while index < instruction_values.size()
+		instructions.push(try _decode_instruction(instruction_values[index], path + "/instructions/" + index.to_s()))
+		index += 1
+	end
+	return Result<SnapshotBlock, Diagnostic>::Ok(
+		SnapshotBlock.new(
+			id: try _required_string(fields, "id", path, true),
+			origin: try decode_origin(try _required_field(fields, "origin", path), path + "/origin"),
+			instructions: instructions,
+		)
+	)
+end
+
+def _decode_instruction(value: JSON::Value, path: String): Result<SnapshotInstruction, Diagnostic>
+	base_fields := try _object(value, path)
+	op := try _required_string(base_fields, "op", path, false)
+	if op == "integer_literal"
+		fields := try _strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<SnapshotInstruction, Diagnostic>::Ok(
+			SnapshotInstruction::IntegerLiteral(
+				try _required_string(fields, "result", path, true),
+				try _required_integer(fields, "value", path),
+				try decode_origin(try _required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "integer_add_checked"
+		fields := try _strict_object(value, path, ["op", "result", "left", "right", "origin"])
+		return Result<SnapshotInstruction, Diagnostic>::Ok(
+			SnapshotInstruction::IntegerAddChecked(
+				try _required_string(fields, "result", path, true),
+				try _required_string(fields, "left", path, true),
+				try _required_string(fields, "right", path, true),
+				try decode_origin(try _required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "return"
+		fields := try _strict_object(value, path, ["op", "value", "origin"])
+		return Result<SnapshotInstruction, Diagnostic>::Ok(
+			SnapshotInstruction::Return(
+				try _required_string(fields, "value", path, true),
+				try decode_origin(try _required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	return Result<SnapshotInstruction, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Snapshot validation operation")
+	)
+end
+
+def decode_origin(value: JSON::Value, path: String): Result<SourceOrigin, Diagnostic>
+	fields := try _strict_object(
+		value,
+		path,
+		["source", "startLine", "startColumn", "endLine", "endColumn"],
+	)
+	return Result<SourceOrigin, Diagnostic>::Ok(
+		SourceOrigin.new(
+			source_id: try _required_string(fields, "source", path, true),
+			start_line: try _required_integer(fields, "startLine", path),
+			start_column: try _required_integer(fields, "startColumn", path),
+			end_line: try _required_integer(fields, "endLine", path),
+			end_column: try _required_integer(fields, "endColumn", path),
+		)
+	)
+end
+
+def _verify_snapshot_function(
+		function: SnapshotFunction,
+		source_ids: Hash<String, Boolean>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if function.blocks.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/blocks", "function must contain at least one block")
+		)
+	end
+	if function.blocks.size() != 1
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", path + "/blocks", "Snapshot validation supports exactly one entry block")
+		)
+	end
+	mut block_ids: Hash<String, Boolean> := {}
+	mut entry_found := false
+	mut values: Hash<String, Boolean> := {}
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		block := function.blocks[block_index]
+		block_path := path + "/blocks/" + block_index.to_s()
+		if block_ids.key?(block.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", block_path + "/id", "duplicate block identifier")
+			)
+		end
+		block_ids[block.id] = true
+		if block.id == function.entry
+			entry_found = true
+		end
+		try _verify_origin(block.origin, source_ids, block_path + "/origin")
+		if block.instructions.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", block_path + "/instructions", "block must contain a terminator")
+			)
+		end
+		mut instruction_index := 0
+		while instruction_index < block.instructions.size()
+			instruction_path := block_path + "/instructions/" + instruction_index.to_s()
+			instruction := block.instructions[instruction_index]
+			try _verify_snapshot_instruction(
+				instruction,
+				values,
+				source_ids,
+				instruction_path,
+				instruction_index == block.instructions.size() - 1,
+			)
+			instruction_index += 1
+		end
+		block_index += 1
+	end
+	if !entry_found
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/entry", "entry block does not exist")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_snapshot_instruction(
+		instruction: SnapshotInstruction,
+		mut values: Hash<String, Boolean>,
+		source_ids: Hash<String, Boolean>,
+		path: String,
+		is_last: Boolean,
+	): Result<Boolean, Diagnostic>
+	case instruction
+	when SnapshotInstruction::IntegerLiteral(result, _value, origin)
+		try _verify_origin(origin, source_ids, path + "/origin")
+		try _define_value(values, result, path + "/result")
+	when SnapshotInstruction::IntegerAddChecked(result, left, right, origin)
+		try _verify_origin(origin, source_ids, path + "/origin")
+		try _require_value(values, left, path + "/left")
+		try _require_value(values, right, path + "/right")
+		try _define_value(values, result, path + "/result")
+	when SnapshotInstruction::Return(value, origin)
+		try _verify_origin(origin, source_ids, path + "/origin")
+		try _require_value(values, value, path + "/value")
+		if !is_last
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/op", "terminator must be the final instruction")
+			)
+		end
+	end
+	if is_last
+		case instruction
+		when SnapshotInstruction::Return(_value, _origin)
+		else
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/op", "block must end with a return terminator")
+			)
+		end
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_origin(
+		origin: SourceOrigin,
+		source_ids: Hash<String, Boolean>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !source_ids.key?(origin.source_id)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/source", "origin references an unknown source")
+		)
+	end
+	if origin.start_line < 1 || origin.start_column < 1 || origin.end_line < 1 || origin.end_column < 1
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "origin coordinates must be positive")
+		)
+	end
+	if origin.end_line < origin.start_line || (origin.end_line == origin.start_line && origin.end_column < origin.start_column)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "origin end precedes its start")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _define_value(
+		mut values: Hash<String, Boolean>,
+		value: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if values.key?(value)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "value identifier is defined more than once")
+		)
+	end
+	values[value] = true
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _require_value(
+		values: Hash<String, Boolean>,
+		value: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !values.key?(value)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "operand references an undefined value")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _strict_object(
+		value: JSON::Value,
+		path: String,
+		allowed: Array<String>,
+	): Result<Hash<String, JSON::Value>, Diagnostic>
+	fields := try _object(value, path)
+	names := fields.keys().sort()
+	mut index := 0
+	while index < names.size()
+		name := names[index]
+		if !allowed.include?(name)
+			return Result<Hash<String, JSON::Value>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0002", path + "/" + name, "unknown field")
+			)
+		end
+		index += 1
+	end
+	return Result<Hash<String, JSON::Value>, Diagnostic>::Ok(fields)
+end
+
+def _object(value: JSON::Value, path: String): Result<Hash<String, JSON::Value>, Diagnostic>
+	case value
+	when JSON::Value::Object(fields)
+		return Result<Hash<String, JSON::Value>, Diagnostic>::Ok(fields)
+	else
+		return Result<Hash<String, JSON::Value>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path, "expected an object")
+		)
+	end
+end
+
+def _required_field(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<JSON::Value, Diagnostic>
+	if !fields.key?(name)
+		return Result<JSON::Value, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "required field is missing")
+		)
+	end
+	return Result<JSON::Value, Diagnostic>::Ok(fields.fetch(name))
+end
+
+def _required_string(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+		identifier: Boolean,
+	): Result<String, Diagnostic>
+	value := try _required_field(fields, name, path)
+	case value
+	when JSON::Value::String(result)
+		if identifier && result.empty?()
+			return Result<String, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/" + name, "identifier must not be empty")
+			)
+		end
+		if identifier && result.size() > MAX_IDENTIFIER_SIZE
+			return Result<String, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/" + name, "identifier exceeds the Snapshot validation limit")
+			)
+		end
+		return Result<String, Diagnostic>::Ok(result)
+	else
+		return Result<String, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a string")
+		)
+	end
+end
+
+def _required_integer(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Integer, Diagnostic>
+	value := try _required_field(fields, name, path)
+	case value
+	when JSON::Value::Integer(result)
+		return Result<Integer, Diagnostic>::Ok(result)
+	else
+		return Result<Integer, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected an integer")
+		)
+	end
+end
+
+def _required_array(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Array<JSON::Value>, Diagnostic>
+	value := try _required_field(fields, name, path)
+	case value
+	when JSON::Value::Array(result)
+		return Result<Array<JSON::Value>, Diagnostic>::Ok(result)
+	else
+		return Result<Array<JSON::Value>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected an array")
+		)
+	end
+end

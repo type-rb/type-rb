@@ -1,0 +1,38 @@
+mut calls := 0
+def number(present: Boolean): Integer?
+	calls += 1
+	if present
+		return 7
+	end
+	return nil
+end
+def floating(present: Boolean): Float?
+	if present
+		return 1.5
+	end
+	return nil
+end
+def flag(present: Boolean): Boolean?
+	if present
+		return false
+	end
+	return nil
+end
+def text(present: Boolean): String?
+	if present
+		return "日" + "\x00本"
+	end
+	return nil
+end
+def main()
+	puts(number(true))
+	puts(number(false))
+	puts(floating(true))
+	puts(floating(false))
+	puts(flag(true))
+	puts(flag(false))
+	puts(text(true))
+	puts(text(false))
+	puts(nil)
+	puts(calls)
+end

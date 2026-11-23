@@ -1,0 +1,52 @@
+import { unicode_identifier_contains, unicode_identifier_decode } from support/unicode_identifiers
+import { unicode_identifier_digit_data, unicode_identifier_letter_data, unicode_identifier_lower_data, unicode_identifier_upper_data } from support/unicode_identifier_data
+import { describe, expect, test } from trb/std/test
+
+describe("Unicode identifier properties") do
+	test("separates letters decimal digits and uppercase across planes") do
+		letters := unicode_identifier_letter_data()
+		[65, 90, 97, 122, 197, 453, 945, 3585, 12354, 19968, 66560, 131072].each do |point|
+			expect(unicode_identifier_contains(point, letters)).to_be_true()
+		end
+		[-1, 0, 48, 64, 91, 96, 123, 178, 215, 247, 769, 1632, 8544, 55296, 57343, 128512, 1114112].each do |point|
+			expect(unicode_identifier_contains(point, letters)).to_be_false()
+		end
+		digits := unicode_identifier_digit_data()
+		[48, 57, 1632, 1641, 65296, 65305, 120782].each do |point|
+			expect(unicode_identifier_contains(point, digits)).to_be_true()
+		end
+		[47, 58, 65, 178, 1631, 1642, 8544, 65295, 65306].each do |point|
+			expect(unicode_identifier_contains(point, digits)).to_be_false()
+		end
+		upper := unicode_identifier_upper_data()
+		[65, 90, 197, 256, 452, 913, 66560].each do |point|
+			expect(unicode_identifier_contains(point, upper)).to_be_true()
+		end
+		[64, 91, 97, 229, 257, 453, 454, 945, 19968, 66600].each do |point|
+			expect(unicode_identifier_contains(point, upper)).to_be_false()
+		end
+		lower := unicode_identifier_lower_data()
+		[97, 122, 229, 257, 312, 454, 945, 66600].each do |point|
+			expect(unicode_identifier_contains(point, lower)).to_be_true()
+		end
+		[65, 90, 170, 453, 66560, 19968].each do |point|
+			expect(unicode_identifier_contains(point, lower)).to_be_false()
+		end
+	end
+
+	test("decodes exactly one valid non-ASCII scalar without replacement") do
+		expect(unicode_identifier_decode([194, 128])).to_equal(128)
+		expect(unicode_identifier_decode([223, 191])).to_equal(2047)
+		expect(unicode_identifier_decode([224, 160, 128])).to_equal(2048)
+		expect(unicode_identifier_decode([227, 129, 130])).to_equal(12354)
+		expect(unicode_identifier_decode([237, 159, 191])).to_equal(55295)
+		expect(unicode_identifier_decode([238, 128, 128])).to_equal(57344)
+		expect(unicode_identifier_decode([239, 191, 191])).to_equal(65535)
+		expect(unicode_identifier_decode([240, 144, 128, 128])).to_equal(65536)
+		expect(unicode_identifier_decode([244, 143, 191, 191])).to_equal(1114111)
+		invalid: Array<Array<Integer>> := [[], [65], [65, 66], [128, 128], [192, 128], [193, 191], [194, 127], [194, 192], [224, 159, 191], [237, 160, 128], [237, 191, 191], [239, 191], [240, 143, 191, 191], [244, 144, 128, 128], [245, 128, 128, 128], [248, 128, 128, 128, 128], [255, 255]]
+		invalid.each do |bytes|
+			expect(unicode_identifier_decode(bytes)).to_equal(-1)
+		end
+	end
+end

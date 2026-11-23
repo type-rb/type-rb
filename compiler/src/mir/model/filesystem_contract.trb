@@ -1,0 +1,66 @@
+# Internal synchronous filesystem ABI. Resource identity is verified separately.
+def filesystem_adapter_start(): Integer
+	return 50
+end
+
+def filesystem_names(): Array<String>
+	return ["read_bytes", "read_text", "write_bytes", "write_text", "path", "error_kind", "error_message", "children", "stat_kind", "mkdir"]
+end
+
+def filesystem_parameters(kind: Integer): Array<String>
+	if kind < 2
+		return ["File", "Integer", "Array<" + filesystem_value_type(kind) + ">"]
+	elsif kind < 4
+		return ["File", filesystem_value_type(kind)]
+	elsif kind == 4
+		return ["File"]
+	elsif kind == 7
+		return ["String", "String", "Integer", "Array<String>", "Array<Integer>", "Array<String>"]
+	elsif kind == 8
+		return ["String", "Integer", "Array<Integer>"]
+	elsif kind == 9
+		return ["String"]
+	end
+	return ["Integer"]
+end
+
+def filesystem_value_type(kind: Integer): String
+	if kind == 0 || kind == 2
+		return "Bytes"
+	end
+	return "String"
+end
+
+def filesystem_parameter_names(kind: Integer): Array<String>
+	if kind < 2
+		return ["file", "maximum", "output"]
+	elsif kind < 4
+		return ["file", "value"]
+	elsif kind == 4
+		return ["file"]
+	elsif kind == 7
+		return ["path", "prefix", "maximum", "names", "kinds", "error_path"]
+	elsif kind == 8
+		return ["path", "follow", "output"]
+	elsif kind == 9
+		return ["path"]
+	end
+	return ["status"]
+end
+
+def filesystem_mutable(kind: Integer, index: Integer): Integer
+	if kind < 2 && index == 2
+		return 1
+	end
+	if (kind == 7 && index >= 3) || (kind == 8 && index == 2)
+		return 1
+	end
+	return 0
+end
+
+def filesystem_result(kind: Integer): String
+	if kind == 4 || kind == 6
+		return "String"
+	end
+	return "Integer"
+end

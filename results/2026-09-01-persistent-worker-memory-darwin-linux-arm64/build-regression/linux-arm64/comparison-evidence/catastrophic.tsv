@@ -1,0 +1,9 @@
+metric	stage	role	baseline_median	maximum_observation	ratio	maximum	status
+build_elapsed	b2-b3	baseline	0.90	0.92	1.022222	2.0	pass
+build_peak_rss	b2-b3	baseline	64278528	64503808	1.003505	2.0	pass
+build_elapsed	b2-b3	candidate	0.90	0.93	1.033333	2.0	pass
+build_peak_rss	b2-b3	candidate	64278528	64524288	1.003823	2.0	pass
+build_elapsed	b3-b4	baseline	0.90	0.91	1.011111	2.0	pass
+build_peak_rss	b3-b4	baseline	64454656	64557056	1.001589	2.0	pass
+build_elapsed	b3-b4	candidate	0.90	0.92	1.022222	2.0	pass
+build_peak_rss	b3-b4	candidate	64454656	64491520	1.000572	2.0	pass

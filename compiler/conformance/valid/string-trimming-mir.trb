@@ -1,0 +1,15 @@
+def main()
+	values := ["", "  word  ", " \t\r\n ", "left ", " right"]
+	values.each do |value|
+		puts("[" + value.strip() + "]")
+	end
+	puts("[" + "  both  ".lstrip() + "]")
+	puts("[" + "  both  ".rstrip() + "]")
+	present: String? := " present "
+	absent: String? := nil
+	trimmed := present&.strip()
+	if trimmed != nil
+		puts(trimmed)
+	end
+	puts(absent&.strip() == nil)
+end

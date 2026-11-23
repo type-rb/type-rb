@@ -1,0 +1,126 @@
+import { filesystem_adapter_start, filesystem_names } from mir/model/filesystem_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { emit_filesystem_adapter_runtime } from backend/qbe/runtime/filesystem_adapters
+import { emit_directory_runtime } from backend/qbe/runtime/directory_values
+import { mir_op_file_scope } from mir/model/instructions
+import { MirFunction, MirInstruction, MirModule } from mir/model/module
+import { mir_call_symbol } from mir/model/intrinsics
+import { mir_storage_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_temporary, emitted_value, qbe_type } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { emit_filesystem_io_runtime } from backend/qbe/runtime/filesystem_io
+import { emit_filesystem_values_runtime } from backend/qbe/runtime/filesystem_values
+import { integer_string } from support/literals
+
+def mir_file_scope_needed(native_module: MirModule): Boolean
+	if native_module.program.size() == 1 && native_module.program[0].cli_function >= 0
+		return true
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
+			return true
+		end
+	end
+	return mir_file_scope_plans(native_module).size() > 0
+end
+
+# Rewrites retain old table rows. Only instructions owned by current function
+# blocks have been verified and may request runtime code or a body thunk.
+def mir_file_scope_plans(native_module: MirModule): Array<Integer>
+	mut plans: Array<Integer> := []
+	native_module.functions.each do |function|
+		mut block := function.block_start
+		while block < function.block_start + function.block_count
+			row := native_module.blocks[block]
+			mut index := row.instruction_start
+			while index < row.instruction_start + row.instruction_count
+				instruction := native_module.instructions[index]
+				if instruction.kind == mir_op_file_scope()
+					mut present := false
+					plans.each do |plan|
+						if plan == instruction.payload
+							present = true
+						end
+					end
+					if !present
+						plans.push(instruction.payload)
+					end
+				end
+				index += 1
+			end
+			block += 1
+		end
+	end
+	return plans
+end
+
+# One fixed table per caller frame, reused across loop iterations. Each entry
+# is an already rooted operand; this table never becomes a managed closure.
+def emit_file_scope_storage(native_module: MirModule, function: MirFunction, mut output: QbeOutput)
+	mut captures := 0
+	mut block := function.block_start
+	while block < function.block_start + function.block_count
+		row := native_module.blocks[block]
+		mut index := row.instruction_start
+		while index < row.instruction_start + row.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_file_scope()
+				count := native_module.file_scopes[instruction.payload].argument_count
+				if count > captures
+					captures = count
+				end
+			end
+			index += 1
+		end
+		block += 1
+	end
+	if captures > 0
+		qbe_output_line(output, "\t%file_scope_captures =l alloc8 " + integer_string(captures * 8))
+	end
+end
+
+def emit_mir_file_scope(native_module: MirModule, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	scope := native_module.file_scopes[instruction.payload]
+	body := native_module.signatures[scope.body]
+	mut index := 0
+	while index < scope.argument_count
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + address + " =l add %file_scope_captures, " + integer_string(index * 8))
+		kind := qbe_type(mir_storage_name(native_module, body.parameter_types[index]))
+		qbe_output_line(output, "\tstore" + kind + " " + operands[native_module.arguments[scope.argument_start + index]] + ", " + address)
+		index += 1
+	end
+	mut captures := "0"
+	if scope.argument_count > 0
+		captures = "%file_scope_captures"
+	end
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + result + " =l call $trbn_file_scope(l " + operands[instruction.first] + ", l " + operands[instruction.second] + ", l $trbn_file_body" + integer_string(instruction.payload) + ", l " + captures + ", l $" + mir_call_symbol(native_module.signatures[scope.error]) + ", l " + integer_string(scope.error_variant) + ")")
+	return emitted_value(result, mir_storage_name(native_module, body.result_type))
+end
+
+def emit_file_scope_runtime(native_module: MirModule, mut output: QbeOutput)
+	if !mir_file_scope_needed(native_module)
+		return
+	end
+	emit_filesystem_io_runtime(output)
+	emit_filesystem_values_runtime(output)
+	emit_filesystem_adapter_runtime(output)
+	emit_directory_runtime(output)
+	mir_file_scope_plans(native_module).each do |plan|
+		scope := native_module.file_scopes[plan]
+		body := native_module.signatures[scope.body]
+		qbe_output_line(output, "function l $trbn_file_body" + integer_string(plan) + "(l %file, l %captures) {\n@start")
+		mut arguments := ""
+		mut index := 0
+		while index < scope.argument_count
+			name := integer_string(index)
+			kind := qbe_type(mir_storage_name(native_module, body.parameter_types[index]))
+			qbe_output_line(output, "\t%address" + name + " =l add %captures, " + integer_string(index * 8))
+			qbe_output_line(output, "\t%capture" + name + " =" + kind + " load" + kind + " %address" + name)
+			arguments += kind + " %capture" + name + ", "
+			index += 1
+		end
+		qbe_output_line(output, "\t%result =l call $" + mir_call_symbol(body) + "(" + arguments + "l %file)\n\tret %result\n}\n")
+	end
+end

@@ -1,0 +1,38 @@
+def smallest(): Float
+	mut value := 1.0
+	mut exponent := 0
+	while exponent < 1074
+		value = value / 2.0
+		exponent += 1
+	end
+	return value
+end
+def largest(): Float
+	mut value := 1.9999999999999998
+	mut exponent := 0
+	while exponent < 1023
+		value = value * 2.0
+		exponent += 1
+	end
+	return value
+end
+def reciprocal(value: Float): Float
+	return 1.0 / value
+end
+def negate(value: Float): Float
+	return -value
+end
+def probe()
+	infinity := reciprocal(0.0)
+	nan := infinity - infinity
+	puts(reciprocal(negate(0.0)) < 0.0)
+	puts(reciprocal(negate(0.0).abs()) > 0.0)
+	puts((-2.5).abs() == 2.5)
+	puts((-infinity).abs() == infinity)
+	puts(nan.abs().nan?())
+	puts((-smallest()).abs() == smallest())
+end
+
+def main()
+	probe()
+end

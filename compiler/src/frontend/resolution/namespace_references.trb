@@ -1,0 +1,52 @@
+import { declaration_namespace, declaration_object } from frontend/types/declaration_kinds
+import { find_visible_declaration } from frontend/resolution/declaration_lookup
+import { namespace_parent, namespace_qualify } from frontend/types/namespace_model
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_string_at, store_integer, store_string } from support/storage
+import { advance, expect_identifier, token_is } from frontend/syntax/syntax_tokens
+
+# Consume namespace and class owners. Enum variants and value projections remain
+# with their own checked operations, even though they also use `::` spelling.
+def parse_namespace_reference(mut state: CompilerState, mut position: Array<Integer>): String
+	origin := position[0]
+	mut name := expect_identifier(state, position)
+	while token_is(state, position[0], "::") && (find_visible_declaration(state, state.module_graph.active_module[0], name, declaration_namespace()) >= 0 || find_visible_declaration(state, state.module_graph.active_module[0], name, declaration_object()) >= 0)
+		advance(position)
+		name = namespace_qualify(name, expect_identifier(state, position))
+	end
+	store_string(state.callables.checked[0].resolved_names, origin, name)
+	store_integer(state.callables.checked[0].resolved_finishes, origin, position[0])
+	return name
+end
+
+def namespace_member_access(mut state: CompilerState, source: Integer, name: String, origin: Integer): Boolean
+	owner := namespace_parent(name)
+	if owner == "" || name.size() <= owner.size() + 2 || name[owner.size() + 2] != "_"
+		return true
+	end
+	if source == state.module_graph.active_module[0] && owner == state.global_bindings.declaration_owner[0]
+		return true
+	end
+	diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "private module member " + name + " is not accessible")
+	return false
+end
+
+def checked_reference_name(state: CompilerState, origin: Integer): String
+	name := sparse_string_at(state.callables.checked[0].resolved_names, origin)
+	if name != ""
+		return name
+	end
+	return load_string(state.source_tokens.token_texts, origin)
+end
+
+def parse_declaration_reference(mut state: CompilerState, mut position: Array<Integer>): String
+	origin := position[0]
+	mut name := parse_namespace_reference(state, position)
+	if find_visible_declaration(state, state.module_graph.active_module[0], name, declaration_namespace()) >= 0 && token_is(state, position[0], ".")
+		advance(position)
+		name = namespace_qualify(name, expect_identifier(state, position))
+		store_string(state.callables.checked[0].resolved_names, origin, name)
+		store_integer(state.callables.checked[0].resolved_finishes, origin, position[0])
+	end
+	return name
+end

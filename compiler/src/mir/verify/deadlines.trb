@@ -1,0 +1,38 @@
+import { mir_deadline_call_boundary, mir_deadlines_enabled } from mir/model/deadlines
+import { mir_op_deadline_checkpoint } from mir/model/instructions
+import { mir_terminator_trap } from mir/model/control
+import { MirModule } from mir/model/module
+
+# Structural and intrinsic verification run first. Re-derive required sites
+# from the live CFG and call operations; neither an emitter nor a supplied
+# optimization plan can authorize omission of cancellation checkpoints.
+def mir_deadline_checkpoints_error(native_module: MirModule): String
+	enabled := mir_deadlines_enabled(native_module)
+	native_module.functions.each do |function|
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := native_module.blocks[index]
+			finish := block.instruction_start + block.instruction_count
+			if enabled && block.terminator != mir_terminator_trap()
+				if block.instruction_count == 0 || native_module.instructions[block.instruction_start].kind != mir_op_deadline_checkpoint()
+					return "MIR deadline block is missing its entry checkpoint"
+				end
+			end
+			mut position := block.instruction_start
+			while position < finish
+				instruction := native_module.instructions[position]
+				if !enabled && instruction.kind == mir_op_deadline_checkpoint()
+					return "MIR deadline checkpoint has no owning intrinsic"
+				end
+				if enabled && mir_deadline_call_boundary(instruction.kind)
+					if position + 1 >= finish || native_module.instructions[position + 1].kind != mir_op_deadline_checkpoint()
+						return "MIR deadline call is missing its continuation checkpoint"
+					end
+				end
+				position += 1
+			end
+			index += 1
+		end
+	end
+	return ""
+end

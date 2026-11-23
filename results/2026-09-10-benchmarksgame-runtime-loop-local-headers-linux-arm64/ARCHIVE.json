@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "url": "https://github.com/type-rb/type-rb-native/releases/download/evidence-archive-2026-09-10-loop-headers/loop-local-headers-evidence.tar.gz",
+  "sha256": "dc5e15dcc0795de05c5c29f05af7c3c6d3b837fe0ebd9d08b3f248159e7c4765",
+  "archiveBytes": 7478076,
+  "sourceRevision": "8980b5978f0e8519964d200b7f7799b741796478",
+  "memberPrefix": "results/2026-09-10-benchmarksgame-runtime-loop-local-headers-linux-arm64/",
+  "files": 4138
+}

@@ -1,0 +1,6 @@
+def main()
+values := [1]
+values.each do |_value|
+values.push(2)
+end
+end

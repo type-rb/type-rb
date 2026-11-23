@@ -1,0 +1,109 @@
+import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { MirFunction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_block_index, mir_flow_dominates } from mir/analysis/flow
+import { mir_live_add, mir_managed_contains } from mir/analysis/liveness
+
+record MirNaturalLoop
+	preheader: Integer
+	members: Array<Integer>
+end
+
+# Indices are relative to the function. Only a unique unconditional incoming
+# edge can execute moved work once, before every entry to the natural loop.
+def mir_natural_loop(native_module: MirModule, function: MirFunction, flow: MirFlow, header: Integer): MirNaturalLoop
+	empty := MirNaturalLoop.new(preheader: -1, members: [])
+	if flow.ranks[header] < 0
+		return empty
+	end
+	mut preheader := -1
+	mut pending: Array<Integer> := []
+	flow.predecessors[header].each do |previous|
+		if mir_flow_dominates(flow, header, previous)
+			pending.push(previous)
+		else
+			if preheader >= 0 || native_module.blocks[function.block_start + previous].terminator != mir_terminator_jump()
+				preheader = -2
+			elsif preheader == -1
+				preheader = previous
+			end
+		end
+	end
+	if preheader < 0 || pending.size() == 0
+		return empty
+	end
+	mut members := [header]
+	mut cursor := 0
+	while cursor < pending.size()
+		member := pending[cursor]
+		cursor += 1
+		if !mir_managed_contains(members, member)
+			if !mir_flow_dominates(flow, header, member)
+				return empty
+			end
+			mir_live_add(members, member)
+			flow.predecessors[member].each do |previous|
+				pending.push(previous)
+			end
+		end
+	end
+	return MirNaturalLoop.new(preheader: preheader, members: members)
+end
+
+# Membership follows reachable backedges and dominance, independently of table order.
+def mir_loop_members(native_module: MirModule, function: MirFunction, flow: MirFlow): Array<Integer>
+	mut members: Array<Integer> := []
+	mut predecessors: Array<Array<Integer>> := []
+	mut index := 0
+	while index < function.block_count
+		members.push(0)
+		predecessors.push([])
+		index += 1
+	end
+	if function.kind != mir_function_control()
+		return members
+	end
+	index = 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		mut targets: Array<Integer> := []
+		if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+			targets.push(block.first_target)
+		end
+		if block.terminator == mir_terminator_branch()
+			targets.push(block.second_target)
+		end
+		targets.each do |target|
+			mut incoming := predecessors[mir_flow_block_index(flow, target)]
+			incoming.push(index)
+		end
+		index += 1
+	end
+	mut header := 0
+	while header < function.block_count
+		predecessors[header].each do |latch|
+			if mir_flow_dominates(flow, header, latch)
+				mut seen: Array<Integer> := []
+				members.each do |_member|
+					seen.push(0)
+				end
+				seen[header] = 1
+				members[header] = 1
+				mut pending := [latch]
+				mut cursor := 0
+				while cursor < pending.size()
+					block := pending[cursor]
+					if seen[block] == 0
+						seen[block] = 1
+						members[block] = 1
+						predecessors[block].each do |previous|
+							pending.push(previous)
+						end
+					end
+					cursor += 1
+				end
+			end
+		end
+		header += 1
+	end
+	return members
+end

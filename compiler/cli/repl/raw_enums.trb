@@ -1,0 +1,44 @@
+import { enum_type, find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { raw_enum_error_message, raw_enum_value } from frontend/types/raw_enum_types
+import { find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+import { ReplStore, repl_get, repl_integer, repl_string, repl_value, repl_variant } from repl/model
+import { repl_coerce } from repl/values
+
+def repl_raw_enum_value(state: CompilerState, mut store: ReplStore, id: Integer): Integer
+	value := raw_enum_value(state, repl_variant(store, id))
+	if value.type_name == "String"
+		return repl_string(store, value.text)
+	end
+	return repl_integer(store, value.text.to_i())
+end
+
+def repl_raw_enum_from(state: CompilerState, mut store: ReplStore, owner: Integer, id: Integer, result_type: String): Integer
+	value := repl_get(store, id)
+	definition := state.nominal.enums[owner]
+	result_owner := find_enum_type(state, result_type)
+	mut variant := definition.variant_start
+	finish := variant + definition.variant_count
+	while variant < finish
+		raw := raw_enum_value(state, variant)
+		mut matches := value.text == raw.text
+		if raw.type_name == "Integer"
+			matches = value.integer == raw.text.to_i()
+		end
+		if matches
+			member := repl_value(store, enum_type(owner), variant, 0.0, state.nominal.enum_variants[variant].name, [])
+			ok := find_enum_variant(state, result_owner, "Ok")
+			return repl_value(store, result_type, ok, 0.0, "Ok", [member])
+		end
+		variant += 1
+	end
+	err := find_enum_variant(state, result_owner, "Err")
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	error_record := find_record_type(state, error_type)
+	error_start := load_integer(state.declarations.record_field_starts, error_record)
+	converted := repl_coerce(store, id, load_string(state.declarations.field_types, error_start))
+	message := repl_string(store, raw_enum_error_message(state, owner))
+	error := repl_value(store, error_type, 0, 0.0, "", [converted, message])
+	return repl_value(store, result_type, err, 0.0, "Err", [error])
+end

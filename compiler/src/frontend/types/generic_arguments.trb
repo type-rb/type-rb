@@ -1,0 +1,75 @@
+import { nullable_element } from frontend/types/nullable_types
+
+def generic_base(name: String): String
+	mut result := ""
+	mut index := 0
+	while index < name.size() && name[index] != "<"
+		result += name[index]
+		index += 1
+	end
+	return result
+end
+
+def generic_arguments(name: String): Array<String>
+	mut result: Array<String> := []
+	base := generic_base(name)
+	if base.size() == name.size()
+		return result
+	end
+	mut token := ""
+	mut depth := 0
+	mut index := base.size() + 1
+	while index < name.size() - 1
+		character := name[index]
+		if character == "," && depth == 0
+			result.push(token)
+			token = ""
+		else
+			token += character
+		end
+		if character == "<"
+			depth += 1
+		elsif character == ">"
+			depth -= 1
+		end
+		index += 1
+	end
+	result.push(token)
+	return result
+end
+
+def generic_application(name: String, arguments: Array<String>): String
+	mut result := name + "<"
+	mut index := 0
+	arguments.each do |argument|
+		if index > 0
+			result += ","
+		end
+		result += argument
+		index += 1
+	end
+	return result + ">"
+end
+
+def generic_substitute(name: String, parameters: Array<String>, arguments: Array<String>): String
+	optional := nullable_element(name)
+	if optional != ""
+		return generic_substitute(optional, parameters, arguments) + "?"
+	end
+	mut index := 0
+	while index < parameters.size()
+		if parameters[index] == name
+			return arguments[index]
+		end
+		index += 1
+	end
+	parts := generic_arguments(name)
+	if parts.size() == 0
+		return name
+	end
+	mut replaced: Array<String> := []
+	parts.each do |part|
+		replaced.push(generic_substitute(part, parameters, arguments))
+	end
+	return generic_application(generic_base(name), replaced)
+end

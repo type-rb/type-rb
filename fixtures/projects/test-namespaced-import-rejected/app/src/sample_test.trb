@@ -1,0 +1,7 @@
+import trb/std/test
+
+test.describe("Sample") do
+	test.test("runs") do
+		test.expect(1).to_equal(1)
+	end
+end

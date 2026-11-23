@@ -1,0 +1,173 @@
+import { emit_qbe } from compiler
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { mir_op_callable_new } from mir/model/instructions
+import { mir_callable_plans, mir_callable_plans_equal, mir_planned_instruction_effects } from mir/analysis/callables
+import { MirCallablePlan, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def callable_effect_point(state: CompilerState, position: Integer): Boolean
+	mut found := false
+	state.scalar_mir.root_plans.each do |plan|
+		plan.instructions.each do |instruction|
+			if instruction == position
+				found = true
+			end
+		end
+	end
+	return found
+end
+
+def callable_effect_execute(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+def callable_effect_source(body: String): String
+	return "def step(value: Integer): Integer\n" + body + "\nend\ndef apply(callback: (Integer) -> Integer): Integer\nreturn callback(7)\nend\ndef main()\nputs(apply(step))\nend\n"
+end
+
+describe("MIR singleton callable effects") do
+	test("executes captured scalar and managed results with retained mutation") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/compiler/conformance/valid/singleton-callable-effects.trb"))
+			callable_effect_execute(state, "21\nkept value\nkept value!\n12\n12\n")
+		end
+	end
+
+	test("retains failure-only effects after inlining the Closures callback") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/benchmarks/features/closures/src/main.trb"))
+			expect(state.scalar_mir.callable_plans[0].size()).to_equal(1)
+			allocation := state.scalar_mir.callable_plans[0][0]
+			expect(state.scalar_mir.instructions[allocation.instruction].kind).to_equal(mir_op_callable_new())
+			expect(allocation.effects).to_equal(mir_effect_none())
+			expect(callable_effect_point(state, allocation.instruction)).to_be_false()
+			mut found := 0
+			state.scalar_mir.numeric_plans[0].each do |plan|
+				if plan.function_id == 3 && plan.caller == 1 && plan.call_instruction >= 0
+					instruction := state.scalar_mir.instructions[plan.call_instruction]
+					expect(mir_planned_instruction_effects(state.scalar_mir, instruction, plan.call_instruction)).to_equal(mir_effect_failure())
+					expect(callable_effect_point(state, plan.call_instruction)).to_be_false()
+					found += 1
+				end
+			end
+			expect(found).to_equal(1)
+			expect(state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 1)].size() > 0).to_be_true()
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0(")).to_be_false()
+		end
+	end
+
+	test("preserves failure effects and distinguishes allocation mutation and IO") do
+		bodies := ["return value", "return value + 1", "items := [value]\nreturn items[0]", "puts(value)\nreturn value"]
+		# The existing summary includes the retained failure block even for identity.
+		effects := [8, 8, 15, 15]
+		bodies.each.with_index do |body, index|
+			state := array_loop_mir_check(callable_effect_source(body))
+			plan := state.scalar_mir.callable_plans[0][0]
+			expect(plan.effects).to_equal(effects[index])
+			expect(callable_effect_point(state, plan.instruction)).to_equal(effects[index] == 15)
+		end
+		state := array_loop_mir_check("def apply(callback: () -> Integer): Integer\nreturn callback()\nend\ndef main()\nmut values := [1]\ncallback := fn(): Integer\nvalues[0] += 1\nreturn values[0]\nend\nputs(apply(callback))\nputs(values[0])\nend\n")
+		plan := state.scalar_mir.callable_plans[0][0]
+		expect(plan.effects).to_equal(15)
+		expect(callable_effect_point(state, plan.instruction)).to_be_true()
+		callable_effect_execute(state, "2\n2\n")
+	end
+
+	test("reuses direct recursive and transitive effect summaries") do
+		state := array_loop_mir_check("def left(value: Integer): Integer\nif value == 0\nreturn 0\nend\nreturn right(value - 1)\nend\ndef right(value: Integer): Integer\nreturn left(value)\nend\ndef apply(callback: (Integer) -> Integer): Integer\nreturn callback(4)\nend\ndef main()\nputs(apply(left))\nend\n")
+		plan := state.scalar_mir.callable_plans[0][0]
+		expect(plan.effects).to_equal(8)
+		expect(callable_effect_point(state, plan.instruction)).to_be_false()
+		callable_effect_execute(state, "0\n")
+	end
+
+	test("keeps unresolved invocations and callable bodies with indirect calls conservative") do
+		state := array_loop_mir_check("def step(value: Integer): Integer\nreturn value + 1\nend\ndef inner(value: Integer): Integer\ncallback := step\nreturn callback(value)\nend\ndef keep(callback: (Integer) -> Integer): (Integer) -> Integer\nreturn callback\nend\ndef apply(callback: (Integer) -> Integer): Integer\nreturn callback(7)\nend\ndef main()\nputs(apply(inner))\nother := keep(step)\nputs(other(8))\nend\n")
+		mut conservative := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, position|
+			if instruction.kind == 42 && mir_planned_instruction_effects(state.scalar_mir, instruction, position) == 15
+				expect(callable_effect_point(state, position)).to_be_true()
+				conservative += 1
+			end
+		end
+		expect(conservative).to_equal(2)
+		callable_effect_execute(state, "8\n9\n")
+	end
+
+	test("rejects forged missing and excessive effects before consuming root plans") do
+		mut mode := 0
+		while mode < 4
+			mut state := array_loop_mir_check(callable_effect_source("return value + 1"))
+			old := state.scalar_mir.callable_plans[0][0]
+			if mode == 0
+				state.scalar_mir.callable_plans[0][0] = MirCallablePlan.new(instruction: old.instruction, callee: old.callee, captures: old.captures, effects: 0)
+			elsif mode == 1
+				state.scalar_mir.callable_plans[0][0] = MirCallablePlan.new(instruction: old.instruction, callee: old.callee, captures: old.captures, effects: 15)
+			elsif mode == 2
+				state.scalar_mir.callable_plans[0][0] = MirCallablePlan.new(instruction: old.instruction, callee: old.callee, captures: old.captures, effects: -1)
+			else
+				state.scalar_mir.callable_plans[0] = []
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR callable plan differs")
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			mode += 1
+		end
+	end
+
+	test("retains captured managed values across genuine allocating callback sites") do
+		mut state := array_loop_mir_check("def apply(callback: () -> String): String\nreturn callback()\nend\ndef report(label: String)\ncallback := fn(): String\nreturn label + \"!\"\nend\nputs(apply(callback))\nputs(label)\nend\ndef main()\nreport(\"kept\" + \" value\")\nend\n")
+		plan := state.scalar_mir.callable_plans[0][0]
+		expect(plan.effects).to_equal(15)
+		expect(callable_effect_point(state, plan.instruction)).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_callable_plans_equal(state.scalar_mir.callable_plans[0], mir_callable_plans(state.scalar_mir))).to_be_true()
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		mut forced := ""
+		mut ordinary := false
+		before.split("\n").each do |line|
+			if line.start_with?("function ")
+				ordinary = line.include?("$trbnf")
+			elsif line == "}"
+				ordinary = false
+			end
+			if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_string_concat("))
+				forced += "\tcall $trbn_gc_collect(w 0)\n"
+			end
+			forced += line + "\n"
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("kept value!\nkept value\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

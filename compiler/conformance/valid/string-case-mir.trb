@@ -1,0 +1,13 @@
+def main()
+	puts("aAzZ09".upcase())
+	puts("aAzZ09".downcase())
+	puts("one two".upcase())
+	puts("ONE TWO".downcase())
+	puts("A".downcase().size())
+	puts("i".upcase().size())
+	puts("".upcase().downcase().size())
+	value: String? := "Hello"
+	absent: String? := nil
+	puts(value&.upcase())
+	puts(absent&.downcase() == nil)
+end

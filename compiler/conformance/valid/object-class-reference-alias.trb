@@ -1,0 +1,13 @@
+class Counter
+	@count: Integer := 0
+	def bump()
+		@count += 1
+	end
+end
+
+def main()
+	mut first := Counter.new()
+	second := first
+	first.bump()
+	puts(second.count)
+end

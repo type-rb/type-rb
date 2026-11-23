@@ -1,0 +1,262 @@
+import { MirTransform, TransformSyntax } from frontend/types/transform_model
+import { logical_checked_source } from testing/pipeline
+import { checked_loop_transfer_kind } from frontend/checking/body/control
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { checked_iteration_require, checked_transform_require } from frontend/checking/collections/iteration
+import { MirIteration, mir_iteration_valid } from mir/model/iteration
+import { IterationSyntax, iteration_syntax_valid } from frontend/syntax/iteration_syntax
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { integer_storage, sparse_integer_at, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Array iteration") do
+	test("rejects mismatched and unterminated brace bodies") do
+		cases := ["[1].each { |value|\nputs(value)\nend\n", "[1].each { |value|\nif value == 1\nputs(value)\n}\n", "[1].each { |value|\nputs(value)\n"]
+		cases.each do |body|
+			source := "def main()\n" + body
+			mut state := compiler_new(source.size() * 3 + 16)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+
+	test("checks and emits a live receiver with indexed bindings and loop transfers") do
+		source := "def main()\nmut values := [1, 2]\nvalues.each.with_index do |value, index|\nif value == 1\nvalues.push(3)\nnext\nend\nputs(value)\nputs(index)\nend\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+end
+
+def iteration_test_state(source: String): CompilerState
+	mut state := compiler_new(source.size() * 3 + 16)
+	expect(lex(state, source)).to_be_true()
+	expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+	expect(resolve(state)).to_be_true()
+	expect(check(state)).to_be_true()
+	return state
+end
+
+describe("Array iteration MIR") do
+	test("rejects stale sliced size regions and a Hash traversal substituted for batching") do
+		mut mode := 0
+		while mode < 6
+			mut state := iteration_test_state("def main()\n[1, 2].each_slice(1).with_index do |batch, index|\nputs(batch[0] + index)\nend\nend\n")
+			plan := state.callables.checked[0].iterations[0]
+			mut first := plan.syntax.slice_start
+			mut last := plan.syntax.slice_finish
+			mut kind := plan.source_kind
+			if mode == 0
+				first = -1
+			elsif mode == 1
+				last = -1
+			elsif mode == 2
+				first += 1
+			elsif mode == 3
+				last += 1
+			elsif mode == 4
+				first = plan.syntax.receiver_finish
+			else
+				kind = 3
+			end
+			shape := IterationSyntax.new(origin: plan.syntax.origin, receiver_finish: plan.syntax.receiver_finish, slice_start: first, slice_finish: last, element_origin: plan.syntax.element_origin, second_origin: plan.syntax.second_origin, body_start: plan.syntax.body_start, body_finish: plan.syntax.body_finish, finish: plan.syntax.finish)
+			state.callables.checked[0].iterations[0] = MirIteration.new(syntax: shape, parent_loop: plan.parent_loop, source_kind: kind, type_name: plan.type_name, element_type: plan.element_type)
+			checked_iteration_require(state, plan.syntax.origin, -1)
+			expect(has_diagnostic(state)).to_be_true()
+			mode += 1
+		end
+	end
+	test("treats unallocated sparse origin entries as absent") do
+		mut storage := integer_storage(1024)
+		expect(sparse_integer_at(storage, 0)).to_equal(0)
+		store_integer(storage, 800, 9)
+		expect(sparse_integer_at(storage, -1)).to_equal(0)
+		expect(sparse_integer_at(storage, 800)).to_equal(9)
+		expect(sparse_integer_at(storage, 500)).to_equal(0)
+		expect(sparse_integer_at(storage, 900)).to_equal(0)
+	end
+
+	test("verifies source ranges, receiver types, and nearest loop ownership") do
+		plan := MirIteration.new(syntax: IterationSyntax.new(origin: 4, receiver_finish: 5, slice_start: -1, slice_finish: -1, element_origin: 9, second_origin: 11, body_start: 14, body_finish: 20, finish: 21), parent_loop: -1, source_kind: 1, type_name: "Array<Integer>", element_type: "Integer")
+		expect(mir_iteration_valid(plan, 4, 22, "Array<Integer>", "Integer")).to_be_true()
+		expect(mir_iteration_valid(plan, 3, 22, "Array<Integer>", "Integer")).to_be_false()
+		expect(mir_iteration_valid(plan, 4, 21, "Array<Integer>", "Integer")).to_be_false()
+		expect(mir_iteration_valid(plan, 4, 22, "Array<String>", "String")).to_be_false()
+		expect(mir_iteration_valid(plan, 4, 22, "Array<Integer>", "")).to_be_false()
+		expect(iteration_syntax_valid(plan.syntax, 4, 0)).to_be_false()
+		expect(iteration_syntax_valid(plan.syntax, 4, -9007199254740991)).to_be_false()
+	end
+
+	test("rejects missing, cross-origin, and stale typed operation plans") do
+		source := "def main()\n[1, 2].each.with_index do |value, index|\nputs(value)\nputs(index)\nend\nend\n"
+		mut mode := 0
+		while mode < 8
+			mut state := iteration_test_state(source)
+			plan := state.callables.checked[0].iterations[0]
+			mut element_type := plan.element_type
+			mut parent_loop := plan.parent_loop
+			mut second_origin := plan.syntax.second_origin
+			mut body_finish := plan.syntax.body_finish
+			mut finish := plan.syntax.finish
+			mut receiver_finish := plan.syntax.receiver_finish
+			if mode == 0
+				store_integer(state.parsed.iteration_origins, plan.syntax.origin, 0)
+			elsif mode == 1
+				store_integer(state.parsed.iteration_origins, plan.syntax.origin, 99)
+			elsif mode == 2
+				element_type = "String"
+			elsif mode == 3
+				parent_loop = plan.syntax.origin
+			elsif mode == 4
+				second_origin = -1
+			elsif mode == 5
+				body_finish = 9007199254740991
+				finish = 9007199254740991
+			elsif mode == 6
+				receiver_finish += 1
+			else
+				store_integer(state.parsed.iteration_origins, plan.syntax.body_finish, 0)
+			end
+			state.callables.checked[0].iterations[0] = MirIteration.new(syntax: IterationSyntax.new(origin: plan.syntax.origin, receiver_finish: receiver_finish, slice_start: -1, slice_finish: -1, element_origin: plan.syntax.element_origin, second_origin: second_origin, body_start: plan.syntax.body_start, body_finish: body_finish, finish: finish), parent_loop: parent_loop, source_kind: 1, type_name: plan.type_name, element_type: element_type)
+			checked_iteration_require(state, plan.syntax.origin, -1)
+			expect(has_diagnostic(state)).to_be_true()
+			mode += 1
+		end
+	end
+
+	test("emits brace returns and transfers including unreachable syntax") do
+		mut state := iteration_test_state("def main()\n[1].each { |_value| return }\n[2].each { |_value| break }\nend\n")
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+end
+
+describe("iteration source proof") do
+	test("both traversal and transfer consumers reject an invalid source kind") do
+		mut source := 0
+		while source < 2
+			mut receiver := "[1, 2]"
+			if source == 1
+				receiver = "(1..2)"
+			end
+			mut kind := 0
+			while kind < 4
+				if kind != source + 1
+					mut consumer := 0
+					while consumer < 2
+						mut state := iteration_test_state("def main()\n" + receiver + ".each do |_value|\nnext\nend\nend\n")
+						plan := state.callables.checked[0].iterations[0]
+						expect(checked_loop_transfer_kind(state, plan.syntax.body_start, plan.syntax.origin)).to_equal(2)
+						state.callables.checked[0].iterations[0] = MirIteration.new(syntax: plan.syntax, parent_loop: plan.parent_loop, source_kind: kind, type_name: plan.type_name, element_type: plan.element_type)
+						expect(has_diagnostic(state)).to_be_false()
+						if consumer == 0
+							checked_iteration_require(state, plan.syntax.origin, -1)
+						else
+							expect(checked_loop_transfer_kind(state, plan.syntax.body_start, plan.syntax.origin)).to_equal(0)
+						end
+						expect(has_diagnostic(state)).to_be_true()
+						consumer += 1
+					end
+				end
+				kind += 1
+			end
+			source += 1
+		end
+	end
+end
+
+describe("value-producing collection blocks") do
+	test("verifies search nullable result types independently of source checking") do
+		operations := ["find", "find_index"]
+		operations.each do |operation|
+			mut state := iteration_test_state("def main()\nresult := [1]." + operation + " { |item| item > 0 }\nputs(result == nil)\nend\n")
+			plan := state.callables.checked[0].transforms[0]
+			state.callables.checked[0].transforms[0] = MirTransform.new(syntax: plan.syntax, iteration: plan.iteration, type_name: "String?", key_type: plan.key_type)
+			checked_transform_require(state, plan.syntax.iteration.origin)
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+
+	test("rejects invalid predicate results and transfers") do
+		cases := ["[1].any? { |item| item }", "[1].all? { |item| puts(item) }", "[1].none? { |item| return item == 0 }", "[1].any? { |item| break; item == 1 }"]
+		cases.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("rejects indexed predicates and extra parameters during parsing") do
+		cases := ["[1].any?.with_index { |item, index| item == index }", "[1].all? { |item, other| item == other }"]
+		cases.each do |body|
+			source := "def main()\n" + body + "\nend\n"
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+
+	test("requires Boolean predicate projections") do
+		mut state := iteration_test_state("def main()\nresult := [1].any? { |item| item > 0 }\nputs(result)\nend\n")
+		plan := state.callables.checked[0].transforms[0]
+		state.callables.checked[0].transforms[0] = MirTransform.new(syntax: plan.syntax, iteration: plan.iteration, type_name: "Array<Boolean>", key_type: plan.key_type)
+		checked_transform_require(state, plan.syntax.iteration.origin)
+		expect(has_diagnostic(state)).to_be_true()
+	end
+
+	test("rejects result, binding, capability and transfer violations") do
+		cases := ["[1].map { |item| }", "[1].map { |item| item = 2 }", "[1].select { |item| item }", "[1].reduce(0) { |sum, item| sum.to_s() + item.to_s() }", "[1].map.with_index { |item, item| item }", "[1].reduce(0) { |item, item| item }", "[1].map { |item| return item }", "[1].map { |item| break; item }", "[1].map { |item| next; item }", "values := [1]\nvalues.map { |item| values.push(item); item }", "[1].map { |item| [2].each { |_other| return }; item }", "while true\n[1].map { |item| break; item }\nend"]
+		cases.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("permits owned nested loop transfers and function returns") do
+		mut state := iteration_test_state("def main()\nvalues := [1, 2].map do |item|\nmut total := item\n[3, 4].each do |other|\nif other == 3\nnext\nend\ntotal += other\nbreak\nend\ncallback := fn(): Integer; return total; end\ncallback()\nend\nputs(values[1])\nend\n")
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects missing and inconsistent transform syntax and checked projections") do
+		mut mutation := 0
+		while mutation < 8
+			mut state := iteration_test_state("def main()\nvalues := [1].select.with_index { |item, index| item > index }\nputs(values.size())\nend\n")
+			plan := state.callables.checked[0].transforms[0]
+			origin := plan.syntax.iteration.origin
+			mut kind := plan.syntax.kind
+			mut output := plan.type_name
+			mut initial := plan.syntax.initial_start
+			if mutation == 0
+				store_integer(state.parsed.transform_origins, origin, 0)
+			elsif mutation == 1
+				store_integer(state.parsed.transform_origins, plan.syntax.iteration.body_finish, 0)
+			elsif mutation == 2
+				store_integer(state.callables.checked[0].transform_origins, origin, 99)
+			elsif mutation == 3
+				kind = 1
+			elsif mutation == 4
+				output = "Array<String>"
+			elsif mutation == 5
+				output = "Integer"
+			elsif mutation == 6
+				initial = origin + 1
+			else
+				output = "Void"
+			end
+			syntax := TransformSyntax.new(iteration: plan.syntax.iteration, kind: kind, initial_start: initial, initial_finish: plan.syntax.initial_finish, accumulator_origin: plan.syntax.accumulator_origin)
+			state.callables.checked[0].transforms[0] = MirTransform.new(syntax: syntax, iteration: plan.iteration, type_name: output, key_type: plan.key_type)
+			checked_transform_require(state, origin)
+			expect(has_diagnostic(state)).to_be_true()
+			mutation += 1
+		end
+	end
+end

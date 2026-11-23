@@ -1,0 +1,151 @@
+import { CompilerProjectSources, check, emit_qbe, load_project_sources } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { mir_call_effect_summaries } from mir/analysis/call_effects
+import { MirValue, mir_value_type } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { mir_test_instruction_with_cell } from testing/mir/model
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR literal-return calls") do
+	test("uses the resolved imported declaration and leaves unrelated same-named calls") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/values.trb"],
+				sources: ["import { amount as chosen } from values\ndef amount(value: Integer): Integer\nreturn value\nend\ndef main()\nputs(chosen())\nputs(amount(29))\nend\n", "def amount(): Integer\nreturn 17\nend\n"],
+				error: "",
+			))
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut direct := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 11
+				expect(state.scalar_mir.calls[instruction.payload].argument_count).to_equal(1)
+				direct += 1
+			end
+		end
+		expect(direct).to_equal(1)
+	end
+
+	test("replaces a direct literal call and preserves its value type and origin") do
+		mut state := array_loop_mir_check("def amount(): Integer\nreturn 17\nend\ndef main()\nputs(amount())\nend\n")
+		mut found := false
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 6 && instruction.line == 5
+				expect(state.scalar_mir.literal_texts[instruction.payload]).to_equal("17")
+				expect(instruction.first).to_equal(1)
+				expect(instruction.second).to_equal(-1)
+				expect(instruction.failure).to_equal(-1)
+				expect(instruction.source_id).to_equal(0)
+				expect(mir_value_type(state.scalar_mir, 1, instruction.result)).to_equal(1)
+				found = true
+			end
+		end
+		expect(found).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbnf0")).to_be_false()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("retains large Integer literals and recomputes transitive caller effects") do
+		mut state := array_loop_mir_check("def amount(): Integer\nreturn 9007199254740991\nend\ndef forward(): Integer\nreturn amount()\nend\ndef main()\nputs(forward())\nputs(amount())\nend\n")
+		effects := mir_call_effect_summaries(state.scalar_mir)
+		state.scalar_mir.calls.each do |call|
+			expect(call.effects).to_equal(effects[call.callee])
+		end
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbnf0")).to_be_false()
+		# A forwarding body remains general MIR, rather than growing this rule
+		# into transitive inlining on a later optimization invocation.
+		expect(before.include?("call $trbnf1")).to_be_true()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("9007199254740991\n9007199254740991\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps parameters negative expressions globals and effectful bodies ordinary") do
+		sources := [
+			"def amount(value: Integer): Integer\nreturn 17\nend\ndef main()\nputs(amount(3))\nend\n",
+			"def amount(): Integer\nreturn -17\nend\ndef main()\nputs(amount())\nend\n",
+			"VALUE := 17\ndef amount(): Integer\nreturn VALUE\nend\ndef main()\nputs(amount())\nend\n",
+			"def amount(): Integer\nputs(3)\nreturn 17\nend\ndef main()\nputs(amount())\nend\n",
+			"def amount(): Integer\nif true\nreturn 17\nend\nreturn 8\nend\ndef main()\nputs(amount())\nend\n",
+		]
+		sources.each do |source|
+			state := array_loop_mir_check(source)
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+		end
+	end
+
+	test("does not rewrite an indirect invocation as a direct literal") do
+		state := array_loop_mir_check("def amount(): Integer\nreturn 17\nend\ndef invoke(callback: () -> Integer): Integer\nreturn callback()\nend\ndef main()\nputs(invoke(amount))\nend\n")
+		mut indirect := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 42
+				indirect += 1
+			end
+		end
+		expect(indirect).to_equal(1)
+	end
+
+	test("retains Integer overflow failure after a literal call is folded") do
+		state := array_loop_mir_check("def amount(): Integer\nreturn 1\nend\ndef add(value: Integer): Integer\nreturn value + amount()\nend\ndef main()\nputs(add(9007199254740991))\nend\n")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbnf0")).to_be_false()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output, 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: Integer is outside the portable range\n")
+			end
+		end
+	end
+
+	test("independently rejects forged replacement facts payloads failure edges and types") do
+		fields := [2, 4, 5]
+		values := [0, 999999, 0]
+		fields.each.with_index do |field, mode|
+			mut state := array_loop_mir_check("def amount(): Integer\nreturn 17\nend\ndef main()\nputs(amount())\nend\n")
+			mut selected := -1
+			state.scalar_mir.instructions.each.with_index do |instruction, position|
+				if instruction.kind == 6 && instruction.line == 5
+					selected = position
+				end
+			end
+			expect(selected >= 0).to_be_true()
+			state.scalar_mir.instructions[selected] = mir_test_instruction_with_cell(state.scalar_mir.instructions[selected], field, values[mode])
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+		mut wrong_type := array_loop_mir_check("def amount(): Integer\nreturn 17\nend\ndef main()\nputs(amount())\nend\n")
+		mut replaced := false
+		wrong_type.scalar_mir.values.each.with_index do |value, index|
+			if value.function_id == 1 && value.line == 5 && value.type_id == 1
+				wrong_type.scalar_mir.values[index] = MirValue.new(function_id: value.function_id, id: value.id, type_id: 2, source_id: value.source_id, line: value.line)
+				replaced = true
+			end
+		end
+		expect(replaced).to_be_true()
+		expect(verify_mir(wrong_type.scalar_mir, true) != "").to_be_true()
+	end
+end

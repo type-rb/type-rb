@@ -1,0 +1,155 @@
+--- a/arm64/isel.c
++++ b/arm64/isel.c
+@@ -317,6 +317,105 @@
+ 	}
+ }
+ 
++static int
++memreg(Ref r, Fn *fn)
++{
++	return rtype(r) == RTmp && r.val >= Tmp0
++		&& fn->tmp[r.val].cls == Kl && fn->tmp[r.val].slot == -1;
++}
++
++/* Use only shifts directly encodable by the memory operation. Other shifts
++ * remain ordinary instructions and may still serve as an unscaled index. */
++static Ins *
++memshift(Ref r, int sz, Fn *fn)
++{
++	Ins *d;
++	Con *c;
++
++	if (!memreg(r, fn) || fn->tmp[r.val].ndef != 1)
++		return 0;
++	d = fn->tmp[r.val].def;
++	if (!d || d->op != Oshl || d->cls != Kl
++	|| !memreg(d->arg[0], fn) || rtype(d->arg[1]) != RCon)
++		return 0;
++	c = &fn->con[d->arg[1].val];
++	if (c->type != CBits || c->bits.i < 0 || c->bits.i > 3
++	|| (1 << c->bits.i) != sz)
++		return 0;
++	return d;
++}
++
++/* Fold each memory use, preserving definitions needed by remaining uses.
++ * Shared liveness and allocation handle both registers in RMem. */
++static void
++selmem(Ins *i, Fn *fn)
++{
++	Ins *d, *shift;
++	Tmp *t, *index;
++	Con *c;
++	Addr a;
++	Ref *r;
++	int sz, last;
++
++	if (isload(i->op)) {
++		r = &i->arg[0];
++		sz = loadsz(i);
++	} else if (isstore(i->op)) {
++		r = &i->arg[1];
++		sz = storesz(i);
++	} else
++		return;
++	if (rtype(*r) != RTmp || r->val < Tmp0)
++		return;
++	t = &fn->tmp[r->val];
++	d = t->def;
++	if (t->ndef != 1 || !d
++	|| d->op != Oadd || d->cls != Kl
++	|| !memreg(d->arg[0], fn))
++		return;
++	last = t->nuse == 1;
++	a = (Addr){.offset = {.type = CBits}, .base = d->arg[0],
++		.index = R, .scale = 1};
++	if (rtype(d->arg[1]) == RCon) {
++		if (!last)
++			return;
++		c = &fn->con[d->arg[1].val];
++		if (c->type != CBits || c->bits.i < 0
++		|| c->bits.i > 4095 * sz || c->bits.i % sz)
++			return;
++		a.offset = *c;
++	} else if (memreg(d->arg[1], fn)) {
++		a.index = d->arg[1];
++		shift = memshift(a.index, sz, fn);
++		if (!shift && (shift = memshift(a.base, sz, fn))) {
++			a.index = a.base;
++			a.base = d->arg[1];
++		}
++		/* Shared addresses must save both the shift and the add. */
++		if (!last && !shift)
++			return;
++		if (shift) {
++			index = &fn->tmp[a.index.val];
++			a.index = shift->arg[0];
++			a.scale = sz;
++			/* Only the last address use transfers the add's shift use. */
++			if (last && --index->nuse == 0)
++				*shift = (Ins){.op = Onop};
++			else
++				fn->tmp[a.index.val].nuse++;
++		}
++	} else
++		return;
++	if (!last)
++		fn->tmp[a.base.val].nuse++;
++	vgrow(&fn->mem, ++fn->nmem);
++	fn->mem[fn->nmem-1] = a;
++	*r = MEM(fn->nmem-1);
++	/* The final memory use takes over the add's operand uses. */
++	if (--t->nuse == 0)
++		*d = (Ins){.op = Onop};
++}
++
+ void
+ arm64_isel(Fn *fn)
+ {
+@@ -344,6 +443,11 @@
+ 				*i = (Ins){.op = Onop};
+ 			}
+ 
++	/* Definitions still refer to the original instruction storage here. */
++	for (b=fn->start; b; b=b->link)
++		for (i=b->ins; i<&b->ins[b->nins]; i++)
++			selmem(i, fn);
++
+ 	for (b=fn->start; b; b=b->link) {
+ 		curi = &insb[NIns];
+ 		for (sb=(Blk*[3]){b->s1, b->s2, 0}; *sb; sb++)
+--- a/arm64/emit.c
++++ b/arm64/emit.c
+@@ -169,6 +169,7 @@
+ emitf(char *s, Ins *i, E *e)
+ {
+ 	Ref r;
++	Addr *a;
+ 	int k, c;
+ 	Con *pc;
+ 	uint64_t n;
+@@ -259,6 +260,24 @@
+ 				break;
+ 			case RSlot:
+ 				fprintf(e->f, "[x29, %"PRIu64"]", slot(r, e));
++				break;
++			case RMem:
++				a = &e->fn->mem[r.val];
++				assert(isreg(a->base));
++				assert(a->offset.type == CBits);
++				fprintf(e->f, "[%s, ", rname(a->base.val, Kl));
++				if (req(a->index, R))
++					fprintf(e->f, "#%"PRId64, a->offset.bits.i);
++				else {
++					assert(isreg(a->index) && a->offset.bits.i == 0);
++					fprintf(e->f, "%s", rname(a->index.val, Kl));
++					if (a->scale != 1) {
++						assert(a->scale == 2 || a->scale == 4 || a->scale == 8);
++						fprintf(e->f, ", lsl #%d",
++							a->scale == 8 ? 3 : a->scale == 4 ? 2 : 1);
++					}
++				}
++				fputc(']', e->f);
+ 				break;
+ 			}
+ 			break;

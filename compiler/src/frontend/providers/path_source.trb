@@ -1,0 +1,34 @@
+import { pinned_path_source } from project/official_catalog
+
+# The portable source owns validation and nominal identity. The reference's
+# registry supplies Path#join separately; express its POSIX target behavior as
+# an ordinary checked method before resolution and MIR lowering. Supported
+# Native target profiles use slash separators, independently of compiler host.
+def native_path_source(): String
+	method := "\tdef join(path: RelativePath): Path\n\t\tparent := value()\n\t\tchild := path.value()\n\t\tif parent == \"\" || parent.end_with?(\"/\")\n\t\t\treturn Path.new(parent + child)\n\t\tend\n\t\treturn Path.new(parent + \"/\" + child)\n\tend\n"
+	source := pinned_path_source()
+	marker := "newtype Path = String do\n"
+	mut output := ""
+	mut index := 0
+	mut inserted := false
+	# Keep this assembly in the snapshot subset as well as the ordinary compiler.
+	while index < source.size()
+		output += source[index]
+		index += 1
+		if !inserted && source[index - 1] == "\n" && index >= marker.size()
+			mut matches := true
+			mut offset := 0
+			while offset < marker.size()
+				if source[index - marker.size() + offset] != marker[offset]
+					matches = false
+				end
+				offset += 1
+			end
+			if matches
+				output += method
+				inserted = true
+			end
+		end
+	end
+	return output
+end

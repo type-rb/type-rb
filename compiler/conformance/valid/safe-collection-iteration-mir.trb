@@ -1,0 +1,59 @@
+def visit(values: Array<Integer>?): Integer
+	mut total := 0
+	values&.each.with_index do |value, index|
+		if value == 2
+			next
+		end
+		if value == 4
+			break
+		end
+		total += value * 10 + index
+	end
+	return total
+end
+
+def early(values: Range<Integer>?): Integer
+	values&.each do |value|
+		if value == 2
+			return value
+		end
+	end
+	return -1
+end
+
+def entries(values: Hash<String, Integer>?): Integer
+	mut total := 0
+	values&.each { |key, value| total += key.size() + value }
+	return total
+end
+
+def source(mut calls: Array<Integer>): Array<Integer>?
+	calls.push(1)
+	return [4, 5]
+end
+
+def main()
+	puts(visit(nil))
+	puts(visit([1, 2, 3, 4, 5]))
+	puts(early(nil))
+	puts(early(1..3))
+	puts(entries(nil))
+	puts(entries({ "a": 2, "bb": 3 }))
+	mut calls: Array<Integer> := []
+	mut total := 0
+	source(calls)&.each { |value| total += value }
+	puts(calls.size())
+	puts(total)
+	mut values := [1, 2]
+	mut optional: Array<Integer>? := values
+	optional&.each do |value|
+		if value == 1
+			optional = nil
+			values.push(3)
+		end
+		total += value
+	end
+	puts(total)
+	puts(optional == nil)
+	(2..3)&.each.with_index { |value, index| puts(value + index) }
+end

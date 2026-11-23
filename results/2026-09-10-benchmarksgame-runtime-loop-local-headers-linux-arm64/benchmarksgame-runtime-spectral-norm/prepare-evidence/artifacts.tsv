@@ -1,0 +1,8 @@
+case	candidate	artifact	bytes	sha256
+spectral-norm	typerb-native	/home/runner/work/_temp/prepare-workspace/backend-pair/spectral-norm/native	19552	7df6c38d6b4303755cf5ca09f49c085b64c46b1296a80c73877f55813ca3b175
+spectral-norm	typerb-go	/home/runner/work/_temp/prepare-workspace/backend-pair/spectral-norm/reference	2810658	58b2850f00fa72fd4341d1fe4aa547b267a8bd83559c68e9a0bf505ab8136024
+spectral-norm	c	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/c/program	70696	d495ac44d822a9764c833e15cd1f6e860775d2dd8ba4134644d62dd46ec95833
+spectral-norm	cpp	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/cpp/program	71952	a7c4ac980c182821d6bb423ced743dcec4edc50028a1fee59778ffd6680ffe98
+spectral-norm	go	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/go/program	2382139	5b4913083db78d16fe404fd059fc7bfc961a57a8f69fb2cd60b2af5742002a81
+spectral-norm	rust	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/rust/program	4673736	a9ea21cb3c41ff42db4290abeb9dc92b16c3cc41111f7adafee6b7a551ee9310
+spectral-norm	java	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/java/classes/spectralnorm.class	1428	4e3eb75a36778729f14503f95e35b0a2ec823fd1d4280baac24b22482fd73bcb

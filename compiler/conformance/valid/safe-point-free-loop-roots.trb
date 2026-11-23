@@ -1,0 +1,59 @@
+def loop_root_value(prefix: String): String
+	return prefix + "-kept"
+end
+
+def loop_root_churn(rounds: Integer)
+	mut index := 0
+	while index < rounds
+		discarded := "garbage-" + index.to_s()
+		if discarded == ""
+			puts("unexpected")
+		end
+		index += 1
+	end
+	return
+end
+
+def zero_iteration_root(): String
+	kept := loop_root_value("zero")
+	mut index := 0
+	while index < 0
+		index += 1
+	end
+	loop_root_churn(30000)
+	return kept
+end
+
+def nested_loop_root(): String
+	kept := loop_root_value("nested")
+	mut outer := 0
+	while outer < 2
+		mut inner := 0
+		while inner < 3
+			inner += 1
+		end
+		outer += 1
+	end
+	loop_root_churn(30000)
+	return kept
+end
+
+def early_return_root(limit: Integer): String
+	kept := loop_root_value("early")
+	mut index := 0
+	while index < limit
+		if index == 1
+			return kept
+		end
+		index += 1
+	end
+	loop_root_churn(30000)
+	return kept
+end
+
+def main()
+	puts(zero_iteration_root())
+	puts(nested_loop_root())
+	puts(early_return_root(2))
+	return
+end

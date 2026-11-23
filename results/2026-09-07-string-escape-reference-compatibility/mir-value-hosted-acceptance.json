@@ -1,0 +1,2750 @@
+{
+  "candidateRevision": "89a35c16de504ffb9c2ad926867ff277f6bf529d",
+  "controlRevision": "2f503f993ca93e5d50ad3151755fc739039d1bb5",
+  "cumulativeBaseline": "ac633935a7f248470c59d22666da14c819a131fa",
+  "run": 34258862533,
+  "registration": "https://github.com/type-rb/type-rb-native/pull/357#issuecomment-5589567975",
+  "firstAttemptStatus": "failed-catastrophic-adjacent-observation",
+  "secondAttemptStatus": "passed",
+  "firstOutlierSeconds": 1.978962366,
+  "firstOutlierRatio": 2.0539815698447703,
+  "firstFailurePreserved": true,
+  "cohorts": [
+    {
+      "attempt": 1,
+      "measurements": [
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "1.442858130",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61575168",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.961087810",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61640704",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.964335068",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61636608",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.963586435",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61427712",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "1.978962366",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61501440",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.966003788",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61472768",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.967103084",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61558784",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.958948585",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61403136",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.955833338",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61210624",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "1.681877641",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61440000",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.984068019",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61452288",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "1.022171944",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61456384",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.963476204",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61513728",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.957605171",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61485056",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.960176467",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61513728",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.964895440",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61444096",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.961705418",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61616128",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.962523306",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61448192",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.967036876",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61632512",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.967410340",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61358080",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.967485759",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61616128",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.968186142",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61530112",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.959877525",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61239296",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.979386174",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61186048",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.967625886",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61591552",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.961180305",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61571072",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.963606546",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61517824",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.967573169",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61562880",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.971389035",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61480960",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.958790717",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61509632",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.967613830",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61575168",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.973521860",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61612032",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.969544211",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61595648",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.963545105",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61472768",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.963687951",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61362176",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.961543647",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61620224",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.030147975",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60780544",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.138794345",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77078528",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.138063803",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "74850304",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.030441431",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60899328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.030583736",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60735488",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.136693822",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77352960",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.138362788",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77246464",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.030396923",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60911616",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.030292058",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60923904",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.138229429",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77037568",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.137739104",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75231232",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.030360554",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60825600",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.030460501",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60833792",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.137169205",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77393920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.137063609",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75063296",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.030023940",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60895232",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.030203848",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60735488",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.137185697",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77029376",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.137851486",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75202560",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.030271437",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61108224",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.030533475",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60739584",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.137071780",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77099008",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.137399623",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77369344",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.030441213",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60715008",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.030524617",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60919808",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.136801421",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75087872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.000571345",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1871872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.001142046",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6184960",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.001140043",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.000574421",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1810432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.000568658",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1810432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.001108176",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6172672",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.001143806",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4063232",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.000560957",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1867776",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.000567212",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1859584",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.001129240",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4071424",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.001116285",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6172672",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.000569072",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1863680",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.000543909",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1871872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.001092355",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6172672",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.001104542",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.000544808",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1871872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.000556553",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1871872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.001120735",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6176768",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.001126321",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.000545759",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1855488",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.000565758",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1810432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.001085268",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.001106332",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6172672",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.000545685",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1810432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.000571876",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1810432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.001113383",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6221824",
+          "rss_status": "0",
+          "observer_status": "0"
+        }
+      ],
+      "measurementsSHA256": "be1901b7087af4e3fb84922c3ffa7a73abd16d7363675022721c012f220ffd45",
+      "medians": {
+        "adjacent-build/b2-b3": {
+          "retained": 7,
+          "elapsedMedian": 0.963476204,
+          "rssMedian": 61456384
+        },
+        "adjacent-build/b3-b4": {
+          "retained": 7,
+          "elapsedMedian": 0.966003788,
+          "rssMedian": 61472768
+        },
+        "application-build/go": {
+          "retained": 11,
+          "elapsedMedian": 0.137185697,
+          "rssMedian": 77037568
+        },
+        "application-build/native": {
+          "retained": 11,
+          "elapsedMedian": 0.030396923,
+          "rssMedian": 60833792
+        },
+        "application-runtime/go": {
+          "retained": 11,
+          "elapsedMedian": 0.001113383,
+          "rssMedian": 6172672
+        },
+        "application-runtime/native": {
+          "retained": 11,
+          "elapsedMedian": 0.000560957,
+          "rssMedian": 1859584
+        },
+        "compiler-build/external": {
+          "retained": 7,
+          "elapsedMedian": 0.969544211,
+          "rssMedian": 61591552
+        },
+        "compiler-build/native": {
+          "retained": 7,
+          "elapsedMedian": 0.963545105,
+          "rssMedian": 61509632
+        }
+      },
+      "compiler": {
+        "architecture": "amd64",
+        "asset": "gate6n-candidate-linux-amd64",
+        "attestationSubjectSha256": "fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426",
+        "ccBoundary": "system-cc",
+        "mode": "0755",
+        "os": "linux",
+        "profile": "linux-amd64-v0",
+        "qbeBinarySha256": "2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9",
+        "qbeBinarySize": 679048,
+        "qbeTarget": "amd64_sysv",
+        "runnerImage": "ubuntu-24.04",
+        "sha256": "fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426",
+        "size": 280608
+      },
+      "controllerStatus": "1",
+      "controllerStderr": "gate6n-linux-amd64: adjacent-build b2-b3 observation exceeds the catastrophic bound\n",
+      "identities": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=280768\ninput_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\nb1_size=280768\nb1_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\nb2_size=280608\nb2_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nb3_size=280608\nb3_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nb4_size=280608\nb4_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncompiler_size_limit=310000\n",
+      "setupIdentities": "root_qbe_size=658639\nseed_source_revision=21f507e7ee7de2577f4137f6dfb9f732c14c1640\nseed_source_entry_sha256=6d86b2b63e05be84b9f92cdbec913b1df5553dd2e7706bc07bbddcafbef248d2\nroot_qbe_sha256=62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a\nroot_era_compiler_size=187520\nroot_era_compiler_sha256=06e69b34f42c615564218436bbf405b143e82781985ccab3dd136ec597a2e85c\nfirst_transition_qbe_size=1104977\nfirst_transition_qbe_sha256=d18b402d44822af3b3cbe8ba1d9a19375144697d4a1b10f5d9eb1133ddb9c17a\nfirst_transition_size=293808\nfirst_transition_sha256=cc2019746ac340ed5e09d2bcf178357f9524a7257dd0688b2163de33c98da8fa\nloop_source_revision=4e1d0b4aee97b9a5bd73a98f918b31d47985da25\nloop_source_entry_sha256=fccc35c63aac816bdab91d7b95ca0bcd9b7ff04a9b4d1a31d042498fb5a73329\nloop_transition_qbe_size=1102622\nloop_transition_qbe_sha256=a91af2de27e29cd2eccfea52439edccd7f11852430c4d0b7e2a982394387d07a\nloop_transition_size=269432\nloop_transition_sha256=3f34d11ba43dc4786e90a9ea54b6e6271af3621a43feb67590691ce36ce57187\nboolean_source_revision=57cb41ad6be91716e31fa555ed8ea8c8ce7a5f51\nboolean_source_entry_sha256=ae59e03616b5145a4a09ce2af0d0b7a96f06fa5cda08efd5ed8faed86bd51a71\nboolean_transition_qbe_size=1115817\nboolean_transition_qbe_sha256=b922aacbea7af4452ea076234915ed61983a997511a48890a0179da15046445e\nboolean_transition_size=272056\nboolean_transition_sha256=fb4c82190c56bc36f2296b44a388d48e19ff52d65444a9fbfe3f740086d1529d\nrecord_source_revision=566d00d67172460df0f57dff6d5fe03db3b67cdc\nrecord_source_entry_sha256=a80c668a8f7d7d5aff18339f3bb810bc1c9c17deb545ab50b9dd55d1de291db5\nrecord_transition_qbe_size=1151452\nrecord_transition_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\nrecord_transition_size=281192\nrecord_transition_sha256=3ea0c107c2e613c8ad6b00dabc288e5d8288845d35b4c4994db485e9f770b63e\ncurrent_runtime_qbe_size=1150705\ncurrent_runtime_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncurrent_runtime_transition_size=280768\ncurrent_runtime_transition_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\n",
+      "environment": "workflow_revision=239109bde22ef9f903175f4c4ca769d053d55da9\nworkflow_ref=refs/pull/357/merge\nworkflow_event=pull_request\nworkflow_run_id=34258862533\nworkflow_run_attempt=1\nrunner_image=ubuntu-24.04\ncandidate_revision=239109bde22ef9f903175f4c4ca769d053d55da9\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nroot_repository=type-rb/type-rb-native\nroot_release_tag=bootstrap-seed-2026-08-30\nroot_asset_id=535828321\nLinux runnervmejwal 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 9V74 80-Core Processor\nCPU family:                              25\nModel:                                   17\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.26\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves user_shstk avx512_bf16 clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               64 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                2 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Vulnerable: No microcode\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n",
+      "toolchains": "0.4.6-dev\ngo version go1.27.1 linux/amd64\nPython 3.12.3\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv (default), amd64_apple, amd64_win, arm64, arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+      "packages": "binutils\t2.42-4ubuntu2.10\nfile\t1:5.45-3build1\njq\t1.7.1-3ubuntu0.24.04.2\nlld:amd64\t1:18.0-59~exp2\nstrace\t6.8-0ubuntu2\ntime\t1.9-0.2build1\n"
+    },
+    {
+      "attempt": 2,
+      "measurements": [
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "1.270759263",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61177856",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "1.261526133",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61263872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "1.258300943",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61444096",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "1.253962048",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61472768",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "1.259586843",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61431808",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "1.255129173",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61116416",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "1.270438763",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61374464",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "1.283581789",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61222912",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "1.257392398",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61444096",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "1.257721397",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61476864",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "1.254909922",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61235200",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "1.250295713",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61284352",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "1.287214929",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61235200",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "1.354300847",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61386752",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "1.339160149",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61390848",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "1.315958066",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61394944",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b2-b3",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "1.302984703",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61362176",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "adjacent-build",
+          "candidate": "b3-b4",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "1.311082842",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61259776",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "1.324765293",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61308928",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "1.275980540",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61292544",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "1.298315730",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61116416",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "1.291211832",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61239296",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "1.265014590",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61218816",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "1.270408723",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61202432",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "1.303340266",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61378560",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "1.279384501",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61435904",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "1.268051528",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61087744",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "1.308137256",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61263872",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "1.291524577",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61239296",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "1.298743140",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61300736",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "1.287994338",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61566976",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "1.274318597",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61206528",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "1.302262724",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61186048",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "1.277549268",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61112320",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "1.274993617",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61427712",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "compiler-build",
+          "candidate": "external",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "1.277462156",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "61587456",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.040480907",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60596224",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.180843611",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77393920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.182106699",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77094912",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.040370990",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60735488",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.040271848",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60895232",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.182459967",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77193216",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.183048249",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75149312",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.040343057",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60600320",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.040142246",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60743680",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.182779829",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "76926976",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.185349915",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "76795904",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.040642893",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60768256",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.040277187",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60776448",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.183844935",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77410304",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.185690281",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75096064",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.040535898",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60641280",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.040887776",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60760064",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.182890773",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "77004800",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.180986924",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75014144",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.040245918",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60657664",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.040399953",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60731392",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.184053736",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "74919936",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.180983692",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "74973184",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.040468202",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60628992",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "native",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.040360360",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "60542976",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-build",
+          "candidate": "go",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.181916318",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "75124736",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.000718189",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1617920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "-2",
+          "elapsed_seconds_per_repetition": "0.001455071",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6217728",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.001473770",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6221824",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "-1",
+          "elapsed_seconds_per_repetition": "0.000730492",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1617920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.000726590",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1679360",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "1",
+          "elapsed_seconds_per_repetition": "0.001469417",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6176768",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.001461725",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "2",
+          "elapsed_seconds_per_repetition": "0.000725412",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1654784",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.000739778",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1679360",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "3",
+          "elapsed_seconds_per_repetition": "0.001475848",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.001476494",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6217728",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "4",
+          "elapsed_seconds_per_repetition": "0.000722300",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1646592",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.000723717",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1654784",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "5",
+          "elapsed_seconds_per_repetition": "0.001467646",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.001465036",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4005888",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "6",
+          "elapsed_seconds_per_repetition": "0.000728023",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1597440",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.000729730",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1646592",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "7",
+          "elapsed_seconds_per_repetition": "0.001475872",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.001485036",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6234112",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "8",
+          "elapsed_seconds_per_repetition": "0.000736722",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1617920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.000726893",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1679360",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "9",
+          "elapsed_seconds_per_repetition": "0.001450591",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6184960",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.001454287",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "4067328",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "10",
+          "elapsed_seconds_per_repetition": "0.000715490",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1617920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "native",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.000717636",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "1617920",
+          "rss_status": "0",
+          "observer_status": "0"
+        },
+        {
+          "stage": "application-runtime",
+          "candidate": "go",
+          "iteration": "11",
+          "elapsed_seconds_per_repetition": "0.001431972",
+          "elapsed_status": "0",
+          "peak_rss_bytes": "6184960",
+          "rss_status": "0",
+          "observer_status": "0"
+        }
+      ],
+      "measurementsSHA256": "fbf6a438017a792260576e1177e5c57c28851a980c28722ca0c95476c2f829fe",
+      "medians": {
+        "adjacent-build/b2-b3": {
+          "retained": 7,
+          "elapsedMedian": 1.283581789,
+          "rssMedian": 61362176
+        },
+        "adjacent-build/b3-b4": {
+          "retained": 7,
+          "elapsedMedian": 1.270438763,
+          "rssMedian": 61374464
+        },
+        "application-build/go": {
+          "retained": 11,
+          "elapsedMedian": 0.182890773,
+          "rssMedian": 75149312
+        },
+        "application-build/native": {
+          "retained": 11,
+          "elapsedMedian": 0.04036036,
+          "rssMedian": 60731392
+        },
+        "application-runtime/go": {
+          "retained": 11,
+          "elapsedMedian": 0.001467646,
+          "rssMedian": 4067328
+        },
+        "application-runtime/native": {
+          "retained": 11,
+          "elapsedMedian": 0.00072659,
+          "rssMedian": 1646592
+        },
+        "compiler-build/external": {
+          "retained": 7,
+          "elapsedMedian": 1.291524577,
+          "rssMedian": 61239296
+        },
+        "compiler-build/native": {
+          "retained": 7,
+          "elapsedMedian": 1.277549268,
+          "rssMedian": 61300736
+        }
+      },
+      "compiler": {
+        "architecture": "amd64",
+        "asset": "gate6n-candidate-linux-amd64",
+        "attestationSubjectSha256": "fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426",
+        "ccBoundary": "system-cc",
+        "mode": "0755",
+        "os": "linux",
+        "profile": "linux-amd64-v0",
+        "qbeBinarySha256": "2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9",
+        "qbeBinarySize": 679048,
+        "qbeTarget": "amd64_sysv",
+        "runnerImage": "ubuntu-24.04",
+        "sha256": "fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426",
+        "size": 280608
+      },
+      "controllerStatus": "0",
+      "controllerStderr": "",
+      "identities": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=280768\ninput_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\nb1_size=280768\nb1_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\nb2_size=280608\nb2_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nb3_size=280608\nb3_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nb4_size=280608\nb4_sha256=fc325b7998a704c69f8b48da49239e99ad5ce7dae38c95043eba1f1670518426\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncompiler_size_limit=310000\n",
+      "setupIdentities": "root_qbe_size=658639\nseed_source_revision=21f507e7ee7de2577f4137f6dfb9f732c14c1640\nseed_source_entry_sha256=6d86b2b63e05be84b9f92cdbec913b1df5553dd2e7706bc07bbddcafbef248d2\nroot_qbe_sha256=62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a\nroot_era_compiler_size=187520\nroot_era_compiler_sha256=06e69b34f42c615564218436bbf405b143e82781985ccab3dd136ec597a2e85c\nfirst_transition_qbe_size=1104977\nfirst_transition_qbe_sha256=d18b402d44822af3b3cbe8ba1d9a19375144697d4a1b10f5d9eb1133ddb9c17a\nfirst_transition_size=293808\nfirst_transition_sha256=cc2019746ac340ed5e09d2bcf178357f9524a7257dd0688b2163de33c98da8fa\nloop_source_revision=4e1d0b4aee97b9a5bd73a98f918b31d47985da25\nloop_source_entry_sha256=fccc35c63aac816bdab91d7b95ca0bcd9b7ff04a9b4d1a31d042498fb5a73329\nloop_transition_qbe_size=1102622\nloop_transition_qbe_sha256=a91af2de27e29cd2eccfea52439edccd7f11852430c4d0b7e2a982394387d07a\nloop_transition_size=269432\nloop_transition_sha256=3f34d11ba43dc4786e90a9ea54b6e6271af3621a43feb67590691ce36ce57187\nboolean_source_revision=57cb41ad6be91716e31fa555ed8ea8c8ce7a5f51\nboolean_source_entry_sha256=ae59e03616b5145a4a09ce2af0d0b7a96f06fa5cda08efd5ed8faed86bd51a71\nboolean_transition_qbe_size=1115817\nboolean_transition_qbe_sha256=b922aacbea7af4452ea076234915ed61983a997511a48890a0179da15046445e\nboolean_transition_size=272056\nboolean_transition_sha256=fb4c82190c56bc36f2296b44a388d48e19ff52d65444a9fbfe3f740086d1529d\nrecord_source_revision=566d00d67172460df0f57dff6d5fe03db3b67cdc\nrecord_source_entry_sha256=a80c668a8f7d7d5aff18339f3bb810bc1c9c17deb545ab50b9dd55d1de291db5\nrecord_transition_qbe_size=1151452\nrecord_transition_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\nrecord_transition_size=281192\nrecord_transition_sha256=3ea0c107c2e613c8ad6b00dabc288e5d8288845d35b4c4994db485e9f770b63e\ncurrent_runtime_qbe_size=1150705\ncurrent_runtime_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncurrent_runtime_transition_size=280768\ncurrent_runtime_transition_sha256=c06414953ac46acc0855ebdb98b62762c4a2d27204d349e19e13e371516a635d\n",
+      "environment": "workflow_revision=239109bde22ef9f903175f4c4ca769d053d55da9\nworkflow_ref=refs/pull/357/merge\nworkflow_event=pull_request\nworkflow_run_id=34258862533\nworkflow_run_attempt=2\nrunner_image=ubuntu-24.04\ncandidate_revision=239109bde22ef9f903175f4c4ca769d053d55da9\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nroot_repository=type-rb/type-rb-native\nroot_release_tag=bootstrap-seed-2026-08-30\nroot_asset_id=535828321\nLinux runnervmejwal 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 9V74 80-Core Processor\nCPU family:                              25\nModel:                                   17\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.26\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves user_shstk clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload umip vaes vpclmulqdq rdpid fsrm\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               64 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                2 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Vulnerable: No microcode\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n",
+      "toolchains": "0.4.6-dev\ngo version go1.27.1 linux/amd64\nPython 3.12.3\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv (default), amd64_apple, amd64_win, arm64, arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+      "packages": "binutils\t2.42-4ubuntu2.10\nfile\t1:5.45-3build1\njq\t1.7.1-3ubuntu0.24.04.2\nlld:amd64\t1:18.0-59~exp2\nstrace\t6.8-0ubuntu2\ntime\t1.9-0.2build1\n"
+    }
+  ],
+  "pooled": {
+    "b2-b3": {
+      "retained": 14,
+      "elapsedMedian": 1.2538440555,
+      "rssMedian": 61417472.0
+    },
+    "b3-b4": {
+      "retained": 14,
+      "elapsedMedian": 1.2550195474999999,
+      "rssMedian": 61444096.0
+    }
+  },
+  "pooledMedianSpread": {
+    "elapsedMedian": 1.0009375105260048,
+    "rssMedian": 1.000433492280503
+  },
+  "additionalPooledCheck": "passed",
+  "confirmationBudget": "exhausted-and-expired",
+  "claims": {
+    "newRuntimeSpeedup": false,
+    "ordinaryThresholdChanged": false,
+    "originalCatastrophicObservationPasses": false
+  },
+  "artifactIds": {
+    "first": 10069281073,
+    "second": 10069927237
+  },
+  "acceptedHead": "89a35c16de504ffb9c2ad926867ff277f6bf529d",
+  "mergeRevision": "3bde3e0a06d764789fc478e68255ffe47c209e33",
+  "allSelectedAuthorities": "17-passed",
+  "arm64CompilerCosts": {
+    "darwin-arm64": {
+      "artifactId": 10070136618,
+      "comparison": [
+        {
+          "metric": "compiler_bytes",
+          "stage": "fixed-point",
+          "baseline": "365768",
+          "candidate": "365768",
+          "candidate_baseline_ratio": "1.000000",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_elapsed",
+          "stage": "fixed-point-build",
+          "baseline": "1.960000",
+          "candidate": "1.985000",
+          "candidate_baseline_ratio": "1.012755",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_peak_rss",
+          "stage": "fixed-point-build",
+          "baseline": "41181184.000000",
+          "candidate": "41295872.000000",
+          "candidate_baseline_ratio": "1.002785",
+          "maximum": "1.05",
+          "status": "pass"
+        }
+      ],
+      "measurements": [
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.91",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.82",
+          "peak_rss_bytes": "41156608",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.74",
+          "peak_rss_bytes": "41091072",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.88",
+          "peak_rss_bytes": "41271296",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.87",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.77",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.26",
+          "peak_rss_bytes": "41107456",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.27",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.01",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.05",
+          "peak_rss_bytes": "41091072",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.00",
+          "peak_rss_bytes": "41336832",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.17",
+          "peak_rss_bytes": "40845312",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.93",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.89",
+          "peak_rss_bytes": "41058304",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.19",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.08",
+          "peak_rss_bytes": "41156608",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.94",
+          "peak_rss_bytes": "41123840",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.99",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.93",
+          "peak_rss_bytes": "41123840",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.35",
+          "peak_rss_bytes": "41091072",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.91",
+          "peak_rss_bytes": "41353216",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.94",
+          "peak_rss_bytes": "41074688",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.02",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.89",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.92",
+          "peak_rss_bytes": "41091072",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.01",
+          "peak_rss_bytes": "41484288",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.17",
+          "peak_rss_bytes": "41172992",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.94",
+          "peak_rss_bytes": "41402368",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.91",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.08",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.98",
+          "peak_rss_bytes": "41287680",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.98",
+          "peak_rss_bytes": "41254912",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.99",
+          "peak_rss_bytes": "41189376",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.91",
+          "peak_rss_bytes": "41418752",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.90",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.96",
+          "peak_rss_bytes": "41271296",
+          "status": "0"
+        }
+      ],
+      "identities": "target=darwin-arm64\nbaseline_compiler_bytes=365768\ncandidate_compiler_bytes=365768\ncandidate_compiler_limit=366000\nbaseline_text_bytes=260964\ncandidate_text_bytes=260700\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nbaseline_fixed_point_qbe_size=1151452\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\n",
+      "policy": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n",
+      "environments": {
+        "baseline": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=2f503f993ca93e5d50ad3151755fc739039d1bb5\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin iad20-gt1019-9f201825-1333-44be-af75-5011723636b4-4A80EA4D59D6.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+        "candidate": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=239109bde22ef9f903175f4c4ca769d053d55da9\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin iad20-gt1019-9f201825-1333-44be-af75-5011723636b4-4A80EA4D59D6.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n"
+      }
+    },
+    "linux-arm64": {
+      "artifactId": 10070059461,
+      "comparison": [
+        {
+          "metric": "compiler_bytes",
+          "stage": "fixed-point",
+          "baseline": "327744",
+          "candidate": "327448",
+          "candidate_baseline_ratio": "0.999097",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_elapsed",
+          "stage": "fixed-point-build",
+          "baseline": "1.350000",
+          "candidate": "1.370000",
+          "candidate_baseline_ratio": "1.014815",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_peak_rss",
+          "stage": "fixed-point-build",
+          "baseline": "64671744.000000",
+          "candidate": "64643072.000000",
+          "candidate_baseline_ratio": "0.999557",
+          "maximum": "1.05",
+          "status": "pass"
+        }
+      ],
+      "measurements": [
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64811008",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.37",
+          "peak_rss_bytes": "64688128",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64651264",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.44",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.37",
+          "peak_rss_bytes": "64753664",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64684032",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64794624",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64925696",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.37",
+          "peak_rss_bytes": "64544768",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64815104",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.38",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.37",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64663552",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.39",
+          "peak_rss_bytes": "64548864",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64811008",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64659456",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64667648",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64552960",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.38",
+          "peak_rss_bytes": "64790528",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.66",
+          "peak_rss_bytes": "64548864",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64811008",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64659456",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64679936",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.39",
+          "peak_rss_bytes": "64667648",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64626688",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64548864",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64622592",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.35",
+          "peak_rss_bytes": "64798720",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.36",
+          "peak_rss_bytes": "64671744",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64557056",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.32",
+          "peak_rss_bytes": "64528384",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.34",
+          "peak_rss_bytes": "64626688",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.38",
+          "peak_rss_bytes": "64622592",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.37",
+          "peak_rss_bytes": "64548864",
+          "status": "0"
+        }
+      ],
+      "identities": "target=linux-arm64\nbaseline_compiler_bytes=327744\ncandidate_compiler_bytes=327448\ncandidate_compiler_limit=328000\nbaseline_text_bytes=263552\ncandidate_text_bytes=263280\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nbaseline_fixed_point_qbe_size=1151452\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\n",
+      "policy": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n",
+      "environments": {
+        "baseline": "mode=previous\nprofile=linux-arm64-v0\nrunner_image=ubuntu-24.04-arm\ncompiler_size_limit=328000\nrepository_revision=2f503f993ca93e5d50ad3151755fc739039d1bb5\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nLinux runnervmfx5wp 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:12:01 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64 (default), arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+        "candidate": "mode=previous\nprofile=linux-arm64-v0\nrunner_image=ubuntu-24.04-arm\ncompiler_size_limit=328000\nrepository_revision=239109bde22ef9f903175f4c4ca769d053d55da9\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nLinux runnervmfx5wp 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:12:01 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64 (default), arm64_apple, rv64\n\t-d <flags>  dump debug information\n"
+      }
+    }
+  },
+  "crossTarget": {
+    "artifactId": 10070144738,
+    "evidence": "darwin_arm64_compiler_bytes=365768\nlinux_arm64_compiler_bytes=327448\nbaseline_combined_compiler_bytes=693512\ncombined_compiler_bytes=693216\ncombined_compiler_limit=694000\ndarwin_arm64_text_bytes=260700\nlinux_arm64_text_bytes=263280\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ntarget_neutral_qbe_bytes=1150705\ntarget_neutral_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncandidate_spectral_qbe_bytes=not-applicable\ncandidate_spectral_qbe_sha256=not-applicable\n"
+  }
+}

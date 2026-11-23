@@ -1,0 +1,49 @@
+# Allocation, mutation, I/O and failure occupy bits 0, 1, 2 and 3. These named
+# Integer literals preserve that internal encoding and the recovery subset.
+# Verified direct calls to literal-return functions fold away in MIR.
+def mir_effect_none(): Integer
+	return 0
+end
+
+def mir_effect_allocation(): Integer
+	return 1
+end
+
+def mir_effect_mutation(): Integer
+	return 2
+end
+
+def mir_effect_io(): Integer
+	return 4
+end
+
+def mir_effect_failure(): Integer
+	return 8
+end
+
+def mir_effect_allocation_failure(): Integer
+	return 9
+end
+
+def mir_effect_mutation_failure(): Integer
+	return 10
+end
+
+def mir_effect_allocation_mutation_failure(): Integer
+	return 11
+end
+
+def mir_effect_io_failure(): Integer
+	return 12
+end
+
+def mir_effect_allocation_io_failure(): Integer
+	return 13
+end
+
+# The direct-call summary lattice uses only none, failure and conservative.
+# Their numeric order is a join for those three classes, not for arbitrary
+# effect masks. Unknown behavior conservatively includes all four bits.
+def mir_effect_conservative(): Integer
+	return 15
+end

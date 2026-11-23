@@ -1,0 +1,121 @@
+{
+  "scope": "one diagnostic three-pair Native Web/OIDC dependency observation; no network requests or cold-cache/performance claim",
+  "source_revision": "e5eb67b76374817167d1585269a6229bea7c0233",
+  "reference_revision": "3c92543fe5d3ac984d35d65f62b1ab85fc82cafd",
+  "target": "darwin-arm64",
+  "compiler_sha256": "a4b0b81516a91ccf178ecaf32e62378904806ea454acfdc05489145ecc024ba6",
+  "core_sha256": "ea987687f54873c9d8483b70d69182e8133a64f5f0401e380b74c28a74cb788d",
+  "driver_sha256": "5fc8622badaa61c9476cc4ac6312e78bee1f58e78393210674d0803f8c41b130",
+  "sample_order": [
+    "web",
+    "oidc",
+    "oidc",
+    "web",
+    "web",
+    "oidc"
+  ],
+  "dependency_cost": {
+    "web": {
+      "build_seconds": [
+        2.1103172921575606,
+        2.249189625028521,
+        2.220449957996607
+      ],
+      "startup_seconds": [
+        0.5104331667535007,
+        0.05910958256572485,
+        0.053593875374644995
+      ],
+      "executable_bytes": 375624
+    },
+    "oidc": {
+      "build_seconds": [
+        4.072927916888148,
+        4.572423540987074,
+        4.062015583273023
+      ],
+      "startup_seconds": [
+        0.1186495409347117,
+        0.11669050017371774,
+        0.1267962078563869
+      ],
+      "executable_bytes": 5771192
+    },
+    "increment_bytes": 5395568
+  },
+  "imports": [
+    "/usr/lib/libSystem.B.dylib",
+    "/usr/lib/libc++.1.dylib",
+    "/System/Library/Frameworks/Security.framework/Versions/A/Security",
+    "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+    "/System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration"
+  ],
+  "compiler_bytes": {
+    "bin/trbn": {
+      "baseline_revision": "485b2312f2994e06b738b7e1f5f7b1b735654611",
+      "baseline_bytes": 7125800,
+      "candidate_bytes": 7125816,
+      "increment_bytes": 16,
+      "baseline_sha256": "6d3471efe49840aa913fe39b4e3cb9a81358ec396f4006155ec3a9d6abed2b20",
+      "candidate_sha256": "a4b0b81516a91ccf178ecaf32e62378904806ea454acfdc05489145ecc024ba6"
+    },
+    ".trb/bootstrap/core/compiler": {
+      "baseline_revision": "485b2312f2994e06b738b7e1f5f7b1b735654611",
+      "baseline_bytes": 3143736,
+      "candidate_bytes": 3160264,
+      "increment_bytes": 16528,
+      "baseline_sha256": "89da4e1dfad24b0c9cd7565338da12bff05c576b15bf947512875dcb64d0bf78",
+      "candidate_sha256": "ea987687f54873c9d8483b70d69182e8133a64f5f0401e380b74c28a74cb788d"
+    }
+  },
+  "libraries": {
+    "libcurl": "c6516116224faf7e257d7b32a8e7009382285ac6cf6a3f77b9be9fd81df019af",
+    "libicu-uts46": "1946edcec7d54219f8b6e544dad95ff246556666f738fa950216c8f2a2c8ceb9",
+    "libicuuc": "36152ced30f39a73a3df60acd05115d211a13e725ce6d64cb29bc15d6fb8ee2f",
+    "libnghttp2": "7c1eba23a87a29e3a3a1c493585404c078aa2706672b2bb5be537bc852b855b9",
+    "libssl": "1b01e7f88f7af0649334929beaab9535c766933d4448196bbfd60fab3291b13d",
+    "libz": "cbe60f7706dc240c37df6d9f98990fe906d34f57fa03d7a88b0cd4bc775a4d7a"
+  },
+  "pins": {
+    "curl": {
+      "license": "curl",
+      "revision": "3163ec065643ba20709f190111f42c3e1fe95273",
+      "root": "curl-8.23.0",
+      "sha256": "8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5",
+      "url": "https://github.com/curl/curl/releases/download/curl-8_23_0/curl-8.23.0.tar.xz",
+      "version": "8.23.0"
+    },
+    "icu": {
+      "license": "Unicode-3.0",
+      "revision": "21d1eb0f306e1141c10931e914dfc038c06121da",
+      "root": "icu",
+      "sha256": "3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0",
+      "unicode": "17.0.0",
+      "url": "https://github.com/unicode-org/icu/releases/download/release-78.3/icu4c-78.3-sources.tgz",
+      "version": "78.3"
+    },
+    "nghttp2": {
+      "license": "MIT",
+      "revision": "80dcb8140af050fac91a7e6af4fc6dd013404bd1",
+      "root": "nghttp2-1.71.0",
+      "sha256": "c0f55121d88650e4b9227aec28cebaf664d2417ca60fe70be0f8d38829f52116",
+      "url": "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/nghttp2-1.71.0.tar.xz",
+      "version": "1.71.0"
+    },
+    "zlib": {
+      "license": "Zlib",
+      "revision": "da607da739fa6047df13e66a2af6b8bec7c2a498",
+      "root": "zlib-1.3.2",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "url": "https://zlib.net/fossils/zlib-1.3.2.tar.gz",
+      "version": "1.3.2"
+    }
+  },
+  "dependency_builder_sha256": "b9988c0b0dddfec92c83f6294ad48859fc3a2a218b6bbd9fe6722f32fded9355",
+  "dependency_artifact_tool_sha256": "932e134112e4f12aeb8199014a60d4ce59462b927ae26862645656e1841e9031",
+  "dependency_abi_probe_sha256": "414e4909c63c9c6a5c822dd7713aac577908bdebeea92c704b9ff39ad918d40c",
+  "build_tools": {
+    "cc": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+    "cmake": "cmake version 4.4.5"
+  }
+}

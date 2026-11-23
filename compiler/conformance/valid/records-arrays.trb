@@ -1,0 +1,20 @@
+record Pair
+	left: Integer
+	right: Integer
+end
+
+def sum(pair: Pair): Integer
+	return pair.left + pair.right
+end
+
+def main()
+	mut values: Array<Integer> := [20]
+	values.push(22)
+	pair := Pair.new(left: values[0], right: values[1])
+	if sum(pair) == 42
+		puts("records-arrays-ok")
+	else
+		puts("records-arrays-bad")
+	end
+	return
+end

@@ -1,0 +1,630 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import trb/std/result
+
+enum ScalarType
+	Void
+	Boolean
+	Integer
+	Float
+end
+
+enum IntegerBinaryOperator
+	Add
+	Subtract
+	Multiply
+	Divide
+	Remainder
+	Power
+end
+
+enum FloatBinaryOperator
+	Add
+	Subtract
+	Multiply
+	Divide
+end
+
+enum ComparisonOperator
+	Equal
+	NotEqual
+	LessThan
+	LessThanOrEqual
+	GreaterThan
+	GreaterThanOrEqual
+end
+
+record RecoveryScalarParameter
+	id: String
+	value_type: ScalarType
+	origin: SourceOrigin
+end
+
+enum RecoveryScalarInstruction
+	BooleanLiteral(result: String, value: Boolean, origin: SourceOrigin)
+	IntegerLiteral(result: String, value: Integer, origin: SourceOrigin)
+	FloatLiteral(result: String, value: Float, origin: SourceOrigin)
+	IntegerBinary(
+		result: String,
+		operator: IntegerBinaryOperator,
+		left: String,
+		right: String,
+		origin: SourceOrigin,
+	)
+	FloatBinary(
+		result: String,
+		operator: FloatBinaryOperator,
+		left: String,
+		right: String,
+		origin: SourceOrigin,
+	)
+	IntegerCompare(
+		result: String,
+		operator: ComparisonOperator,
+		left: String,
+		right: String,
+		origin: SourceOrigin,
+	)
+	FloatCompare(
+		result: String,
+		operator: ComparisonOperator,
+		left: String,
+		right: String,
+		origin: SourceOrigin,
+	)
+	BooleanNot(result: String, value: String, origin: SourceOrigin)
+	Call(result: String?, function_id: String, arguments: Array<String>, origin: SourceOrigin)
+	WriteStatic(value: String, origin: SourceOrigin)
+end
+
+enum RecoveryScalarTerminator
+	Jump(target: String, arguments: Array<String>, origin: SourceOrigin)
+	Branch(
+		condition: String,
+		when_true: String,
+		true_arguments: Array<String>,
+		when_false: String,
+		false_arguments: Array<String>,
+		origin: SourceOrigin,
+	)
+	Return(value: String?, origin: SourceOrigin)
+end
+
+record RecoveryScalarBlock
+	id: String
+	parameters: Array<RecoveryScalarParameter>
+	origin: SourceOrigin
+	instructions: Array<RecoveryScalarInstruction>
+	terminator: RecoveryScalarTerminator
+end
+
+record RecoveryScalarFunction
+	id: String
+	name: String
+	parameters: Array<RecoveryScalarParameter>
+	result_type: ScalarType
+	entry: String
+	origin: SourceOrigin
+	blocks: Array<RecoveryScalarBlock>
+end
+
+record RecoveryScalarModule
+	id: String
+	entry_function: String
+	sources: Array<NativeSource>
+	functions: Array<RecoveryScalarFunction>
+end
+
+def verify_recovery_scalar_mir(native_module: RecoveryScalarModule): Result<Boolean, Diagnostic>
+	if native_module.sources.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/sources", "Scalar recovery MIR must declare at least one source")
+		)
+	end
+	if native_module.functions.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/functions", "Scalar recovery MIR must contain at least one function")
+		)
+	end
+	mut source_ids: Array<String> := []
+	mut source_index := 0
+	while source_index < native_module.sources.size()
+		source := native_module.sources[source_index]
+		if source_ids.include?(source.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic(
+					"TRBN0004",
+					"/sources/" + source_index.to_s() + "/id",
+					"Scalar recovery MIR source identifier is duplicated",
+				)
+			)
+		end
+		source_ids.push(source.id)
+		source_index += 1
+	end
+	mut function_ids: Hash<String, Boolean> := {}
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		path := "/functions/" + function_index.to_s()
+		if function_ids.key?(function.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/id", "Scalar recovery MIR function identifier is duplicated")
+			)
+		end
+		function_ids[function.id] = true
+		try _verify_recovery_scalar_origin(function.origin, source_ids, path + "/origin")
+		function_index += 1
+	end
+	entry_function := _recovery_scalar_function(native_module.functions, native_module.entry_function)
+	if entry_function == nil
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/entryFunction", "Scalar recovery MIR entry function does not exist")
+		)
+	end
+	if !entry_function.parameters.empty?() || entry_function.result_type != ScalarType::Void
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic(
+				"TRBN0004",
+				"/entryFunction",
+				"Scalar recovery MIR entry function must take no arguments and return Void",
+			)
+		)
+	end
+	function_index = 0
+	while function_index < native_module.functions.size()
+		try _verify_recovery_scalar_function(
+			native_module.functions[function_index],
+			native_module.functions,
+			source_ids,
+			"/functions/" + function_index.to_s(),
+		)
+		function_index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_recovery_scalar_function(
+		function: RecoveryScalarFunction,
+		functions: Array<RecoveryScalarFunction>,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if function.blocks.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/blocks", "Scalar recovery MIR function has no blocks")
+		)
+	end
+	mut definitions: Hash<String, ScalarType> := {}
+	mut parameter_index := 0
+	while parameter_index < function.parameters.size()
+		parameter := function.parameters[parameter_index]
+		parameter_path := path + "/parameters/" + parameter_index.to_s()
+		try _verify_recovery_scalar_parameter(parameter, source_ids, parameter_path)
+		try _recovery_scalar_define(definitions, parameter.id, parameter.value_type, parameter_path + "/id")
+		parameter_index += 1
+	end
+	mut block_ids: Hash<String, Boolean> := {}
+	mut entry_found := false
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		block := function.blocks[block_index]
+		block_path := path + "/blocks/" + block_index.to_s()
+		if block_ids.key?(block.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", block_path + "/id", "Scalar recovery MIR block identifier is duplicated")
+			)
+		end
+		block_ids[block.id] = true
+		if block.id == function.entry
+			entry_found = true
+			if !block.parameters.empty?()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", block_path + "/parameters", "entry block must not have parameters")
+				)
+			end
+		end
+		try _verify_recovery_scalar_origin(block.origin, source_ids, block_path + "/origin")
+		parameter_index = 0
+		while parameter_index < block.parameters.size()
+			parameter := block.parameters[parameter_index]
+			parameter_path := block_path + "/parameters/" + parameter_index.to_s()
+			try _verify_recovery_scalar_parameter(parameter, source_ids, parameter_path)
+			try _recovery_scalar_define(definitions, parameter.id, parameter.value_type, parameter_path + "/id")
+			parameter_index += 1
+		end
+		mut instruction_index := 0
+		while instruction_index < block.instructions.size()
+			try _recovery_scalar_instruction_definition(
+				block.instructions[instruction_index],
+				functions,
+				definitions,
+				block_path + "/instructions/" + instruction_index.to_s(),
+			)
+			instruction_index += 1
+		end
+		block_index += 1
+	end
+	if !entry_found
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/entry", "Scalar recovery MIR entry block does not exist")
+		)
+	end
+	block_index = 0
+	while block_index < function.blocks.size()
+		try _verify_recovery_scalar_block(
+			function,
+			function.blocks[block_index],
+			functions,
+			definitions,
+			source_ids,
+			path + "/blocks/" + block_index.to_s(),
+		)
+		block_index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_scalar_instruction_definition(
+		instruction: RecoveryScalarInstruction,
+		functions: Array<RecoveryScalarFunction>,
+		mut definitions: Hash<String, ScalarType>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	case instruction
+	when RecoveryScalarInstruction::BooleanLiteral(result, _value, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Boolean, path + "/result")
+	when RecoveryScalarInstruction::IntegerLiteral(result, _value, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Integer, path + "/result")
+	when RecoveryScalarInstruction::FloatLiteral(result, _value, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Float, path + "/result")
+	when RecoveryScalarInstruction::IntegerBinary(result, _operator, _left, _right, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Integer, path + "/result")
+	when RecoveryScalarInstruction::FloatBinary(result, _operator, _left, _right, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Float, path + "/result")
+	when RecoveryScalarInstruction::IntegerCompare(result, _operator, _left, _right, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Boolean, path + "/result")
+	when RecoveryScalarInstruction::FloatCompare(result, _operator, _left, _right, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Boolean, path + "/result")
+	when RecoveryScalarInstruction::BooleanNot(result, _value, _origin)
+		return _recovery_scalar_define(definitions, result, ScalarType::Boolean, path + "/result")
+	when RecoveryScalarInstruction::Call(result, function_id, _arguments, _origin)
+		if result == nil
+			return Result<Boolean, Diagnostic>::Ok(true)
+		end
+		callee := _recovery_scalar_function(functions, function_id)
+		if callee == nil
+			return _recovery_scalar_define(definitions, result, ScalarType::Void, path + "/result")
+		end
+		return _recovery_scalar_define(definitions, result, callee.result_type, path + "/result")
+	when RecoveryScalarInstruction::WriteStatic(_value, _origin)
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+end
+
+def _verify_recovery_scalar_block(
+		function: RecoveryScalarFunction,
+		block: RecoveryScalarBlock,
+		functions: Array<RecoveryScalarFunction>,
+		definitions: Hash<String, ScalarType>,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	mut available: Hash<String, ScalarType> := {}
+	mut index := 0
+	while index < function.parameters.size()
+		parameter := function.parameters[index]
+		available[parameter.id] = parameter.value_type
+		index += 1
+	end
+	index = 0
+	while index < block.parameters.size()
+		parameter := block.parameters[index]
+		available[parameter.id] = parameter.value_type
+		index += 1
+	end
+	index = 0
+	while index < block.instructions.size()
+		instruction_path := path + "/instructions/" + index.to_s()
+		try _verify_recovery_scalar_instruction(
+			block.instructions[index],
+			functions,
+			definitions,
+			available,
+			source_ids,
+			instruction_path,
+		)
+		_recovery_scalar_make_available(block.instructions[index], definitions, available)
+		index += 1
+	end
+	try _verify_recovery_scalar_terminator(function, block.terminator, available, source_ids, path + "/terminator")
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_recovery_scalar_instruction(
+		instruction: RecoveryScalarInstruction,
+		functions: Array<RecoveryScalarFunction>,
+		definitions: Hash<String, ScalarType>,
+		available: Hash<String, ScalarType>,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	case instruction
+	when RecoveryScalarInstruction::BooleanLiteral(_result, _value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+	when RecoveryScalarInstruction::IntegerLiteral(_result, value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		if value < -9007199254740991 || value > 9007199254740991
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/value", "Integer literal is outside the portable range")
+			)
+		end
+	when RecoveryScalarInstruction::FloatLiteral(_result, value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		if !value.finite?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/value", "Float literal must be finite")
+			)
+		end
+	when RecoveryScalarInstruction::IntegerBinary(_result, _operator, left, right, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, left, ScalarType::Integer, path + "/left")
+		try _recovery_scalar_require(available, right, ScalarType::Integer, path + "/right")
+	when RecoveryScalarInstruction::FloatBinary(_result, _operator, left, right, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, left, ScalarType::Float, path + "/left")
+		try _recovery_scalar_require(available, right, ScalarType::Float, path + "/right")
+	when RecoveryScalarInstruction::IntegerCompare(_result, _operator, left, right, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, left, ScalarType::Integer, path + "/left")
+		try _recovery_scalar_require(available, right, ScalarType::Integer, path + "/right")
+	when RecoveryScalarInstruction::FloatCompare(_result, _operator, left, right, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, left, ScalarType::Float, path + "/left")
+		try _recovery_scalar_require(available, right, ScalarType::Float, path + "/right")
+	when RecoveryScalarInstruction::BooleanNot(_result, value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, value, ScalarType::Boolean, path + "/value")
+	when RecoveryScalarInstruction::Call(result, function_id, arguments, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		callee := _recovery_scalar_function(functions, function_id)
+		if callee == nil
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/function", "call references an unknown function")
+			)
+		end
+		if arguments.size() != callee.parameters.size()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/arguments", "call argument count does not match the callee")
+			)
+		end
+		mut argument_index := 0
+		while argument_index < arguments.size()
+			try _recovery_scalar_require(
+				available,
+				arguments[argument_index],
+				callee.parameters[argument_index].value_type,
+				path + "/arguments/" + argument_index.to_s(),
+			)
+			argument_index += 1
+		end
+		if callee.result_type == ScalarType::Void
+			if result != nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/result", "Void call must not define a result")
+				)
+			end
+		else
+			if result == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/result", "non-Void call must define a result")
+				)
+			end
+			if definitions.fetch(result) != callee.result_type
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/result", "call result type does not match the callee")
+				)
+			end
+		end
+	when RecoveryScalarInstruction::WriteStatic(_value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_scalar_make_available(
+		instruction: RecoveryScalarInstruction,
+		definitions: Hash<String, ScalarType>,
+		mut available: Hash<String, ScalarType>,
+	)
+	case instruction
+	when RecoveryScalarInstruction::BooleanLiteral(result, _value, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::IntegerLiteral(result, _value, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::FloatLiteral(result, _value, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::IntegerBinary(result, _operator, _left, _right, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::FloatBinary(result, _operator, _left, _right, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::IntegerCompare(result, _operator, _left, _right, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::FloatCompare(result, _operator, _left, _right, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::BooleanNot(result, _value, _origin)
+		available[result] = definitions.fetch(result)
+	when RecoveryScalarInstruction::Call(result, _function_id, _arguments, _origin)
+		if result != nil
+			available[result] = definitions.fetch(result)
+		end
+	when RecoveryScalarInstruction::WriteStatic(_value, _origin)
+	end
+	return
+end
+
+def _verify_recovery_scalar_terminator(
+		function: RecoveryScalarFunction,
+		terminator: RecoveryScalarTerminator,
+		available: Hash<String, ScalarType>,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	case terminator
+	when RecoveryScalarTerminator::Jump(target, arguments, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _verify_recovery_scalar_target(function, target, arguments, available, path)
+	when RecoveryScalarTerminator::Branch(condition, when_true, true_arguments, when_false, false_arguments, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		try _recovery_scalar_require(available, condition, ScalarType::Boolean, path + "/condition")
+		try _verify_recovery_scalar_target(function, when_true, true_arguments, available, path + "/true")
+		try _verify_recovery_scalar_target(function, when_false, false_arguments, available, path + "/false")
+	when RecoveryScalarTerminator::Return(value, origin)
+		try _verify_recovery_scalar_origin(origin, source_ids, path + "/origin")
+		if function.result_type == ScalarType::Void
+			if value != nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/value", "Void function must not return a value")
+				)
+			end
+		else
+			if value == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/value", "non-Void function must return a value")
+				)
+			end
+			try _recovery_scalar_require(available, value, function.result_type, path + "/value")
+		end
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_recovery_scalar_target(
+		function: RecoveryScalarFunction,
+		target: String,
+		arguments: Array<String>,
+		available: Hash<String, ScalarType>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	block := _recovery_scalar_block(function.blocks, target)
+	if block == nil
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/target", "terminator references an unknown block")
+		)
+	end
+	if arguments.size() != block.parameters.size()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/arguments", "block argument count does not match the target")
+		)
+	end
+	mut index := 0
+	while index < arguments.size()
+		try _recovery_scalar_require(
+			available,
+			arguments[index],
+			block.parameters[index].value_type,
+			path + "/arguments/" + index.to_s(),
+		)
+		index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_recovery_scalar_parameter(
+		parameter: RecoveryScalarParameter,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if parameter.value_type == ScalarType::Void
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/type", "parameter type must not be Void")
+		)
+	end
+	try _verify_recovery_scalar_origin(parameter.origin, source_ids, path + "/origin")
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_scalar_define(
+		mut definitions: Hash<String, ScalarType>,
+		id: String,
+		value_type: ScalarType,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if id.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "value identifier must not be empty")
+		)
+	end
+	if definitions.key?(id)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "value identifier is defined more than once")
+		)
+	end
+	definitions[id] = value_type
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_scalar_require(
+		available: Hash<String, ScalarType>,
+		id: String,
+		expected: ScalarType,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !available.key?(id)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "operand is not available in this block")
+		)
+	end
+	if available.fetch(id) != expected
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "operand type does not match the operation")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_scalar_function(functions: Array<RecoveryScalarFunction>, id: String): RecoveryScalarFunction?
+	mut index := 0
+	while index < functions.size()
+		if functions[index].id == id
+			return functions[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def _recovery_scalar_block(blocks: Array<RecoveryScalarBlock>, id: String): RecoveryScalarBlock?
+	mut index := 0
+	while index < blocks.size()
+		if blocks[index].id == id
+			return blocks[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def _verify_recovery_scalar_origin(
+		origin: SourceOrigin,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !source_ids.include?(origin.source_id)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/source", "origin references an unknown source")
+		)
+	end
+	if origin.start_line < 1 || origin.start_column < 1 || origin.end_line < 1 || origin.end_column < 1
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "origin coordinates must be positive")
+		)
+	end
+	if origin.end_line < origin.start_line || (origin.end_line == origin.start_line && origin.end_column < origin.start_column)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "origin end precedes its start")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end

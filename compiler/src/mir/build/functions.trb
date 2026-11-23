@@ -1,0 +1,160 @@
+import { mir_function_scalar, mir_terminator_return, mir_terminator_trap } from mir/model/control
+import { mir_state_enabled_slot, mir_state_failure_block_slot, mir_state_function_slot, mir_state_next_value_slot, mir_state_return_value_slot } from state/local_slots
+import { mir_type_none } from mir/model/type_ids
+import { mir_op_scalar_literal } from mir/model/instructions
+import { mir_semantic_type_id, mir_semantic_value_type } from mir/model/types
+import { mir_add_value } from frontend/checking/body/values
+import { MirFunction, mir_instruction_with_payload } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { mir_control_active, mir_control_commit } from mir/build/control
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, store_integer } from support/storage
+
+def scalar_mir_begin(
+		mut state: CompilerState,
+		function_index: Integer,
+		mut locals: CheckedLocals,
+	)
+	locals.mir_state[mir_state_function_slot()] = function_index
+	result_type := load_string(state.declarations.function_result_types, function_index)
+	if mir_semantic_type_id(state.scalar_mir, result_type) == mir_type_none()
+		if result_type != "Void"
+			return
+		end
+	end
+	parameter_start := load_integer(state.declarations.function_parameter_starts, function_index)
+	parameter_finish := parameter_start + load_integer(state.declarations.function_parameter_counts, function_index)
+	mut parameter_index := parameter_start
+	while parameter_index < parameter_finish
+		if load_integer(state.declarations.parameter_mutable, parameter_index) != 0
+			type_id := mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.parameter_types, parameter_index))
+			if !mir_semantic_value_type(state.scalar_mir, type_id)
+				return
+			end
+		end
+		if mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.parameter_types, parameter_index)) == mir_type_none()
+			return
+		end
+		parameter_index += 1
+	end
+	locals.mir_state[mir_state_enabled_slot()] = 1
+	locals.mir_state[mir_state_next_value_slot()] = 0
+	locals.mir_state[mir_state_failure_block_slot()] = function_index * 2 + 1
+	locals.mir_state[mir_state_return_value_slot()] = -1
+	return
+end
+
+def mir_add_parameter(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		parameter_index: Integer,
+	)
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return
+	end
+	value_id := mir_add_value(
+		state, locals, mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.parameter_types, parameter_index)), load_integer(state.declarations.parameter_lines, parameter_index),
+	)
+	store_integer(locals.mir_values, locals.count[0] - 1, value_id + 1)
+	return
+end
+
+def scalar_mir_commit(
+		mut state: CompilerState,
+		function_index: Integer,
+		mut locals: CheckedLocals,
+	): String
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return "checked function has no MIR body"
+	end
+	if mir_control_active(locals)
+		return mir_control_commit(state, function_index, locals)
+	end
+	mut native_module := state.scalar_mir
+	return_value := locals.mir_state[mir_state_return_value_slot()]
+	if return_value < 0
+		return "scalar MIR function has no return value"
+	end
+	source := state.module_graph.active_module[0]
+	line := load_integer(state.declarations.function_lines, function_index)
+	parameter_count := load_integer(state.declarations.function_parameter_counts, function_index)
+	entry_block := function_index * 2
+	argument_base := native_module.arguments.size()
+	block_base := native_module.blocks.size()
+	instruction_base := native_module.instructions.size()
+	literal_base := native_module.literal_texts.size()
+	if native_module.functions.size() == 0
+		mut source_count := state.module_graph.module_count[0]
+		if source_count == 0
+			source_count = 1
+		end
+		native_module.source_count[0] = source_count
+		native_module.entry_function[0] = function_index
+	end
+	native_module.functions.push(MirFunction.new(kind: mir_function_scalar(), result_type: load_string(state.declarations.function_result_types, function_index), integer_guard: 0, id: function_index, entry_block: entry_block, source_id: source, line: line, parameter_start: argument_base, parameter_count: parameter_count, block_start: block_base, block_count: 2))
+	mut index := 0
+	while index < parameter_count
+		native_module.arguments.push(index)
+		index += 1
+	end
+	index = 0
+	while index < locals.mir_value_rows.size()
+		native_module.values.push(locals.mir_value_rows[index])
+		index += 1
+	end
+	index = 0
+	while index < locals.mir_literal_texts.size()
+		native_module.literal_texts.push(locals.mir_literal_texts[index])
+		index += 1
+	end
+	instruction_count := locals.mir_instructions.size()
+	index = 0
+	while index < instruction_count
+		# Checking is complete: transfer the function-owned instruction.
+		# Relocate a literal payload without mutating the function-local record.
+		mut instruction := locals.mir_instructions[index]
+		if instruction.kind == mir_op_scalar_literal()
+			instruction = mir_instruction_with_payload(instruction, instruction.payload + literal_base)
+		end
+		native_module.instructions.push(instruction)
+		index += 1
+	end
+	native_module.blocks.push(mir_block(
+			entry_block,
+			source,
+			line,
+			argument_base + parameter_count,
+			0,
+			instruction_base,
+			instruction_count,
+			mir_terminator_return(),
+			-1,
+			-1,
+			-1,
+			0,
+			0,
+			0,
+			0,
+			return_value,
+		))
+	native_module.blocks.push(mir_block(
+			locals.mir_state[mir_state_failure_block_slot()],
+			source,
+			line,
+			argument_base + parameter_count,
+			0,
+			instruction_base + instruction_count,
+			0,
+			mir_terminator_trap(),
+			-1,
+			-1,
+			-1,
+			0,
+			0,
+			0,
+			0,
+			-1,
+		))
+	return ""
+end

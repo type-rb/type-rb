@@ -1,0 +1,195 @@
+import { repl_flow_normal } from repl/flow_kinds
+import { literal_type_base } from frontend/types/literal_types
+import { load_string } from support/storage
+import { CompilerState } from state/state
+import { callable_parts } from frontend/types/callable_types
+import { find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { repl_remap_type } from repl/types
+
+# Values have a checked language type and a finite storage representation.
+# Aggregate identities are pool indexes, so aliases survive across submissions.
+record ReplValue
+	type_name: String
+	integer: Integer
+	floating: Float
+	text: String
+	children: Array<Integer>
+end
+
+record ReplHashTable
+	keys: Array<Integer>
+	values: Array<Integer>
+	sizes: Array<Integer>
+	order: Array<Integer>
+end
+
+record ReplStore
+	# Source globals and retained session bindings share traced binding cells.
+	globals: Hash<String, Integer>
+	types: Array<String>
+	# Fully rendered checked names need no additional catalog ownership.
+	presentations: Array<String>
+	integers: Array<Integer>
+	floats: Array<Float>
+	texts: Array<String>
+	children: Array<Array<Integer>>
+	error: Array<String>
+	# Terminal runtime failures may have an empty message.
+	failed: Array<Boolean>
+	hashes: Array<ReplHashTable>
+	depth: Array<Integer>
+	# Reachable closures and nominal values own their checked code/type catalog.
+	programs: Array<CompilerState>
+	active_program: Array<Integer>
+	value_programs: Array<Integer>
+end
+
+record ReplEnvironment
+	# Lexical transfer kind, value and loop owner for expression evaluation.
+	flow: Array<Integer>
+	# Origin of the last statement actually executed in a result-producing block.
+	result_origin: Array<Integer>
+	names: Array<String>
+	values: Array<Integer>
+	# Captured bindings use pool cells; zero keeps an ordinary direct value.
+	cells: Array<Integer>
+	mutable: Array<Integer>
+	presentations: Array<String>
+	count: Array<Integer>
+end
+
+record ReplReference
+	value: Integer
+	binding: Integer
+	container: Integer
+	slot: Integer
+end
+
+def repl_store(): ReplStore
+	return ReplStore.new(globals: {}, types: ["Void"], presentations: [""], integers: [0], floats: [0.0], texts: [""], children: [[]], error: [""], failed: [false], hashes: [], depth: [0], programs: [], active_program: [-1], value_programs: [-1])
+end
+
+def repl_failed(store: ReplStore): Boolean
+	if store.failed[0]
+		return true
+	end
+	return store.error[0] != ""
+end
+
+def repl_environment(): ReplEnvironment
+	return ReplEnvironment.new(flow: [repl_flow_normal(), 0, -1], result_origin: [-1], names: [], values: [], cells: [], mutable: [], presentations: [], count: [0])
+end
+
+def repl_value(mut store: ReplStore, type_name: String, integer: Integer, floating: Float, text: String, children: Array<Integer>): Integer
+	id := store.types.size()
+	store.types.push(type_name)
+	store.presentations.push("")
+	store.value_programs.push(repl_type_owner(store, type_name))
+	store.integers.push(integer)
+	store.floats.push(floating)
+	store.texts.push(text)
+	store.children.push(children)
+	return id
+end
+
+# Scalar payloads have no child identities. Reuse the immutable empty list
+# owned by pool entry zero; language aggregate child lists remain independent.
+def repl_integer(mut store: ReplStore, value: Integer): Integer
+	return repl_value(store, "Integer", value, 0.0, "", store.children[0])
+end
+
+def repl_float(mut store: ReplStore, value: Float): Integer
+	return repl_value(store, "Float", 0, value, "", store.children[0])
+end
+
+def repl_boolean(mut store: ReplStore, value: Boolean): Integer
+	mut integer := 0
+	if value
+		integer = 1
+	end
+	return repl_value(store, "Boolean", integer, 0.0, "", store.children[0])
+end
+
+def repl_string(mut store: ReplStore, value: String): Integer
+	return repl_value(store, "String", 0, 0.0, value, store.children[0])
+end
+
+def repl_reference(value: Integer): ReplReference
+	return ReplReference.new(value: value, binding: -1, container: -1, slot: -1)
+end
+
+def repl_get(store: ReplStore, id: Integer): ReplValue
+	mut name := repl_type(store, id)
+	if literal_type_base(name) != ""
+		name = literal_type_base(name)
+	end
+	return ReplValue.new(type_name: name, integer: repl_variant(store, id), floating: store.floats[id], text: store.texts[id], children: store.children[id])
+end
+
+# Only nominal type spellings and callable code depend on a checked program.
+# Plain scalar/container values must not retain an entire input's compiler state.
+def repl_type_owner(store: ReplStore, type_name: String): Integer
+	if callable_parts(type_name).size() > 0 || repl_nominal_type(type_name)
+		return store.active_program[0]
+	end
+	return -1
+end
+
+def repl_activate(mut store: ReplStore, state: CompilerState)
+	store.active_program[0] = store.programs.size()
+	store.programs.push(state)
+end
+
+def repl_type(store: ReplStore, id: Integer): String
+	owner := store.value_programs[id]
+	current := store.active_program[0]
+	if owner < 0 || current < 0 || owner == current
+		return store.types[id]
+	end
+	return repl_remap_type(store.programs[owner], store.programs[current], store.types[id])
+end
+
+def repl_variant(store: ReplStore, id: Integer): Integer
+	owner := store.value_programs[id]
+	current := store.active_program[0]
+	if owner >= 0 && current >= 0 && owner != current
+		enum_index := find_enum_type(store.programs[current], repl_type(store, id))
+		if enum_index >= 0
+			return find_enum_variant(store.programs[current], enum_index, store.texts[id])
+		end
+	end
+	return store.integers[id]
+end
+
+def repl_set_type(mut store: ReplStore, id: Integer, type_name: String)
+	store.types[id] = type_name
+	store.value_programs[id] = repl_type_owner(store, type_name)
+end
+
+def repl_nominal_type(type_name: String): Boolean
+	if literal_type_base(type_name) != ""
+		return false
+	end
+	mut index := 0
+	while index < type_name.size()
+		if type_name[index] == "#"
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+# Completion checks a temporary program without replacing the session context.
+def repl_type_in(state: CompilerState, store: ReplStore, id: Integer): String
+	owner := store.value_programs[id]
+	if owner < 0
+		return store.types[id]
+	end
+	return repl_remap_type(store.programs[owner], state, store.types[id])
+end
+
+def repl_global_key(state: CompilerState, identity: Integer): String
+	row := state.global_bindings.globals[identity]
+	return load_string(state.module_graph.module_names, row.source_id) + ":" + row.name
+end

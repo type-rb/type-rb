@@ -1,0 +1,12 @@
+def main()
+	mut values := {}
+	values[1] = []
+	values[2] = ["retained"]
+	mut index := 0
+	while index < 8
+		values[1].push(index)
+		index += 1
+	end
+	puts(values[1].size())
+	puts(values[2].size())
+end

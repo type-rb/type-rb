@@ -1,0 +1,37 @@
+def sum(values: Array<Integer>, transform: (Integer) -> Integer): Integer
+	mut total := 0
+	values.each do |value|
+		total += transform(value)
+	end
+	return total
+end
+
+def invoke(callback: () -> String): String
+	return callback()
+end
+
+def report(label: String)
+	callback := fn(): String
+		return label
+	end
+	result := invoke(callback)
+	other := label + "!"
+	puts(result)
+	puts(other)
+end
+
+def main()
+	offset := 5
+	callback := fn(value: Integer): Integer
+		return value + offset
+	end
+	puts(sum([1, 2, 3], callback))
+	report("kept" + " value")
+	mut values := [10]
+	change := fn(): Integer
+		values[0] += 2
+		return values[0]
+	end
+	puts(change())
+	puts(values[0])
+end

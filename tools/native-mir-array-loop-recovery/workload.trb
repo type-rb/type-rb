@@ -1,0 +1,26 @@
+def sum(values: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 100000
+		values.push(index % 10)
+		index += 1
+	end
+	mut result := 0
+	mut round := 0
+	while round < 1000
+		result += sum(values)
+		round += 1
+	end
+	puts(result.to_s())
+	return
+end

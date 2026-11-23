@@ -1,0 +1,107 @@
+import { mir_op_file_scope } from mir/model/instructions
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_type_kind_newtype, mir_type_kind_record } from mir/model/type_kinds
+import { mir_adapter_argv, mir_signature_standard } from mir/model/call_kinds
+import { mir_op_callable_new, mir_op_direct_call, mir_op_global_read, mir_op_global_write, mir_op_indirect_call } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirModule, mir_function_index } from mir/model/module
+
+record MirInitializerDependencies
+	values: Array<Integer>
+	opaque: Boolean
+end
+
+# Consume verified MIR bodies. Closure creation is not a call; a direct lambda
+# invocation can follow its exact constructor, while an unknown callable stays
+# opaque. Native host symbols and open interface dispatch have no reentry proof.
+def mir_initializer_dependencies(native_module: MirModule, initializer: Integer): MirInitializerDependencies
+	mut values: Array<Integer> := []
+	mut opaque := false
+	mut pending := [initializer]
+	mut visited: Hash<String, Integer> := {}
+	mut cursor := 0
+	while cursor < pending.size()
+		callee := pending[cursor]
+		cursor += 1
+		if visited.key?(integer_string(callee))
+			next
+		end
+		visited[integer_string(callee)] = 1
+		signature := native_module.signatures[callee]
+		body := mir_function_index(native_module, callee)
+		if body < 0
+			if signature.kind != mir_signature_standard() || signature.adapter != mir_adapter_argv()
+				opaque = true
+			end
+			next
+		end
+		function := native_module.functions[body]
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut operation := block.instruction_start
+			while operation < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[operation]
+				if instruction.kind == mir_op_global_read() || instruction.kind == mir_op_global_write()
+					values.push(instruction.payload)
+				elsif instruction.kind == mir_op_file_scope()
+					scope := native_module.file_scopes[instruction.payload]
+					pending.push(scope.body)
+					pending.push(scope.error)
+				elsif instruction.kind == mir_op_direct_call()
+					pending.push(native_module.calls[instruction.payload].callee)
+				elsif instruction.kind == mir_op_indirect_call()
+					mut known := false
+					mut candidate_block := function.block_start
+					while candidate_block < function.block_start + function.block_count
+						candidate := native_module.blocks[candidate_block]
+						mut position := candidate.instruction_start
+						while position < candidate.instruction_start + candidate.instruction_count
+							creation := native_module.instructions[position]
+							if creation.kind == mir_op_callable_new() && creation.result == instruction.first
+								pending.push(creation.payload)
+								known = true
+							end
+							position += 1
+						end
+						candidate_block += 1
+					end
+					if !known
+						opaque = true
+					end
+				end
+				operation += 1
+			end
+			block_index += 1
+		end
+	end
+	return MirInitializerDependencies.new(values: values, opaque: opaque)
+end
+
+# Inline records and newtypes must have finite storage in every target. Runtime
+# references (including nullable values, classes, collections and enums) stop
+# the traversal. Concrete generic field types already belong to verified MIR.
+def mir_inline_reaches(native_module: MirModule, type_id: Integer, target: Integer, mut visited: Hash<String, Integer>): Boolean
+	if type_id == target
+		return true
+	end
+	if type_id < mir_type_composite_start() || visited.key?(integer_string(type_id))
+		return false
+	end
+	visited[integer_string(type_id)] = 1
+	row := native_module.types[type_id - mir_type_composite_start()]
+	if row.kind == mir_type_kind_newtype()
+		return mir_inline_reaches(native_module, native_module.newtypes[row.declaration].representation, target, visited)
+	end
+	if row.kind == mir_type_kind_record()
+		definition := native_module.records[row.declaration]
+		mut field := definition.field_start
+		while field < definition.field_start + definition.field_count
+			if mir_inline_reaches(native_module, native_module.fields[field].type_id, target, visited)
+				return true
+			end
+			field += 1
+		end
+	end
+	return false
+end

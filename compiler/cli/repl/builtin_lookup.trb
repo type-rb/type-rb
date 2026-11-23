@@ -1,0 +1,76 @@
+import { array_method_slice, result_method_index, result_method_key, string_method_slice } from frontend/types/method_kinds
+import { builtin_result_variant } from frontend/checking/builtins/results
+import { find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+import { repl_array_method } from repl/array_methods
+import { repl_hash_slot } from repl/hash
+import { ReplStore, repl_boolean, repl_get, repl_integer, repl_string, repl_value } from repl/model
+import { repl_string_method } from repl/string_methods
+import { repl_coerce } from repl/values
+
+def repl_builtin_error(state: CompilerState, mut store: ReplStore, result_type: String, fields: Array<Integer>): Integer
+	err := builtin_result_variant(state, result_type, false)
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	record_index := find_record_type(state, error_type)
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	mut values: Array<Integer> := []
+	fields.each.with_index do |field, index|
+		values.push(repl_coerce(store, field, load_string(state.declarations.field_types, start + index)))
+	end
+	error := repl_value(store, error_type, 0, 0.0, "", values)
+	return repl_value(store, result_type, err, 0.0, "Err", [error])
+end
+
+def repl_builtin_lookup(state: CompilerState, mut store: ReplStore, kind: Integer, receiver: Integer, argument: Integer, result_type: String): Integer
+	ok := builtin_result_variant(state, result_type, true)
+	if kind == result_method_key()
+		table := store.hashes[store.integers[receiver]]
+		slot := repl_hash_slot(store, table, argument)
+		if slot >= 0
+			return repl_value(store, result_type, ok, 0.0, "Ok", [table.values[slot]])
+		end
+		message := repl_string(store, "Hash key is missing")
+		return repl_builtin_error(state, store, result_type, [argument, message])
+	end
+	# Read the retained receiver's current storage only after argument evaluation.
+	value := repl_get(store, receiver)
+	mut size := store.children[receiver].size()
+	mut label := "Array"
+	if value.type_name == "String"
+		size = value.text.size()
+		label = "String"
+	end
+	if kind == result_method_index()
+		mut position := store.integers[argument]
+		if position < 0
+			position += size
+		end
+		if position >= 0 && position < size
+			mut selected := 0
+			if value.type_name == "String"
+				selected = repl_string(store, value.text[position])
+			else
+				selected = store.children[receiver][position]
+			end
+			return repl_value(store, result_type, ok, 0.0, "Ok", [selected])
+		end
+		message := repl_string(store, label + " index is out of bounds")
+		return repl_builtin_error(state, store, result_type, [argument, repl_integer(store, size), message])
+	end
+	bounds := store.children[argument]
+	first := store.integers[bounds[0]]
+	finish := store.integers[bounds[1]]
+	exclusive := store.integers[bounds[2]] == 1
+	if first >= 0 && first <= finish && finish <= size && (exclusive || finish < size)
+		mut selected := 0
+		if value.type_name == "String"
+			selected = repl_string_method(store, string_method_slice(), receiver, argument)
+		else
+			selected = repl_array_method(store, array_method_slice(), receiver, argument)
+		end
+		return repl_value(store, result_type, ok, 0.0, "Ok", [selected])
+	end
+	message := repl_string(store, label + " slice range is out of bounds")
+	return repl_builtin_error(state, store, result_type, [bounds[0], bounds[1], repl_boolean(store, exclusive), repl_integer(store, size), message])
+end

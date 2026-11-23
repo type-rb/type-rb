@@ -1,0 +1,176 @@
+import { check_lambda_value, lambda_names } from frontend/checking/body/lambdas
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, has_diagnostic, select_checked_body } from state/state
+import { local_bind, locals_new } from state/local_state
+import { resolution_local_bind, resolution_local_find } from state/resolution_locals
+import { load_integer, load_string, sparse_integer_at, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { lambda_analysis_state } from testing/mir/callables
+
+describe("Anonymous lexical body checking") do
+	test("snapshots shadowed names independently of checked lambda bindings") do
+		mut locals := locals_new(3)
+		local_bind(locals, "self", "Outer", 0)
+		local_bind(locals, "self", "Inner", 1)
+		mut names := lambda_names(locals, 3)
+		expect(names.count[0]).to_equal(2)
+		expect(resolution_local_find(names, "self")).to_equal(1)
+		expect(load_string(names.types, 1)).to_equal("Inner")
+		store_string(names.types, 1, "Resolved")
+		expect(load_string(locals.types, 1)).to_equal("Inner")
+		store_string(locals.types, 0, "Changed")
+		expect(load_string(names.types, 0)).to_equal("Outer")
+		resolution_local_bind(names, "temporary", "String")
+		expect(locals.count[0]).to_equal(2)
+		local_bind(locals, "checked", "Integer", 0)
+		expect(resolution_local_find(names, "checked")).to_equal(-1)
+		expect(load_string(locals.names, 2)).to_equal("checked")
+	end
+
+	test("captures only referenced parent identities with their declared capabilities") do
+		source := "def factory(mut counter: Integer, label: String, other: String)\nputs(other)\n_callback := fn(delta: Integer): Integer\nputs(label)\ncounter += delta\nreturn counter\nend\nend\ndef main()\nfactory(1, \"label\", \"other\")\nend\n"
+		mut state := lambda_analysis_state(source)
+		expect(has_diagnostic(state)).to_be_false()
+		select_checked_body(state, 0)
+		parent := state.callables.checked[0]
+		expect(parent.shared_bindings).to_equal([0])
+		expect(parent.lambdas.size()).to_equal(1)
+		lambda := parent.lambdas[0]
+		expect(lambda.captures.size()).to_equal(2)
+		expect(lambda.captures[0].name).to_equal("counter")
+		expect(lambda.captures[0].identity).to_equal(0)
+		expect(lambda.captures[0].type_name).to_equal("Integer")
+		expect(lambda.captures[0].mutable).to_equal(1)
+		expect(lambda.captures[1].name).to_equal("label")
+		expect(lambda.captures[1].mutable).to_equal(0)
+		expect(state.callables.checked_bodies[lambda.body].function).to_equal(lambda.function[0])
+		expect(state.declarations.function_count[0]).to_equal(3)
+		expect(state.declarations.parameter_count[0]).to_equal(6)
+	end
+
+	test("lets fn parameters and local declarations shadow parent bindings") do
+		source := "def factory(value: Integer, text: Integer, kept: String)\nputs(value + text)\n_callback := fn(value: String): String\ntext := value + kept\nreturn text\nend\nend\ndef main()\nend\n"
+		mut state := lambda_analysis_state(source)
+		expect(has_diagnostic(state)).to_be_false()
+		select_checked_body(state, 0)
+		captures := state.callables.checked[0].lambdas[0].captures
+		expect(captures.size()).to_equal(1)
+		expect(captures[0].name).to_equal("kept")
+		expect(captures[0].identity).to_equal(2)
+	end
+
+	test("propagates transitive captures while keeping nested parameters local") do
+		source := "def factory(mut counter: Integer, unused: String)\nputs(unused)\n_outer := fn(seed: Integer): () -> Integer\nreturn fn(): Integer\ncounter += seed\nreturn counter\nend\nend\nend\ndef main()\nend\n"
+		mut state := lambda_analysis_state(source)
+		expect(has_diagnostic(state)).to_be_false()
+		select_checked_body(state, 0)
+		outer := state.callables.checked[0].lambdas[0]
+		expect(outer.captures.size()).to_equal(1)
+		expect(outer.captures[0].name).to_equal("counter")
+		expect(state.callables.checked[0].shared_bindings).to_equal([0])
+		expect(state.callables.checked_bodies[outer.body].shared_bindings).to_equal([0])
+		inner := state.callables.checked_bodies[outer.body].lambdas[0]
+		expect(inner.captures.size()).to_equal(2)
+		expect(inner.captures[0].name).to_equal("counter")
+		expect(inner.captures[1].name).to_equal("seed")
+		expect(inner.body != outer.body).to_be_true()
+	end
+
+	test("distinguishes reused iteration slots and excludes hidden iteration state") do
+		source := "def factory(mut counter: Integer)\n_outer := fn()\n[1].each do |item|\ncallback := fn(): Integer; return item + counter; end\nputs(callback())\nend\n[2].each do |item|\ncallback := fn(): Integer; return item + counter; end\nputs(callback())\nend\nend\nend\ndef main()\nend\n"
+		mut state := lambda_analysis_state(source)
+		expect(has_diagnostic(state)).to_be_false()
+		select_checked_body(state, 0)
+		outer := state.callables.checked[0].lambdas[0]
+		body := state.callables.checked_bodies[outer.body]
+		expect(body.shared_bindings.size()).to_equal(3)
+		expect(body.shared_bindings.include?(0)).to_be_true()
+		expect(body.shared_bindings.include?(body.lambdas[0].captures[1].identity)).to_be_true()
+		expect(body.shared_bindings.include?(body.lambdas[1].captures[1].identity)).to_be_true()
+		expect(body.lambdas.size()).to_equal(2)
+		expect(body.lambdas[0].captures.size()).to_equal(2)
+		expect(body.lambdas[1].captures.size()).to_equal(2)
+		expect(body.lambdas[0].captures[1].name).to_equal("item")
+		expect(body.lambdas[1].captures[1].name).to_equal("item")
+		expect(body.lambdas[0].captures[1].identity != body.lambdas[1].captures[1].identity).to_be_true()
+		expect(outer.captures.size()).to_equal(1)
+		expect(outer.captures[0].name).to_equal("counter")
+	end
+
+	test("checks independent return types paths and immutable captures") do
+		bodies := ["fn(): Integer; return \"wrong\"; end", "fn(); return 1; end", "fn(flag: Boolean): Integer; if flag; return 1; end; end", "fn(); value = 2; end", "fn(); value += 2; end", "fn(); puts(missing); end", "fn(); puts(later); later := 1; end"]
+		errors := ["expected Integer, found String", "expected Void, found Integer", "fn must return on every completing path", "assignment target is immutable", "assignment target is immutable", "unresolved local missing", "unresolved local later"]
+		mut index := 0
+		while index < bodies.size()
+			source := "def factory(value: Integer)\ncallback := " + bodies[index] + "\nend\ndef main()\nend\n"
+			state := lambda_analysis_state(source)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal(errors[index])
+			index += 1
+		end
+	end
+
+	test("keeps loop transfers and conditional returns inside the fn boundary") do
+		state := lambda_analysis_state("def main()\nwhile true\ncallback := fn(); break; end\nbreak\nend\nend\n")
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("break is only valid inside a loop")
+		valid := lambda_analysis_state("def main()\ncallback := fn(flag: Boolean): Integer\nif flag\nreturn 1\nelse\nreturn 2\nend\nend\nend\n")
+		expect(has_diagnostic(valid)).to_be_false()
+	end
+
+	test("checks unused nested bodies and their Result obligations") do
+		invalid := lambda_analysis_state("def main()\nouter := fn()\ninner := fn(): Integer; return \"wrong\"; end\nend\nend\n")
+		expect(load_string(invalid.diagnostics.messages, 0)).to_equal("expected Integer, found String")
+		source := "import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef main()\ncallback := fn()\nunused := operation()\nend\nend\n"
+		result := lambda_analysis_state(source)
+		expect(load_string(result.diagnostics.messages, 0)).to_equal("Result binding unused must be used")
+	end
+
+	test("resolves generic applications inside an owned anonymous body") do
+		source := "def identity<T>(value: T): T; return value; end\ndef main()\ncallback := fn(value: Integer): Integer\nreturn identity<Integer>(value)\nend\nend\n"
+		mut state := lambda_analysis_state(source)
+		expect(has_diagnostic(state)).to_be_false()
+		select_checked_body(state, 0)
+		lambda := state.callables.checked[0].lambdas[0]
+		body := state.callables.checked_bodies[lambda.body]
+		mut origin := state.callables.lambdas[0].body_start
+		while load_string(state.source_tokens.token_texts, origin) != "identity"
+			origin += 1
+		end
+		call := sparse_integer_at(body.generic_application_finishes, origin)
+		expect(call > origin).to_be_true()
+		expect(sparse_integer_at(body.generic_calls, call) > 0).to_be_true()
+		expect(sparse_integer_at(state.callables.checked[0].generic_calls, call)).to_equal(0)
+	end
+
+	test("owns different typed anonymous bodies for shared generic syntax") do
+		source := "def probe<T>(value: T)\ncallback := fn(): T; return value; end\nend\ndef main()\nprobe<Integer>(1)\nprobe<String>(\"text\")\nend\n"
+		mut state := compiler_new(source.size() * 4 + 64)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state)).to_be_true()
+		mut body_ids: Array<Integer> := []
+		mut index := 0
+		while index < 2
+			function := state.type_resolution.generic_function_instances[index].function
+			select_checked_body(state, function)
+			mut parent := locals_new(state.source_tokens.token_count[0] + 1)
+			type_name := load_string(state.declarations.parameter_types, load_integer(state.declarations.function_parameter_starts, function))
+			local_bind(parent, "value", type_name, 0)
+			mut position := [state.callables.lambdas[0].origin]
+			value := check_lambda_value(state, position, parent)
+			expect(value.type_name).to_equal("$Callable<" + type_name + ">")
+			expect(has_diagnostic(state)).to_be_false()
+			lambda := state.callables.checked[0].lambdas[0]
+			expect(lambda.captures[0].type_name).to_equal(type_name)
+			body_ids.push(lambda.body)
+			index += 1
+		end
+		expect(body_ids[0] != body_ids[1]).to_be_true()
+	end
+	test("retains immutable nullable binding proofs without narrowing mutable captures") do
+		accepted := lambda_analysis_state("def factory(value: Integer?)\nif value != nil\n_callback := fn(): Integer; return value; end\nend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(accepted)).to_be_false()
+		rejected := lambda_analysis_state("def factory(mut value: Integer?)\nif value != nil\ncallback := fn(): Integer; return value; end\nend\nend\ndef main()\nend\n")
+		expect(load_string(rejected.diagnostics.messages, 0)).to_equal("expected Integer, found Integer?")
+	end
+
+end

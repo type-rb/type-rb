@@ -1,0 +1,58 @@
+import { standard_source_time_host } from state/standard_source_kinds
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Loader identity, complete signature and an empty declaration body are all
+# required. Authored names and paths cannot grant host clock or file access.
+def standard_time_host(state: CompilerState, function: Integer): Integer
+	if function < 0 || function >= state.declarations.function_count[0]
+		return 0
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_time_host()
+		return 0
+	end
+	name := load_string(state.declarations.function_names, function)
+	mut kind := 0
+	mut names: Array<String> := []
+	mut types: Array<String> := []
+	mut mutation: Array<Integer> := []
+	mut result := ""
+	if name == "clock"
+		kind = 1
+		names = ["parts"]
+		types = ["Array<Integer>"]
+		mutation = [1]
+		result = "Boolean"
+	elsif name == "zone_data"
+		kind = 2
+		names = ["path", "start", "length", "parts"]
+		types = ["String", "Integer", "Integer", "Array<String>"]
+		mutation = [0, 0, 0, 1]
+		result = "Integer"
+	elsif name == "zone_environment"
+		kind = 3
+		names = ["parts"]
+		types = ["Array<String>"]
+		mutation = [1]
+		result = "Boolean"
+	else
+		return 0
+	end
+	if load_integer(state.declarations.function_parameter_counts, function) != names.size() || load_string(state.declarations.function_result_types, function) != result || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function)
+		return 0
+	end
+	if sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+		return 0
+	end
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := 0
+	while index < names.size()
+		parameter := start + index
+		if load_string(state.declarations.parameter_names, parameter) != names[index] || load_string(state.declarations.parameter_types, parameter) != types[index] || load_integer(state.declarations.parameter_mutable, parameter) != mutation[index] || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+			return 0
+		end
+		index += 1
+	end
+	return kind
+end

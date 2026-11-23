@@ -1,0 +1,5 @@
+def main()
+[1].each.with_index do |value|
+puts(value)
+end
+end

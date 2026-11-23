@@ -1,0 +1,10 @@
+record Entry
+id: Integer
+end
+record Other
+id: Integer
+end
+def main()
+mut values: Array<Missing> := []
+puts(values.size())
+end

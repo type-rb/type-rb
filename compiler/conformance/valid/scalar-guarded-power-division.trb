@@ -1,0 +1,12 @@
+def quotient(value: Integer): Integer
+	return (value + 1) / 8 + 0
+end
+
+def main()
+	values := [-9007199254740991, -67108865, -18, -1, 0, 1, 6, 7, 8, 67108862, 67108863, 67108864, 9007199254740990]
+	mut index := 0
+	while index < values.size()
+		puts(quotient(values[index]))
+		index += 1
+	end
+end

@@ -1,0 +1,71 @@
+record Row
+	id: Integer
+	active: Boolean
+end
+
+record Message
+	text: String
+	rows: Array<Row>
+end
+
+record Node
+	id: Integer
+	children: Array<Node>
+end
+
+def make(value: Integer): Row
+	return Row.new(id: value, active: value > 0)
+end
+
+def grow(mut rows: Array<Row>): Row
+	mut index := 0
+	while index < 64
+		rows.push(make(index))
+		index += 1
+	end
+	return make(9)
+end
+
+def message(value: Integer): Message
+	return Message.new(text: "record" + "-held", rows: [make(value)])
+end
+
+def retained(): Array<Message>
+	return [message(42)]
+end
+
+def main()
+	mut rows := [make(1), make(2)]
+	rows[-1] = grow(rows)
+	groups: Array<Array<Array<Row>>> := [[rows]]
+	messages := retained()
+	mut children: Array<Node> := []
+	node := Node.new(id: 42, children: children)
+	children.push(node)
+	mut index := 0
+	while index < 20000
+		discarded := [message(index)]
+		mut cyclic_children: Array<Node> := []
+		cyclic := Node.new(id: index, children: cyclic_children)
+		cyclic_children.push(cyclic)
+		if discarded[0].rows[0].id != index
+			puts("record-array-fail")
+			return
+		end
+		index += 1
+	end
+	if node.children[0].children[0].id != 42
+		puts("record-array-cycle-fail")
+		return
+	end
+	if groups[0][0][1].id == 9
+		if groups[0][0][-1].id == 63
+			if messages[0].text == "record-held"
+				if messages[0].rows[0].active
+					puts("record-array-recovery-ok")
+				end
+			end
+		end
+	end
+	return
+end

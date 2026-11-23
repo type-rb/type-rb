@@ -1,0 +1,104 @@
+import { declaration_function, declaration_generic_function, declaration_global } from frontend/types/declaration_kinds
+import { build_module_components, module_is_cyclic } from frontend/resolution/module_components
+import { find_declaration_in_module } from frontend/resolution/declaration_lookup
+import { namespace_parent } from frontend/types/namespace_model
+import { integer_string } from support/literals
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, sparse_integer_at, store_integer, store_string } from support/storage
+import { resolve_type_name } from frontend/resolution/type_resolution
+
+def order_global_module(mut state: CompilerState, source: Integer, mut visited: Array<Integer>)
+	if visited[source] != 0
+		return
+	end
+	visited[source] = 1
+	mut binding := load_integer(state.module_graph.module_import_starts, source)
+	finish := binding + load_integer(state.module_graph.module_import_counts, source)
+	while binding < finish
+		target := load_integer(state.module_graph.import_targets, binding)
+		if target >= 0
+			order_global_module(state, target, visited)
+		end
+		binding += 1
+	end
+	generated := sparse_integer_at(state.module_graph.module_generated_dependencies, source) - 1
+	if generated >= 0
+		order_global_module(state, generated, visited)
+	end
+	mut index := 0
+	while index < state.global_bindings.globals.size()
+		if state.global_bindings.globals[index].source_id == source
+			state.global_bindings.runtime_order.push(index)
+		end
+		index += 1
+	end
+end
+
+def declare_global_functions(mut state: CompilerState): Boolean
+	build_module_components(state)
+	if state.global_bindings.globals.size() == 0
+		return true
+	end
+	mut visited: Array<Integer> := []
+	mut source := 0
+	while source < state.module_graph.module_count[0] || source <= state.module_graph.entry_module[0]
+		visited.push(0)
+		source += 1
+	end
+	order_global_module(state, state.module_graph.entry_module[0], visited)
+	# All sources are checked; only the entry closure executes. SCC membership
+	# changes the ordering only inside a cyclic source component.
+	state.global_bindings.component_modules.each do |members|
+		members.each do |member|
+			mut global := 0
+			while global < state.global_bindings.globals.size()
+				if state.global_bindings.globals[global].source_id == member
+					state.global_bindings.global_order.push(global)
+				end
+				global += 1
+			end
+		end
+	end
+	mut index := 0
+	while index < state.global_bindings.globals.size()
+		row := state.global_bindings.globals[index]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		mut kind := declaration_function()
+		while kind < declaration_global()
+			if (row.constant || (kind != declaration_function() && kind != declaration_generic_function())) && find_declaration_in_module(state, row.source_id, row.name, kind) >= 0
+				diagnostic(state, "TRBN4003", row.line, "duplicate constant declaration " + row.name)
+			end
+			kind += 1
+		end
+		if find_declaration_in_module(state, row.source_id, row.name, declaration_global()) != index
+			diagnostic(state, "TRBN4003", row.line, "duplicate constant declaration " + row.name)
+		end
+		mut type_name := ""
+		if row.annotation != ""
+			type_name = resolve_type_name(state, row.source_id, row.annotation, false)
+			if type_name == ""
+				diagnostic(state, "TRBN4003", row.line, "unknown constant type " + row.annotation)
+			end
+		end
+		function := state.declarations.function_count[0]
+		store_string(state.declarations.function_names, function, "$constant" + integer_string(index))
+		store_integer(state.declarations.function_modules, function, row.source_id)
+		store_integer(state.declarations.function_parameter_starts, function, state.declarations.parameter_count[0])
+		store_integer(state.declarations.function_parameter_counts, function, 0)
+		store_string(state.declarations.function_result_types, function, type_name)
+		store_integer(state.declarations.function_body_starts, function, row.start)
+		store_integer(state.declarations.function_body_ends, function, row.finish)
+		store_integer(state.declarations.function_lines, function, row.line)
+		store_integer(state.parsed.function_expression_bodies, function, 2)
+		if module_is_cyclic(state, row.source_id)
+			state.global_bindings.global_types.push(type_name)
+		else
+			state.global_bindings.global_types.push("")
+		end
+		state.global_bindings.global_functions.push(function)
+		state.declarations.function_count[0] += 1
+		index += 1
+	end
+	return !has_diagnostic(state)
+end

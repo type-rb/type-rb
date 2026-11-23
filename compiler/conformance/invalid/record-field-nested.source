@@ -1,0 +1,11 @@
+record Box
+value: Integer
+values: Array<Integer>
+end
+record Outer
+box: Box
+end
+def main()
+mut outer := Outer.new(box: Box.new(value: 1, values: [2]))
+outer.box.value = 2
+end

@@ -1,0 +1,106 @@
+import { mir_type_integer, mir_type_string } from mir/model/type_ids
+import { mir_op_guard, mir_op_hash_get, mir_op_hash_set, mir_op_integer_immediate, mir_op_integer_less, mir_op_integer_to_float, mir_op_scalar_literal, mir_op_string_literal } from mir/model/instructions
+import { mir_instruction_occurrences } from mir/analysis/flow
+import { MirHashLookupReuse, MirInstruction, MirModule, mir_value_type } from mir/model/module
+import { mir_hash_key_type } from mir/model/types
+
+# Only admitted scalar operations can separate a lookup from its store. Calls,
+# allocations, mutation, other reads and future instruction kinds invalidate it.
+# Scalar failures stay in place and never turn a missing get into an insertion.
+def mir_hash_lookup_preserves(instruction: MirInstruction): Boolean
+	if instruction.kind >= mir_op_integer_immediate() && instruction.kind <= mir_op_integer_less()
+		return true
+	end
+	if instruction.kind >= mir_op_scalar_literal() && instruction.kind <= mir_op_integer_to_float()
+		return true
+	end
+	if instruction.kind == mir_op_string_literal() || instruction.kind == mir_op_guard()
+		return true
+	end
+	return false
+end
+
+def mir_hash_lookup_plans(native_module: MirModule): Array<MirHashLookupReuse>
+	mut plans: Array<MirHashLookupReuse> := []
+	occurrences := mir_instruction_occurrences(native_module)
+	native_module.functions.each do |function|
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut producer := -1
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if occurrences[index] != 1
+					producer = -1
+				elsif instruction.kind == mir_op_hash_get()
+					producer = index
+				elsif instruction.kind == mir_op_hash_set()
+					if producer >= 0
+						get := native_module.instructions[producer]
+						if get.first == instruction.first && get.second == instruction.second
+							owner_type := mir_value_type(native_module, function.id, get.first)
+							key_type := mir_hash_key_type(native_module, owner_type)
+							if key_type == mir_type_integer() || key_type == mir_type_string()
+								plans.push(MirHashLookupReuse.new(producer: producer, store: index))
+							end
+						end
+					end
+					producer = -1
+				elsif !mir_hash_lookup_preserves(instruction)
+					producer = -1
+				end
+				index += 1
+			end
+			block_index += 1
+		end
+	end
+	# Block/function storage order is not an optimization input. Nonoverlapping
+	# pairs have the same producer and store order, enabling both binary lookups.
+	mut index := 1
+	while index < plans.size()
+		row := plans[index]
+		mut position := index
+		while position > 0 && plans[position - 1].producer > row.producer
+			plans[position] = plans[position - 1]
+			position -= 1
+		end
+		plans[position] = row
+		index += 1
+	end
+	return plans
+end
+
+def mir_hash_lookup_equal(left: Array<MirHashLookupReuse>, right: Array<MirHashLookupReuse>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].producer != right[index].producer || left[index].store != right[index].store
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_hash_lookup_find(plans: Array<MirHashLookupReuse>, instruction: Integer, producer: Boolean): Integer
+	mut lower := 0
+	mut upper := plans.size()
+	while lower < upper
+		middle := lower + (upper - lower) / 2
+		mut identity := plans[middle].store
+		if producer
+			identity = plans[middle].producer
+		end
+		if identity == instruction
+			return plans[middle].producer
+		elsif identity < instruction
+			lower = middle + 1
+		else
+			upper = middle
+		end
+	end
+	return -1
+end

@@ -1,0 +1,135 @@
+def mir_adapter_set_sqlite_link(): Integer
+	return 86
+end
+
+def mir_adapter_set_oidc_link(): Integer
+	return 22
+end
+
+# Signature categories and runtime adapters use independent encodings.
+# An interface signature stores a method-table index in adapter, not an adapter tag.
+# Runtime name/symbol tables start at the file-exists adapter and retain their order.
+
+def mir_signature_ordinary(): Integer
+	return 0
+end
+
+def mir_signature_compiler_runtime(): Integer
+	return 1
+end
+
+def mir_signature_host(): Integer
+	return 2
+end
+
+def mir_signature_standard(): Integer
+	return 3
+end
+
+def mir_signature_interface(): Integer
+	return 4
+end
+
+def mir_adapter_none(): Integer
+	return 0
+end
+
+def mir_adapter_file_exists(): Integer
+	return 1
+end
+
+def mir_adapter_read_source(): Integer
+	return 2
+end
+
+def mir_adapter_source_is_utf8(): Integer
+	return 3
+end
+
+def mir_adapter_string_bytes(): Integer
+	return 4
+end
+
+def mir_adapter_source_slice(): Integer
+	return 5
+end
+
+def mir_adapter_collect_project_sources(): Integer
+	return 6
+end
+
+def mir_adapter_eputs(): Integer
+	return 7
+end
+
+def mir_adapter_reset_temporary_storage(): Integer
+	return 8
+end
+
+def mir_adapter_host(): Integer
+	return 9
+end
+
+def mir_adapter_argv(): Integer
+	return 10
+end
+
+def mir_adapter_sqrt(): Integer
+	return 11
+end
+
+def mir_adapter_literal_byte(): Integer
+	return 12
+end
+
+def mir_adapter_runtime_fail(): Integer
+	return 13
+end
+
+def mir_adapter_time_clock(): Integer
+	return 14
+end
+
+def mir_adapter_time_zone_data(): Integer
+	return 15
+end
+
+def mir_adapter_time_zone_environment(): Integer
+	return 66
+end
+
+def mir_adapter_entropy(): Integer
+	return 16
+end
+
+def mir_adapter_runtime_recover(): Integer
+	return 17
+end
+
+def mir_adapter_collect_package_files(): Integer
+	return 18
+end
+
+def mir_adapter_set_network_link(): Integer
+	return 19
+end
+
+def mir_adapter_set_compression_link(): Integer
+	return 20
+end
+
+def mir_adapter_gzip(): Integer
+	return 34
+end
+
+def mir_adapter_set_crypto_link(): Integer
+	return 21
+end
+
+def mir_adapter_collect_test_paths(): Integer
+	return 23
+end
+
+def mir_adapter_runtime_deadline(): Integer
+	return 67
+end

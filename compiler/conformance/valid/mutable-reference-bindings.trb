@@ -1,0 +1,67 @@
+record Sample
+	value: Integer
+end
+
+record Box
+	item: Sample
+	values: Array<Integer>
+end
+
+def make_sample(): Sample
+	return Sample.new(value: 3)
+end
+
+def make_values(): Array<Integer>
+	return [4]
+end
+
+def change(mut input: Sample, mut values: Array<Integer>)
+	mut copy := (input)
+	copy = Sample.new(value: copy.value + 1)
+	mut items := values
+	items.push(2)
+	return
+end
+
+def read_nested(input: Box, values: Array<Array<Integer>>)
+	# Readonly binding capability is shallow in the reference language.
+	mut item := input.item
+	item = Sample.new(value: item.value + 1)
+	mut items := input.values
+	items.push(5)
+	mut nested := values[0]
+	nested.push(6)
+	return
+end
+
+def copy_values(number: Integer, text: String)
+	mut numeric := number
+	numeric += 1
+	mut message := text
+	message += "!"
+	puts(numeric)
+	puts(message)
+	return
+end
+
+def main()
+	mut sample := Sample.new(value: 1)
+	mut values := [1]
+	change(sample, values)
+	puts(sample.value)
+	puts(values.size())
+	mut returned := make_sample()
+	returned = Sample.new(value: returned.value + 1)
+	mut returned_values := make_values()
+	returned_values.push(7)
+	puts(returned.value)
+	puts(returned_values.size())
+	box := Box.new(item: Sample.new(value: 8), values: [1])
+	nested := [[2]]
+	read_nested(box, nested)
+	puts(box.item.value)
+	puts(box.values.size())
+	puts(nested[0].size())
+	copy_values(9, "ok")
+	return
+end

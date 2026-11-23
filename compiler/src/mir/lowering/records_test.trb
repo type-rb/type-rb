@@ -1,0 +1,175 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { array_mir_test_read } from testing/mir/arrays
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirField, MirRecord, MirRootPlan, MirType } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { string_starts_with } from support/path
+import { CompilerState } from state/state
+import { load_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def record_mir_test_state(): CompilerState
+	mut state := logical_checked_source("record Node\ntext: String\nchildren: Array<Node>\nend\ndef main()\nmut root := Node.new(text: (1).to_s(), children: [])\nroot.children.push(root)\nputs(root.children[0].text)\nend\n")
+	expect(check(state)).to_be_true()
+	expect(state.scalar_mir.functions.size()).to_equal(1)
+	return state
+end
+
+describe("Nominal record MIR") do
+	test("preserves readonly field bindings through grouped MIR projections") do
+		["root.text = \"bad\"", "(root.text) = \"bad\"", "((root).text) += \"bad\"", "(root.children) = []"].each do |statement|
+			mut state := logical_checked_source("record Node\ntext: String\nchildren: Array<Node>\nend\ndef main()\nmut root := Node.new(text: \"ok\", children: [])\n" + statement + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("retains recursive record, Hash and Range field types") do
+		mut state := logical_checked_source("record Entry\nchildren: Array<Entry>\nindex: Hash<String, Entry>\nspan: Range<Integer>\nend\ndef identity(value: Entry): Entry\nreturn value\nend\ndef main()\nputs(1)\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(2)
+		expect(state.scalar_mir.records.size()).to_equal(1)
+		expect(state.scalar_mir.fields.size()).to_equal(3)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects forged declaration, field, origin and container identities") do
+		mut kind := 0
+		while kind < 7
+			mut state := record_mir_test_state()
+			mut native_module := state.scalar_mir
+			definition := native_module.records[0]
+			field := native_module.fields[0]
+			if kind == 0
+				native_module.records[0] = MirRecord.new(declaration: 9, type_id: definition.type_id, name: definition.name, source_id: definition.source_id, line: definition.line, field_start: definition.field_start, field_count: definition.field_count)
+			elsif kind == 1
+				native_module.records[0] = MirRecord.new(declaration: 0, type_id: definition.type_id, name: definition.name, source_id: definition.source_id, line: definition.line, field_start: 1, field_count: definition.field_count)
+			elsif kind == 2
+				native_module.fields[0] = MirField.new(owner: 1, name: field.name, type_id: field.type_id, source_id: field.source_id, line: field.line)
+			elsif kind == 3
+				native_module.fields[0] = MirField.new(owner: 0, name: field.name, type_id: 999999, source_id: field.source_id, line: field.line)
+			elsif kind == 4
+				native_module.fields[0] = MirField.new(owner: 0, name: field.name, type_id: field.type_id, source_id: 999999, line: field.line)
+			elsif kind == 5
+				native_module.fields[1] = field
+			else
+				native_module.types[definition.type_id - 9] = MirType.new(kind: 2, name: "Record#1", element: 0, key: 0, declaration: 0)
+			end
+			expect(verify_mir(native_module, true).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+
+	test("rejects field projection across shape-identical nominal owners") do
+		mut state := logical_checked_source("record Left\ntext: String\nend\nrecord Right\ntext: String\nend\ndef read(value: Left): String\nreturn value.text\nend\ndef main()\nputs(read(Left.new(text: \"left\")))\nend\n")
+		expect(check(state)).to_be_true()
+		mut index := 0
+		while state.scalar_mir.instructions[index].kind != 26
+			index += 1
+		end
+		instruction := state.scalar_mir.instructions[index]
+		state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, state.scalar_mir.records[1].field_start)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR record field owner or type differs")
+	end
+
+	test("verifies constructor arguments, projection owners and allocating roots") do
+		mut kind := 25
+		while kind <= 26
+			mut state := record_mir_test_state()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != kind
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut effects := 0
+			if kind == 25
+				effects = 9
+			end
+			expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(effects)
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, 999999)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			kind += 1
+		end
+		mut state := record_mir_test_state()
+		plan := state.scalar_mir.root_plans[0]
+		mut roots := plan.roots
+		mut point := 0
+		while state.scalar_mir.instructions[plan.instructions[point]].kind != 25
+			point += 1
+		end
+		expect(roots[point].size()).to_equal(2)
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("executes source-erased nominal MIR and descriptors with forced collection") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root != nil
+			if qbe != nil
+				fixture := root + "/compiler/conformance/valid/managed-record-mir"
+				mut state := logical_checked_source(array_mir_test_read(fixture + ".trb"))
+				expect(check(state)).to_be_true()
+				expect(state.scalar_mir.functions.size()).to_equal(state.declarations.function_count[0])
+				before := control_test_output(emit_qbe(state))
+				state.scalar_mir.functions.each do |function|
+					mut token := load_integer(state.declarations.function_body_starts, function.id)
+					while token < load_integer(state.declarations.function_body_ends, function.id)
+						store_string(state.source_tokens.token_texts, token, "unavailable")
+						token += 1
+					end
+				end
+				mut field := 0
+				while field < state.declarations.field_count[0]
+					store_string(state.declarations.field_types, field, "unavailable")
+					store_string(state.declarations.field_names, field, "unavailable")
+					field += 1
+				end
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				state.scalar_mir.functions.each do |function|
+					mut left := function.block_start
+					mut right := left + function.block_count - 1
+					while left < right
+						saved := state.scalar_mir.blocks[left]
+						state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+						state.scalar_mir.blocks[right] = saved
+						left += 1
+						right -= 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				reordered := control_test_output(emit_qbe(state))
+				mut forced := ""
+				mut ordinary := false
+				mut hooks := 0
+				reordered.split("\n").each do |line|
+					if string_starts_with(line, "function ")
+						ordinary = line.include?("$trbnf")
+					end
+					if line == "}"
+						ordinary = false
+					end
+					if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_integer_to_string(") || line.include?("call $trbnf"))
+						forced += "\tcall $trbn_gc_collect(w 0)\n"
+						hooks += 1
+					end
+					forced += line + "\n"
+				end
+				expect(hooks > 10).to_be_true()
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(actual)
+					expect(actual).to_equal(array_mir_test_read(fixture + ".out"))
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end

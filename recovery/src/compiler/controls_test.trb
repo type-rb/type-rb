@@ -1,0 +1,170 @@
+import { RecoveryCommandControl, recovery_control_limit, recovery_module_selection, run_recovery_command_controls } from compiler/controls
+import { allocate_compiler_recovery_workspace, discard_empty_compiler_recovery_workspace } from compiler/workspace
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _control_fixture(root: String, limit: Integer, failures: Boolean): Result<Boolean, String>
+	workspace := try allocate_compiler_recovery_workspace("")
+	mut controls: Array<RecoveryCommandControl> := []
+	mut labels: Array<String> := []
+	mut index := 0
+	while index < 6
+		label := "control-" + index.to_s()
+		labels.push(label)
+		mut outcome := "ok"
+		if failures
+			if index == 0
+				outcome = "exit"
+			elsif index == 1
+				outcome = "stdout"
+			elsif index == 2
+				outcome = "stderr"
+			end
+		end
+		controls.push(RecoveryCommandControl.new(
+				label: label,
+				executable: "python3",
+				arguments: [root + "/tools/recovery-control-fixture.py", "worker", workspace, label, outcome, limit.to_s()],
+				expected_stdout: label + "\n",
+			))
+		index += 1
+	end
+	result := run_recovery_command_controls(controls, limit)
+	mut verified := false
+	case result
+	when Result::Ok(value)
+		verified = value && !failures
+	when Result::Err(error)
+		if failures
+			verified = error == "control-0: process failed with status 7: \ncontrol-1: stdout differs\ncontrol-2: unexpected stderr: control-2\n\n"
+		else
+			puts(error)
+		end
+	end
+	mut arguments := [root + "/tools/recovery-control-fixture.py", "verify", workspace, limit.to_s()]
+	labels.each do |label|
+		arguments.push(label)
+	end
+	case Process.run("python3", arguments)
+	when Result::Ok(process)
+		verified = verified && process.success && process.stdout == "ok\n" && process.stderr.empty?()
+		if !process.success
+			puts(process.stderr)
+		end
+	when Result::Err(error)
+		puts(error.message)
+		verified = false
+	end
+	case Process.run("/bin/rm", [workspace + "/ledger.json"])
+	when Result::Ok(process)
+		verified = verified && process.success
+	when Result::Err(_error)
+		verified = false
+	end
+	cleaned := discard_empty_compiler_recovery_workspace(workspace)
+	return Result<Boolean, String>::Ok(verified && cleaned)
+end
+
+describe("Bounded compiler recovery controls") do
+	test("defaults to every dependency and rejects stale or duplicate delta selections") do
+		names := ["compiler", "lexer", "parser", "mir"]
+		["", "all"].each do |scope|
+			case recovery_module_selection(scope, names)
+			when Result::Ok(selected)
+				expect(selected).to_equal(["lexer", "parser", "mir"])
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+		end
+		case recovery_module_selection("none", names)
+		when Result::Ok(selected)
+			expect(selected.empty?()).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case recovery_module_selection("mir,lexer", names)
+		when Result::Ok(selected)
+			expect(selected).to_equal(["mir", "lexer"])
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		["compiler", "unknown", "lexer,lexer", "lexer,unknown", ",lexer", "lexer,", "lexer,,mir"].each do |scope|
+			case recovery_module_selection(scope, names)
+			when Result::Ok(_selected)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.start_with?("invalid recovery module selection: ")).to_be_true()
+			end
+		end
+	end
+
+	test("retains complete nested identities in recovery selections") do
+		case recovery_module_selection("checking/value,mir/value", ["compiler", "checking/value", "mir/value"])
+		when Result::Ok(selected)
+			expect(selected).to_equal(["checking/value", "mir/value"])
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("keeps all workers and deterministic failures within the configured bound") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			[1, 2, 4].each do |limit|
+				[false, true].each do |failures|
+					case _control_fixture(root, limit, failures)
+					when Result::Ok(value)
+						expect(value).to_be_true()
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+		end
+	end
+
+	test("rejects invalid limits and ambiguous labels before starting a command") do
+		control := RecoveryCommandControl.new(label: "one", executable: "/missing/recovery-control", arguments: [], expected_stdout: "")
+		[-1, 0, 5].each do |limit|
+			case run_recovery_command_controls([control], limit)
+			when Result::Ok(_value)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("recovery control concurrency must be from 1 to 4")
+			end
+		end
+		case run_recovery_command_controls([control, control], 2)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(error)
+			expect(error).to_equal("recovery control labels must be nonempty and unique")
+		end
+		["0", "-1", "5", "2x", " 2", "2.0"].each do |value|
+			case recovery_control_limit(value)
+			when Result::Ok(_value)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("TYPE_RB_NATIVE_RECOVERY_JOBS must be an integer from 1 to 4")
+			end
+		end
+	end
+
+	test("attributes process launch failures without accepting an empty successful batch") do
+		empty: Array<RecoveryCommandControl> := []
+		case run_recovery_command_controls(empty, 2)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(error)
+			expect(error).to_equal("recovery controls must not be empty")
+		end
+		control := RecoveryCommandControl.new(label: "missing", executable: "/missing/recovery-control", arguments: [], expected_stdout: "")
+		case run_recovery_command_controls([control], 2)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(error)
+			expect(error.start_with?("missing: ")).to_be_true()
+		end
+	end
+end

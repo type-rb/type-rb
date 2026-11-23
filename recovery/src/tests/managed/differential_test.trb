@@ -1,0 +1,393 @@
+import { decode_recovery_managed_snapshot } from managed/snapshot
+import { build_recovery_managed_executable, build_recovery_managed_instrumented_executable } from managed/toolchain
+import { emit_recovery_managed_qbe } from managed/qbe
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+record RecoveryManagedObservation
+	status: Integer
+	stdout: String
+	stderr: String
+end
+
+record RecoveryManagedDifferentialPair
+	reference: RecoveryManagedObservation
+	native: RecoveryManagedObservation
+end
+
+record RecoveryManagedDifferentialExpectation
+	name: String
+	stdout: String
+	stderr: String
+	status: Integer
+end
+
+def _recovery_managed_observe(command: String): Result<RecoveryManagedObservation, String>
+	case Process.run("/usr/bin/env", ["GOTRACEBACK=none", command])
+	when Result::Ok(process)
+		return Result<RecoveryManagedObservation, String>::Ok(
+			RecoveryManagedObservation.new(
+				status: process.status,
+				stdout: process.stdout,
+				stderr: process.stderr,
+			)
+		)
+	when Result::Err(error)
+		return Result<RecoveryManagedObservation, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_managed_snapshot(name: String): Result<String, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	if root == nil
+		return Result<String, String>::Err("Managed recovery snapshot root is unavailable")
+	end
+	if reference_trb == nil
+		return Result<String, String>::Err("Managed recovery snapshot environment is incomplete")
+	end
+	config := root + "/corpus/recovery-managed/" + name + "/trbconfig.jsonc"
+	case Process.run(
+			reference_trb,
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "4", "--config", config],
+		)
+	when Result::Ok(process)
+		if process.success
+			return Result<String, String>::Ok(process.stdout)
+		end
+		return Result<String, String>::Err("snapshot: " + process.stderr)
+	when Result::Err(error)
+		return Result<String, String>::Err("snapshot: " + error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_managed_compare_files(left: String, right: String): Result<Boolean, String>
+	case Process.run("/usr/bin/cmp", [left, right])
+	when Result::Ok(process)
+		if process.success
+			return Result<Boolean, String>::Ok(true)
+		end
+		return Result<Boolean, String>::Err("artifacts differ: " + left + " and " + right)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("cmp: " + error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_managed_reproducibility_case(name: String): Result<Boolean, String>
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return Result<Boolean, String>::Err("TYPE_RB_NATIVE_QBE is unavailable")
+	end
+	first_snapshot := try _recovery_managed_snapshot(name)
+	second_snapshot := try _recovery_managed_snapshot(name)
+	if first_snapshot != second_snapshot
+		return Result<Boolean, String>::Err("source snapshots differ for " + name)
+	end
+	first_module := case decode_recovery_managed_snapshot(first_snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<Boolean, String>::Err(
+			"first decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	second_module := case decode_recovery_managed_snapshot(second_snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<Boolean, String>::Err(
+			"second decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	expect(first_module).to_equal(second_module)
+	first_workspace := "/tmp/type-rb-native-recovery-managed-reproducibility-" + name + "-first"
+	second_workspace := "/tmp/type-rb-native-recovery-managed-reproducibility-" + name + "-second"
+	case native_create_directory(first_workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	case native_create_directory(second_workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	first_output := first_workspace + "/native"
+	second_output := second_workspace + "/native"
+	first_report := case build_recovery_managed_executable(first_module, qbe, "/usr/bin/cc", first_workspace, first_output)
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("first build " + error.phase + ": " + error.message)
+	end
+	second_report := case build_recovery_managed_executable(second_module, qbe, "/usr/bin/cc", second_workspace, second_output)
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("second build " + error.phase + ": " + error.message)
+	end
+	try _recovery_managed_compare_files(first_report.qbe_ir_path, second_report.qbe_ir_path)
+	try _recovery_managed_compare_files(first_report.assembly_path, second_report.assembly_path)
+	try _recovery_managed_compare_files(first_output, second_output)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_managed_differential_case(name: String): Result<RecoveryManagedDifferentialPair, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if root == nil
+		return Result<RecoveryManagedDifferentialPair, String>::Err("TYPE_RB_NATIVE_ROOT is unavailable")
+	end
+	if reference_trb == nil
+		return Result<RecoveryManagedDifferentialPair, String>::Err("TYPE_RB_NATIVE_REFERENCE_TRB is unavailable")
+	end
+	if qbe == nil
+		return Result<RecoveryManagedDifferentialPair, String>::Err("Managed recovery differential environment is incomplete")
+	end
+	config := root + "/corpus/recovery-managed/" + name + "/trbconfig.jsonc"
+	workspace := "/tmp/type-rb-native-recovery-managed-differential-" + name
+	case native_create_directory(workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	snapshot_process := case Process.run(
+			reference_trb,
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "4", "--config", config],
+		)
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryManagedDifferentialPair, String>::Err("snapshot: " + error.operation + ": " + error.message)
+	end
+	if !snapshot_process.success
+		return Result<RecoveryManagedDifferentialPair, String>::Err("snapshot: " + snapshot_process.stderr)
+	end
+	native_module := case decode_recovery_managed_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<RecoveryManagedDifferentialPair, String>::Err(
+			"decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	native_output := workspace + "/native"
+	case build_recovery_managed_executable(native_module, qbe, "/usr/bin/cc", workspace, native_output)
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<RecoveryManagedDifferentialPair, String>::Err(
+			"native-build: " + error.phase + ": " + error.message + "\n" + error.stderr
+		)
+	end
+	reference_output := workspace + "/reference"
+	reference_build := case Process.run(
+			reference_trb,
+			["build", "--compile", "--config", config, "--outfile", reference_output],
+		)
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryManagedDifferentialPair, String>::Err("reference-build: " + error.operation + ": " + error.message)
+	end
+	if !reference_build.success
+		return Result<RecoveryManagedDifferentialPair, String>::Err("reference-build: " + reference_build.stderr)
+	end
+	reference_observation := try _recovery_managed_observe(reference_output)
+	native_observation := try _recovery_managed_observe(native_output)
+	return Result<RecoveryManagedDifferentialPair, String>::Ok(
+		RecoveryManagedDifferentialPair.new(reference: reference_observation, native: native_observation)
+	)
+end
+
+def _recovery_managed_cycle_runtime_report(): Result<Hash<String, Integer>, String>
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return Result<Hash<String, Integer>, String>::Err("TYPE_RB_NATIVE_QBE is unavailable")
+	end
+	snapshot := try _recovery_managed_snapshot("cycle-stress")
+	native_module := case decode_recovery_managed_snapshot(snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<Hash<String, Integer>, String>::Err(
+			"decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	workspace := "/tmp/type-rb-native-recovery-managed-cycle-runtime-report"
+	case native_create_directory(workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	output := workspace + "/native"
+	case build_recovery_managed_instrumented_executable(native_module, qbe, "/usr/bin/cc", workspace, output)
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<Hash<String, Integer>, String>::Err(
+			"instrumented-build: " + error.phase + ": " + error.message + "\n" + error.stderr
+		)
+	end
+	process := case Process.run(output, [])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<Hash<String, Integer>, String>::Err(error.operation + ": " + error.message)
+	end
+	if !process.success
+		return Result<Hash<String, Integer>, String>::Err("cycle runtime failed: " + process.stderr)
+	end
+	if process.stdout != "recovery-managed-cycle-stress\n"
+		return Result<Hash<String, Integer>, String>::Err("cycle runtime output changed: " + process.stdout)
+	end
+	mut statistics: Hash<String, Integer> := {}
+	lines := process.stderr.split("\n")
+	mut index := 0
+	while index < lines.size()
+		fields := lines[index].split(",")
+		if fields.size() == 3
+			if fields[0] == "recovery-managed-gc-stat"
+				statistics[fields[1]] = fields[2].to_i()
+			end
+		end
+		index += 1
+	end
+	return Result<Hash<String, Integer>, String>::Ok(statistics)
+end
+
+describe("Managed recovery source-connected differential corpus") do
+	test("matches optimized Go managed values, closures, collection, and failure behavior") do
+		if Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB") == nil || Process.environment("TYPE_RB_NATIVE_QBE") == nil
+			expect(true).to_be_true()
+		else
+			expectations: Array<RecoveryManagedDifferentialExpectation> := [
+				RecoveryManagedDifferentialExpectation.new(
+					name: "utf8-strings",
+					stdout: "recovery-managed-utf8-strings\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryManagedDifferentialExpectation.new(
+					name: "array-values",
+					stdout: "recovery-managed-array-values\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryManagedDifferentialExpectation.new(
+					name: "closure-values",
+					stdout: "recovery-managed-closure-values\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryManagedDifferentialExpectation.new(
+					name: "cycle-stress",
+					stdout: "recovery-managed-cycle-stress\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryManagedDifferentialExpectation.new(
+					name: "string-index-failure",
+					stdout: "",
+					stderr: "panic: String index is out of bounds\n",
+					status: 2,
+				),
+				RecoveryManagedDifferentialExpectation.new(
+					name: "array-index-failure",
+					stdout: "",
+					stderr: "panic: Array index is out of bounds\n",
+					status: 2,
+				),
+			]
+			mut index := 0
+			while index < expectations.size()
+				expected := expectations[index]
+				case _recovery_managed_differential_case(expected.name)
+				when Result::Ok(pair)
+					expect(pair.reference).to_equal(pair.native)
+					expect(pair.native.status).to_equal(expected.status)
+					expect(pair.native.stdout).to_equal(expected.stdout)
+					expect(pair.native.stderr).to_equal(expected.stderr)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+				index += 1
+			end
+		end
+	end
+
+	test("reproduces snapshots, decoded MIR, QBE IL, assembly, and executables") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root == nil
+			expect(true).to_be_true()
+		else
+			if reference_trb == nil || qbe == nil
+				expect(true).to_be_true()
+			else
+				case_names := ["utf8-strings", "array-values", "closure-values", "cycle-stress"]
+				mut index := 0
+				while index < case_names.size()
+					case _recovery_managed_reproducibility_case(case_names[index])
+					when Result::Ok(value)
+						expect(value).to_be_true()
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+					index += 1
+				end
+			end
+		end
+	end
+
+	test("folds source literal concatenation into immortal static Strings") do
+		if Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB") == nil
+			expect(true).to_be_true()
+		else
+			case _recovery_managed_snapshot("utf8-strings")
+			when Result::Ok(snapshot)
+				case decode_recovery_managed_snapshot(snapshot)
+				when Result::Ok(native_module)
+					case emit_recovery_managed_qbe(native_module)
+					when Result::Ok(source)
+						expect(source.include?("call $trbn_string_concat")).to_be_false()
+						expect(source.include?("l 7, l 3, b 65 240 159 152 128 195 169")).to_be_true()
+					when Result::Err(_diagnostic)
+						expect(false).to_be_true()
+					end
+				when Result::Err(_diagnostic)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("automatically collects and reclaims the source closure and Array cycles") do
+		if Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB") == nil || Process.environment("TYPE_RB_NATIVE_QBE") == nil
+			expect(true).to_be_true()
+		else
+			case _recovery_managed_cycle_runtime_report()
+			when Result::Ok(statistics)
+				collections := statistics.fetch("collections")
+				automatic_collections := statistics.fetch("automatic-collections")
+				collection_nanoseconds := statistics.fetch("collection-nanoseconds")
+				allocated_bytes := statistics.fetch("allocated-bytes")
+				reclaimed_bytes := statistics.fetch("reclaimed-bytes")
+				live_bytes := statistics.fetch("live-bytes")
+				expect(automatic_collections >= 2).to_be_true()
+				expect(collections).to_equal(automatic_collections + 1)
+				expect(collection_nanoseconds > 0).to_be_true()
+				expect(allocated_bytes > 0).to_be_true()
+				expect(reclaimed_bytes > 0).to_be_true()
+				expect(allocated_bytes).to_equal(reclaimed_bytes + live_bytes)
+				expect(live_bytes <= 65536).to_be_true()
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

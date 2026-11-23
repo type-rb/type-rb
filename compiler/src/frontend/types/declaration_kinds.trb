@@ -1,0 +1,42 @@
+# Lexical declaration lookup families, independent of MIR type categories.
+# Contiguous values permit duplicate-name scans across all declaration families.
+
+def declaration_function(): Integer
+	return 0
+end
+
+def declaration_record(): Integer
+	return 1
+end
+
+def declaration_enum(): Integer
+	return 2
+end
+
+def declaration_generic_type(): Integer
+	return 3
+end
+
+def declaration_generic_function(): Integer
+	return 4
+end
+
+def declaration_alias(): Integer
+	return 5
+end
+
+def declaration_namespace(): Integer
+	return 6
+end
+
+def declaration_global(): Integer
+	return 7
+end
+
+def declaration_newtype(): Integer
+	return 8
+end
+
+def declaration_object(): Integer
+	return 9
+end

@@ -1,0 +1,77 @@
+import { has_diagnostic } from state/state
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { check, emit_qbe } from compiler
+import { qbe_runtime_needs } from backend/qbe/runtime/requirements
+import { mir_module_new } from mir/model/module
+import { output_source } from testing/compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+def runtime_requirements_output(source: String): String
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "check", check(state))
+	before := output_source(emit_qbe(state))
+	expect_compiler_phase(state, "emit-qbe", !has_diagnostic(state))
+	expect(before.size() > 0).to_be_true()
+	intrinsic_mir_erase(state)
+	expect(output_source(emit_qbe(state))).to_equal(before)
+	return before
+end
+
+describe("QBE runtime requirements") do
+	test("omits optional families from scalar programs while retaining core storage") do
+		qbe := runtime_requirements_output("def main()\nputs(42)\nend\n")
+		["trbn_string_concat_three", "trbn_string_concat_many", "trbn_string_query", "trbn_string_sequence", "trbn_string_slice", "trbn_string_trim", "trbn_string_split", "trbn_string_replace", "trbn_string_case", "trbn_array_copy", "trbn_array_join", "trbn_string_join", "trbn_array_unshift", "trbn_case_lower_count"].each do |symbol|
+			expect(qbe.include?("$" + symbol)).to_be_false()
+		end
+		expect(qbe.include?("function l $trbn_gc_alloc(")).to_be_true()
+		expect(qbe.include?("function l $trbn_utf8_count(")).to_be_true()
+	end
+
+	test("retains transitive byte search for transforms and ordering for String sorting") do
+		split := runtime_requirements_output("def main()\nputs(\"a:b\".split(\":\")[1])\nend\n")
+		expect(split.include?("function l $trbn_string_split(")).to_be_true()
+		expect(split.include?("function l $trbn_string_find_bytes(")).to_be_true()
+		expect(split.include?("$trbn_case_lower_count")).to_be_false()
+		ordered := runtime_requirements_output("def main()\nputs([\"b\", \"a\"].sort()[0])\nend\n")
+		expect(ordered.include?("function l $trbn_string_before(")).to_be_true()
+		expect(ordered.include?("function l $trbn_array_copy(")).to_be_true()
+		expect(ordered.include?("$trbn_string_split")).to_be_false()
+	end
+
+	test("omits the concatenation constructor for Array joins") do
+		qbe := runtime_requirements_output("def joined(values: Array<String>): String\nreturn values.join(\"\")\nend\ndef main()\nputs(joined([\"a\", \"b\"]))\nend\n")
+		expect(qbe.include?("function l $trbn_join_fragments(")).to_be_true()
+		expect(qbe.include?("$trbn_string_concat_many")).to_be_false()
+	end
+
+	test("includes requirements from uncalled bodies and nested callable bodies") do
+		source := "def unused(value: String): String\nreturn value.strip().upcase()\nend\n\ndef main()\n[\"a\"].each do |text|\nputs(text.reverse().chars().join(\"\"))\nend\nmut values := [\"b\"]\nvalues.unshift(\"a\")\nputs(values.shift())\nputs(\"abc\".slice(0..1))\nend\n"
+		qbe := runtime_requirements_output(source)
+		["trbn_string_trim", "trbn_string_case", "trbn_string_sequence", "trbn_string_reverse", "trbn_array_join", "trbn_string_join", "trbn_array_unshift", "trbn_array_remove", "trbn_string_slice"].each do |symbol|
+			expect(qbe.include?("$" + symbol + "(")).to_be_true()
+		end
+		expect(qbe.include?("$trbn_case_lower_count")).to_be_true()
+	end
+
+	test("retains String ordering for dynamic Hash output") do
+		qbe := runtime_requirements_output("def main()\nvalue: Any := {\"b\" => 2, \"a\" => 1}\nputs(value)\nend\n")
+		expect(qbe.include?("function l $trbn_string_before(")).to_be_true()
+		expect(qbe.include?("call $trbn_string_before(")).to_be_true()
+	end
+
+	test("retains shared empty-Array error data for removal and endpoint guards") do
+		["mut values := [1]\nputs(values.shift())", "puts([1].first())"].each do |body|
+			qbe := runtime_requirements_output("def main()\n" + body + "\nend\n")
+			expect(qbe.include?("data $trbn_array_empty_error =")).to_be_true()
+			expect(qbe.include?("call $trbn_fail(l $trbn_array_empty_error,")).to_be_true()
+		end
+	end
+
+	test("keeps all optional families for compiler gateways with injected adapters") do
+		needs := qbe_runtime_needs(mir_module_new(), true)
+		expect(needs.concat_three && needs.concat_many && needs.queries && needs.sequences && needs.slices).to_be_true()
+		expect(needs.trimming && needs.transforms && needs.case_mapping).to_be_true()
+		expect(needs.copies && needs.join && needs.mutations).to_be_true()
+	end
+end

@@ -1,0 +1,75 @@
+import { CompilerState } from state/state
+
+# The initial source hint does not include declarations discovered through
+# implicit standard imports. Grow the sparse catalogs together before parsing
+# another module; raising a logical limit does not allocate untouched chunks.
+def compiler_reserve_source(mut state: CompilerState, source_size: Integer)
+	required := state.source_tokens.token_count[0] + source_size + 1
+	if required <= state.source_tokens.token_kinds.limit[0]
+		return
+	end
+	capacity := required * 2
+	state.nominal.raw_enum_results.limit[0] = capacity
+	state.nominal.function_receivers.limit[0] = capacity
+	state.global_bindings.global_scope_orders.limit[0] = capacity
+	state.callables.call_block_origins.limit[0] = capacity
+	state.callables.lambda_origins.limit[0] = capacity
+	state.callables.function_lambdas.limit[0] = capacity
+	state.callables.function_file_bodies.limit[0] = capacity
+	state.callables.checked_body_indices.limit[0] = capacity
+	state.standard_modules.limit[0] = capacity
+	state.type_resolution.alias_patterns.limit[0] = capacity
+	state.type_resolution.alias_expansion_path.limit[0] = capacity
+	state.type_resolution.record_generic_bindings.limit[0] = capacity
+	state.type_resolution.function_generic_bindings.limit[0] = capacity
+	state.parsed.catch_origins.limit[0] = capacity
+	state.parsed.statement_finishes.limit[0] = capacity
+	state.parsed.loop_finishes.limit[0] = capacity
+	state.parsed.control_origins.limit[0] = capacity
+	state.parsed.parameter_defaults.limit[0] = capacity
+	state.parsed.field_defaults.limit[0] = capacity
+	state.parsed.field_type_names.limit[0] = capacity
+	state.parsed.function_expression_bodies.limit[0] = capacity
+	state.parsed.record_default_parameters.limit[0] = capacity
+	state.parsed.transform_origins.limit[0] = capacity
+	state.parsed.iteration_origins.limit[0] = capacity
+	state.source_tokens.token_kinds.limit[0] = capacity
+	state.source_tokens.token_texts.limit[0] = capacity
+	state.source_tokens.token_lines.limit[0] = capacity
+	state.source_tokens.token_columns.limit[0] = capacity
+	state.source_tokens.token_fused_literals.limit[0] = capacity
+	state.source_tokens.token_namespaces.limit[0] = capacity
+	state.module_graph.module_names.limit[0] = capacity
+	state.module_graph.module_files.limit[0] = capacity
+	state.module_graph.module_import_starts.limit[0] = capacity
+	state.module_graph.module_import_counts.limit[0] = capacity
+	state.module_graph.import_modules.limit[0] = capacity
+	state.module_graph.import_paths.limit[0] = capacity
+	state.module_graph.import_symbols.limit[0] = capacity
+	state.module_graph.import_declarations.limit[0] = capacity
+	state.module_graph.import_kinds.limit[0] = capacity
+	state.module_graph.import_lines.limit[0] = capacity
+	state.module_graph.import_targets.limit[0] = capacity
+	state.module_graph.import_used.limit[0] = capacity
+	state.declarations.record_names.limit[0] = capacity
+	state.declarations.record_modules.limit[0] = capacity
+	state.declarations.record_field_starts.limit[0] = capacity
+	state.declarations.record_field_counts.limit[0] = capacity
+	state.declarations.record_lines.limit[0] = capacity
+	state.declarations.field_names.limit[0] = capacity
+	state.declarations.field_types.limit[0] = capacity
+	state.declarations.field_lines.limit[0] = capacity
+	state.declarations.function_names.limit[0] = capacity
+	state.declarations.function_modules.limit[0] = capacity
+	state.declarations.function_parameter_starts.limit[0] = capacity
+	state.declarations.function_parameter_counts.limit[0] = capacity
+	state.declarations.function_result_types.limit[0] = capacity
+	state.declarations.function_body_starts.limit[0] = capacity
+	state.declarations.function_body_ends.limit[0] = capacity
+	state.declarations.function_lines.limit[0] = capacity
+	state.declarations.parameter_names.limit[0] = capacity
+	state.declarations.parameter_types.limit[0] = capacity
+	state.declarations.parameter_mutable.limit[0] = capacity
+	state.declarations.parameter_named_only.limit[0] = capacity
+	state.declarations.parameter_lines.limit[0] = capacity
+end

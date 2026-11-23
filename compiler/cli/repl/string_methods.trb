@@ -1,0 +1,105 @@
+import { string_method_chars, string_method_codepoints, string_method_empty, string_method_end_with, string_method_index, string_method_lstrip, string_method_reverse, string_method_rindex, string_method_rstrip, string_method_slice, string_method_start_with, string_method_strip } from frontend/types/method_kinds
+import { native_cli_scalar } from host
+import { ReplStore, repl_boolean, repl_integer, repl_string, repl_value } from repl/model
+import { repl_none } from repl/nullable
+
+# The retained evaluator compares code points without constructing substrings.
+def repl_string_offset(value: String, part: String, kind: Integer): Integer
+	last := value.size() - part.size()
+	if last < 0
+		return -1
+	end
+	mut first := 0
+	mut finish := last
+	if kind == string_method_start_with()
+		finish = 0
+	elsif kind == string_method_end_with()
+		first = last
+	end
+	mut found := -1
+	mut start := first
+	while start <= finish
+		mut index := 0
+		while index < part.size()
+			if value[start + index] != part[index]
+				break
+			end
+			index += 1
+		end
+		if index == part.size()
+			found = start
+			if kind != string_method_rindex()
+				return found
+			end
+		end
+		start += 1
+	end
+	return found
+end
+
+def repl_string_method(mut store: ReplStore, kind: Integer, receiver: Integer, argument: Integer): Integer
+	value := store.texts[receiver]
+	if kind == string_method_strip()
+		return repl_string(store, value.strip())
+	elsif kind == string_method_lstrip()
+		return repl_string(store, value.lstrip())
+	elsif kind == string_method_rstrip()
+		return repl_string(store, value.rstrip())
+	end
+	if kind == string_method_slice()
+		bounds := store.children[argument]
+		first := store.integers[bounds[0]]
+		last := store.integers[bounds[1]]
+		exclusive := store.integers[bounds[2]] == 1
+		if first < 0 || last < 0 || first > last || last > value.size() || (!exclusive && last == value.size())
+			store.error[0] = "panic: String slice range is out of bounds"
+			return 0
+		end
+		mut finish := last
+		if !exclusive
+			finish += 1
+		end
+		mut sliced := ""
+		mut index := first
+		while index < finish
+			sliced += value[index]
+			index += 1
+		end
+		return repl_string(store, sliced)
+	end
+	if kind >= string_method_codepoints()
+		mut children: Array<Integer> := []
+		mut reversed := ""
+		mut index := 0
+		while index < value.size()
+			character := value[index]
+			if kind == string_method_codepoints()
+				children.push(repl_integer(store, native_cli_scalar(character)))
+			elsif kind == string_method_chars()
+				children.push(repl_string(store, character))
+			else
+				reversed = character + reversed
+			end
+			index += 1
+		end
+		if kind == string_method_reverse()
+			return repl_string(store, reversed)
+		end
+		mut type_name := "Array<Integer>"
+		if kind == string_method_chars()
+			type_name = "Array<String>"
+		end
+		return repl_value(store, type_name, 0, 0.0, "", children)
+	end
+	if kind == string_method_empty()
+		return repl_boolean(store, value.size() == 0)
+	end
+	offset := repl_string_offset(value, store.texts[argument], kind)
+	if kind < string_method_index()
+		return repl_boolean(store, offset >= 0)
+	end
+	if offset < 0
+		return repl_none(store, "Integer?")
+	end
+	return repl_value(store, "Integer?", 0, 0.0, "", [repl_integer(store, offset)])
+end

@@ -1,0 +1,68 @@
+import { integer_string } from support/literals
+import { MirModule } from mir/model/module
+
+# Function-local value IDs may be sparse and reused by other functions.
+def mir_identity_key(function_id: Integer, value_id: Integer): String
+	return integer_string(function_id) + ":" + integer_string(value_id)
+end
+
+def mir_count_definition(mut definitions: Hash<String, Integer>, function_id: Integer, value_id: Integer)
+	if value_id < 0
+		return
+	end
+	key := mir_identity_key(function_id, value_id)
+	mut count := 0
+	if definitions.key?(key)
+		count = definitions[key]
+	end
+	definitions[key] = count + 1
+end
+
+record MirFunctionDefinitions
+	counts: Hash<String, Integer>
+end
+
+def mir_count_local_definition(mut counts: Hash<String, Integer>, value_id: Integer)
+	if value_id < 0
+		return
+	end
+	key := integer_string(value_id)
+	mut count := 0
+	if counts.key?(key)
+		count = counts[key]
+	end
+	counts[key] = count + 1
+end
+
+# Called after every function's identity and storage spans are checked. Rows
+# follow function storage order, not the possibly sparse function IDs. Separate
+# local tables avoid allocating composite identity strings for every definition.
+# Rebuild from the current module so raw edits cannot reuse stale facts.
+def mir_definition_index(native_module: MirModule): Array<MirFunctionDefinitions>
+	mut functions: Array<MirFunctionDefinitions> := []
+	native_module.functions.each do |function|
+		mut definitions: Hash<String, Integer> := {}
+		mut index := function.parameter_start
+		while index < function.parameter_start + function.parameter_count
+			mir_count_local_definition(definitions, native_module.arguments[index])
+			index += 1
+		end
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			index = block.parameter_start
+			while index < block.parameter_start + block.parameter_count
+				mir_count_local_definition(definitions, native_module.arguments[index])
+				index += 1
+			end
+			index = block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				mir_count_local_definition(definitions, native_module.instructions[index].result)
+				index += 1
+			end
+			block_index += 1
+		end
+		functions.push(MirFunctionDefinitions.new(counts: definitions))
+	end
+	return functions
+end

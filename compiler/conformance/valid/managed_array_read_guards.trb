@@ -1,0 +1,54 @@
+def twice(values: Array<Integer>, index: Integer): Integer
+	return values[index] + values[index]
+end
+
+def twice_float(values: Array<Float>, index: Integer): Float
+	return values[index] + values[index]
+end
+
+def replace(mut values: Array<String>, index: Integer): String
+	previous := values[index]
+	values[index] = previous
+	return previous
+end
+
+def overwrite(mut values: Array<Integer>, mut view: Array<Integer>, index: Integer, replacement: Integer): Integer
+	previous := values[index]
+	view[index] = replacement
+	return previous * 100 + values[index]
+end
+
+def overwrite_float(mut values: Array<Float>, mut view: Array<Float>, index: Integer, replacement: Float): Float
+	previous := values[index]
+	view[index] = replacement
+	return previous + values[index]
+end
+
+def overwrite_boolean(mut values: Array<Boolean>, mut view: Array<Boolean>, index: Integer, replacement: Boolean): Boolean
+	previous := values[index]
+	view[index] = replacement
+	return previous && values[index] == replacement
+end
+
+def main()
+	mut integers := [2, 3]
+	puts(twice(integers, -1))
+	puts(twice(integers, 0))
+	mut floats := [1.5, 2.5]
+	puts(twice_float(floats, -1) == 5.0)
+	mut strings: Array<String> := []
+	mut index := 0
+	while index < 40
+		strings.push("item" + index.to_s())
+		index += 1
+	end
+	puts(replace(strings, -1))
+	puts(strings[39])
+	puts(overwrite(integers, integers, -1, 9))
+	puts(overwrite(integers, integers, 0, 8))
+	mut other := [5, 6]
+	puts(overwrite(integers, other, 0, 77))
+	puts(overwrite_float(floats, floats, -1, 7.5) == 10.0)
+	mut booleans := [true]
+	puts(overwrite_boolean(booleans, booleans, -1, false))
+end

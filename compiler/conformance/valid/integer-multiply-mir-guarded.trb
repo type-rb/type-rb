@@ -1,0 +1,14 @@
+def product(left: Integer, right: Integer): Integer
+	return left * right
+end
+
+def main()
+	lefts := [67108863, 67108864, -67108863, 9007199254740991, 9007199254740991]
+	rights := [67108863, 1, 1, 1, 0]
+	mut index := 0
+	while index < lefts.size()
+		puts(product(lefts[index], rights[index]).to_s())
+		index += 1
+	end
+	return
+end

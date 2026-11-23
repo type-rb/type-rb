@@ -1,0 +1,27 @@
+def main()
+	mut values := [1, 2, 3]
+	mut copy := values.dup()
+	copy[0] = 9
+	puts(values.first())
+	puts(values.last())
+	puts(copy.first())
+	puts(values.empty?())
+	values.reverse().each { |value| puts(value) }
+	values.slice(1..2).each { |value| puts(value) }
+	mut empty: Array<Integer> := []
+	mut fresh := empty.reverse()
+	fresh.push(7)
+	puts(empty.empty?())
+	puts(fresh.last())
+	puts(values.slice(3...3).size())
+	flags := [false, true]
+	puts(flags.reverse().first())
+	floats := [1.5, 2.5]
+	puts(floats.dup().last() == 2.5)
+	puts(floats.reverse().first() == 2.5)
+	mut inner := [4]
+	outer := [inner]
+	nested := outer.dup()
+	inner[0] = 8
+	puts(nested.first().first())
+end

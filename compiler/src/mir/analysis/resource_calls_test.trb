@@ -1,0 +1,31 @@
+import { scoped_call_failures, scoped_call_graph, scoped_call_node } from mir/analysis/resource_calls
+import { describe, expect, test } from trb/std/test
+
+describe("Scoped synchronous call proof") do
+	test("keeps recursive source cycles safe until an opaque edge reaches them") do
+		mut graph := scoped_call_graph(true)
+		scoped_call_node(graph, 3)
+		graph.checked[0] = 1
+		graph.checked[1] = 1
+		graph.checked[2] = 1
+		graph.checked[3] = 1
+		graph.callers.push(0)
+		graph.callees.push(1)
+		graph.callers.push(1)
+		graph.callees.push(0)
+		graph.callers.push(2)
+		graph.callees.push(1)
+		expect(scoped_call_failures(graph, 4)).to_equal([0, 0, 0, 0])
+		graph.forbidden[1] = 1
+		expect(scoped_call_failures(graph, 4)).to_equal([2, 2, 2, 0])
+	end
+
+	test("does not treat missing source bodies as synchronous proof") do
+		mut graph := scoped_call_graph(true)
+		scoped_call_node(graph, 1)
+		graph.checked[0] = 1
+		graph.callers.push(0)
+		graph.callees.push(1)
+		expect(scoped_call_failures(graph, 2)).to_equal([2, 2])
+	end
+end

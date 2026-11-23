@@ -1,0 +1,109 @@
+import trb/std/process
+import trb/std/result
+
+# Test orchestration only; no ordinary compiler generation imports this module.
+record RecoveryCommandControl
+	label: String
+	executable: String
+	arguments: Array<String>
+	expected_stdout: String
+end
+
+def recovery_control_limit(value: String): Result<Integer, String>
+	if value.empty?() || value == "2"
+		return Result<Integer, String>::Ok(2)
+	end
+	if value == "1"
+		return Result<Integer, String>::Ok(1)
+	end
+	if value == "3"
+		return Result<Integer, String>::Ok(3)
+	end
+	if value == "4"
+		return Result<Integer, String>::Ok(4)
+	end
+	return Result<Integer, String>::Err("TYPE_RB_NATIVE_RECOVERY_JOBS must be an integer from 1 to 4")
+end
+
+# The default remains every module; a CI delta may select only current modules.
+def recovery_module_selection(value: String, names: Array<String>): Result<Array<String>, String>
+	mut selected: Array<String> := []
+	if value.empty?() || value == "all"
+		names.each do |name|
+			if name != "compiler"
+				selected.push(name)
+			end
+		end
+		return Result<Array<String>, String>::Ok(selected)
+	end
+	if value == "none"
+		return Result<Array<String>, String>::Ok(selected)
+	end
+	if value.start_with?(",") || value.end_with?(",") || value.include?(",,")
+		return Result<Array<String>, String>::Err("invalid recovery module selection: " + value)
+	end
+	value.split(",").each do |name|
+		if name == "compiler" || !names.include?(name) || selected.include?(name)
+			return Result<Array<String>, String>::Err("invalid recovery module selection: " + name)
+		end
+		selected.push(name)
+	end
+	return Result<Array<String>, String>::Ok(selected)
+end
+
+# Collect every admitted result in input order, including failures after a peer fails.
+def collect_recovery_controls(results: Array<Result<Boolean, String>>): Result<Boolean, String>
+	mut errors := ""
+	results.each do |result|
+		case result
+		when Result::Ok(value)
+			if !value
+				errors += "recovery control returned false\n"
+			end
+		when Result::Err(error)
+			errors += error + "\n"
+		end
+	end
+	if !errors.empty?()
+		return Result<Boolean, String>::Err(errors)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def run_recovery_command_control(control: RecoveryCommandControl): Result<Boolean, String>
+	case Process.run(control.executable, control.arguments)
+	when Result::Ok(process)
+		if !process.success || process.status != 0
+			return Result<Boolean, String>::Err(control.label + ": process failed with status " + process.status.to_s() + ": " + process.stderr)
+		end
+		if !process.stderr.empty?()
+			return Result<Boolean, String>::Err(control.label + ": unexpected stderr: " + process.stderr)
+		end
+		if process.stdout != control.expected_stdout
+			return Result<Boolean, String>::Err(control.label + ": stdout differs")
+		end
+		return Result<Boolean, String>::Ok(true)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(control.label + ": " + error.operation + ": " + error.message)
+	end
+end
+
+def run_recovery_command_controls(controls: Array<RecoveryCommandControl>, limit: Integer): Result<Boolean, String>
+	if limit < 1 || limit > 4
+		return Result<Boolean, String>::Err("recovery control concurrency must be from 1 to 4")
+	end
+	if controls.empty?()
+		return Result<Boolean, String>::Err("recovery controls must not be empty")
+	end
+	mut labels: Array<String> := []
+	controls.each do |control|
+		if control.label.empty?() || labels.include?(control.label)
+			return Result<Boolean, String>::Err("recovery control labels must be nonempty and unique")
+		end
+		labels.push(control.label)
+	end
+	results := controls.concurrent_map(limit: limit) do |control|
+		run_recovery_command_control(control)
+	end
+	return collect_recovery_controls(results)
+end

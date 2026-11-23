@@ -1,0 +1,5 @@
+def main()
+while true
+next 1
+end
+end

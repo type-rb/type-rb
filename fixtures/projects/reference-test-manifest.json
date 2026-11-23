@@ -1,0 +1,794 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M2 reference",
+  "typeRBRevision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "note": "Current reference replay preserves every historical command, including Go name selection. Only the approved portable value rendering replaces the historical structural diagnostic. The immutable historical manifest remains available for its original revision.",
+  "comparison": "Native matches exit status, PASS and FAIL lines, origins, messages and summaries. Output from the Go toolchain itself, such as a trailing `exit status N` line, is backend-specific.",
+  "modeRule": "Fixtures use one go-mode configuration, as in the reference. Execution steps compare the reference in that mode with Native in mode trb over the same source, changing only the mode; see the M1 manifest's modeRule.",
+  "observedWith": {
+    "reference": "Exact TYPE_RB_REVISION; every historical command replayed, with approved portable rendering checked against the current test contract."
+  },
+  "scenarios": [
+    {
+      "id": "test-basic-pass",
+      "title": "Nested suites discovered and passing",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md; https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestRunsPortableSuiteAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery",
+        "to_equal",
+        "summary"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-basic-pass",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Calculator / adds numbers\nPASS Calculator / negative values / preserves the sign\n\n2 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-name-filter",
+      "title": "Selecting a suite by its full display name",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test",
+          "-t",
+          "negative values"
+        ],
+        [
+          "test",
+          "-t",
+          "Calculator / negative values$"
+        ]
+      ],
+      "dependencies": [
+        "name selection"
+      ],
+      "expectation": "triage",
+      "note": "The guide selects a suite with this anchored full name; the pinned reference reports no match. Triage against the reference before M2 activation.",
+      "fixture": "fixtures/projects/test-name-filter",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "-t",
+            "negative values"
+          ],
+          "code": 0,
+          "stdout": "PASS Calculator / negative values / preserves the sign\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        },
+        {
+          "args": [
+            "test",
+            "-t",
+            "Calculator / negative values$"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trb: no tests matched --test-name-pattern \"Calculator / negative values$\"\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "-t",
+            "negative values"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-positional-file",
+      "title": "Selecting one test file",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests)",
+      "steps": [
+        [
+          "test",
+          "src/alpha_test.trb"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-file",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/alpha_test.trb"
+          ],
+          "code": 0,
+          "stdout": "PASS Alpha / runs\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/alpha_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-positional-directory",
+      "title": "Selecting a directory recursively and skipping unrelated tests",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests)",
+      "steps": [
+        [
+          "test",
+          "src/domain"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-directory",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/domain"
+          ],
+          "code": 0,
+          "stdout": "PASS Orders / runs\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/domain"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-positional-duplicate-names",
+      "title": "A file path disambiguates identically named suites",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalFileDisambiguatesDuplicateNames)",
+      "steps": [
+        [
+          "test",
+          "src/first_test.trb",
+          "-t",
+          "Shared / same$"
+        ]
+      ],
+      "dependencies": [
+        "path selection",
+        "name selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-duplicate-names",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/first_test.trb",
+            "-t",
+            "Shared / same$"
+          ],
+          "code": 0,
+          "stdout": "PASS Shared / same\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/first_test.trb",
+            "-t",
+            "Shared / same$"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-selection-invalid",
+      "title": "A missing selected path is rejected",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestSelectionRejectsInvalidInputs)",
+      "steps": [
+        [
+          "test",
+          "src/missing_test.trb"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-selection-invalid",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/missing_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trb: test path src/missing_test.trb: stat <fixture>/app/src/missing_test.trb: no such file or directory\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/missing_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-failure-origin",
+      "title": "A failing assertion reports its .trb origin and fails the run",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReturnsFailureAndJSONEvents)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "failure origins",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-failure-origin",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Calculator / adds wrongly\n  <fixture>/app/src/calculator_test.trb:6:3: expected 3 to equal 4\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-json-reporter",
+      "title": "JSON events for passing and failing cases",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReturnsFailureAndJSONEvents)",
+      "steps": [
+        [
+          "test",
+          "--reporter",
+          "json"
+        ]
+      ],
+      "dependencies": [
+        "JSON reporter",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-json-reporter",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "--reporter",
+            "json"
+          ],
+          "code": 1,
+          "stdout": "{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":4,\"name\":\"Sample / passes\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_started\"}\n{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":4,\"name\":\"Sample / passes\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_passed\"}\n{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":7,\"name\":\"Sample / fails\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_started\"}\n{\"column\":3,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":8,\"message\":\"expected \\\"a\\\" to equal \\\"b\\\"\",\"name\":\"Sample / fails\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_failed\"}\n{\"failed\":1,\"total\":2,\"type\":\"test_summary\"}\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "--reporter",
+            "json"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-continue-after-failure",
+      "title": "A failing case does not stop later cases",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "case isolation",
+        "summary"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-continue-after-failure",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Sample / fails first\n  <fixture>/app/src/sample_test.trb:5:3: expected 1 to equal 2\nPASS Sample / passes later\n\n2 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "assert-basic-forms",
+      "title": "Inequality, Boolean and nil assertions",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "assertions"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/assert-basic-forms",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Assertions / not equal\nPASS Assertions / true\nPASS Assertions / false\nPASS Assertions / nil\n\n4 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "assert-structural-equality",
+      "title": "Structural equality for Arrays, Hashes, records and payload enums",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "structural equality"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/assert-structural-equality",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Structure / array\nPASS Structure / hash\nPASS Structure / record\nPASS Structure / enum\n\n4 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "assert-structural-failure",
+      "title": "A record inequality failure message",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "structural equality",
+        "failure messages"
+      ],
+      "expectation": "match-reference-status",
+      "note": "Go mode renders values in Go syntax; the portable failure text is settled with the M2 runner.",
+      "fixture": "fixtures/projects/assert-structural-failure",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Structure / record\n  <fixture>/app/src/sample_test.trb:15:3: expected Point(x: 1, y: 2) to equal Point(x: 1, y: 3)\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "expect-ok-err-pass",
+      "title": "expect_ok and expect_err return payloads",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-ok-err-pass",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Parser / ok\nPASS Parser / err\n\n2 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "expect-ok-on-err-fails",
+      "title": "expect_ok fails at its call site for Err",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-ok-on-err-fails",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Parser / ok\n  <fixture>/app/src/parser_test.trb:6:12: expected Ok, got Err(\"bad two\")\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "expect-err-on-ok-fails",
+      "title": "expect_err fails at its call site for Ok",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-err-on-ok-fails",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Parser / err\n  <fixture>/app/src/parser_test.trb:6:12: expected Err, got Ok(1)\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-runtime-trap",
+      "title": "A runtime trap inside a case",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReportsRuntimeStartFailure)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "runtime failures",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-runtime-trap",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Traps / index\n  <fixture>/app/src/sample_test.trb:4:2: Array index is out of bounds\nPASS Traps / later\n\n2 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-compile-error",
+      "title": "A type error in a test file",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "checking",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-compile-error",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:5:22: error[TRB3000]: argument 1 to to_equal() has type String, expected Integer\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-namespaced-import-rejected",
+      "title": "Namespaced test imports are rejected",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go (TestPrepareRejectsNamespacedTestImports)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-namespaced-import-rejected",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:1:1: error[TRB3000]: test suites require named imports from trb/std/test\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-nonliteral-name-rejected",
+      "title": "Suite and case names must be literals",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go (TestPrepareRejectsAmbiguousTestDeclarations)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-nonliteral-name-rejected",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:5:10: error[TRB3000]: describe() name must be a String literal\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    },
+    {
+      "id": "test-no-tests",
+      "title": "A project without test files",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-no-tests",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trb: no *_test.trb files found\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ]
+    }
+  ],
+  "historicalManifest": "fixtures/projects/m2-manifest.json",
+  "historicalManifestSha256": "395da0e27746da00d026b2e2332d3dd71cc98763377b99522c5a7f254846741d",
+  "approvedDisplayContract": "https://github.com/type-rb/type-rb/pull/849"
+}

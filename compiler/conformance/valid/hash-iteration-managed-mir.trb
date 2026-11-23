@@ -1,0 +1,55 @@
+def main()
+	mut values := { "left" =>["hel" + "lo"], "right" =>["wor" + "ld!"] }
+	mut total := 0
+	mut count := 0
+	values.each do |key, value|
+		if count == 0
+			values.delete("left")
+			values.delete("right")
+		end
+		mut temporary := ["allocation" + " pressure"]
+		temporary.push("more" + " data")
+		total += key.size() + value[0].size()
+		count += 1
+	end
+	puts(total)
+	puts(count)
+	puts(values.size())
+	mut inner := [1]
+	shared := { a: inner, b: inner }
+	mut size := 0
+	shared.each do |_key, value|
+		inner.push(2)
+		size += value.size()
+	end
+	puts(size)
+	text := "cap" + "ture"
+	callback := fn(value: Integer): Integer
+		return value + text.size()
+	end
+	mut callbacks := { a: callback, b: callback }
+	mut result := 0
+	mut first := true
+	callbacks.each do |_key, value|
+		if first
+			callbacks.delete("a")
+			callbacks.delete("b")
+			first = false
+		end
+		result += value(3)
+	end
+	puts(result)
+	zero := fn(): Integer
+		return 0
+	end
+	mut retained := [zero]
+	{ a: [3], bb: [5] }.each do |key, value|
+		capture := fn(): Integer
+			return key.size() + value[0]
+		end
+		retained.push(capture)
+	end
+	mut sum := 0
+	retained.each { |capture| sum += capture() }
+	puts(sum)
+end

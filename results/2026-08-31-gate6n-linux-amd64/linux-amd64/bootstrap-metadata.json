@@ -1,0 +1,15 @@
+{
+  "architecture": "amd64",
+  "asset": "gate6n-candidate-linux-amd64",
+  "attestationSubjectSha256": "cb6002b84dcfcb05d6c1336a7d5affa4eaa16a216f2fcb776d48c01bbe605a0b",
+  "ccBoundary": "system-cc",
+  "mode": "0755",
+  "os": "linux",
+  "profile": "linux-amd64-v0",
+  "qbeBinarySha256": "2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9",
+  "qbeBinarySize": 679048,
+  "qbeTarget": "amd64_sysv",
+  "runnerImage": "ubuntu-24.04",
+  "sha256": "cb6002b84dcfcb05d6c1336a7d5affa4eaa16a216f2fcb776d48c01bbe605a0b",
+  "size": 240888
+}

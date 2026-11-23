@@ -1,0 +1,145 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 2,
+  "module": "example/main",
+  "entryFunction": "example/main#main",
+  "sources": [
+    { "id": "main", "path": "src/main.trb" }
+  ],
+  "functions": [
+    {
+      "id": "example/main#add",
+      "name": "add",
+      "parameters": [
+        {
+          "id": "left",
+          "type": "Integer",
+          "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 20 }
+        },
+        {
+          "id": "right",
+          "type": "Integer",
+          "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 20 }
+        }
+      ],
+      "result": "Integer",
+      "entry": "entry",
+      "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 3, "endColumn": 4 },
+      "blocks": [
+        {
+          "id": "entry",
+          "parameters": [],
+          "origin": { "source": "main", "startLine": 2, "startColumn": 1, "endLine": 2, "endColumn": 20 },
+          "instructions": [
+            {
+              "op": "integer_binary",
+              "result": "sum",
+              "operator": "add",
+              "left": "left",
+              "right": "right",
+              "origin": { "source": "main", "startLine": 2, "startColumn": 9, "endLine": 2, "endColumn": 20 }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": "sum",
+            "origin": { "source": "main", "startLine": 2, "startColumn": 2, "endLine": 2, "endColumn": 20 }
+          }
+        }
+      ]
+    },
+    {
+      "id": "example/main#main",
+      "name": "main",
+      "parameters": [],
+      "result": "Void",
+      "entry": "entry",
+      "origin": { "source": "main", "startLine": 5, "startColumn": 1, "endLine": 10, "endColumn": 4 },
+      "blocks": [
+        {
+          "id": "entry",
+          "parameters": [],
+          "origin": { "source": "main", "startLine": 6, "startColumn": 1, "endLine": 8, "endColumn": 20 },
+          "instructions": [
+            {
+              "op": "integer_literal",
+              "result": "forty",
+              "value": 40,
+              "origin": { "source": "main", "startLine": 6, "startColumn": 2, "endLine": 6, "endColumn": 3 }
+            },
+            {
+              "op": "integer_literal",
+              "result": "two",
+              "value": 2,
+              "origin": { "source": "main", "startLine": 6, "startColumn": 5, "endLine": 6, "endColumn": 5 }
+            },
+            {
+              "op": "call",
+              "result": "answer",
+              "function": "example/main#add",
+              "arguments": ["forty", "two"],
+              "origin": { "source": "main", "startLine": 6, "startColumn": 7, "endLine": 6, "endColumn": 20 }
+            },
+            {
+              "op": "integer_literal",
+              "result": "expected",
+              "value": 42,
+              "origin": { "source": "main", "startLine": 7, "startColumn": 1, "endLine": 7, "endColumn": 2 }
+            },
+            {
+              "op": "integer_compare",
+              "result": "matches",
+              "operator": "equal",
+              "left": "answer",
+              "right": "expected",
+              "origin": { "source": "main", "startLine": 7, "startColumn": 4, "endLine": 7, "endColumn": 20 }
+            }
+          ],
+          "terminator": {
+            "op": "branch",
+            "condition": "matches",
+            "whenTrue": "success",
+            "trueArguments": [],
+            "whenFalse": "failure",
+            "falseArguments": [],
+            "origin": { "source": "main", "startLine": 7, "startColumn": 4, "endLine": 7, "endColumn": 20 }
+          }
+        },
+        {
+          "id": "success",
+          "parameters": [],
+          "origin": { "source": "main", "startLine": 8, "startColumn": 1, "endLine": 8, "endColumn": 7 },
+          "instructions": [
+            {
+              "op": "write_static",
+              "value": "ok\n",
+              "origin": { "source": "main", "startLine": 8, "startColumn": 1, "endLine": 8, "endColumn": 7 }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": null,
+            "origin": { "source": "main", "startLine": 8, "startColumn": 1, "endLine": 8, "endColumn": 7 }
+          }
+        },
+        {
+          "id": "failure",
+          "parameters": [],
+          "origin": { "source": "main", "startLine": 9, "startColumn": 1, "endLine": 9, "endColumn": 8 },
+          "instructions": [
+            {
+              "op": "write_static",
+              "value": "bad\n",
+              "origin": { "source": "main", "startLine": 9, "startColumn": 1, "endLine": 9, "endColumn": 8 }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": null,
+            "origin": { "source": "main", "startLine": 9, "startColumn": 1, "endLine": 9, "endColumn": 8 }
+          }
+        }
+      ]
+    }
+  ]
+}

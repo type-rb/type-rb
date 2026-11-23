@@ -1,0 +1,41 @@
+import { mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment, mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Only mechanical POSIX LP64 clock, environment and file-range operations cross
+# this boundary. Source precedence, initialization, ZIP/TZif validation and error
+# selection remain ordinary checked TypeRB. Managed output arrays stay rooted
+# across every allocation; each adapter restores its temporary-root frame.
+def emit_time_host_runtime(native_module: MirModule, mut output: QbeOutput)
+	mut clock := false
+	mut zone := false
+	mut environment := false
+	if native_module.program.size() == 1 && native_module.program[0].cli_function >= 0
+		clock = true
+		zone = true
+		environment = true
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard()
+			if signature.adapter == mir_adapter_time_clock()
+				clock = true
+			elsif signature.adapter == mir_adapter_time_zone_data()
+				zone = true
+			elsif signature.adapter == mir_adapter_time_zone_environment()
+				environment = true
+			end
+		end
+	end
+	if clock
+		qbe_output_line(output, "function l $trbn_time_clock(l %parts) {\n@start\n %length_address =l add %parts, 8\n %length =l loadl %length_address\n %valid =w ceql %length, 2\n jnz %valid, @read, @fail\n@read\n %timestamp =l alloc8 16\n %status =w call $clock_gettime(w 0, l %timestamp)\n %ok =w ceqw %status, 0\n jnz %ok, @copy, @fail\n@copy\n %seconds =l loadl %timestamp\n %nano_address =l add %timestamp, 8\n %nanos =l loadl %nano_address\n %data_address =l add %parts, 24\n %data =l loadl %data_address\n storel %seconds, %data\n %second =l add %data, 8\n storel %nanos, %second\n ret 1\n@fail\n ret 0\n}\n")
+	end
+	if zone || environment
+		qbe_output_line(output, "data $trbn_time_empty = align 8 { l 0, l 0, l 0, b 0 }\ndata $trbn_time_read_mode = { b \"rb\", b 0 }\ndata $trbn_time_tz_name = { b \"TZ\", b 0 }\ndata $trbn_time_zoneinfo_name = { b \"ZONEINFO\", b 0 }\ndata $trbn_time_errno_function = align 8 { l 0 }\ndata $trbn_time_errno_darwin = { b \"__error\", b 0 }\ndata $trbn_time_errno_linux = { b \"__errno_location\", b 0 }\nfunction l $trbn_time_errno_resolve() {\n@start\n %cached =l loadl $trbn_time_errno_function\n %known =w cnel %cached, 0\n jnz %known, @cached, @open\n@cached\n ret %cached\n@open\n %handle =l call $dlopen(l 0, w 1)\n %opened =w cnel %handle, 0\n jnz %opened, @darwin, @failed\n@darwin\n %apple =l call $dlsym(l %handle, l $trbn_time_errno_darwin)\n %is_apple =w cnel %apple, 0\n jnz %is_apple, @apple, @linux\n@apple\n jmp @save\n@linux\n %linux =l call $dlsym(l %handle, l $trbn_time_errno_linux)\n jmp @save\n@save\n %function =l phi @apple %apple, @linux %linux\n call $dlclose(l %handle)\n storel %function, $trbn_time_errno_function\n ret %function\n@failed\n ret 0\n}\n")
+	end
+	if zone
+		qbe_output_line(output, "# The caller supplies a two-element rooted Array<String>. Every success\n# publishes bytes once; failed reads never expose an incomplete managed value.\n# Whole TZif reads have the reference's 10 MiB ceiling; ZIP ranges are bounded\n# by the actual file length, so an unrelated large archive member is not read.\nfunction l $trbn_time_zone_data(l %path, l %start, l %requested, l %parts) {\n@start\n %countp =l add %parts, 8\n %count =l loadl %countp\n %valid =w ceql %count, 2\n jnz %valid, @prepare, @invalid\n@invalid\n ret 22\n@prepare\n %roots =l loadl $trbn_gc_temp_count\n call $trbn_gc_temp_push(l %parts)\n %datap =l add %parts, 24\n %cells =l loadl %datap\n %error_cell =l add %cells, 8\n storel $trbn_time_empty, %cells\n storel $trbn_time_empty, %error_cell\n %errno =l call $trbn_time_errno_resolve()\n %available =w cnel %errno, 0\n jnz %available, @path, @unavailable\n@unavailable\n jmp @failure\n@path\n %path_data =l add %path, 24\n %path_sizep =l add %path, 8\n %path_size =l loadl %path_sizep\n %c_size =l call $strlen(l %path_data)\n %no_nul =w ceql %path_size, %c_size\n jnz %no_nul, @open, @bad_path\n@bad_path\n jmp @failure\n@open\n %file =l call $fopen(l %path_data, l $trbn_time_read_mode)\n %opened =w cnel %file, 0\n jnz %opened, @seek_end, @open_error\n@open_error\n %open_address =l call %errno()\n %open_code =w loadw %open_address\n %open_status =l extuw %open_code\n jmp @failure\n@seek_end\n %seek =w call $fseek(l %file, l 0, w 2)\n jnz %seek, @read_error, @size\n@size\n %size =l call $ftell(l %file)\n %negative =w csltl %size, 0\n jnz %negative, @read_error, @whole\n@whole\n %whole =w ceql %requested, -1\n jnz %whole, @whole_size, @range_start\n@whole_size\n %too_large =w csgtl %size, 10485760\n jnz %too_large, @large, @whole_start\n@large\n jmp @close_error\n@whole_start\n %zero =w ceql %start, 0\n jnz %zero, @whole_ready, @bad_range\n@whole_ready\n jmp @range\n@range_start\n %relative =w csltl %start, 0\n jnz %relative, @relative, @absolute\n@relative\n %from_end =l add %size, %start\n jmp @range_ready\n@absolute\n jmp @range_ready\n@range_ready\n %offset =l phi @relative %from_end, @absolute %start\n jmp @range\n@range\n %position =l phi @whole_ready 0, @range_ready %offset\n %length =l phi @whole_ready %size, @range_ready %requested\n %before =w csltl %position, 0\n %after =w csgtl %position, %size\n %length_negative =w csltl %length, 0\n %remaining =l sub %size, %position\n %past =w csgtl %length, %remaining\n %bad_position =w or %before, %after\n %bad_length =w or %length_negative, %past\n %bad =w or %bad_position, %bad_length\n jnz %bad, @bad_range, @seek\n@bad_range\n jmp @close_error\n@seek\n %seek_status =w call $fseek(l %file, l %position, w 0)\n jnz %seek_status, @read_error, @allocate\n@allocate\n %allocation =l add %length, 17\n %result =l call $trbn_string_alloc(l %allocation)\n %lengthp =l add %result, 8\n storel %length, %lengthp\n %pointsp =l add %result, 16\n storel %length, %pointsp\n %data =l add %result, 24\n %read =l call $fread(l %data, l 1, l %length, l %file)\n %complete =w ceql %read, %length\n jnz %complete, @success, @short\n@short\n %io_error =w call $ferror(l %file)\n jnz %io_error, @read_error, @bad_range\n@read_error\n %read_address =l call %errno()\n %read_code =w loadw %read_address\n %read_status =l extuw %read_code\n jmp @close_error\n@close_error\n %close_code =l phi @large -1, @bad_range -2, @read_error %read_status\n call $fclose(l %file)\n jmp @failure\n@failure\n %status =l phi @unavailable -3, @bad_path 22, @open_error %open_status, @close_error %close_code\n %positive =w csgtl %status, 0\n jnz %positive, @message, @failed\n@message\n %error =l call $strerror(w %status)\n %message =l call $trbn_string_from_c(l %error)\n storel %message, %error_cell\n jmp @failed\n@failed\n storel %roots, $trbn_gc_temp_count\n ret %status\n@success\n call $fclose(l %file)\n %end =l add %data, %length\n storeb 0, %end\n storel %result, %cells\n storel %roots, $trbn_gc_temp_count\n ret 0\n}\n")
+	end
+	if environment
+		qbe_output_line(output, "function l $trbn_time_zone_environment(l %parts) {\n@start\n %countp =l add %parts, 8\n %count =l loadl %countp\n %valid =w ceql %count, 2\n jnz %valid, @read, @invalid\n@invalid\n ret 0\n@read\n %roots =l loadl $trbn_gc_temp_count\n call $trbn_gc_temp_push(l %parts)\n %datap =l add %parts, 24\n %cells =l loadl %datap\n %zone_cell =l add %cells, 8\n storel $trbn_time_empty, %cells\n storel $trbn_time_empty, %zone_cell\n %tz =l call $getenv(l $trbn_time_tz_name)\n %present =w cnel %tz, 0\n jnz %present, @tz, @zone\n@tz\n %value =l call $trbn_string_from_c(l %tz)\n storel %value, %cells\n jmp @zone\n@zone\n %zone =l call $getenv(l $trbn_time_zoneinfo_name)\n %has_zone =w cnel %zone, 0\n jnz %has_zone, @copy, @done\n@copy\n %source =l call $trbn_string_from_c(l %zone)\n storel %source, %zone_cell\n jmp @done\n@done\n storel %roots, $trbn_gc_temp_count\n %result =l extuw %present\n ret %result\n}\n")
+	end
+end

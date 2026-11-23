@@ -1,0 +1,113 @@
+import { compiler_string_bytes } from support/compiler_bytes
+import { ascii_code } from support/literals
+import { unicode_identifier_digit_data, unicode_identifier_letter_data, unicode_identifier_upper_data } from support/unicode_identifier_data
+
+# Classification is a frontend fact. These compact, generated ranges follow
+# the exact Unicode categories used by the reference lexer, without locale or
+# normalization dependencies. ASCII tokens keep their existing fast path.
+def unicode_identifier_field(data: String, start: Integer): Integer
+	mut value := 0
+	mut index := start
+	while index < start + 6
+		digit := ascii_code(data[index])
+		mut decoded := digit - 48
+		if digit >= 97
+			decoded = digit - 87
+		end
+		value = value * 16 + decoded
+		index += 1
+	end
+	return value
+end
+
+def unicode_identifier_contains(point: Integer, data: String): Boolean
+	if point < 0 || point > 1114111
+		return false
+	end
+	mut first := 0
+	mut finish := data.size() / 18
+	while first < finish
+		middle := first + (finish - first) / 2
+		start := middle * 18
+		low := unicode_identifier_field(data, start)
+		high := unicode_identifier_field(data, start + 6)
+		if point < low
+			finish = middle
+		elsif point > high
+			first = middle + 1
+		else
+			stride := unicode_identifier_field(data, start + 12)
+			return (point - low) % stride == 0
+		end
+	end
+	return false
+end
+
+# Ordinary compiler and CLI builds use the existing declaration-bound byte
+# adapter. The preceding immutable seed can compile this ASCII-only source.
+def unicode_identifier_point(character: String): Integer
+	point := ascii_code(character)
+	if point >= 0
+		return point
+	end
+	return unicode_identifier_decode(compiler_string_bytes(character))
+end
+
+def unicode_identifier_decode(bytes: Array<Integer>): Integer
+	length := bytes.size()
+	if length < 2 || length > 4
+		return -1
+	end
+	mut mask := 32
+	mut minimum := 128
+	if length == 3
+		mask = 16
+		minimum = 2048
+	elsif length == 4
+		mask = 8
+		minimum = 65536
+	end
+	if bytes[0] < 256 - mask * 2 || bytes[0] >= 256 - mask
+		return -1
+	end
+	mut value := bytes[0] % mask
+	mut index := 1
+	while index < length
+		if bytes[index] < 128 || bytes[index] >= 192
+			return -1
+		end
+		value = value * 64 + bytes[index] - 128
+		index += 1
+	end
+	if value < minimum || value > 1114111 || (value >= 55296 && value <= 57343)
+		return -1
+	end
+	return value
+end
+
+def unicode_identifier_start(character: String): Boolean
+	point := unicode_identifier_point(character)
+	if point < 128
+		return false
+	end
+	return unicode_identifier_contains(point, unicode_identifier_letter_data())
+end
+
+def unicode_identifier_part(character: String): Boolean
+	point := unicode_identifier_point(character)
+	if point < 128
+		return false
+	end
+	if unicode_identifier_contains(point, unicode_identifier_letter_data())
+		return true
+	end
+	return unicode_identifier_contains(point, unicode_identifier_digit_data())
+end
+
+def unicode_identifier_upper(character: String): Boolean
+	point := unicode_identifier_point(character)
+	if point < 128
+		return false
+	end
+	return unicode_identifier_contains(point, unicode_identifier_upper_data())
+end

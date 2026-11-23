@@ -1,0 +1,129 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot, nullable_state_head_slot } from state/local_slots
+import { CheckedLambda, LambdaCapture, LambdaParameter, callable_parts } from frontend/types/callable_types
+import { CheckedValue, checked_value } from frontend/checking/body/values
+import { integer_string } from support/literals
+import { mir_binding_capture } from mir/build/bindings
+import { mir_add_parameter } from mir/build/functions
+import { mir_checked_closure } from mir/lowering/callables
+import { nullable_fact } from frontend/checking/nominal/nullable_flow
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals, local_bind_identity, local_slot } from state/local_state
+import { load_integer, sparse_integer_at, store_integer, store_string } from support/storage
+import { array_type } from frontend/resolution/type_resolution
+
+# Only analysis appends declarations. The complete catalog is frozen before
+# signatures, standard adapters or any executable body are emitted.
+def declare_captured_body(mut state: CompilerState, name: String, origin: Integer, body_start: Integer, body_finish: Integer, body: Integer, captures: Array<LambdaCapture>, parameters: Array<LambdaParameter>, parameter_types: Array<String>, result_type: String): Integer
+	function := state.declarations.function_count[0]
+	start := state.declarations.parameter_count[0]
+	store_string(state.declarations.function_names, function, name + integer_string(function))
+	store_integer(state.declarations.function_modules, function, state.module_graph.active_module[0])
+	store_integer(state.declarations.function_parameter_starts, function, start)
+	store_integer(state.declarations.function_parameter_counts, function, captures.size() + parameters.size())
+	store_string(state.declarations.function_result_types, function, result_type)
+	store_integer(state.declarations.function_body_starts, function, body_start)
+	store_integer(state.declarations.function_body_ends, function, body_finish)
+	store_integer(state.declarations.function_lines, function, load_integer(state.source_tokens.token_lines, origin))
+	store_integer(state.type_resolution.function_generic_bindings, function, state.callables.checked_bodies[body].generic_binding[0])
+	store_integer(state.callables.checked_body_indices, function, body + 1)
+	captures.each do |capture|
+		index := state.declarations.parameter_count[0]
+		mut storage := capture.type_name
+		if capture.mutable > 0
+			storage = array_type(storage)
+		end
+		store_string(state.declarations.parameter_names, index, capture.name)
+		store_string(state.declarations.parameter_types, index, storage)
+		store_integer(state.declarations.parameter_mutable, index, capture.mutable)
+		store_integer(state.declarations.parameter_lines, index, load_integer(state.source_tokens.token_lines, origin))
+		state.declarations.parameter_count[0] += 1
+	end
+	mut parameter := 0
+	while parameter < parameters.size()
+		row := parameters[parameter]
+		index := state.declarations.parameter_count[0]
+		store_string(state.declarations.parameter_names, index, row.name)
+		store_string(state.declarations.parameter_types, index, parameter_types[parameter])
+		store_integer(state.declarations.parameter_mutable, index, row.mutable)
+		store_integer(state.declarations.parameter_lines, index, load_integer(state.source_tokens.token_lines, row.origin))
+		state.declarations.parameter_count[0] += 1
+		parameter += 1
+	end
+	state.declarations.function_count[0] += 1
+	return function
+end
+
+def declare_lambda(mut state: CompilerState, mut lambda: CheckedLambda)
+	syntax := state.callables.lambdas[sparse_integer_at(state.callables.lambda_origins, lambda.origin) - 1]
+	parts := callable_parts(lambda.type_name)
+	mut parameters: Array<String> := []
+	mut index := 1
+	while index < parts.size()
+		parameters.push(parts[index])
+		index += 1
+	end
+	function := declare_captured_body(state, "$lambda", lambda.origin, syntax.body_start, syntax.body_finish, lambda.body, lambda.captures, syntax.parameters, parameters, parts[0])
+	lambda.function[0] = function
+	state.callables.checked_lambdas.push(lambda)
+	store_integer(state.callables.function_lambdas, function, state.callables.checked_lambdas.size())
+end
+
+# Adopt captured cells rather than boxing them again. The sparse identity prefix
+# preserves nested captures and shared-binding plans independently of ABI slots.
+def bind_captured_body(mut state: CompilerState, mut locals: CheckedLocals, function: Integer, inherited_count: Integer, captures: Array<LambdaCapture>, result_type: String): Integer
+	while locals.binding_slots.size() < inherited_count
+		locals.binding_slots.push(-1)
+	end
+	locals.lambda_result.push(result_type)
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut parameter := 0
+	captures.each do |capture|
+		slot := local_bind_identity(locals, capture.name, capture.type_name, capture.mutable, capture.child_identity)
+		locals.capture_parents.push(capture.identity)
+		locals.capture_uses.push(0)
+		mir_add_parameter(state, locals, start + parameter)
+		if capture.mutable > 0
+			store_string(locals.mir_cell_types, slot, array_type(capture.type_name))
+			store_integer(locals.mir_cell_plans, capture.child_identity, 1)
+		elsif capture.flow_type != capture.type_name
+			locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, slot, -1, capture.flow_type, locals.nullable_state[nullable_state_head_slot()])
+		end
+		parameter += 1
+	end
+	return parameter
+end
+
+def lambda_bind_captures(mut state: CompilerState, mut locals: CheckedLocals, function: Integer): Integer
+	encoded := sparse_integer_at(state.callables.function_lambdas, function)
+	if encoded == 0
+		return 0
+	end
+	lambda := state.callables.checked_lambdas[encoded - 1]
+	return bind_captured_body(state, locals, function, lambda.inherited_count, lambda.captures, callable_parts(lambda.type_name)[0])
+end
+
+def lower_lambda(mut state: CompilerState, mut locals: CheckedLocals, origin: Integer): CheckedValue
+	state.callables.checked[0].lambdas.each do |lambda|
+		if lambda.origin == origin
+			mut captures: Array<Integer> := []
+			lambda.captures.each do |capture|
+				slot := local_slot(locals, capture.identity)
+				if slot >= 0
+					store_integer(locals.binding_use_counts, slot, sparse_integer_at(locals.binding_use_counts, slot) + 1)
+				end
+			end
+			if locals.mir_state[mir_state_enabled_slot()] == 1
+				lambda.captures.each do |capture|
+					captures.push(mir_binding_capture(state, locals, capture, origin))
+				end
+			end
+			if locals.mir_state[mir_state_enabled_slot()] != 1
+				return checked_value(lambda.type_name, checked_category_value(), origin, 0)
+			end
+			return mir_checked_closure(state, locals, lambda.function[0], captures, origin)
+		end
+	end
+	diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "fn has no analyzed body")
+	return checked_value("Invalid", checked_category_value(), origin, 0)
+end

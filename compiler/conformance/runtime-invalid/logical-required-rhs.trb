@@ -1,0 +1,6 @@
+def main()
+	empty: Array<Integer> := []
+	value := false || empty[0] == 0
+	puts(value)
+	return
+end

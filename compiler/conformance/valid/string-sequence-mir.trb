@@ -1,0 +1,19 @@
+def main()
+	text := "abcba"
+	mut points := text.codepoints()
+	mut characters := text.chars()
+	puts(points.size())
+	puts(points[0])
+	puts(points[-1])
+	puts(characters.size())
+	puts(characters[1])
+	points[0] = 999
+	characters[0] = "changed"
+	puts(text)
+	puts(text.codepoints()[0])
+	puts(text.chars()[0])
+	puts("abcd".reverse())
+	puts("".codepoints().size())
+	puts("".chars().size())
+	puts("".reverse().size())
+end

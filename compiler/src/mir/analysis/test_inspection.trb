@@ -1,0 +1,182 @@
+import { MirTestComparisonNode, mir_test_comparison_node } from mir/analysis/test_comparison
+import { MirModule } from mir/model/module
+import { mir_type_boolean, mir_type_composite_start, mir_type_integer } from mir/model/type_ids
+import { mir_type_kind_class, mir_type_kind_empty_hash, mir_type_kind_interface, mir_type_kind_range, mir_type_kind_string_builder } from mir/model/type_kinds
+
+# The semantic plan owns names, ordering and transparent wrappers. ABI adapters
+# only read these verified layouts; parsed/frontend catalogs are not required.
+record MirTestInspectionNode
+	value: MirTestComparisonNode
+	kind: String
+	labels: Array<String>
+	field_labels: Array<Array<String>>
+	key: Integer
+end
+record MirTestInspectionPlan
+	nodes: Array<MirTestInspectionNode>
+	error: String
+end
+
+def test_authored_name(name: String): String
+	mut result := ""
+	mut index := 0
+	while index < name.size() && name[index] != "<"
+		result += name[index]
+		index += 1
+	end
+	return result
+end
+
+def test_nominal_name(native_module: MirModule, name: String, source: Integer): String
+	authored := test_authored_name(name)
+	mut duplicate := false
+	native_module.records.each do |other|
+		if other.source_id != source && test_authored_name(other.name) == authored
+			duplicate = true
+		end
+	end
+	native_module.objects.each do |other|
+		if other.source_id != source && test_authored_name(other.name) == authored
+			duplicate = true
+		end
+	end
+	native_module.enums.each do |other|
+		if other.source_id != source && test_authored_name(other.name) == authored
+			duplicate = true
+		end
+	end
+	if duplicate && source >= 0 && source < native_module.source_names.size()
+		return native_module.source_names[source] + "::" + authored
+	end
+	return authored
+end
+
+def mir_test_inspection_node(native_module: MirModule, type_id: Integer): MirTestInspectionNode
+	value := mir_test_comparison_node(native_module, type_id)
+	mut kind := value.kind
+	mut labels: Array<String> := []
+	mut field_labels: Array<Array<String>> := []
+	mut key := 0
+	if type_id == mir_type_integer()
+		kind = "integer"
+	elsif type_id == mir_type_boolean()
+		kind = "boolean"
+	elsif type_id >= mir_type_composite_start() && type_id - mir_type_composite_start() < native_module.types.size()
+		row := native_module.types[type_id - mir_type_composite_start()]
+		if kind == "hash"
+			key = row.key
+		elsif kind == "fields"
+			if row.kind == mir_type_kind_range()
+				kind = "range"
+			else
+				owner := native_module.records[row.declaration]
+				labels.push(test_nominal_name(native_module, owner.name, owner.source_id))
+				mut names: Array<String> := []
+				mut index := 0
+				while index < owner.field_count
+					names.push(native_module.fields[owner.field_start + index].name)
+					index += 1
+				end
+				field_labels.push(names)
+			end
+		elsif kind == "object" || kind == "interface"
+			value.variants.each do |variant|
+				owner := native_module.objects[variant]
+				labels.push(test_nominal_name(native_module, owner.name, owner.source_id))
+				mut names: Array<String> := []
+				owner.fields.each do |field|
+					mut name := field.name
+					if name.size() > 0 && name[0] == "@"
+						mut trimmed := ""
+						mut index := 1
+						while index < name.size()
+							trimmed += name[index]
+							index += 1
+						end
+						name = trimmed
+					end
+					names.push(name)
+				end
+				field_labels.push(names)
+			end
+		elsif kind == "enum"
+			owner := native_module.enums[row.declaration]
+			mut payload := false
+			value.fields.each do |fields|
+				if fields.size() > 0
+					payload = true
+				end
+			end
+			if !payload
+				kind = "enum_scalar"
+			end
+			value.variants.each do |variant|
+				mut label := native_module.enum_variants[variant].name
+				if payload
+					label = test_nominal_name(native_module, owner.name, owner.source_id) + "::" + label
+				end
+				if !payload
+					native_module.enum_scalars.each do |scalar|
+						if scalar.variant == variant
+							label = scalar.text
+							if scalar.type_id == mir_type_integer()
+								kind = "enum_integer"
+							end
+						end
+					end
+				end
+				labels.push(label)
+			end
+		elsif kind == "empty" && row.kind == mir_type_kind_empty_hash()
+			kind = "empty_hash"
+		elsif row.kind == mir_type_kind_string_builder()
+			kind = "opaque"
+		elsif kind == "unsupported" && (row.kind == mir_type_kind_class() || row.kind == mir_type_kind_interface())
+			if row.declaration >= 0 && row.declaration < native_module.objects.size() && native_module.objects[row.declaration].resource_kind > 0
+				kind = "opaque"
+			end
+		end
+	end
+	return MirTestInspectionNode.new(value: value, kind: kind, labels: labels, field_labels: field_labels, key: key)
+end
+
+def mir_test_inspection_plan(native_module: MirModule, roots: Array<Integer>): MirTestInspectionPlan
+	mut pending: Array<Integer> := []
+	roots.each do |root|
+		pending.push(root)
+	end
+	mut nodes: Array<MirTestInspectionNode> := []
+	mut index := 0
+	while index < pending.size()
+		type_id := pending[index]
+		mut seen := false
+		nodes.each do |node|
+			if node.value.type_id == type_id
+				seen = true
+			end
+		end
+		if !seen
+			node := mir_test_inspection_node(native_module, type_id)
+			if node.kind == "unsupported"
+				return MirTestInspectionPlan.new(nodes: [], error: "test inspection requires a supported verified value layout")
+			end
+			nodes.push(node)
+			if node.kind == "bytes"
+				pending.push(mir_type_integer())
+			end
+			if node.key > 0
+				pending.push(node.key)
+			end
+			node.value.children.each do |child|
+				pending.push(child)
+			end
+			node.value.fields.each do |fields|
+				fields.each do |child|
+					pending.push(child)
+				end
+			end
+		end
+		index += 1
+	end
+	return MirTestInspectionPlan.new(nodes: nodes, error: "")
+end

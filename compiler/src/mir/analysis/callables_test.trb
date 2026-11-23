@@ -1,0 +1,173 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCallablePlan, MirInstruction } from mir/model/module
+import { mir_op_callable_new } from mir/model/instructions
+import { mir_effect_none } from mir/model/effects
+import { mir_callable_plans, mir_callable_plans_equal } from mir/analysis/callables
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState, compiler_new } from state/state
+import { load_string } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def known_callable_state(source: String): CompilerState
+	mut state := compiler_new(source.size() * 4 + 64)
+	valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+	if !valid
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(valid).to_be_true()
+	return state
+end
+
+def known_callable_execute(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR singleton callable identity") do
+	test("forwards one callback through recursive direct-call parameters") do
+		source := "alias Callback = (Integer) -> Integer\ndef step(value: Integer): Integer\nreturn value + 2\nend\ndef left(callback: Callback, value: Integer, depth: Integer): Integer\nif depth == 0\nreturn callback(value)\nend\nreturn right(callback, value, depth - 1)\nend\ndef right(callback: Callback, value: Integer, depth: Integer): Integer\nif depth == 0\nreturn callback(value)\nend\nreturn left(callback, value, depth - 1)\nend\ndef main()\nputs(left(step, 10, 4))\nend\n"
+		mut state := known_callable_state(source)
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		known_callable_execute(state, "12\n")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		mut lower := 0
+		mut upper := state.scalar_mir.functions.size() - 1
+		while lower < upper
+			previous := state.scalar_mir.functions[lower]
+			state.scalar_mir.functions[lower] = state.scalar_mir.functions[upper]
+			state.scalar_mir.functions[upper] = previous
+			lower += 1
+			upper -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_callable_plans_equal(state.scalar_mir.callable_plans[0], mir_callable_plans(state.scalar_mir))).to_be_true()
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("retains indirect dispatch when ordinary callers supply different code") do
+		state := known_callable_state("alias Callback = (Integer) -> Integer\ndef plus(value: Integer): Integer\nreturn value + 1\nend\ndef minus(value: Integer): Integer\nreturn value - 1\nend\ndef apply(callback: Callback, value: Integer): Integer\nreturn callback(value)\nend\ndef main()\nputs(apply(plus, 10))\nputs(apply(minus, 10))\nend\n")
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(0)
+		known_callable_execute(state, "11\n9\n")
+	end
+
+	test("merges equal code identities across a branch and loop-carried values") do
+		state := known_callable_state("alias Callback = (Integer) -> Integer\ndef step(value: Integer): Integer\nreturn value + 2\nend\ndef apply(choose: Boolean): Integer\nmut callback: Callback := step\nif choose\ncallback = step\nend\nmut index := 0\nwhile index < 3\ncallback = step\nindex += 1\nend\nreturn callback(10)\nend\ndef main()\nputs(apply(true))\nputs(apply(false))\nend\n")
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(1)
+		known_callable_execute(state, "12\n12\n")
+	end
+
+	test("does not turn different branch identities into a singleton") do
+		state := known_callable_state("alias Callback = (Integer) -> Integer\ndef plus(value: Integer): Integer\nreturn value + 1\nend\ndef minus(value: Integer): Integer\nreturn value - 1\nend\ndef apply(choose: Boolean): Integer\nmut callback: Callback := plus\nif choose\ncallback = minus\nend\nreturn callback(10)\nend\ndef main()\nputs(apply(true))\nputs(apply(false))\nend\n")
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(0)
+		known_callable_execute(state, "9\n11\n")
+	end
+
+	test("keeps return, global and container producers unknown") do
+		state := known_callable_state("alias Callback = (Integer) -> Integer\ndef step(value: Integer): Integer\nreturn value + 2\nend\nsaved: Callback := step\ndef keep(callback: Callback): Callback\nreturn callback\nend\ndef apply(callback: Callback): Integer\nreturn callback(10)\nend\ndef main()\nvalues := [step]\nputs(apply(values[0]))\nputs(apply(keep(step)))\nputs(apply(saved))\nend\n")
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(0)
+		known_callable_execute(state, "12\n12\n12\n")
+	end
+
+	test("does not infer captured callable parameters from direct callers") do
+		state := known_callable_state("alias Callback = (Integer) -> Integer\ndef step(value: Integer): Integer\nreturn value + 2\nend\ndef apply(callback: Callback, value: Integer): Integer\nreturn callback(value)\nend\ndef main()\nouter := apply\nputs(apply(step, 10))\nputs(outer(step, 20))\nend\n")
+		# Local forwarding removes outer itself; the captured apply parameter
+		# still has no singleton proof.
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(1)
+		allocation := state.scalar_mir.callable_plans[0][0]
+		expect(state.scalar_mir.instructions[allocation.instruction].kind).to_equal(mir_op_callable_new())
+		expect(allocation.effects).to_equal(mir_effect_none())
+		known_callable_execute(state, "12\n22\n")
+	end
+
+	test("loads each closure's captured values while preserving allocation-time roots") do
+		mut state := known_callable_state("def apply(callback: (Integer) -> String): String\nreturn callback(5)\nend\ndef report(label: String)\ncallback := fn(value: Integer): String\nvalues := [label, value.to_s()]\nreturn values[0] + values[1]\nend\nputs(apply(callback))\nend\ndef main()\nreport(\"first\" + \"!\")\nreport(\"second\" + \"!\")\nend\n")
+		expect(state.scalar_mir.callable_plans[0].size()).to_equal(1)
+		expect(state.scalar_mir.callable_plans[0][0].captures).to_equal(1)
+		known_callable_execute(state, "first!5\nsecond!5\n")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		mut forced := ""
+		mut ordinary := false
+		before.split("\n").each do |line|
+			if line.start_with?("function ")
+				ordinary = line.include?("$trbnf")
+			end
+			if line == "}"
+				ordinary = false
+			end
+			if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_string_concat("))
+				forced += "\tcall $trbn_gc_collect(w 0)\n"
+			end
+			forced += line + "\n"
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("first!5\nsecond!5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects forged identity, capture arity and instruction ownership") do
+		mut mode := 0
+		while mode < 4
+			mut state := known_callable_state("def step(value: Integer): Integer\nreturn value + 2\nend\ndef apply(callback: (Integer) -> Integer): Integer\nreturn callback(10)\nend\ndef main()\nputs(apply(step))\nend\n")
+			old := state.scalar_mir.callable_plans[0][0]
+			mut instruction := old.instruction
+			mut callee := old.callee
+			mut captures := old.captures
+			if mode == 0
+				callee = 9999
+			elsif mode == 1
+				captures = 1
+			elsif mode == 2
+				instruction -= 1
+			else
+				state.scalar_mir.callable_plans[0].push(old)
+			end
+			state.scalar_mir.callable_plans[0][0] = MirCallablePlan.new(instruction: instruction, callee: callee, captures: captures, effects: old.effects)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR callable plan differs")
+			mode += 1
+		end
+	end
+
+	test("rejects a stale proof after a type-compatible closure body changes") do
+		mut state := known_callable_state("def plus(value: Integer): Integer\nreturn value + 1\nend\ndef minus(value: Integer): Integer\nreturn value - 1\nend\ndef apply(callback: (Integer) -> Integer): Integer\nreturn callback(10)\nend\ndef main()\nputs(apply(plus))\nend\n")
+		mut index := 0
+		while state.scalar_mir.instructions[index].kind != mir_op_callable_new()
+			index += 1
+		end
+		old := state.scalar_mir.instructions[index]
+		state.scalar_mir.instructions[index] = MirInstruction.new(kind: old.kind, result: old.result, first: old.first, second: old.second, payload: 1, failure: old.failure, source_id: old.source_id, line: old.line)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR callable plan differs")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		known_callable_execute(state, "9\n")
+	end
+end

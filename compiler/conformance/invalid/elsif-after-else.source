@@ -1,0 +1,9 @@
+def main()
+if false
+return
+else
+return
+elsif true
+return
+end
+end

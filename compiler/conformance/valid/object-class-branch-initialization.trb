@@ -1,0 +1,14 @@
+class Flag
+	@value: String
+	def initialize(selected: Boolean)
+		if selected
+			@value = "yes"
+		else
+			@value = "no"
+		end
+	end
+end
+def main()
+	puts(Flag.new(true).value)
+	puts(Flag.new(false).value)
+end

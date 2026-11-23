@@ -1,0 +1,3 @@
+def configured_value(): Integer
+	return 42
+end

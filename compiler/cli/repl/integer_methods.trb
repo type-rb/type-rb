@@ -1,0 +1,46 @@
+import { integer_method_abs, integer_method_even, integer_method_max, integer_method_min, integer_method_negative, integer_method_odd, integer_method_positive, integer_method_to_f, integer_method_zero } from frontend/types/method_kinds
+import { ReplStore, repl_boolean, repl_float, repl_integer } from repl/model
+
+# Arguments arrive in source order from the checked ordinary receiver call.
+def repl_integer_method(mut store: ReplStore, kind: Integer, receiver: Integer, arguments: Array<Integer>): Integer
+	mut value := store.integers[receiver]
+	if kind == integer_method_to_f()
+		return repl_float(store, value * 1.0)
+	end
+	if kind == integer_method_abs()
+		if value < 0
+			value = -value
+		end
+	elsif kind == integer_method_zero()
+		return repl_boolean(store, value == 0)
+	elsif kind == integer_method_positive()
+		return repl_boolean(store, value > 0)
+	elsif kind == integer_method_negative()
+		return repl_boolean(store, value < 0)
+	elsif kind == integer_method_even()
+		return repl_boolean(store, value % 2 == 0)
+	elsif kind == integer_method_odd()
+		return repl_boolean(store, value % 2 != 0)
+	elsif kind == integer_method_min()
+		if store.integers[arguments[0]] < value
+			value = store.integers[arguments[0]]
+		end
+	elsif kind == integer_method_max()
+		if store.integers[arguments[0]] > value
+			value = store.integers[arguments[0]]
+		end
+	else
+		minimum := store.integers[arguments[0]]
+		maximum := store.integers[arguments[1]]
+		if minimum > maximum
+			store.error[0] = "panic: clamp minimum exceeds maximum"
+			return 0
+		end
+		if value < minimum
+			value = minimum
+		elsif value > maximum
+			value = maximum
+		end
+	end
+	return repl_integer(store, value)
+end

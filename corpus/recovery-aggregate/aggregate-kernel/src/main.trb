@@ -1,0 +1,25 @@
+record KernelState
+	index: Integer
+	total: Integer
+end
+
+def kernel(iterations: Integer): Integer
+	mut state := KernelState.new(index: 0, total: 0)
+	while state.index < iterations
+		mut next_total := state.total + (state.index % 97) * 3 - state.index % 31
+		if next_total > 1000000
+			next_total /= 2
+		end
+		state = KernelState.new(index: state.index + 1, total: next_total)
+	end
+	return state.total
+end
+
+def main()
+	if kernel(5000000) > 0
+		puts("recovery-aggregate-aggregate-kernel")
+		return
+	end
+	puts("recovery-aggregate-aggregate-kernel-failed")
+	return
+end

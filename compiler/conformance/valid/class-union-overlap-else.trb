@@ -1,0 +1,31 @@
+class Loaded
+	readonly @kind: "loaded" := "loaded"
+	@value: String
+	def initialize(value: String)
+		@value = value + "!"
+	end
+end
+class Missing
+	readonly @kind: "missing" := "missing"
+	@code: Integer := 404
+end
+alias Response = Loaded | Missing
+class Queued
+	readonly @kind: "loaded" := "loaded"
+	@value: String := "queued"
+end
+alias Pending = Loaded | Queued | Missing
+def read(value: Pending): String
+	return case value.kind
+	when "loaded"
+		value.value
+	else
+		value.code.to_s()
+	end
+end
+
+def main()
+	puts(read(Loaded.new("ready")))
+	puts(read(Queued.new()))
+	puts(read(Missing.new()))
+end

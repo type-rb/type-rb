@@ -1,0 +1,88 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Parse status is 0 for success, 1 for syntax, and 2 for portable range.
+# Accumulate only while the magnitude fits. After overflow, validate the remaining
+# bytes without arithmetic: an invalid suffix still takes priority over range.
+# The output slot is written only on success; every read respects String length.
+def emit_integer_parse_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\ndata $trbn_invalid_integer_error = { b \"panic: invalid Integer\", b 10 }\n\nfunction l $trbn_parse_integer(l %string, l %output) {\n@start\n %length_address =l add %string, 8\n %length =l loadl %length_address\n %empty =w ceql %length, 0\n jnz %empty, @invalid, @first")
+	qbe_output_line(output, "\n@first\n %data =l add %string, 24\n %first =w loadub %data\n %plus =w ceqw %first, 43\n %minus =w ceqw %first, 45\n %signed =w or %plus, %minus\n %begin =l extuw %signed\n %sign_only =w ceql %begin, %length\n jnz %sign_only, @invalid, @parse")
+	qbe_output_line(output, "\n@parse\n %index =l phi @first %begin, @next %next_index\n %accumulator =l phi @first 0, @next %next_accumulator\n %done =w ceql %index, %length\n jnz %done, @sign, @digit")
+	qbe_output_line(output, "\n@digit\n %address =l add %data, %index\n %character =w loadub %address\n %digit_word =w sub %character, 48\n %valid =w cultw %digit_word, 10\n jnz %valid, @accumulate, @invalid")
+	# The entering magnitude is at most 2^53-1, so multiplying by ten
+	# and adding one digit fits int64. One comparison detects portable overflow.
+	qbe_output_line(output, "\n@accumulate\n %digit =l extuw %digit_word\n %scaled =l mul %accumulator, 10\n %next_accumulator =l add %scaled, %digit\n %overflow =w csgtl %next_accumulator, 9007199254740991\n jnz %overflow, @overflow, @next\n@next\n %next_index =l add %index, 1\n jmp @parse")
+	qbe_output_line(output, "\n@overflow\n %remainder_begin =l add %index, 1\n jmp @validate_remainder")
+	qbe_output_line(output, "\n@validate_remainder\n %remainder_index =l phi @overflow %remainder_begin, @remainder_next %remainder_advance\n %remainder_done =w ceql %remainder_index, %length\n jnz %remainder_done, @range, @remainder_digit")
+	qbe_output_line(output, "\n@remainder_digit\n %remainder_address =l add %data, %remainder_index\n %remainder_character =w loadub %remainder_address\n %remainder_digit =w sub %remainder_character, 48\n %remainder_valid =w cultw %remainder_digit, 10\n jnz %remainder_valid, @remainder_next, @invalid")
+	qbe_output_line(output, "\n@remainder_next\n %remainder_advance =l add %remainder_index, 1\n jmp @validate_remainder")
+	qbe_output_line(output, "\n@sign\n jnz %minus, @negative, @positive\n@negative\n %negative_result =l sub 0, %accumulator\n storel %negative_result, %output\n ret 0\n@positive\n storel %accumulator, %output\n ret 0\n@invalid\n ret 1\n@range\n ret 2\n}\n")
+end
+
+# Exact binary64 powers 10^0 through 10^22, stored as their raw bit patterns.
+def emit_float_parse_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\ndata $trbn_parse_decimal_powers = {\n l 4607182418800017408,\n l 4621819117588971520,\n l 4636737291354636288,\n l 4652007308841189376,\n l 4666723172467343360,\n l 4681608360884174848,\n l 4696837146684686336,\n l 4711630319722168320,\n l 4726483295884279808,\n l 4741671816366391296,\n l 4756540486875873280,\n l 4771362005757984768,\n l 4786511204640096256,\n l 4801453603149578240,\n l 4816244402031689728,\n l 4831355200913801216,\n l 4846369599423283200,\n l 4861130398305394688,\n l 4876203697187506176,\n l 4891288408196988160,\n l 4906019910204099648,\n l 4921056587992461136,\n l 4936209963552724370\n}\n")
+	qbe_output_line(output, "\ndata $trbn_invalid_float_error = { b \"panic: invalid Float\", b 10 }\ndata $trbn_float_range_error = { b \"panic: Float is outside the portable range\", b 10 }\nfunction l $trbn_parse_float(l %string, l %output) {")
+	qbe_output_line(output, "\n@start\n %length_address =l add %string, 8\n %length =l loadl %length_address\n %empty =w ceql %length, 0\n jnz %empty, @invalid, @first")
+	qbe_output_line(output, "\n@first\n %data =l add %string, 24\n %first =w loadub %data\n %plus =w ceqw %first, 43\n %minus =w ceqw %first, 45\n %signed =w or %plus, %minus\n %begin =l extuw %signed\n jmp @integer")
+	qbe_output_line(output, "\n@integer\n %integer_index =l phi @first %begin, @integer_next %integer_advance\n %integer_end =w ceql %integer_index, %length\n jnz %integer_end, @integer_finish, @integer_read")
+	qbe_output_line(output, "\n@integer_read\n %integer_address =l add %data, %integer_index\n %integer_byte =w loadub %integer_address\n %integer_digit =w sub %integer_byte, 48\n %integer_valid =w cultw %integer_digit, 10\n jnz %integer_valid, @integer_next, @integer_finish")
+	qbe_output_line(output, "\n@integer_next\n %integer_advance =l add %integer_index, 1\n jmp @integer")
+	qbe_output_line(output, "\n@integer_finish\n %integer_count =l sub %integer_index, %begin\n jnz %integer_end, @without_fraction, @dot")
+	qbe_output_line(output, "\n@dot\n %dot_address =l add %data, %integer_index\n %dot_byte =w loadub %dot_address\n %is_dot =w ceqw %dot_byte, 46\n jnz %is_dot, @fraction_start, @without_fraction")
+	qbe_output_line(output, "\n@without_fraction\n jmp @mantissa")
+	qbe_output_line(output, "\n@fraction_start\n %fraction_begin =l add %integer_index, 1\n jmp @fraction")
+	qbe_output_line(output, "\n@fraction\n %fraction_index =l phi @fraction_start %fraction_begin, @fraction_next %fraction_advance\n %fraction_end =w ceql %fraction_index, %length\n jnz %fraction_end, @fraction_finish, @fraction_read")
+	qbe_output_line(output, "\n@fraction_read\n %fraction_address =l add %data, %fraction_index\n %fraction_byte =w loadub %fraction_address\n %fraction_digit =w sub %fraction_byte, 48\n %fraction_valid =w cultw %fraction_digit, 10\n jnz %fraction_valid, @fraction_next, @fraction_finish")
+	qbe_output_line(output, "\n@fraction_next\n %fraction_advance =l add %fraction_index, 1\n jmp @fraction")
+	qbe_output_line(output, "\n@fraction_finish\n %fraction_count =l sub %fraction_index, %fraction_begin\n %total_count =l add %integer_count, %fraction_count\n jmp @mantissa")
+	qbe_output_line(output, "\n@mantissa\n %fraction_digits =l phi @without_fraction 0, @fraction_finish %fraction_count\n %digits =l phi @without_fraction %integer_count, @fraction_finish %total_count\n %mantissa_finish =l phi @without_fraction %integer_index, @fraction_finish %fraction_index\n %no_digits =w ceql %digits, 0\n jnz %no_digits, @invalid, @after_mantissa")
+	qbe_output_line(output, "\n@after_mantissa\n %done =w ceql %mantissa_finish, %length\n jnz %done, @parse, @exponent_marker")
+	qbe_output_line(output, "\n@exponent_marker\n %marker_address =l add %data, %mantissa_finish\n %marker =w loadub %marker_address\n %lower_e =w ceqw %marker, 101\n %upper_e =w ceqw %marker, 69\n %is_e =w or %lower_e, %upper_e\n jnz %is_e, @exponent_start, @invalid")
+	qbe_output_line(output, "\n@exponent_start\n %exponent_begin =l add %mantissa_finish, 1\n %exponent_empty =w ceql %exponent_begin, %length\n jnz %exponent_empty, @invalid, @exponent_sign")
+	qbe_output_line(output, "\n@exponent_sign\n %sign_address =l add %data, %exponent_begin\n %sign =w loadub %sign_address\n %exponent_plus =w ceqw %sign, 43\n %exponent_minus =w ceqw %sign, 45\n %exponent_signed =w or %exponent_plus, %exponent_minus\n %sign_length =l extuw %exponent_signed\n %exponent_digits =l add %exponent_begin, %sign_length\n %exponent_count =l sub %length, %exponent_digits\n %sign_only =w ceql %exponent_digits, %length\n jnz %sign_only, @invalid, @exponent")
+	qbe_output_line(output, "\n@exponent\n %exponent_index =l phi @exponent_sign %exponent_digits, @exponent_next %exponent_advance\n %exponent_end =w ceql %exponent_index, %length\n jnz %exponent_end, @parse, @exponent_read")
+	qbe_output_line(output, "\n@exponent_read\n %exponent_address =l add %data, %exponent_index\n %exponent_byte =w loadub %exponent_address\n %exponent_digit =w sub %exponent_byte, 48\n %exponent_valid =w cultw %exponent_digit, 10\n jnz %exponent_valid, @exponent_next, @invalid")
+	qbe_output_line(output, "\n@exponent_next\n %exponent_advance =l add %exponent_index, 1\n jmp @exponent")
+	# Validate the entire grammar before choosing a conversion. Long coefficients
+	# or exponents take the existing fallback without extra per-digit arithmetic.
+	qbe_output_line(output, "\n@parse\n %exponent_length =l phi @after_mantissa 0, @exponent %exponent_count\n %exponent_start_index =l phi @after_mantissa 0, @exponent %exponent_digits\n %negative_exponent =w phi @after_mantissa 0, @exponent %exponent_minus\n %short_mantissa =w culel %digits, 16\n %short_exponent =w culel %exponent_length, 2\n %short_decimal =w and %short_mantissa, %short_exponent\n jnz %short_decimal, @short_exponent, @fallback")
+	# The validated exponent has zero, one or two digits; every read is bounded.
+	qbe_output_line(output, "\n@short_exponent\n %no_exponent =w ceql %exponent_length, 0\n jnz %no_exponent, @exponent_zero, @exponent_one")
+	qbe_output_line(output, "\n@exponent_zero\n jmp @short_scale")
+	qbe_output_line(output, "\n@exponent_one\n %first_exponent_address =l add %data, %exponent_start_index\n %first_exponent_byte =w loadub %first_exponent_address\n %first_exponent_digit_word =w sub %first_exponent_byte, 48\n %first_exponent_digit =l extuw %first_exponent_digit_word\n %one_exponent_digit =w ceql %exponent_length, 1\n jnz %one_exponent_digit, @exponent_one_done, @exponent_two")
+	qbe_output_line(output, "\n@exponent_one_done\n jmp @short_scale")
+	qbe_output_line(output, "\n@exponent_two\n %second_exponent_address =l add %first_exponent_address, 1\n %second_exponent_byte =w loadub %second_exponent_address\n %second_exponent_digit_word =w sub %second_exponent_byte, 48\n %second_exponent_digit =l extuw %second_exponent_digit_word\n %exponent_tens =l mul %first_exponent_digit, 10\n %exponent_pair =l add %exponent_tens, %second_exponent_digit\n jmp @short_scale")
+	# Every power 10^k for 0 <= k <= 22 is exactly representable. Reject other
+	# scales before scanning the coefficient again.
+	qbe_output_line(output, "\n@short_scale\n %exponent_magnitude =l phi @exponent_zero 0, @exponent_one_done %first_exponent_digit, @exponent_two %exponent_pair\n %exponent_negative =l extuw %negative_exponent\n %twice_negative =l mul %exponent_negative, 2\n %exponent_direction =l sub 1, %twice_negative\n %signed_exponent =l mul %exponent_magnitude, %exponent_direction\n %decimal_scale =l sub %signed_exponent, %fraction_digits\n %scale_above_minimum =w csgel %decimal_scale, -22\n %scale_below_maximum =w cslel %decimal_scale, 22\n %exact_power =w and %scale_above_minimum, %scale_below_maximum\n jnz %exact_power, @coefficient_start, @fallback")
+	qbe_output_line(output, "\n@coefficient_start\n jmp @coefficient")
+	# At most 16 decimal digits and one dot reach this loop. Its accumulator
+	# is at most 10^16-1, so it cannot overflow a raw 64-bit word. The preceding
+	# grammar check owns syntax; this bounded loop only computes the coefficient.
+	qbe_output_line(output, "\n@coefficient\n %coefficient_index =l phi @coefficient_start %begin, @coefficient_next %coefficient_advance\n %magnitude =l phi @coefficient_start 0, @coefficient_next %coefficient_next_magnitude\n %coefficient_done =w ceql %coefficient_index, %mantissa_finish\n jnz %coefficient_done, @exact_magnitude, @coefficient_read")
+	qbe_output_line(output, "\n@coefficient_read\n %coefficient_address =l add %data, %coefficient_index\n %coefficient_byte =w loadub %coefficient_address\n %coefficient_dot =w ceqw %coefficient_byte, 46\n jnz %coefficient_dot, @coefficient_dot, @coefficient_digit")
+	qbe_output_line(output, "\n@coefficient_dot\n jmp @coefficient_next")
+	qbe_output_line(output, "\n@coefficient_digit\n %coefficient_digit_word =w sub %coefficient_byte, 48\n %coefficient_digit =l extuw %coefficient_digit_word\n %coefficient_scaled =l mul %magnitude, 10\n %coefficient_accumulated =l add %coefficient_scaled, %coefficient_digit\n jmp @coefficient_next")
+	qbe_output_line(output, "\n@coefficient_next\n %coefficient_next_magnitude =l phi @coefficient_dot %magnitude, @coefficient_digit %coefficient_accumulated\n %coefficient_advance =l add %coefficient_index, 1\n jmp @coefficient")
+	# A significand below 2^52 converts exactly. One multiplication/division
+	# then rounds the exact decimal value once; nonzero results are normal
+	# and finite under the scale bounds above.
+	qbe_output_line(output, "\n@exact_magnitude\n %exact_magnitude =w cultl %magnitude, 4503599627370496\n jnz %exact_magnitude, @short_value, @fallback")
+	# Apply the sign bit before arithmetic to preserve negative zero.
+	qbe_output_line(output, "\n@short_value\n %unsigned_value =d sltof %magnitude\n %unsigned_bits =l cast %unsigned_value\n %float_negative =l extuw %minus\n %sign_bits =l shl %float_negative, 63\n %signed_bits =l or %unsigned_bits, %sign_bits\n %signed_value =d cast %signed_bits\n %negative_scale =w csltl %decimal_scale, 0\n jnz %negative_scale, @divide, @multiply")
+	qbe_output_line(output, "\n@multiply\n %multiply_offset =l mul %decimal_scale, 8\n %multiply_address =l add $trbn_parse_decimal_powers, %multiply_offset\n %multiply_power =d loadd %multiply_address\n %product =d mul %signed_value, %multiply_power\n jmp @converted")
+	qbe_output_line(output, "\n@divide\n %positive_scale =l sub 0, %decimal_scale\n %divide_offset =l mul %positive_scale, 8\n %divide_address =l add $trbn_parse_decimal_powers, %divide_offset\n %divide_power =d loadd %divide_address\n %quotient =d div %signed_value, %divide_power\n jmp @converted")
+	# Preserve established subnormal, underflow and range behavior.
+	qbe_output_line(output, "\n@fallback\n %fallback_value =d call $strtod(l %data, l 0)\n jmp @converted")
+	qbe_output_line(output, "\n@converted\n %value =d phi @multiply %product, @divide %quotient, @fallback %fallback_value\n %difference =d sub %value, %value\n %finite =w ceqd %difference, %difference\n jnz %finite, @success, @range")
+	qbe_output_line(output, "\n@success\n stored %value, %output\n ret 0")
+	qbe_output_line(output, "\n@invalid\n ret 1")
+	qbe_output_line(output, "\n@range\n ret 2\n}\n")
+end
+
+def emit_number_parsing_runtime(mut output: QbeOutput)
+	emit_integer_parse_runtime(output)
+	emit_float_parse_runtime(output)
+	qbe_output_line(output, "\nfunction l $trbn_string_integer_status(l %string) {\n@start\n %output =l alloc8 8\n %status =l call $trbn_parse_integer(l %string, l %output)\n ret %status\n}\nfunction l $trbn_string_to_integer(l %string) {\n@start\n %output =l alloc8 8\n %status =l call $trbn_parse_integer(l %string, l %output)\n %status_nonzero =w cnel %status, 0\n jnz %status_nonzero, @failure, @success\n@success\n %result =l loadl %output\n ret %result\n@failure\n %invalid =w ceql %status, 1\n jnz %invalid, @invalid, @range\n@invalid\n call $trbn_fail(l $trbn_invalid_integer_error, l 23)\n hlt\n@range\n call $trbn_fail(l $trbn_integer_range_error, l 45)\n hlt\n}\n\nfunction l $trbn_string_float_status(l %string) {\n@start\n %output =l alloc8 8\n %status =l call $trbn_parse_float(l %string, l %output)\n ret %status\n}\nfunction d $trbn_string_to_float(l %string) {\n@start\n %output =l alloc8 8\n %status =l call $trbn_parse_float(l %string, l %output)\n %status_nonzero =w cnel %status, 0\n jnz %status_nonzero, @failure, @success\n@success\n %result =d loadd %output\n ret %result\n@failure\n %invalid =w ceql %status, 1\n jnz %invalid, @invalid, @range\n@invalid\n call $trbn_fail(l $trbn_invalid_float_error, l 21)\n hlt\n@range\n call $trbn_fail(l $trbn_float_range_error, l 43)\n hlt\n}\n")
+end

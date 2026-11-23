@@ -1,0 +1,27 @@
+# UTF-8 String splitting, code-point sizes and predicates.
+
+def scan(rounds: Integer): Integer
+	line := "alpha,βeta,gamma,δelta,epsilon,ζeta,eta,θeta,iota,κappa"
+	mut total := 0
+	mut round := 0
+	while round < rounds
+		parts := line.split(",")
+		parts.each do |part|
+			total += part.size()
+			if part.start_with?("e")
+				total += 3
+			end
+			if part.include?("ta")
+				total += 1
+			end
+		end
+		total += parts.size()
+		round += 1
+	end
+	return total
+end
+
+def main()
+	puts(scan(210000))
+	return
+end

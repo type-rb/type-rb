@@ -1,0 +1,110 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { GenericDefinition, GenericInstance } from frontend/types/generic_model
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR generic nominal types") do
+	test("resolves concrete recursive catalogs before MIR and erases template dependencies") do
+		sources := ["record Box<T>\nvalue: T\nend\ndef main()\na := Box<Integer>.new(value: 3)\nb := Box<String>.new(value: \"held\")\nputs(a.value)\nputs(b.value)\nend\n",
+			"record Box<T>\nvalue: T\nend\nrecord Pair<A, B>\nleft: A\nright: B\nend\ndef main()\nvalue: Pair<Box<String>, Array<Integer>> := Pair<Box<String>, Array<Integer>>.new(right: [4], left: Box<String>.new(value: \"nested\"))\nputs(value.left.value)\nputs(value.right[0])\nend\n",
+			"enum Item<T>\nValue(value: T)\nOther(text: String)\nend\ndef label(item: Item<String>): String\nreturn case item\nwhen Item::Value(value)\nvalue\nwhen Item::Other(text)\ntext\nend\nend\ndef main()\nputs(label(Item<String>::Value(\"held\")))\nputs(label(Item<String>::Other(\"other\")))\ncase Item<Integer>::Value(7)\nwhen Item::Value(value)\nputs(value)\nwhen Item::Other(text)\nputs(text)\nend\nend\n",
+			"record Node<T>\nvalue: T\ntail: Node<T>?\nend\ndef total(node: Node<Integer>): Integer\nif node.tail == nil\nreturn node.value\nend\nreturn node.value + total(node.tail)\nend\ndef main()\nnode := Node<Integer>.new(value: 2, tail: Node<Integer>.new(value: 3, tail: nil))\nputs(total(node))\nend\n",
+			"enum Tree<T>\nLeaf(value: T)\nBranch(children: Array<Tree<T>>)\nend\ndef total(tree: Tree<Integer>): Integer\ncase tree\nwhen Tree::Leaf(value)\nreturn value\nwhen Tree::Branch(children)\nmut result := 0\nchildren.each do |child|\nresult += total(child)\nend\nreturn result\nend\nend\ndef main()\ntree := Tree<Integer>::Branch([Tree<Integer>::Leaf(4), Tree<Integer>::Leaf(5)])\nlookup := {\"tree\" => tree}\nputs(total(lookup[\"tree\"]))\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef mark(value: String): String\nputs(value)\nreturn value\nend\nenum Pair<T>\nValues(id: Integer, *, left: T, right: T)\nend\ndef main()\nvalue := Pair<Box<String>>::Values(1, right: Box<String>.new(value: mark(\"right\")), left: Box<String>.new(value: mark(\"left\")))\ncase value\nwhen Pair::Values(id, right: second, left: first)\nputs(id)\nputs(first.value + second.value)\nend\nbox: Box<Float> := Box<Float>.new(value: 7)\nputs(box.value.to_i())\nend\n"]
+		outputs := ["3\nheld\n", "nested\n4\n", "held\nother\n7\n", "5\n", "9\n", "right\nleft\n1\nleftright\n7\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				mut item := 0
+				while item < state.type_resolution.generic_definitions.size()
+					state.type_resolution.generic_definitions[item] = GenericDefinition.new(kind: 0, name: "unavailable", source_id: -1, line: -1, parameters: [], variants: [])
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_instances.size()
+					state.type_resolution.generic_instances[item] = GenericInstance.new(definition: -1, arguments: [], type_name: "Invalid")
+					item += 1
+				end
+				state.type_resolution.generic_instance_lookup.keys().each do |key|
+					state.type_resolution.generic_instance_lookup[key] = -1
+				end
+				state.callables.checked_bodies.each do |body|
+					body.generic_application_types.used[0] = 0
+					body.generic_application_finishes.used[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					before.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects invalid templates, applications and variant patterns") do
+		sources := ["record Box<T>\nvalue: Missing\nend\ndef main()\nend\n",
+			"record Box<T, T>\nvalue: T\nend\ndef main()\nend\n",
+			"record Box<T>\nvalue: T\nvalue: T\nend\ndef main()\nend\n",
+			"enum E<T>\nA(value: T)\nA(other: T)\nend\ndef main()\nend\n",
+			"enum E<T>\na(value: T)\nend\ndef main()\nend\n",
+			"enum E<T>\nA\nend\ndef main()\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef main()\nx := Box<Integer, String>.new(value: 1)\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef main()\nx := Box.new(value: 1)\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef main()\nx: Box<String> := Box<Integer>.new(value: 1)\nend\n",
+			"enum E<T>\nA(value: T)\nend\ndef main()\nx := E::A(1)\nend\n",
+			"enum E<T>\nA(value: T)\nend\ndef main()\nx := E<Integer>::A(\"bad\")\nend\n",
+			"enum E<T>\nA(value: T)\nB(value: T)\nend\ndef main()\ncase E<Integer>::A(1)\nwhen E::A(value)\nputs(value)\nend\nend\n",
+			"record Box<T>\nvalue: T = 1\nend\ndef main()\nend\n",
+			"record Growing<T>\nnext: Growing<Array<T>>?\nend\ndef main()\nx: Growing<Integer>? := nil\nend\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if valid
+				puts(index)
+			end
+			expect(valid).to_be_false()
+			index += 1
+		end
+	end
+end

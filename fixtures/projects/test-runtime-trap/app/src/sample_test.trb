@@ -1,0 +1,11 @@
+import { describe, expect, test } from trb/std/test
+
+describe("Traps") do
+	test("index") do
+		values := [1]
+		expect(values[values.size() + 1]).to_equal(1)
+	end
+	test("later") do
+		expect(1).to_equal(1)
+	end
+end

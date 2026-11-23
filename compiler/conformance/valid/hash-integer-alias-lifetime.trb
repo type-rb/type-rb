@@ -1,0 +1,20 @@
+def fetch(table: Hash<Integer, String>, key: Integer): String
+	marker := "m" + key.to_s()
+	held := table[key]
+	return held + marker
+end
+
+def main()
+	mut table: Hash<Integer, String> := {}
+	mut index := -32
+	while index < 32
+		table[index] = "v" + index.to_s()
+		index += 1
+	end
+	view := table
+	table[-1] = "updated" + index.to_s()
+	puts(view.key?(-1))
+	puts(fetch(view, -1))
+	puts(fetch(table, 31))
+	puts(table.size())
+end

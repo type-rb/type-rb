@@ -1,0 +1,26 @@
+alias Text = String
+record Entry
+	label: Text
+end
+def probe()
+	mut calls := 0
+	entry := Entry.new(label: "A" + "😀")
+	take := fn(): Text
+		calls += 1
+		return entry.label
+	end
+	chars := take().chars()
+	points := take().codepoints()
+	reversed := take().reverse()
+	mut garbage := ""
+	(0...10).each { |i| garbage += i.to_s() }
+	puts(chars[1])
+	puts(points[1])
+	puts(reversed)
+	puts(calls)
+	puts(garbage.size())
+end
+
+def main()
+	probe()
+end

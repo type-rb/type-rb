@@ -1,0 +1,136 @@
+import { string_ends_with, string_starts_with } from support/path
+import { web_route_has, web_route_join, web_route_method, web_route_parts, web_route_slice } from project/web_route_paths
+import { package_name_less } from project/package_json
+import { ProjectWebRoute } from state/web_routes
+import { web_route_less, web_route_overlap, web_route_path_error, web_route_pattern, web_route_precedence, web_route_segments } from project/web_route_paths
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { path_directory } from support/path
+
+# Only configured application sources are eligible. External packages cannot
+# acquire route ownership from a directory or imported declaration name.
+def discover_web_routes(mut state: CompilerState, owners: Array<Integer>): Boolean
+	mut enabled := false
+	mut index := 0
+	while index < state.module_graph.import_count[0]
+		path := load_string(state.module_graph.import_paths, index)
+		if path == "trb/web" || string_starts_with(path, "trb/web/")
+			enabled = true
+		end
+		index += 1
+	end
+	if !enabled
+		return true
+	end
+	mut source := 0
+	while source < owners.size()
+		name := load_string(state.module_graph.module_names, source)
+		if owners[source] < 0 && string_starts_with(name, "routes/")
+			state.module_graph.active_module[0] = source
+			relative := web_route_slice(name, 7, name.size())
+			mut directory := path_directory(relative)
+			if directory == "."
+				directory = ""
+			end
+			mut middleware := false
+			if relative == "_middleware" || string_ends_with(relative, "/_middleware")
+				middleware = true
+			end
+			mut pattern: Array<String> := []
+			if !middleware
+				parts := web_route_segments(relative)
+				error := web_route_path_error(parts)
+				if error != ""
+					diagnostic(state, "TRBN4003", 1, error)
+					return false
+				end
+				pattern = web_route_pattern(parts)
+			end
+			mut found := false
+			mut function := 0
+			while function < state.declarations.function_count[0]
+				if load_integer(state.declarations.function_modules, function) == source
+					method := load_string(state.declarations.function_names, function)
+					if (middleware && method == "call") || (!middleware && web_route_has(["delete", "get", "head", "options", "patch", "post", "put"], method))
+						# Preserve the reference's exact source type spellings before
+						# ordinary resolution expands transparent aliases.
+						parameter_start := load_integer(state.declarations.function_parameter_starts, function)
+						mut valid := load_string(state.declarations.function_result_types, function) == "Response"
+						if load_integer(state.declarations.function_parameter_counts, function) < 1 || load_string(state.declarations.parameter_types, parameter_start) != "Context"
+							valid = false
+						end
+						if middleware
+							if load_integer(state.declarations.function_parameter_counts, function) < 2 || load_string(state.declarations.parameter_types, parameter_start + 1) != "Next"
+								valid = false
+							end
+						end
+						if !valid
+							diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, function), "Web route signature must use exact Context, Next and Response types")
+							return false
+						end
+						found = true
+						row := ProjectWebRoute.new(source_id: source, function_id: function, path: "/" + web_route_join(pattern, "/"), directory: directory, method: web_route_method(method), segments: pattern)
+						if middleware
+							state.module_graph.web_middlewares.push(row)
+						else
+							state.module_graph.web_routes.push(row)
+						end
+					end
+				end
+				function += 1
+			end
+			if !found
+				mut message := "route file must declare at least one HTTP handler"
+				if middleware
+					message = "middleware must declare call(context: Context, next_handler: Next): Response"
+				end
+				diagnostic(state, "TRBN4003", 1, message)
+				return false
+			end
+		end
+		source += 1
+	end
+	# Stable insertion order keeps generated identities independent of filesystem order.
+	index = 1
+	while index < state.module_graph.web_routes.size()
+		mut cursor := index
+		while cursor > 0 && web_route_less(state.module_graph.web_routes[cursor], state.module_graph.web_routes[cursor - 1])
+			prior_row := state.module_graph.web_routes[cursor - 1]
+			state.module_graph.web_routes[cursor - 1] = state.module_graph.web_routes[cursor]
+			state.module_graph.web_routes[cursor] = prior_row
+			cursor -= 1
+		end
+		index += 1
+	end
+	index = 1
+	while index < state.module_graph.web_middlewares.size()
+		mut cursor := index
+		while cursor > 0
+			left := state.module_graph.web_middlewares[cursor]
+			right := state.module_graph.web_middlewares[cursor - 1]
+			if web_route_parts(left.directory).size() > web_route_parts(right.directory).size() || (web_route_parts(left.directory).size() == web_route_parts(right.directory).size() && !package_name_less(left.directory, right.directory))
+				break
+			end
+			state.module_graph.web_middlewares[cursor - 1] = left
+			state.module_graph.web_middlewares[cursor] = right
+			cursor -= 1
+		end
+		index += 1
+	end
+	index = 0
+	while index < state.module_graph.web_routes.size()
+		current := state.module_graph.web_routes[index]
+		mut previous := 0
+		while previous < index
+			other := state.module_graph.web_routes[previous]
+			if current.method == other.method && web_route_overlap(current, other) && !web_route_precedence(current, other)
+				state.module_graph.active_module[0] = current.source_id
+				diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, current.function_id), current.method + " " + current.path + " conflicts with route " + other.path)
+				return false
+			end
+			previous += 1
+		end
+		index += 1
+	end
+	return !has_diagnostic(state)
+end

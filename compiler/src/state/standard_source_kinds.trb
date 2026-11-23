@@ -1,0 +1,496 @@
+def standard_source_orm_sql(): Integer
+	return 52
+end
+
+def standard_source_sqlite(): Integer
+	return 49
+end
+
+def standard_source_jobs_sql(): Integer
+	return 50
+end
+
+def standard_source_jobs_worker(): Integer
+	return 51
+end
+
+def standard_source_process(): Integer
+	return 47
+end
+
+def standard_source_internal_process(): Integer
+	return 48
+end
+
+def standard_source_web_timeout(): Integer
+	return 46
+end
+
+def standard_source_test_runner(): Integer
+	return 45
+end
+
+def standard_source_test(): Integer
+	return 43
+end
+
+def standard_source_test_host(): Integer
+	return 44
+end
+
+def standard_source_filesystem_host(): Integer
+	return 42
+end
+
+def standard_source_file(): Integer
+	return 40
+end
+
+def standard_source_dir(): Integer
+	return 41
+end
+
+def standard_source_oidc_http(): Integer
+	return 39
+end
+
+def standard_source_oidc(): Integer
+	return 36
+end
+
+def standard_source_oidc_json(): Integer
+	return 37
+end
+
+def standard_source_oidc_host(): Integer
+	return 38
+end
+
+def standard_source_digest(): Integer
+	return 31
+end
+
+def standard_source_internal_hash(): Integer
+	return 32
+end
+
+def standard_source_hmac(): Integer
+	return 33
+end
+
+def standard_source_internal_hmac(): Integer
+	return 34
+end
+
+def standard_source_secure_compare(): Integer
+	return 35
+end
+
+def standard_source_compression(): Integer
+	return 30
+end
+
+def standard_source_string_builder_storage(): Integer
+	return 29
+end
+
+def standard_source_string_builder(): Integer
+	return 28
+end
+
+def standard_source_network_host(): Integer
+	return 26
+end
+
+def standard_source_web_server(): Integer
+	return 27
+end
+
+def standard_source_path(): Integer
+	return 25
+end
+
+def standard_source_web_dispatch(): Integer
+	return 24
+end
+
+def standard_source_hex(): Integer
+	return 17
+end
+
+def standard_source_internal_hex(): Integer
+	return 18
+end
+
+def standard_source_base64(): Integer
+	return 19
+end
+
+def standard_source_internal_base64(): Integer
+	return 20
+end
+
+def standard_source_secure_random(): Integer
+	return 21
+end
+
+def standard_source_entropy(): Integer
+	return 22
+end
+
+def standard_source_encoding_bytes(): Integer
+	return 23
+end
+
+def standard_source_web_context(): Integer
+	return 16
+end
+
+# Loader-assigned source ownership is independent of declaration spelling.
+# IDs from 100 belong to the generated official catalog; do not rename or reorder
+# its generated rows here. The virtual Math import target is separate.
+
+def standard_source_unowned(): Integer
+	return 0
+end
+
+def standard_source_result(): Integer
+	return 1
+end
+
+def standard_source_unit(): Integer
+	return 2
+end
+
+def standard_source_errors(): Integer
+	return 3
+end
+
+def standard_source_url(): Integer
+	return 4
+end
+
+def standard_source_internal_url(): Integer
+	return 5
+end
+
+def standard_source_json(): Integer
+	return 6
+end
+
+def standard_source_jsonc(): Integer
+	return 7
+end
+
+def standard_source_internal_json(): Integer
+	return 8
+end
+
+def standard_source_internal_runtime(): Integer
+	return 9
+end
+
+def standard_source_time(): Integer
+	return 10
+end
+
+def standard_source_internal_time(): Integer
+	return 11
+end
+
+def standard_source_time_calendar(): Integer
+	return 12
+end
+
+def standard_source_time_parse(): Integer
+	return 13
+end
+
+def standard_source_time_zones(): Integer
+	return 14
+end
+
+def standard_source_time_host(): Integer
+	return 15
+end
+
+# Root-only exports and file-level service functions are owned loader contracts.
+# These policies never apply to authored declarations with the same spelling.
+def standard_source_root(kind: Integer): String
+	if kind == standard_source_orm_sql()
+		return "OrmSql"
+	end
+	if kind == standard_source_jobs_sql()
+		return "SQL"
+	end
+	if kind == standard_source_sqlite()
+		return "SQLite"
+	end
+	if kind == standard_source_process() || kind == standard_source_internal_process()
+		return "Process"
+	end
+	if kind == standard_source_web_timeout()
+		return "Timeout"
+	end
+	if kind == standard_source_filesystem_host()
+		return "FileHost"
+	end
+	if kind == standard_source_oidc_http()
+		return "OidcHttp"
+	end
+	if kind == standard_source_oidc()
+		return "Oidc"
+	elsif kind == standard_source_oidc_json()
+		return "OidcJson"
+	elsif kind == standard_source_oidc_host()
+		return "OidcHost"
+	end
+	if kind == standard_source_digest()
+		return "Digest"
+	elsif kind == standard_source_internal_hash()
+		return "Hash"
+	elsif kind == standard_source_hmac() || kind == standard_source_internal_hmac()
+		return "HMAC"
+	elsif kind == standard_source_secure_compare()
+		return "SecureCompare"
+	end
+	if kind == standard_source_compression()
+		return "Compression"
+	end
+	if kind == standard_source_string_builder_storage()
+		return "StringBuilderStorage"
+	end
+	if kind == standard_source_string_builder()
+		return "StringBuilder"
+	end
+	if kind == standard_source_network_host()
+		return "NetworkHost"
+	end
+	if kind == standard_source_hex()
+		return "Hex"
+	end
+	if kind == standard_source_internal_hex()
+		return "Hex"
+	end
+	if kind == standard_source_base64()
+		return "Base64"
+	end
+	if kind == standard_source_internal_base64()
+		return "Base64"
+	end
+	if kind == standard_source_secure_random()
+		return "SecureRandom"
+	end
+	if kind == standard_source_entropy()
+		return "Entropy"
+	end
+	if kind == standard_source_encoding_bytes()
+		return "EncodingBytes"
+	end
+	if kind == standard_source_web_context()
+		return "ContextStorage"
+	end
+	if kind == standard_source_url() || kind == standard_source_internal_url()
+		return "URL"
+	elsif kind == standard_source_json() || kind == standard_source_internal_json()
+		return "JSON"
+	elsif kind == standard_source_jsonc()
+		return "JSONC"
+	elsif kind == standard_source_internal_time()
+		return "Time"
+	elsif kind == standard_source_time_host()
+		return "TimeHost"
+	elsif kind == standard_source_internal_runtime()
+		return "Runtime"
+	end
+	return ""
+end
+
+def standard_source_function(kind: Integer, name: String): Boolean
+	if kind == standard_source_orm_sql()
+		if name == "::filter_range" || name == "::filter_subquery" || name == "::aggregate_value" || name == "::average_value"
+			return true
+		end
+		if name == "::selection" || name == "::filter" || name == "::ordered" || name == "::limited" || name == "::skipped" || name == "::read_statement" || name == "::read_rows"
+			return true
+		end
+		if name == "::time_text" || name == "::time_parameter" || name == "::boolean_value" || name == "::count_rows" || name == "::scope_id" || name == "::lookup" || name == "::delete_row" || name == "::insert_row" || name == "::update_row"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_jobs_sql()
+		if name == "::enqueue" || name == "::enqueue_at" || name == "::open_store" || name == "::claim" || name == "::recover_stale" || name == "::heartbeat" || name == "::acknowledge" || name == "::fail"
+			return true
+		end
+		if name == "::list_statuses" || name == "::retry_failed" || name == "::discard"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_sqlite()
+		if name == "::execute_writes" || name == "::query_one" || name == "::query_rows" || name == "::transaction" || name == "::worker_control" || name == "::worker_log"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_process() || kind == standard_source_internal_process()
+		if name == "::argv" || name == "::environment" || name == "::working_directory" || name == "::run"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_web_timeout()
+		return name == "::call"
+	end
+	if kind == standard_source_filesystem_host()
+		names := ["::read_bytes", "::read_text", "::write_bytes", "::write_text", "::path", "::error_kind", "::error_message", "::failure", "::mode_value", "::path_value", "::children", "::stat_kind", "::mkdir", "::make_directories"]
+		mut index := 0
+		while index < names.size()
+			if names[index] == name
+				return true
+			end
+			index += 1
+		end
+		return false
+	end
+	if kind == standard_source_oidc_http()
+		return name == "::fetch"
+	end
+	if kind == standard_source_oidc()
+		return name == "::verify_bearer"
+	elsif kind == standard_source_oidc_host()
+		if name == "::fetch" || name == "::verify_rs256" || name == "::timestamp" || name == "::describe_uri" || name == "::monotonic_millis" || name == "::ip_address" || name == "::environment" || name == "::ascii_hostname"
+			return true
+		end
+		return false
+	elsif kind == standard_source_oidc_json()
+		if name == "::parse_strings" || name == "::parse_keys" || name == "::parse_claims" || name == "::field" || name == "::text" || name == "::number" || name == "::get" || name == "::decode" || name == "::fold"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_digest() || kind == standard_source_internal_hash()
+		if name == "::md5" || name == "::sha1" || name == "::sha256" || name == "::sha512"
+			return true
+		end
+		return false
+	elsif kind == standard_source_hmac() || kind == standard_source_internal_hmac()
+		if name == "::sha256" || name == "::sha512" || name == "::equal"
+			return true
+		end
+		return false
+	elsif kind == standard_source_secure_compare()
+		return name == "::equal"
+	end
+	if kind == standard_source_compression()
+		return name == "::gzip"
+	end
+	if kind == standard_source_string_builder_storage()
+		return name == "::append_bytes"
+	end
+	if kind == standard_source_string_builder()
+		if name == "::new" || name == "::from_string"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_network_host()
+		if name == "::start" || name == "::next_request" || name == "::read" || name == "::status" || name == "::write" || name == "::stop"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_hex()
+		if name == "::encode" || name == "::decode"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_internal_hex()
+		if name == "::encode" || name == "::decode"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_base64()
+		if name == "::encode" || name == "::decode" || name == "::url_encode" || name == "::url_decode"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_internal_base64()
+		if name == "::encode" || name == "::decode" || name == "::url_encode" || name == "::url_decode"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_secure_random()
+		return name == "::bytes"
+	end
+	if kind == standard_source_entropy()
+		return name == "::read"
+	end
+	if kind == standard_source_encoding_bytes()
+		if name == "::octet" || name == "::table"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_web_context()
+		if name == "::pack" || name == "::accepts" || name == "::unpack" || name == "::same" || name == "::copy_state" || name == "::copy_request" || name == "::put" || name == "::find" || name == "::matches"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_internal_time()
+		names := ["::validate_date", "::date_try_new", "::date_try_parse", "::date_parse", "::date_to_string", "::date_add_days", "::date_compare", "::validate_time", "::time_of_day_try_new", "::time_of_day_try_parse", "::time_of_day_parse", "::time_of_day_to_string", "::time_of_day_compare", "::validate_datetime", "::datetime_try_new", "::datetime_try_parse", "::datetime_parse", "::datetime_to_string", "::datetime_compare", "::datetime_try_to_instant", "::datetime_to_instant", "::validate_duration", "::duration_from_seconds", "::duration_from_milliseconds", "::duration_try_parse", "::duration_parse", "::duration_add", "::duration_subtract", "::duration_negative", "::duration_to_string", "::duration_compare", "::validate_time_zone", "::time_zone_try_get", "::validate_instant", "::instant_now", "::instant_try_parse", "::instant_parse", "::instant_to_string", "::instant_to_datetime", "::instant_add", "::instant_subtract", "::instant_duration_since", "::instant_compare"]
+		mut index := 0
+		while index < names.size()
+			if names[index] == name
+				return true
+			end
+			index += 1
+		end
+		return false
+	end
+	if kind == standard_source_time_host()
+		if name == "::clock" || name == "::zone_data" || name == "::zone_environment"
+			return true
+		end
+		return false
+	end
+	if kind == standard_source_url() || kind == standard_source_internal_url()
+		if name == "::encode_component" || name == "::decode_component"
+			return true
+		end
+		if kind == standard_source_url()
+			if name == "::parse_query" || name == "::build_query"
+				return true
+			end
+		end
+	elsif kind == standard_source_internal_runtime()
+		if name == "::recover" || name == "::deadline"
+			return true
+		end
+		return name == "::fail"
+	elsif kind == standard_source_jsonc()
+		return name == "::parse"
+	elsif kind == standard_source_internal_json()
+		if name == "::parse" || name == "::parse_jsonc" || name == "::stringify"
+			return true
+		end
+	elsif kind == standard_source_json()
+		if name == "::decode" || name == "::encode"
+			return true
+		end
+		if name == "::parse" || name == "::stringify" || name == "::as_boolean" || name == "::as_integer" || name == "::as_float" || name == "::as_string" || name == "::as_array" || name == "::as_object" || name == "::field"
+			return true
+		end
+	end
+	return false
+end
+
+def standard_source_official_start(): Integer
+	return 100
+end

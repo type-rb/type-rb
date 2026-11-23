@@ -1,0 +1,657 @@
+import { project_json_skip_ignored, project_json_string } from project/config_json
+import { compiler_file_exists, compiler_read_source, compiler_package_content, compiler_package_root, compiler_load_locked_package, compiler_load_package_lock } from compiler
+import { ProjectConfig, ProjectPackageRequirement, parse_project_config, project_config_trimmed } from project/config
+import { package_checksum } from project/package_checksum
+import { package_text_index, package_git_requirement_error, package_git_source, package_git_source_error, package_git_url, package_version_canonical, package_version_less } from project/package_git
+import { LockedPackage, PackageLock, package_lock_index, package_lock_parse } from project/package_lock
+import { package_manifest_parse, package_requirement_names, package_requirements_json, package_version_valid } from project/package_manifest
+import { package_json_parse, package_json_quote, package_json_canonical, package_sorted_indices } from project/package_json
+import { ProjectPackages, ResolvedLocalPackage, package_path_safe, package_relative_path, project_packages_fail, project_packages_lock, project_packages_new } from project/packages
+import { native_cli_cwd, native_cli_interrupt, native_cli_package_signals, native_cli_write, native_cli_capture, native_cli_chmod, native_cli_mkdir, native_cli_platform, native_cli_remove, native_cli_remove_tree, native_cli_rename, native_cli_save, native_cli_tempdir, native_cli_tempfile } from host
+import { compiler_source_slice } from frontend/syntax/lexer
+import { path_directory, path_join, path_normalize, string_starts_with } from support/path
+
+record CliGitResult
+	output: String
+	error: String
+end
+
+record CliPackageFetch
+	root: String
+	revision: String
+	checksum: String
+	error: String
+end
+
+record CliPackageInstall
+	packages: ProjectPackages
+	changed: Boolean
+end
+
+def cli_package_directory(path: String): Boolean
+	if compiler_file_exists(path_join(path, "."))
+		return true
+	end
+	if native_cli_mkdir(path) == 0
+		return true
+	end
+	parent := path_directory(path)
+	if parent == path || !cli_package_directory(parent)
+		return false
+	end
+	return native_cli_mkdir(path) == 0
+end
+
+def cli_package_remove_tree(path: String): Boolean
+	# FTW_PHYS | FTW_DEPTH differs between the supported POSIX hosts.
+	mut flags := 9
+	if native_cli_platform() == "Darwin"
+		flags = 5
+	end
+	return native_cli_remove_tree(path, flags) == 0
+end
+
+def cli_package_git(project_root: String, directory: String, arguments: Array<String>): CliGitResult
+	if native_cli_interrupt(0) != 0
+		return CliGitResult.new(output: "", error: "package operation interrupted")
+	end
+	mut command := ["git"]
+	if directory != ""
+		command.push("-C")
+		command.push(directory)
+	end
+	arguments.each do |argument|
+		command.push(argument)
+	end
+	command.each do |argument|
+		if !package_path_safe(argument)
+			return CliGitResult.new(output: "", error: "Git argument contains NUL")
+		end
+	end
+	cache := path_join(project_root, ".trb/packages")
+	if !cli_package_directory(cache)
+		return CliGitResult.new(output: "", error: "cannot create package cache")
+	end
+	output := native_cli_tempfile(path_join(cache, ".git-output"))
+	if output == ""
+		return CliGitResult.new(output: "", error: "cannot create Git output file")
+	end
+	status := native_cli_capture(command, output)
+	text := compiler_read_source(output)
+	native_cli_remove(output, 0)
+	if native_cli_interrupt(0) != 0
+		return CliGitResult.new(output: text, error: "package operation interrupted")
+	end
+	if status != 0
+		return CliGitResult.new(output: text, error: "Git command failed (" + status.to_s() + "): " + project_config_trimmed(text))
+	end
+	return CliGitResult.new(output: text, error: "")
+end
+
+def cli_package_git_ref(project_root: String, source: String, version: String): CliGitResult
+	if version != "latest"
+		if package_version_valid(version)
+			return CliGitResult.new(output: "refs/tags/" + package_version_canonical(version), error: "")
+		end
+		return CliGitResult.new(output: version, error: "")
+	end
+	result := cli_package_git(project_root, "", ["ls-remote", "--tags", "--refs", package_git_url(source)])
+	if result.error != ""
+		return result
+	end
+	mut latest := ""
+	result.output.split("\n").each do |line|
+		parts := line.split("\t")
+		if parts.size() == 2 && string_starts_with(parts[1], "refs/tags/v")
+			tag := compiler_source_slice(parts[1], 10, parts[1].size())
+			if package_version_valid(tag)
+				if latest == "" || package_version_less(latest, tag)
+					latest = tag
+				end
+			end
+		end
+	end
+	if latest == ""
+		return CliGitResult.new(output: "", error: "package has no semantic version tags")
+	end
+	return CliGitResult.new(output: "refs/tags/" + latest, error: "")
+end
+
+def cli_package_fetch_in(project_root: String, source: String, revision: String, temporary: String): CliPackageFetch
+	commands := [["init", "--quiet"], ["remote", "add", "origin", package_git_url(source)], ["fetch", "--quiet", "--depth", "1", "--", "origin", revision], ["checkout", "--quiet", "--detach", "FETCH_HEAD"]]
+	commands.each do |arguments|
+		result := cli_package_git(project_root, temporary, arguments)
+		if result.error != ""
+			return CliPackageFetch.new(root: "", revision: "", checksum: "", error: result.error)
+		end
+	end
+	resolved := cli_package_git(project_root, temporary, ["rev-parse", "HEAD"])
+	if resolved.error != ""
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: resolved.error)
+	end
+	if !cli_package_remove_tree(path_join(temporary, ".git"))
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "cannot remove temporary Git metadata")
+	end
+	content := compiler_package_content(temporary)
+	if native_cli_interrupt(0) != 0
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "package operation interrupted")
+	end
+	if content.error != ""
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: content.error)
+	end
+	cache := path_join(path_join(project_root, ".trb/packages"), compiler_source_slice(content.checksum, 7, content.checksum.size()))
+	if compiler_file_exists(cache)
+		existing := compiler_package_content(cache)
+		if existing.error != "" || existing.checksum != content.checksum
+			return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "existing package cache checksum mismatch")
+		end
+	elsif native_cli_rename(temporary, cache) != 0
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "cannot publish package cache")
+	end
+	return CliPackageFetch.new(root: cache, revision: project_config_trimmed(resolved.output), checksum: content.checksum, error: "")
+end
+
+def cli_package_fetch(project_root: String, source: String, revision: String): CliPackageFetch
+	source_error := package_git_source_error(source)
+	if source_error != ""
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: source_error)
+	end
+	cache := path_join(project_root, ".trb/packages")
+	if !cli_package_directory(cache)
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "cannot create package cache")
+	end
+	temporary := native_cli_tempdir(path_join(cache, ".fetch-"))
+	if temporary == ""
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: "cannot create temporary package directory")
+	end
+	result := cli_package_fetch_in(project_root, source, revision, temporary)
+	if compiler_file_exists(temporary) && !cli_package_remove_tree(temporary)
+		return CliPackageFetch.new(root: "", revision: "", checksum: "", error: result.error + "; cannot clean temporary package directory")
+	end
+	return result
+end
+
+def cli_package_cache(locked: LockedPackage, root: String, offline: Boolean): String
+	if locked.path != ""
+		return ""
+	end
+	content := compiler_package_content(compiler_package_root(locked, root))
+	if content.error == ""
+		if content.checksum != locked.checksum
+			return "TypeRB package " + locked.name + " checksum mismatch in cache"
+		end
+		return ""
+	end
+	if offline
+		return "TypeRB package " + locked.name + " is not available in the offline cache"
+	end
+	fetched := cli_package_fetch(root, locked.source, locked.revision)
+	if fetched.error != ""
+		return fetched.error
+	end
+	if fetched.revision != locked.revision || fetched.checksum != locked.checksum
+		return "fetched TypeRB package does not match trb.lock"
+	end
+	return ""
+end
+
+def cli_package_resolve(mut packages: ProjectPackages, requirement: ProjectPackageRequirement, base_root: String, root: String): String
+	mut directory := requirement.path
+	mut source := ""
+	mut revision := ""
+	mut checksum := ""
+	mut ref := ""
+	mut locked_path := ""
+	if directory != ""
+		if !string_starts_with(directory, "/")
+			directory = path_join(base_root, directory)
+		end
+		directory = path_normalize(directory)
+		locked_path = package_relative_path(root, directory)
+	else
+		source = package_git_source(requirement.name, requirement.source)
+		mut version := project_config_trimmed(requirement.version)
+		if version == ""
+			version = "latest"
+		end
+		error := package_git_requirement_error(source, version)
+		if error != ""
+			project_packages_fail(packages, error)
+			return ""
+		end
+		selected := cli_package_git_ref(root, source, version)
+		if selected.error != ""
+			project_packages_fail(packages, selected.error)
+			return ""
+		end
+		ref = selected.output
+		fetched := cli_package_fetch(root, source, ref)
+		if fetched.error != ""
+			project_packages_fail(packages, fetched.error)
+			return ""
+		end
+		directory = fetched.root
+		revision = fetched.revision
+		checksum = fetched.checksum
+	end
+	manifest_path := path_join(directory, "trbpackage.json")
+	if !package_path_safe(directory) || !compiler_file_exists(manifest_path)
+		project_packages_fail(packages, "cannot read package manifest")
+		return ""
+	end
+	manifest := package_manifest_parse(compiler_read_source(manifest_path))
+	if manifest.error != ""
+		project_packages_fail(packages, manifest.error)
+		return ""
+	end
+	if string_starts_with(ref, "refs/tags/") && package_version_canonical(manifest.version) != compiler_source_slice(ref, 10, ref.size())
+		project_packages_fail(packages, "manifest version does not match Git tag")
+		return ""
+	end
+	mut index := 0
+	while index < packages.packages.size()
+		previous := packages.packages[index]
+		if previous.manifest.name == manifest.name
+			if packages.loading[index]
+				project_packages_fail(packages, "package dependency cycle involving " + manifest.name)
+			elsif previous.source != source || previous.path != locked_path || previous.revision != revision || previous.manifest.version != manifest.version
+				project_packages_fail(packages, "package " + manifest.name + " resolves to incompatible requirements")
+			end
+			return manifest.name
+		end
+		index += 1
+	end
+	owner := packages.packages.size()
+	packages.packages.push(ResolvedLocalPackage.new(root: directory, path: locked_path, source: source, revision: revision, checksum: checksum, manifest: manifest, aliases: [], names: []))
+	packages.loading.push(true)
+	manifest.packages.each do |dependency|
+		if packages.error[0] == ""
+			canonical := cli_package_resolve(packages, dependency, directory, root)
+			packages.packages[owner].aliases.push(dependency.name)
+			packages.packages[owner].names.push(canonical)
+		end
+	end
+	packages.loading[owner] = false
+	return manifest.name
+end
+
+def cli_package_pin(mut packages: ProjectPackages, lock: PackageLock, name: String, root: String, mode: String)
+	mut index := 0
+	while index < packages.packages.size()
+		if packages.packages[index].manifest.name == name
+			if packages.loading[index]
+				project_packages_fail(packages, "package dependency cycle involving " + name)
+			end
+			return
+		end
+		index += 1
+	end
+	id := package_lock_index(lock, name)
+	if id < 0
+		project_packages_fail(packages, "locked package is missing: " + name)
+		return
+	end
+	locked := lock.packages[id]
+	error := cli_package_cache(locked, root, false)
+	if error != ""
+		project_packages_fail(packages, error)
+		return
+	end
+	owner := packages.packages.size()
+	compiler_load_locked_package(packages, locked, root, mode)
+	if packages.error[0] != ""
+		return
+	end
+	packages.loading[owner] = true
+	locked.names.each do |dependency|
+		if packages.error[0] == ""
+			cli_package_pin(packages, lock, dependency, root, mode)
+		end
+	end
+	packages.loading[owner] = false
+end
+
+def cli_package_selected(selected: Array<String>, name: String): Boolean
+	selected.each do |value|
+		if value == name
+			return true
+		end
+	end
+	return false
+end
+
+def cli_package_install(config: ProjectConfig, config_path: String, frozen: Boolean, offline: Boolean, update: Boolean, selected: Array<String>): CliPackageInstall
+	mut packages := project_packages_new(package_checksum(package_requirements_json(config.packages)))
+	if config.packages.size() == 0 && !update && selected.size() == 0
+		return CliPackageInstall.new(packages: packages, changed: false)
+	end
+	root := path_normalize(path_directory(config_path))
+	lock_path := path_join(root, "trb.lock")
+	exists := compiler_file_exists(lock_path)
+	mut text := ""
+	if exists
+		text = compiler_read_source(lock_path)
+	end
+	lock := package_lock_parse(text)
+	current := exists && lock.error == "" && lock.checksum == packages.checksum
+	if (frozen || selected.size() > 0) && !current
+		mut error := "trb.lock is missing or stale; run trb install"
+		if exists && lock.error != ""
+			error = lock.error
+		end
+		project_packages_fail(packages, error)
+		return CliPackageInstall.new(packages: packages, changed: false)
+	end
+	if current && !update && selected.size() == 0
+		lock.packages.each do |locked|
+			if packages.error[0] == ""
+				project_packages_fail(packages, cli_package_cache(locked, root, offline))
+			end
+		end
+		if packages.error[0] != ""
+			return CliPackageInstall.new(packages: packages, changed: false)
+		end
+		loaded := compiler_load_package_lock(config, config_path, lock)
+		if loaded.error[0] == "" || frozen || !string_starts_with(loaded.error[0], "local TypeRB package manifest changed")
+			return CliPackageInstall.new(packages: loaded, changed: false)
+		end
+	end
+	if offline
+		config.packages.each do |requirement|
+			if project_config_trimmed(requirement.path) == ""
+				project_packages_fail(packages, "cannot resolve an unlocked TypeRB package while offline")
+			end
+		end
+	end
+	selected.each do |name|
+		if !cli_package_selected(package_requirement_names(config.packages), name)
+			project_packages_fail(packages, "TypeRB package " + name + " is not a direct project dependency")
+		end
+	end
+	if packages.error[0] != ""
+		return CliPackageInstall.new(packages: packages, changed: false)
+	end
+	order := package_sorted_indices(package_requirement_names(config.packages))
+	if selected.size() > 0
+		order.each do |index|
+			requirement := config.packages[index]
+			if !cli_package_selected(selected, requirement.name) && packages.error[0] == ""
+				mut canonical := ""
+				mut mapping := 0
+				while mapping < lock.aliases.size()
+					if lock.aliases[mapping] == requirement.name
+						canonical = lock.names[mapping]
+					end
+					mapping += 1
+				end
+				cli_package_pin(packages, lock, canonical, root, config.mode)
+				packages.aliases.push(requirement.name)
+				packages.names.push(canonical)
+			end
+		end
+	end
+	order.each do |index|
+		requirement := config.packages[index]
+		if packages.error[0] == "" && (selected.size() == 0 || cli_package_selected(selected, requirement.name))
+			canonical := cli_package_resolve(packages, requirement, root, root)
+			packages.aliases.push(requirement.name)
+			packages.names.push(canonical)
+		end
+	end
+	if packages.error[0] != ""
+		return CliPackageInstall.new(packages: packages, changed: false)
+	end
+	validated := compiler_load_package_lock(config, config_path, package_lock_parse(project_packages_lock(packages)))
+	return CliPackageInstall.new(packages: validated, changed: validated.error[0] == "")
+end
+
+def cli_package_save(path: String, content: String): String
+	if native_cli_interrupt(0) != 0
+		return "package operation interrupted"
+	end
+	temporary := native_cli_tempfile(path)
+	if temporary == ""
+		return "cannot create temporary package metadata"
+	end
+	mut error := ""
+	if native_cli_save(temporary, content, 0) != 0
+		error = "cannot write package metadata"
+	elsif native_cli_chmod(temporary, 420) != 0
+		error = "cannot set package metadata permissions"
+	elsif native_cli_interrupt(0) != 0
+		error = "package operation interrupted"
+	elsif native_cli_rename(temporary, path) != 0
+		error = "cannot publish package metadata"
+	end
+	if error != ""
+		native_cli_remove(temporary, 0)
+	end
+	return error
+end
+
+# Configuration is parsed once by the project validator, then rewritten through
+# its JSON data. Package changes preserve other recognized configuration fields.
+def cli_package_config_json(source: String, requirements: Array<ProjectPackageRequirement>): String
+	mut position := [0]
+	mut line := [1]
+	mut error := [""]
+	mut error_line := [0]
+	mut plain := ""
+	while position[0] < source.size() && error[0] == ""
+		project_json_skip_ignored(source, position, line, error, error_line)
+		if position[0] < source.size()
+			start := position[0]
+			if source[start] == "\""
+				project_json_string(source, position, line, error, error_line)
+			else
+				position[0] += 1
+			end
+			plain += compiler_source_slice(source, start, position[0])
+		end
+	end
+	document := package_json_parse(plain)
+	if error[0] != "" || document.error[0] != ""
+		return ""
+	end
+	root := document.nodes[0]
+	mut result := "{\n"
+	package_sorted_indices(root.keys).each do |index|
+		if root.keys[index] != "packages"
+			result += "  " + package_json_quote(root.keys[index]) + ": " + package_json_canonical(document, root.children[index]) + ",\n"
+		end
+	end
+	return "// TypeRB project configuration. Comments are allowed; trailing commas are not.\n" + result + "  \"packages\": " + package_requirements_json(requirements) + "\n}\n"
+end
+
+def cli_package_find_config(start: String): String
+	mut root := path_normalize(start)
+	while root != ""
+		candidate := path_join(root, "trbconfig.jsonc")
+		if compiler_file_exists(candidate)
+			return candidate
+		end
+		parent := path_directory(root)
+		if parent == root
+			return ""
+		end
+		root = parent
+	end
+	return ""
+end
+
+def cli_package_error(message: String): Integer
+	native_cli_write("trbn: " + message + "\n", 2)
+	return 1
+end
+
+def cli_package_boolean(value: String): Integer
+	if value == "true" || value == "True" || value == "TRUE" || value == "t" || value == "T" || value == "1"
+		return 1
+	end
+	if value == "false" || value == "False" || value == "FALSE" || value == "f" || value == "F" || value == "0"
+		return 0
+	end
+	return -1
+end
+
+def cli_package_command(arguments: Array<String>): Integer
+	command := arguments[0]
+	mut source := ""
+	mut path := ""
+	mut dev := 0
+	mut native := 0
+	mut index := 1
+	mut parsing := command != "update"
+	while index < arguments.size() && parsing
+		argument := arguments[index]
+		if argument == "--"
+			index += 1
+			parsing = false
+		elsif string_starts_with(argument, "-")
+			mut key := argument
+			mut value := ""
+			at := package_text_index(argument, "=")
+			if at >= 0
+				key = compiler_source_slice(argument, 0, at)
+				value = compiler_source_slice(argument, at + 1, argument.size())
+			end
+			index += 1
+			if key == "--source" || key == "--path" || key == "-source" || key == "-path"
+				if command != "add"
+					return cli_package_error("unknown option " + key)
+				end
+				if at < 0
+					if index >= arguments.size()
+						return cli_package_error("missing value for " + key)
+					end
+					value = arguments[index]
+					index += 1
+				end
+				if key == "--source" || key == "-source"
+					source = value
+				else
+					path = value
+				end
+			elsif key == "--native" || key == "-native" || ((key == "--dev" || key == "-dev") && command == "add")
+				mut boolean := 1
+				if at >= 0
+					boolean = cli_package_boolean(value)
+				end
+				if boolean < 0
+					return cli_package_error("invalid Boolean value for " + key)
+				end
+				if key == "--native" || key == "-native"
+					native = boolean
+				else
+					dev = boolean
+				end
+			else
+				return cli_package_error("unknown option " + key)
+			end
+		else
+			parsing = false
+		end
+	end
+	mut values: Array<String> := []
+	while index < arguments.size()
+		values.push(arguments[index])
+		index += 1
+	end
+	if command == "add" && (values.size() < 1 || values.size() > 2)
+		return cli_package_error("usage: trbn add [--source GIT | --path DIRECTORY] PACKAGE [VERSION]")
+	end
+	if command == "remove" && values.size() != 1
+		return cli_package_error("usage: trbn remove PACKAGE")
+	end
+	if native > 0
+		return cli_package_error("target-language dependency management is not implemented")
+	end
+	if dev > 0
+		return cli_package_error("--dev currently applies only to --native dependencies")
+	end
+	if source != "" && path != ""
+		return cli_package_error("--source and --path are mutually exclusive")
+	end
+	config_path := cli_package_find_config(native_cli_cwd())
+	if config_path == ""
+		return cli_package_error("no trbconfig.jsonc found")
+	end
+	original := compiler_read_source(config_path)
+	config := parse_project_config(original)
+	if config.error != ""
+		return cli_package_error(config.error)
+	end
+	native_cli_package_signals()
+	if command == "update"
+		resolved := cli_package_install(config, config_path, false, false, values.size() == 0, values)
+		if native_cli_interrupt(0) != 0
+			return cli_package_error("package operation interrupted")
+		end
+		if resolved.packages.error[0] != ""
+			return cli_package_error(resolved.packages.error[0])
+		end
+		error := cli_package_save(path_join(path_directory(config_path), "trb.lock"), project_packages_lock(resolved.packages))
+		if error != ""
+			return cli_package_error(error)
+		end
+		puts("updated " + resolved.packages.packages.size().to_s() + " TypeRB package(s)")
+		return 0
+	end
+	mut name := values[0]
+	mut version := ""
+	if command == "add"
+		if values.size() == 2
+			version = values[1]
+		else
+			mut at := -1
+			index = 0
+			while index < name.size()
+				if name[index] == "@"
+					at = index
+				end
+				index += 1
+			end
+			if at > 0
+				version = compiler_source_slice(name, at + 1, name.size())
+				name = compiler_source_slice(name, 0, at)
+			end
+		end
+		if path != "" && version != ""
+			return cli_package_error("a local TypeRB package path cannot have a version")
+		end
+		if path == "" && version == ""
+			version = "latest"
+		end
+	end
+	mut requirements: Array<ProjectPackageRequirement> := []
+	config.packages.each do |requirement|
+		if requirement.name != name
+			requirements.push(requirement)
+		end
+	end
+	if command == "add"
+		requirements.push(ProjectPackageRequirement.new(name: name, source: source, version: version, path: path))
+	end
+	updated_source := cli_package_config_json(original, requirements)
+	updated := parse_project_config(updated_source)
+	if updated_source == "" || updated.error != ""
+		return cli_package_error("invalid updated package configuration: " + updated.error)
+	end
+	resolved := cli_package_install(updated, config_path, false, false, true, [])
+	if native_cli_interrupt(0) != 0
+		return cli_package_error("package operation interrupted")
+	end
+	if resolved.packages.error[0] != ""
+		return cli_package_error(resolved.packages.error[0])
+	end
+	lock_error := cli_package_save(path_join(path_directory(config_path), "trb.lock"), project_packages_lock(resolved.packages))
+	if lock_error != ""
+		return cli_package_error(lock_error)
+	end
+	config_error := cli_package_save(config_path, updated_source)
+	if config_error != ""
+		return cli_package_error(config_error)
+	end
+	puts(name + " -> " + config_path)
+	return 0
+end

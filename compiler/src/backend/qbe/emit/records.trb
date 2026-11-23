@@ -1,0 +1,34 @@
+import { mir_op_record_new } from mir/model/instructions
+import { emit_address } from backend/qbe/context
+import { integer_string } from support/literals
+import { MirInstruction } from mir/model/module
+import { mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_temporary, emit_typed_load, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+# Layout is an adaptation of the verified nominal field table. No executable
+# source, initializer labels or independent managed-field analysis is required.
+def emit_mir_record_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	native_module := state.scalar_mir
+	type_name := mir_storage_type_name(native_module, mir_operand_type(value_types, instruction.result))
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_record_new()
+		definition := native_module.records[instruction.payload]
+		qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_record" + integer_string(definition.declaration) + ", l " + integer_string(definition.field_count * 8) + ", l 0)")
+		mut field := 0
+		while field < definition.field_count
+			row := native_module.fields[definition.field_start + field]
+			address := emit_address(context, output, result, 8 + field * 8)
+			value := native_module.arguments[instruction.first + field]
+			emit_typed_store(output, mir_storage_type_name(native_module, row.type_id), operands[value], address)
+			field += 1
+		end
+	else
+		field := native_module.fields[instruction.payload]
+		definition := native_module.records[field.owner]
+		address := emit_address(context, output, operands[instruction.first], 8 + (instruction.payload - definition.field_start) * 8)
+		emit_typed_load(output, result, type_name, address)
+	end
+	return emitted_value(result, type_name)
+end

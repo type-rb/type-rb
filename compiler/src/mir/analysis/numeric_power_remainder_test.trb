@@ -1,0 +1,116 @@
+import { emit_qbe } from compiler
+import { mir_numeric_find, mir_numeric_plans_equal } from mir/analysis/numeric
+import { MirNumericOperation } from mir/model/module
+import { mir_numeric_nonnegative_power_remainder_mode } from mir/model/numeric_modes
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { integer_string } from support/literals
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def power_remainder_source(divisor: String): String
+	return "def reduce(value: Integer, other: Integer): Integer\nreturn value % " + divisor + "\nend\ndef main()\nputs(reduce(19, 7))\nend\n"
+end
+
+describe("MIR power-of-two remainder") do
+	test("masks a proven nonnegative dividend and rejects a forged range") do
+		mut state := array_loop_mir_check("def reduce(values: Array<Integer>): Integer\nreturn values.size() % 8\nend\ndef main()\nputs(reduce([1, 2, 3]))\nend\n")
+		plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+		expect(plan.operations[0].mode).to_equal(mir_numeric_nonnegative_power_remainder_mode())
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		mut unknown := array_loop_mir_check(power_remainder_source("8"))
+		mut ordinary := mir_numeric_find(unknown.scalar_mir.numeric_plans[0], 0, -1, -1)
+		operation := ordinary.operations[0]
+		ordinary.operations[0] = MirNumericOperation.new(tested_value: operation.tested_value, instruction: operation.instruction, mode: mir_numeric_nonnegative_power_remainder_mode(), divisor: operation.divisor, reciprocal: operation.reciprocal, shift: operation.shift)
+		expect(verify_mir(unknown.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+
+	test("selects exact literal divisors while preserving signed endpoint results") do
+		[1, 2, 8, 65536, 4294967296, 4503599627370496].each do |divisor|
+			mut source := "def reduce(value: Integer): Integer\nreturn value % " + integer_string(divisor) + "\nend\ndef main()\n"
+			mut expected := ""
+			[-9007199254740991, -divisor - 1, -divisor, -1, 0, 1, divisor - 1, divisor, divisor + 1, 9007199254740991].each do |value|
+				source += "puts(reduce(" + integer_string(value) + "))\n"
+				expected += integer_string(value % divisor) + "\n"
+			end
+			source += "end\n"
+			state := array_loop_mir_check(source)
+			plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			expect(plan.operations[0].mode).to_equal(8)
+			expect(plan.operations[0].divisor).to_equal(divisor)
+			expect(plan.operations[0].reciprocal).to_equal(0)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal(expected)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("keeps zero negative non-power and dynamic divisors on existing paths") do
+		["0", "-2", "3", "7", "4294967295", "9007199254740991", "other"].each do |divisor|
+			state := array_loop_mir_check(power_remainder_source(divisor))
+			plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			expect(plan.operations[0].mode == 8).to_be_false()
+		end
+	end
+
+	test("retains zero-divisor failure") do
+		state := array_loop_mir_check(power_remainder_source("0"))
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("division by zero")).to_be_true()
+			end
+		end
+	end
+
+	test("rejects forged divisors exponents and reciprocal fields") do
+		mut mutation := 0
+		while mutation < 3
+			mut state := array_loop_mir_check(power_remainder_source("8"))
+			mut plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			original := plan.operations[0]
+			mut divisor := original.divisor
+			mut shift := original.shift
+			mut reciprocal := original.reciprocal
+			if mutation == 0
+				divisor = 7
+			elsif mutation == 1
+				shift += 1
+			else
+				reciprocal = 1
+			end
+			plan.operations[0] = MirNumericOperation.new(tested_value: -1, instruction: original.instruction, mode: 8, divisor: divisor, reciprocal: reciprocal, shift: shift)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+			mutation += 1
+		end
+	end
+
+	test("rederives the same facts after source erasure") do
+		mut state := array_loop_mir_check(power_remainder_source("8"))
+		plans := state.scalar_mir.numeric_plans[0]
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+end

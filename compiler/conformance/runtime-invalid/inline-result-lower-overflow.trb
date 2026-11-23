@@ -1,0 +1,13 @@
+def identity(value: Integer): Integer
+	return value
+end
+
+def main()
+	mut index := 0
+	while index < 1
+		value := identity(1 - 9007199254740991) + (-2)
+		puts(value.to_s())
+		index += 1
+	end
+	return
+end

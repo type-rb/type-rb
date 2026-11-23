@@ -1,0 +1,143 @@
+import trb/std/encoding/base64 as PublicBase64
+import trb/std/result
+import trb/internal/encoding_bytes as Octets
+
+module Base64
+end
+
+# Each immutable table maps an input octet to a sextet or the invalid marker.
+# The URL alphabet differs only at digits 62 and 63; padding stays in _decode.
+INVALID_DIGIT := 255
+DECODE_DIGITS := "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x3e\xff\xff\xff\x3f\x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\xff\xff\xff\xff\xff\xff\xff\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\xff\xff\xff\xff\xff\xff\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28\x29\x2a\x2b\x2c\x2d\x2e\x2f\x30\x31\x32\x33\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+URL_DECODE_DIGITS := "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x3e\xff\xff\x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\xff\xff\xff\xff\xff\xff\xff\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\xff\xff\xff\xff\x3f\xff\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28\x29\x2a\x2b\x2c\x2d\x2e\x2f\x30\x31\x32\x33\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+
+def _encode(value: Bytes, url: Boolean): String
+	mut alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	if url
+		alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	end
+	mut parts: Array<String> := []
+	mut index := 0
+	while index < value.size()
+		first := value.at(index)
+		mut second := 0
+		mut third := 0
+		if index + 1 < value.size()
+			second = value.at(index + 1)
+		end
+		if index + 2 < value.size()
+			third = value.at(index + 2)
+		end
+		parts.push(alphabet[first / 4])
+		parts.push(alphabet[(first % 4) * 16 + second / 16])
+		if index + 1 < value.size()
+			parts.push(alphabet[(second % 16) * 4 + third / 64])
+		elsif !url
+			parts.push("=")
+		end
+		if index + 2 < value.size()
+			parts.push(alphabet[third % 64])
+		elsif !url
+			parts.push("=")
+		end
+		index += 3
+	end
+	return parts.join("")
+end
+
+def encode(value: Bytes): String
+	return _encode(value, false)
+end
+
+def url_encode(value: Bytes): String
+	return _encode(value, true)
+end
+
+def _error(kind: PublicBase64::DecodeErrorKind, input: String, index: Integer, message: String): Result<Bytes, PublicBase64::DecodeError>
+	return Result<Bytes, PublicBase64::DecodeError>::Err(PublicBase64::DecodeError.new(kind: kind, input: input, index: index, message: message))
+end
+
+def _decode(value: String, url: Boolean): Result<Bytes, PublicBase64::DecodeError>
+	# Length errors take precedence and use the String's code-point count.
+	length := value.size()
+	if url && length % 4 == 1
+		return _error(PublicBase64::DecodeErrorKind::InvalidLength, value, length, "base64url input has invalid length")
+	elsif !url && length % 4 != 0
+		return _error(PublicBase64::DecodeErrorKind::InvalidLength, value, length, "base64 input length must be a multiple of 4")
+	end
+	mut digits := DECODE_DIGITS.to_bytes()
+	if url
+		digits = URL_DECODE_DIGITS.to_bytes()
+	end
+	bytes := value.to_bytes()
+	mut padding := 0
+	mut index := 0
+	# Accepted characters are ASCII, so the first invalid character has
+	# the same byte and code-point offset. No digit Array is needed.
+	while index < length
+		point := bytes.at(index)
+		if point == 61
+			if url
+				return _error(PublicBase64::DecodeErrorKind::InvalidPadding, value, index, "base64url input must not contain padding")
+			end
+			padding += 1
+			if index < length - 2 || padding > 2
+				return _error(PublicBase64::DecodeErrorKind::InvalidPadding, value, index, "invalid base64 padding")
+			end
+		else
+			if padding > 0
+				return _error(PublicBase64::DecodeErrorKind::InvalidPadding, value, index, "invalid base64 padding")
+			end
+			digit := digits.at(point)
+			if digit == INVALID_DIGIT
+				mut message := "invalid base64 character"
+				if url
+					message = "invalid base64url character"
+				end
+				return _error(PublicBase64::DecodeErrorKind::InvalidCharacter, value, index, message)
+			end
+		end
+		index += 1
+	end
+	# Strict decoding requires the unused low bits of the final digit to be zero.
+	count := length - padding
+	mut noncanonical := false
+	if count % 4 == 2
+		noncanonical = digits.at(bytes.at(count - 1)) % 16 != 0
+	elsif count % 4 == 3
+		noncanonical = digits.at(bytes.at(count - 1)) % 4 != 0
+	end
+	if noncanonical
+		mut message := "non-canonical base64 encoding"
+		if url
+			message = "non-canonical base64url encoding"
+		end
+		return _error(PublicBase64::DecodeErrorKind::NonCanonical, value, count - 1, message)
+	end
+	octets := Octets.table()
+	mut parts: Array<String> := []
+	index = 0
+	while index < count
+		first := digits.at(bytes.at(index))
+		second := digits.at(bytes.at(index + 1))
+		parts.push(octets[first * 4 + second / 16])
+		if index + 2 < count
+			third := digits.at(bytes.at(index + 2))
+			parts.push(octets[(second % 16) * 16 + third / 4])
+			if index + 3 < count
+				fourth := digits.at(bytes.at(index + 3))
+				parts.push(octets[(third % 4) * 64 + fourth])
+			end
+		end
+		index += 4
+	end
+	return Result<Bytes, PublicBase64::DecodeError>::Ok(parts.join("").to_bytes())
+end
+
+def decode(value: String): Result<Bytes, PublicBase64::DecodeError>
+	return _decode(value, false)
+end
+
+def url_decode(value: String): Result<Bytes, PublicBase64::DecodeError>
+	return _decode(value, true)
+end

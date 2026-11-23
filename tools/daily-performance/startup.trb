@@ -1,0 +1,4 @@
+def main()
+	puts("ready")
+	return
+end

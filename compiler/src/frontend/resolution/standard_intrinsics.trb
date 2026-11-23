@@ -1,0 +1,105 @@
+import { callable_type } from frontend/types/callable_types
+import { standard_source_internal_runtime } from state/standard_source_kinds
+import { CompilerState } from state/state
+import { load_integer, sparse_integer_at } from support/storage
+
+# Only the internal loader can grant this declaration ownership. Neither an
+# authored path/name nor a generated instance spelling grants runtime access.
+def standard_runtime_fail(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_internal_runtime()
+		return false
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			row := state.type_resolution.generic_functions[instance.definition]
+			if row.source_id != owner || row.name != "fail" || row.receiver_type != "" || row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.parameters.size() != 1 || row.result_type != "T" || row.body_start != row.body_finish
+				return false
+			end
+			parameter := row.parameters[0]
+			if parameter.name != "message" || parameter.type_name != "String" || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0
+				return false
+			end
+			return true
+		end
+	end
+	return false
+end
+
+# Recovery is private to loader-owned runtime declarations. Its callback and
+# fallback retain the same concrete result identity across the MIR boundary.
+def standard_runtime_recover(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_internal_runtime()
+		return false
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			row := state.type_resolution.generic_functions[instance.definition]
+			if row.source_id != owner || row.name != "recover" || row.receiver_type != "" || row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.parameters.size() != 2 || row.result_type != "T" || row.body_start != row.body_finish
+				return false
+			end
+			mut index := 0
+			while index < 2
+				parameter := row.parameters[index]
+				mut name := "action"
+				mut type_name := callable_type([], "T")
+				if index == 1
+					name = "fallback"
+					type_name = "T"
+				end
+				if parameter.name != name || parameter.type_name != type_name || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0
+					return false
+				end
+				index += 1
+			end
+			return true
+		end
+	end
+	return false
+end
+
+# Deadline callbacks retain one checked result identity and a portable Integer
+# duration. Authored names cannot grant this private runtime capability.
+def standard_runtime_deadline(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_internal_runtime()
+		return false
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			row := state.type_resolution.generic_functions[instance.definition]
+			if row.source_id != owner || row.name != "deadline" || row.receiver_type != "" || row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.parameters.size() != 3 || row.result_type != "T" || row.body_start != row.body_finish
+				return false
+			end
+			mut index := 0
+			while index < 3
+				parameter := row.parameters[index]
+				mut name := "action"
+				mut type_name := callable_type([], "T")
+				if index == 1
+					name = "milliseconds"
+					type_name = "Integer"
+				elsif index == 2
+					name = "fallback"
+					type_name = "T"
+				end
+				if parameter.name != name || parameter.type_name != type_name || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0
+					return false
+				end
+				index += 1
+			end
+			return true
+		end
+	end
+	return false
+end

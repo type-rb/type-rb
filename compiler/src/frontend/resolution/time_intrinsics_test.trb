@@ -1,0 +1,144 @@
+import { mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment } from mir/model/call_kinds
+import { standard_time_host } from frontend/resolution/time_intrinsics
+import { standard_source_internal_time } from state/standard_source_kinds
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { load_integer, store_integer, store_string } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCall, MirSignature, mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+
+# Isolate the mechanical adapters from the ordinary library's full parser and
+# calendar bodies, which the Native CLI differential suite executes separately.
+def time_host_test_state(): CompilerState
+	source := "import trb/internal/time_host as Host\ndef main()\nmut parts := [0, 0]\nputs(Host.clock(parts))\nputs(parts[0])\nmut values := [\"\", \"\"]\nputs(Host.zone_data(\"unused-zone-fixture\", 0, -1, values))\nputs(Host.zone_environment(values))\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, standard_source_internal_time())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Trusted time host adapters") do
+	test("preserves typed mutation and I/O through source-erased MIR") do
+		mut state := time_host_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut count := 0
+		state.scalar_mir.signatures.each do |signature|
+			kind := standard_time_host(state, signature.id)
+			if kind > 0
+				count += 1
+				expect(signature.kind).to_equal(3)
+				expect(mir_function_index(state.scalar_mir, signature.id)).to_equal(-1)
+				if kind == 1
+					expect(signature.adapter).to_equal(mir_adapter_time_clock())
+					expect(signature.parameter_types).to_equal(["Array<Integer>"])
+					expect(signature.parameter_mutable).to_equal([1])
+					expect(signature.result_type).to_equal("Boolean")
+				elsif kind == 2
+					expect(signature.adapter).to_equal(mir_adapter_time_zone_data())
+					expect(signature.parameter_types).to_equal(["String", "Integer", "Integer", "Array<String>"])
+					expect(signature.parameter_mutable).to_equal([0, 0, 0, 1])
+					expect(signature.result_type).to_equal("Integer")
+				else
+					expect(signature.adapter).to_equal(mir_adapter_time_zone_environment())
+					expect(signature.parameter_types).to_equal(["Array<String>"])
+					expect(signature.parameter_mutable).to_equal([1])
+					expect(signature.result_type).to_equal("Boolean")
+				end
+			end
+		end
+		expect(count).to_equal(3)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("does not grant adapter access to authored names") do
+		mut state := logical_checked_source("def clock(mut parts: Array<Integer>): Boolean\nparts[0] = 7\nreturn true\nend\ndef zone_data(path: String, start: Integer, length: Integer, mut parts: Array<String>): Integer\nparts[0] = path\nreturn start + length\nend\ndef zone_environment(mut parts: Array<String>): Boolean\nparts[1] = \"authored\"\nreturn true\nend\ndef main()\nmut parts := [0, 0]\nputs(clock(parts))\nmut values := [\"\", \"\"]\nputs(zone_data(\"authored\", 0, -1, values))\nputs(zone_environment(values))\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_time_host(state, signature.id)).to_equal(0)
+		end
+	end
+
+	test("requires complete owned declarations rather than trusted spelling") do
+		[1, 2, 3].each do |expected_kind|
+			["owner", "name", "mutable", "parameter", "result", "body", "default"].each do |damage|
+				mut state := time_host_test_state()
+				state.scalar_mir.signatures.each do |signature|
+					if standard_time_host(state, signature.id) == expected_kind
+						mut parameter := load_integer(state.declarations.function_parameter_starts, signature.id)
+						if damage == "mutable" && expected_kind == 2
+							parameter += 3
+						end
+						if damage == "owner"
+							store_integer(state.standard_modules, signature.source_id, 0)
+						elsif damage == "name"
+							store_string(state.declarations.function_names, signature.id, "authored_clock")
+						elsif damage == "mutable"
+							store_integer(state.declarations.parameter_mutable, parameter, 0)
+						elsif damage == "parameter"
+							store_string(state.declarations.parameter_types, parameter, "Bytes")
+						elsif damage == "result"
+							store_string(state.declarations.function_result_types, signature.id, "Void")
+						elsif damage == "body"
+							store_integer(state.declarations.function_body_ends, signature.id, 99999)
+						else
+							store_integer(state.parsed.parameter_defaults, parameter, 1)
+						end
+						expect(standard_time_host(state, signature.id)).to_equal(0)
+					end
+				end
+			end
+		end
+	end
+
+	test("independently rejects tampered MIR signatures and effects") do
+		[mir_adapter_time_clock(), mir_adapter_time_zone_data(), mir_adapter_time_zone_environment()].each do |expected_adapter|
+			["name", "parameter", "mutable", "result", "effects"].each do |damage|
+				mut state := time_host_test_state()
+				mut index := 0
+				while index < state.scalar_mir.signatures.size()
+					row := state.scalar_mir.signatures[index]
+					if row.adapter == expected_adapter && damage != "effects"
+						mut name := row.name
+						mut parameters := row.parameter_types
+						mut mutable := row.parameter_mutable
+						mut result := row.result_type
+						if damage == "name"
+							name = "authored.clock"
+						elsif damage == "parameter"
+							parameters = ["Bytes"]
+						elsif damage == "mutable"
+							mutable = [0, 0, 0, 0]
+						elsif damage == "result"
+							result = "Void"
+						end
+						state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+					end
+					index += 1
+				end
+				if damage == "effects"
+					index = 0
+					while index < state.scalar_mir.calls.size()
+						row := state.scalar_mir.calls[index]
+						if state.scalar_mir.signatures[row.callee].adapter == expected_adapter
+							state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+						end
+						index += 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+			end
+		end
+	end
+end

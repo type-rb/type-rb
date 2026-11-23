@@ -1,0 +1,18 @@
+# String interpolation, concatenation, conversion and joining.
+
+def build(count: Integer): Integer
+	mut total := 0
+	mut index := 0
+	while index < count
+		label := "item-#{index.to_s()}:" + (index % 97).to_s()
+		parts := [label, "x", label]
+		total += parts.join("/").size()
+		index += 1
+	end
+	return total
+end
+
+def main()
+	puts(build(600000))
+	return
+end

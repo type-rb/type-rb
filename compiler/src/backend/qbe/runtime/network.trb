@@ -1,0 +1,29 @@
+import { network_adapter_start, network_names } from mir/model/network_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { QbeOutput } from backend/qbe/output
+import { emit_network_libraries } from backend/qbe/runtime/network_libraries
+import { emit_network_buffers } from backend/qbe/runtime/network_buffers
+import { emit_network_parser } from backend/qbe/runtime/network_parser
+import { emit_network_transport } from backend/qbe/runtime/network_transport
+
+# The host boundary is mechanical and has no managed callback entry points.
+# All allocations inside libuv/llhttp callbacks are raw, with explicit release.
+def network_runtime_needed(native_module: MirModule): Boolean
+	mut needed := false
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter >= network_adapter_start() && signature.adapter < network_adapter_start() + network_names().size()
+			needed = true
+		end
+	end
+	return needed
+end
+
+def emit_network_runtime(native_module: MirModule, mut output: QbeOutput)
+	if network_runtime_needed(native_module)
+		emit_network_libraries(output)
+		emit_network_buffers(output)
+		emit_network_parser(output)
+		emit_network_transport(output)
+	end
+end

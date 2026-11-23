@@ -1,0 +1,167 @@
+import { qbe_hash_concat_reads, qbe_hash_integer_reads, qbe_hash_string_reads, qbe_output_append, qbe_output_branch, qbe_output_chunk, qbe_output_line, qbe_output_new, qbe_require_hash, qbe_require_hash_concat } from backend/qbe/output
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("QBE output construction") do
+	test("retains requested Hash key families across aliases and emitter order") do
+		["integer", "string"].each do |first|
+			mut output := qbe_output_new(1, [0, 0, 0, 0, 0, 0])
+			mut shared := output
+			expect(qbe_hash_integer_reads(output)).to_be_false()
+			expect(qbe_hash_string_reads(output)).to_be_false()
+			qbe_require_hash(shared, first)
+			expect(qbe_hash_integer_reads(output)).to_equal(first == "integer")
+			expect(qbe_hash_string_reads(output)).to_equal(first == "string")
+			qbe_require_hash(output, "generic")
+			qbe_require_hash(output, "integer")
+			qbe_require_hash(output, "string")
+			qbe_require_hash(shared, "generic")
+			qbe_require_hash(shared, first)
+			expect(qbe_hash_integer_reads(output)).to_be_true()
+			expect(qbe_hash_string_reads(output)).to_be_true()
+		end
+	end
+
+	test("shares concat probe requirements with separately buffered function output") do
+		mut output := qbe_output_new(1, [0, 0, 0, 0, 0, 0])
+		mut body := qbe_output_new(1, output.runtime_flags)
+		expect(qbe_hash_concat_reads(output)).to_be_false()
+		qbe_require_hash_concat(body)
+		qbe_require_hash(output, "integer")
+		qbe_require_hash(body, "generic")
+		expect(qbe_hash_concat_reads(output)).to_be_true()
+		expect(qbe_hash_string_reads(output)).to_be_true()
+		expect(qbe_hash_integer_reads(body)).to_be_true()
+	end
+
+	test("shares appended lines and growth through output aliases") do
+		mut output := qbe_output_new(1, [])
+		mut shared := output
+		mut index := 0
+		while index < 513
+			qbe_output_line(shared, "line")
+			index += 1
+		end
+		qbe_output_line(output, "tail")
+		expect(load_string(shared.lines, 0)).to_equal("line")
+		expect(load_string(output.lines, 512)).to_equal("line")
+		expect(load_string(shared.lines, 513)).to_equal("tail")
+		mut position := [0]
+		mut expected := ""
+		index = 0
+		while index < 513
+			expected += "line\n"
+			index += 1
+		end
+		expect(qbe_output_chunk(output, position)).to_equal(expected + "tail")
+		expect(position[0]).to_equal(514)
+	end
+
+	test("keeps ordered lines, branch spelling, and appended output independent") do
+		flags := [1, 0]
+		mut output := qbe_output_new(8, flags)
+		expect(output.lines.used[0]).to_equal(0)
+		qbe_output_line(output, "@entry")
+		qbe_output_branch(output, "%condition", "@yes", "@no")
+		mut appended := qbe_output_new(4, [0, 1])
+		qbe_output_line(appended, "@yes")
+		qbe_output_append(output, appended)
+		expect(output.lines.used[0]).to_equal(3)
+		expect(load_string(output.lines, 0)).to_equal("@entry")
+		expect(load_string(output.lines, 1)).to_equal("\tjnz %condition, @yes, @no")
+		expect(load_string(output.lines, 2)).to_equal("@yes")
+		expect(appended.lines.used[0]).to_equal(1)
+		qbe_output_line(appended, "@no")
+		expect(output.lines.used[0]).to_equal(3)
+		expect(output.runtime_flags[0]).to_equal(1)
+		expect(output.runtime_flags[1]).to_equal(0)
+	end
+end
+
+describe("QBE output chunks") do
+	test("joins a later uneven chunk across storage blocks without a leading separator") do
+		mut output := qbe_output_new(1, [])
+		mut oversized := ""
+		while oversized.size() < 4097
+			oversized += "x"
+		end
+		qbe_output_line(output, oversized)
+		mut expected := ""
+		mut index := 0
+		while index < 259
+			mut line := "alpha\nbeta"
+			if index % 3 == 0
+				line = ""
+			elsif index % 3 == 1
+				line = "z"
+			end
+			qbe_output_line(output, line)
+			if index > 0
+				expected += "\n"
+			end
+			expected += line
+			index += 1
+		end
+		mut position := [0]
+		mut shared_position := position
+		expect(qbe_output_chunk(output, position)).to_equal(oversized)
+		expect(shared_position[0]).to_equal(1)
+		expect(qbe_output_chunk(output, position)).to_equal(expected)
+		expect(shared_position[0]).to_equal(260)
+		expect(output.lines.used[0]).to_equal(260)
+		expect(load_string(output.lines, 1)).to_equal("")
+	end
+
+	test("preserves empty lines, embedded newlines and the terminal newline") do
+		mut output := qbe_output_new(8, [])
+		lines := ["", "alpha\nbeta", "", "omega", ""]
+		mut expected := ""
+		mut index := 0
+		while index < lines.size()
+			qbe_output_line(output, lines[index])
+			expected += lines[index] + "\n"
+			index += 1
+		end
+		mut position := [0]
+		expect(qbe_output_chunk(output, position) + "\n").to_equal(expected)
+		expect(position[0]).to_equal(lines.size())
+	end
+
+	test("keeps boundary and oversized lines intact and consumes each once") do
+		mut output := qbe_output_new(8, [])
+		mut long := ""
+		while long.size() < 4095
+			long += "x"
+		end
+		qbe_output_line(output, long)
+		qbe_output_line(output, "")
+		qbe_output_line(output, "tail")
+		qbe_output_line(output, long + "oversized")
+		qbe_output_line(output, "last")
+		mut position := [0]
+		expect(qbe_output_chunk(output, position)).to_equal(long + "\n")
+		expect(position[0]).to_equal(2)
+		expect(qbe_output_chunk(output, position)).to_equal("tail")
+		expect(qbe_output_chunk(output, position)).to_equal(long + "oversized")
+		expect(qbe_output_chunk(output, position)).to_equal("last")
+		expect(position[0]).to_equal(5)
+	end
+
+	test("joins many short lines without changing the chunk boundary") do
+		mut output := qbe_output_new(8, [])
+		mut index := 0
+		mut expected := ""
+		while index < 4100
+			qbe_output_line(output, "")
+			if index < 4096
+				expected += "\n"
+			end
+			index += 1
+		end
+		mut position := [0]
+		expect(qbe_output_chunk(output, position)).to_equal(expected)
+		expect(position[0]).to_equal(4097)
+		expect(qbe_output_chunk(output, position)).to_equal("\n\n")
+		expect(position[0]).to_equal(4100)
+	end
+end

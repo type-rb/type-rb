@@ -1,0 +1,71 @@
+import { push_token } from frontend/syntax/lexer
+import { expand_quoted_token } from frontend/syntax/literal_syntax
+import { parse_raw_enum_value } from frontend/syntax/raw_enum_syntax
+import { expand_type_closer } from frontend/syntax/syntax_tokens
+import { compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Sparse fused token preservation") do
+	test("clears a folded literal flag when its token index is reused") do
+		mut state := compiler_new(64)
+		push_token(state, 3, "left", 2)
+		push_token(state, 5, "+", 2)
+		push_token(state, 3, "right", 2)
+		push_token(state, 4, "\n", 2)
+		expect(state.source_tokens.token_count[0]).to_equal(2)
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal("leftright")
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 0)).to_equal(1)
+		state.source_tokens.token_count[0] = 0
+		push_token(state, 3, "replacement", 7)
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 0)).to_equal(0)
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal("replacement")
+		expect(load_integer(state.source_tokens.token_lines, 0)).to_equal(7)
+	end
+	test("moves folded flags and preserves origins when splitting a type closer") do
+		mut state := compiler_new(64)
+		push_token(state, 5, ">>", 5)
+		push_token(state, 3, "a", 5)
+		push_token(state, 5, "+", 5)
+		push_token(state, 3, "b", 5)
+		push_token(state, 4, "\n", 5)
+		expand_type_closer(state, 0)
+		expect(state.source_tokens.token_count[0]).to_equal(4)
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal(">")
+		expect(load_string(state.source_tokens.token_texts, 1)).to_equal(">")
+		expect(load_string(state.source_tokens.token_texts, 2)).to_equal("ab")
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 1)).to_equal(0)
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 2)).to_equal(1)
+		expect(load_integer(state.source_tokens.token_lines, 2)).to_equal(5)
+	end
+	test("preserves a folded tail when expanding a quoted token") do
+		mut state := compiler_new(64)
+		push_token(state, 7, "'first'", 3)
+		push_token(state, 3, "a", 4)
+		push_token(state, 5, "+", 4)
+		push_token(state, 3, "b", 4)
+		push_token(state, 4, "\n", 4)
+		expect(expand_quoted_token(state, 0, false)).to_be_true()
+		expect(state.source_tokens.token_count[0]).to_equal(3)
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal("first")
+		expect(load_string(state.source_tokens.token_texts, 1)).to_equal("ab")
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 0)).to_equal(0)
+		expect(sparse_integer_at(state.source_tokens.token_fused_literals, 1)).to_equal(1)
+		expect(load_integer(state.source_tokens.token_lines, 0)).to_equal(3)
+		expect(load_integer(state.source_tokens.token_lines, 1)).to_equal(4)
+	end
+	test("rejects a folded String as a raw enum literal with the original diagnostic") do
+		mut state := compiler_new(64)
+		push_token(state, 5, "=", 9)
+		push_token(state, 3, "a", 9)
+		push_token(state, 5, "+", 9)
+		push_token(state, 3, "b", 9)
+		push_token(state, 4, "\n", 9)
+		mut position := [0]
+		expect(parse_raw_enum_value(state, position, 0)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4002")
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("raw enum values must be explicit String or Integer literals")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(9)
+	end
+end

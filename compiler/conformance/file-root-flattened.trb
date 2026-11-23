@@ -1,0 +1,60 @@
+record Score
+	total: Integer
+end
+
+def shared_normalize(value: Integer): Integer
+	return value
+end
+
+def adjust(value: Integer): Integer
+	return shared_normalize(value)
+end
+
+def score_normalize(value: Integer): Integer
+	return value
+end
+
+def build_score(iterations: Integer): Score
+	mut values: Array<Integer> := []
+	values.push(iterations)
+	mut index := 0
+	mut total := 0
+	while index < values[0]
+		total += (index % 97) * 3
+		total -= index % 31
+		if total > 1000000
+			total /= 2
+		end
+		index += 1
+	end
+	return Score.new(total: score_normalize(total) + adjust(0))
+end
+
+def label_normalize(value: String): String
+	return value
+end
+
+def prefix(): String
+	return "file-root"
+end
+
+def suffix(): String
+	return "-ok"
+end
+
+def label(): String
+	return label_normalize(prefix() + suffix())
+end
+
+def report(iterations: Integer): String
+	score: Score := build_score(iterations)
+	if score.total > 0
+		return label()
+	end
+	return "file-root-bad"
+end
+
+def main()
+	puts(report(5000000))
+	return
+end

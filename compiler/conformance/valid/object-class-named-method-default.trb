@@ -1,0 +1,11 @@
+class Offset
+	@amount: Integer := 2
+	def add(value: Integer, *, extra: Integer = 1): Integer
+		return @amount + value + extra
+	end
+end
+def main()
+	item := Offset.new()
+	puts(item.add(3))
+	puts(item.add(3, extra: 4))
+end

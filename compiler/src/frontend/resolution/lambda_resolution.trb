@@ -1,0 +1,30 @@
+import { callable_type } from frontend/types/callable_types
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, store_string } from support/storage
+import { resolve_type_name } from frontend/resolution/type_resolution
+
+# Identical token regions in different generic instances have distinct resolved
+# signatures. Only parsed parameter spellings are shared across these bodies.
+def resolve_lambda_headers(mut state: CompilerState, start: Integer, finish: Integer): Boolean
+	state.callables.lambdas.each do |syntax|
+		if syntax.origin >= start && syntax.finish <= finish
+			mut parameters: Array<String> := []
+			syntax.parameters.each do |parameter|
+				resolved := resolve_type_name(state, state.module_graph.active_module[0], parameter.type_name, false)
+				if resolved == ""
+					diagnostic(state, "TRBN4003", load_integer(state.source_tokens.token_lines, parameter.origin), "invalid fn parameter type " + parameter.type_name)
+				end
+				parameters.push(resolved)
+			end
+			result := resolve_type_name(state, state.module_graph.active_module[0], syntax.result_type, true)
+			if result == ""
+				diagnostic(state, "TRBN4003", load_integer(state.source_tokens.token_lines, syntax.origin), "invalid fn return type " + syntax.result_type)
+			end
+			if has_diagnostic(state)
+				return false
+			end
+			store_string(state.callables.checked[0].lambda_types, syntax.origin, callable_type(parameters, result))
+		end
+	end
+	return true
+end

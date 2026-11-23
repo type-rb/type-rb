@@ -1,0 +1,147 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { load_string, store_integer } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { string_starts_with } from support/path
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR value control") do
+	test("executes typed branch joins and lexical transfers") do
+		sources := [
+			"def mark(text: String, value: Boolean): Boolean\nputs(text)\nreturn value\nend\ndef main()\nvalue := if mark(\"condition\", false)\nputs(\"then\")\n\"wrong\"\nelse\nputs(\"else\")\n\"chosen\"\nend\nputs(value)\nend\n",
+			"def select(flag: Boolean): Array<String>\nvalue := if flag\n[\"yes\" + \"!\"]\nelse\n[\"no\" + \"!\"]\nend\nreturn value\nend\ndef main()\nmut first := select(true)\nsecond := select(false)\nfirst.push(\"added\")\nputs(first.size())\nputs(second[0])\nend\n",
+			"def choose(flag: Boolean): Float\nvalue := if flag\n1\nelse\n2.5\nend\nreturn value\nend\ndef main()\nputs(choose(true).to_i())\nputs(choose(false).to_i())\nend\n",
+			"def choose(flag: Boolean): Integer\nvalue := if flag\nreturn 7\nelse\n9\nend\nreturn value\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n",
+			"def choose(value: Integer): String\nresult := if value == 0\n\"zero\"\nelsif value == 1\n\"one\"\nelse\n\"other\"\nend\nreturn result\nend\ndef main()\nputs(choose(1))\nend\n",
+			"def mark(value: Integer): Integer\nputs(\"subject\")\nreturn value\nend\ndef main()\nvalue := case mark(2)\nwhen 1\nputs(\"first\")\n\"one\"\nwhen 2\nputs(\"second\")\n\"two\"\nelse\nputs(\"other\")\n\"other\"\nend\nputs(value)\nend\n",
+			"def main()\nvalue := case \"word\"\nwhen \"no\", \"word\"\n\"yes\"\nelse\n\"bad\"\nend\nputs(value)\nend\n",
+			"def choose(flag: Boolean, value: String = flag ? \"yes\" : \"no\"): String\nreturn value\nend\ndef main()\nputs(choose(false))\nputs(choose(true, \"supplied\"))\nend\n",
+			"def main()\nmut i := 0\nmut total := 0\nwhile i < 5\ni += 1\nvalue := if i == 2\nnext\nelsif i == 4\nbreak\nelse\ni * 10\nend\ntotal += value\nend\nputs(total)\nputs(i)\nend\n",
+			"def main()\nmut i := 0\nwhile i < 5\ni += 1\nvalue := if i < 3\nnext\nelse\nbreak\nend\nputs(value)\nend\nputs(i)\nend\n",
+			"def choose(flag: Boolean): Integer\nmut outer := 1\nvalue := if flag\nouter = 10\nouter + 2\nelse\nouter = 20\nouter + 3\nend\nreturn outer + value\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n",
+			"def main()\nmut shared := [1]\nselected := if false\n[2]\nelse\nshared\nend\nshared.push(3)\nputs(selected.size())\nputs(selected[1])\nend\n",
+			"def choose(value: Integer): Integer\nchosen := case value\nwhen 1\nreturn 7\nwhen 2, 3\n9\nelse\n11\nend\nreturn chosen + 1\nend\ndef main()\nputs(choose(1))\nputs(choose(3))\nputs(choose(0))\nend\n",
+			"def mark(): Integer\nputs(\"left\")\nreturn 10\nend\ndef choose(flag: Boolean): Integer\nvalue := mark() + if flag\nreturn 7\nelse\nreturn 8\nend\nreturn value\nend\ndef main()\nputs(choose(true))\nend\n",
+			"def mark(): Integer\nputs(\"value\")\nreturn 7\nend\ndef guard(flag: Boolean): Boolean\nputs(\"guard\")\nreturn flag\nend\ndef choose(flag: Boolean): Integer\nreturn mark() if guard(flag)\nreturn 9\nend\ndef main()\nputs(choose(false))\nputs(choose(true))\nend\n",
+			"def main()\nmut i := 0\nmut sum := 0\nwhile i < 6\ni += 1\nnext if i == 2\nbreak if i == 5\nsum += i\nend\nputs(sum)\nputs(i)\nend\n",
+			"def main()\nmut sum := 0\n(1..6).each do |i|\nnext if i == 2\nbreak if i == 5\nsum += i\nend\nputs(sum)\nend\n",
+			"def choose(flag: Boolean)\nreturn if flag\nputs(\"done\")\nend\ndef main()\nchoose(true)\nchoose(false)\nend\n",
+			"def choose(flag: Boolean): Integer\nvalue := flag && if flag\nreturn 7\nelse\nreturn 8\nend\nputs(value)\nreturn 9\nend\ndef main()\nputs(choose(false))\nputs(choose(true))\nend\n",
+			"def choose(flag: Boolean): Integer\nmut value := 3\nvalue += if flag\nreturn 7\nelse\nreturn 8\nend\nreturn value\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n",
+			"def mark(value: Integer): Integer\nputs(value)\nreturn value\nend\ndef add(left: Integer, right: Integer): Integer\nputs(\"add\")\nreturn left + right\nend\ndef choose(flag: Boolean): Integer\nvalue := add(if flag\nreturn 7\nelse\nreturn 8\nend, mark(2))\nreturn value\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n",
+			"def mark(value: Integer): Integer\nputs(value)\nreturn value\nend\ndef add(left: Integer, right: Integer): Integer\nputs(\"add\")\nreturn left + right\nend\ndef choose(flag: Boolean): Integer\nvalue := add(mark(1), if flag\nreturn 7\nelse\nreturn 8\nend)\nreturn value\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n",
+			"def mark(): Integer\nputs(\"left\")\nreturn 10\nend\ndef choose(flag: Boolean): Integer\nvalue := mark() + (if flag\nreturn 7\nelse\nreturn 8\nend)\nreturn value\nend\ndef main()\nputs(choose(true))\nend\n",
+			"def mark(): Integer\n\tputs(\"prefix\")\n\treturn 1\nend\n\ndef from_index(mut values: Hash<String, Integer>): Integer\n\tvalue := values[if true\n\t\treturn 7\n\telse\n\t\treturn 8\n\tend]\n\treturn value\nend\n\ndef from_fetch(mut values: Hash<String, Integer>): Integer\n\tvalue := values.fetch(if true\n\t\treturn 9\n\telse\n\t\treturn 10\n\tend)\n\treturn value\nend\n\ndef from_literal(): Integer\n\tvalue := {\"first\" => mark(), \"second\" => if true\n\t\treturn 11\n\telse\n\t\treturn 12\n\tend}\n\treturn value.size()\nend\n\ndef from_array(): Integer\n\tvalue := [mark(), if true\n\t\treturn 13\n\telse\n\t\treturn 14\n\tend]\n\treturn value.size()\nend\n\nrecord Packet\n\tfirst: Integer\n\tsecond: Integer\nend\n\ndef from_record(): Integer\n\tvalue := Packet.new(first: if true\n\t\treturn 15\n\telse\n\t\treturn 16\n\tend, second: mark())\n\treturn value.first\nend\n\ndef from_push(mut values: Array<Integer>): Integer\n\tvalues.push(if true\n\t\treturn 17\n\telse\n\t\treturn 18\n\tend)\n\treturn values.size()\nend\n\ndef main()\n\tmut values := {\"saved\" => 3}\n\tputs(from_index(values))\n\tputs(values[\"saved\"])\n\tputs(from_fetch(values))\n\tputs(values[\"saved\"])\n\tputs(from_literal())\n\tputs(from_array())\n\tputs(from_record())\n\tmut items := [1]\n\tputs(from_push(items))\n\tputs(items.size())\nend\n",
+		]
+		outputs := ["condition\nelse\nchosen\n", "2\nno!\n", "1\n2\n", "7\n9\n", "one\n", "subject\nsecond\ntwo\n", "yes\n", "no\nsupplied\n", "40\n4\n", "3\n", "22\n43\n", "2\n3\n", "7\n10\n12\n", "left\n7\n", "guard\n9\nguard\nvalue\n7\n", "8\n5\n", "8\n", "done\n", "false\n9\n7\n", "7\n8\n", "7\n8\n", "1\n7\n1\n8\n", "left\n7\n", "7\n3\n9\n3\nprefix\n11\nprefix\n13\n15\n17\n1\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					before := control_test_output(emit_qbe(state))
+					intrinsic_mir_erase(state)
+					state.parsed.controls.each do |control|
+						store_integer(state.parsed.control_origins, control.origin, 0)
+					end
+					expect(control_test_output(emit_qbe(state))).to_equal(before)
+					state.scalar_mir.functions.each do |function|
+						mut left := function.block_start
+						mut right := left + function.block_count - 1
+						while left < right
+							saved := state.scalar_mir.blocks[left]
+							state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+							state.scalar_mir.blocks[right] = saved
+							left += 1
+							right -= 1
+						end
+					end
+					expect(verify_mir(state.scalar_mir, true)).to_equal("")
+					mut forced := ""
+					mut ordinary := false
+					control_test_output(emit_qbe(state)).split("\n").each do |line|
+						if string_starts_with(line, "function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects invalid branch values scope patterns and transfer targets") do
+		bodies := ["value := if true\n1\nend", "value := if true\n1\nelse\n\"wrong\"\nend", "value := if true\n_inside := 1\nelse\n2\nend", "value := if true\ninside := 1\ninside\nelse\ninside\nend", "break if true", "value := case 1\nwhen 1 + 0\n2\nelse\n3\nend", "value := if true\nreturn\nelse\nreturn\nend\n1 + \"wrong\""]
+		messages := ["requires an else", "incompatible types", "end with a value", "unresolved", "inside a loop", "literal matching the selector type", "operator + does not support Integer and String"]
+		mut index := 0
+		bodies.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+			message := load_string(state.diagnostics.messages, 0)
+			if !message.include?(messages[index])
+				puts(message)
+			end
+			expect(message.include?(messages[index])).to_be_true()
+			index += 1
+		end
+	end
+
+	test("retains immutable reference capabilities across value joins") do
+		["if true\nvalues\nelse\n[2]\nend", "true ? values : [2]", "case 1\nwhen 1\nvalues\nelse\n[2]\nend"].each do |expression|
+			mut state := logical_checked_source("def main()\nvalues := [1]\nmut selected := " + expression + "\nselected.push(3)\nend\n")
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("cannot initialize mutable selected from an immutable value")
+		end
+	end
+
+	test("rejects a value join edge with a missing result operand") do
+		mut state := logical_checked_source("def choose(flag: Boolean): Float\nvalue := if flag\n1\nelse\n2.5\nend\nreturn value\nend\ndef main()\nputs(choose(true).to_i())\nend\n")
+		expect(check(state)).to_be_true()
+		mut changed := false
+		state.scalar_mir.blocks.each do |block|
+			if !changed && block.terminator == 1 && block.first_argument_count > 1
+				state.scalar_mir.arguments[block.first_argument_start + block.first_argument_count - 1] = 9007199254740991
+				changed = true
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("does not treat an initializer transfer as a private helper return") do
+		mut state := logical_checked_source("def choose(flag: Boolean, value: Integer = if flag\nreturn 7\nelse\n9\nend): Integer\nreturn value\nend\ndef main()\nputs(choose(true))\nend\n")
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("return is unavailable inside a default initializer")
+	end
+
+end

@@ -1,0 +1,9 @@
+metric,native,comparison,limit_percent
+compiler-build-time,1.011470606,1.011697077,125
+compiler-build-rss,61280256,61272064,125
+adjacent-build-time,1.070266075,1.056262533,110
+adjacent-build-rss,61272064,61206528,110
+application-build-time,0.041963901,0.187373396,125
+application-build-rss,60723200,76865536,125
+application-runtime-time,0.000891878,0.001906653,125
+application-runtime-rss,1617920,6184960,125

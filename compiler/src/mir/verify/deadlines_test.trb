@@ -1,0 +1,46 @@
+import { deadline_intrinsic_test_state } from testing/mir/deadlines
+import { MirModule } from mir/model/module
+import { mir_op_deadline_checkpoint } from mir/model/instructions
+import { mir_deadline_checkpoints_error } from mir/verify/deadlines
+import { verify_mir } from mir/verify/module
+import { mir_test_block_with_cell } from testing/mir/model
+import { describe, expect, test } from trb/std/test
+
+def deadline_test_remove_checkpoint(mut native_module: MirModule, entry: Boolean)
+	mut block_index := 0
+	while block_index < native_module.blocks.size()
+		block := native_module.blocks[block_index]
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			if native_module.instructions[position].kind == mir_op_deadline_checkpoint() && ((position == block.instruction_start) == entry)
+				start := native_module.instructions.size()
+				mut copied := block.instruction_start
+				while copied < block.instruction_start + block.instruction_count
+					if copied != position
+						native_module.instructions.push(native_module.instructions[copied])
+					end
+					copied += 1
+				end
+				changed := mir_test_block_with_cell(block, 5, start)
+				native_module.blocks[block_index] = mir_test_block_with_cell(changed, 6, block.instruction_count - 1)
+				return
+			end
+			position += 1
+		end
+		block_index += 1
+	end
+	expect(false).to_be_true()
+end
+
+describe("MIR deadline checkpoint verification") do
+	test("rejects removal of a required entry or continuation checkpoint") do
+		[true, false].each do |entry|
+			mut state := deadline_intrinsic_test_state()
+			deadline_test_remove_checkpoint(state.scalar_mir, entry)
+			expect(mir_deadline_checkpoints_error(state.scalar_mir).include?("checkpoint")).to_be_true()
+			# Full verification also rejects any now-stale derived plan.
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+
+end

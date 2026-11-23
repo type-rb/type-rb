@@ -1,0 +1,36 @@
+import { CompilerProjectSources, check, load_project_sources } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState } from state/state
+import { expect_compiler_phase } from testing/pipeline
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def object_import_test_state(declarations: String, main: String): CompilerState
+	return load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(paths: ["/project/src/item.trb", "/project/src/main.trb"], sources: [declarations, main], error: ""))
+end
+
+describe("Class and interface import roots") do
+	test("keeps generic class identities through a bare alias") do
+		mut state := object_import_test_state("class Item<T>\nreadonly @value: T\ndef initialize(value: T)\n@value = value\nend\nend\n", "import item as Entry\ndef main()\nputs(Entry<Integer>.new(7).value)\nend\n")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(load_string(state.module_graph.import_declarations, 0)).to_equal("Item")
+		expect(load_string(state.module_graph.import_symbols, 0)).to_equal("Entry")
+	end
+
+	test("resolves generic interface roots used by implemented methods") do
+		mut state := object_import_test_state("interface Item<T>\ncall(value: T): T\nend\nclass Concrete implements Item<Integer>\ndef call(value: Integer): Integer\nreturn value + 1\nend\nend\n", "import item as Contract\nimport { Concrete } from item\ndef main()\nvalue: Contract<Integer> := Concrete.new()\nputs(value.call(7))\nend\n")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+	end
+
+	test("requires an exact import for ambiguous class and interface roots") do
+		declarations := "class Item\nend\ninterface ITEM\nend\n"
+		mut rejected := object_import_test_state(declarations, "import item\ndef main()\nend\n")
+		expect(resolve(rejected)).to_be_false()
+		expect(load_string(rejected.diagnostics.messages, 0)).to_equal("import item has multiple record root declarations matching item: Item, ITEM; use an exact named import")
+		mut accepted := object_import_test_state(declarations, "import { Item } from item\ndef main()\nItem.new()\nend\n")
+		expect_compiler_phase(accepted, "resolve", resolve(accepted))
+		expect_compiler_phase(accepted, "check", check(accepted))
+	end
+end

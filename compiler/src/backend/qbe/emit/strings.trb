@@ -1,0 +1,182 @@
+import { mir_convert_boolean_to_string, mir_convert_float_to_integer, mir_convert_float_to_string, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer, mir_puts_any_mode, mir_string_compare_before, mir_string_compare_not_equal, mir_string_sequence_reverse } from mir/model/operation_modes
+import { qbe_runtime_boolean_output_slot, qbe_runtime_float_string_slot, qbe_runtime_process_slot } from backend/qbe/runtime_slots
+import { mir_type_boolean } from mir/model/type_ids
+import { mir_op_array_join, mir_op_puts, mir_op_scalar_conversion, mir_op_string_case, mir_op_string_compare, mir_op_string_index, mir_op_string_literal, mir_op_string_query, mir_op_string_replace, mir_op_string_sequence, mir_op_string_size, mir_op_string_slice, mir_op_string_split, mir_op_string_trim } from mir/model/instructions
+import { integer_string } from support/literals
+import { mir_operand_type, mir_storage_type_name } from mir/model/types
+import { MirInstruction, MirStringConcat, MirStringSplit } from mir/model/module
+import { QbeEmitContext, QbeValue, emit_temporary, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+def emit_mir_string_concat(plan: MirStringConcat, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	if plan.fragments.size() == 3
+		result := emit_temporary(context)
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_concat_three(l " + operands[plan.fragments[0]] + ", l " + operands[plan.fragments[1]] + ", l " + operands[plan.fragments[2]] + ")")
+		return emitted_value(result, "String")
+	end
+	fragments := "%string_fragments"
+	mut index := 0
+	while index < plan.fragments.size()
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + address + " =l add " + fragments + ", " + integer_string(index * 8))
+		qbe_output_line(output, "\tstorel " + operands[plan.fragments[index]] + ", " + address)
+		index += 1
+	end
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + result + " =l call $trbn_string_concat_many(l " + fragments + ", l " + integer_string(plan.fragments.size()) + ")")
+	return emitted_value(result, "String")
+end
+
+# Runtime calls implement the verified operation, with no source inspection or
+# root/effect inference here. The control adapter publishes the MIR root plan.
+def emit_mir_string_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, symbols: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	kind := instruction.kind
+	result_type := mir_storage_type_name(state.scalar_mir, mir_operand_type(value_types, instruction.result))
+	if kind == mir_op_string_literal()
+		return emitted_value(symbols[instruction.payload], "String")
+	end
+	first := operands[instruction.first]
+	if kind == mir_op_puts()
+		mut runtime := "$trbn_puts"
+		if instruction.payload == mir_puts_any_mode()
+			runtime = "$trbn_puts_any"
+			output.runtime_flags[qbe_runtime_process_slot()] = 1
+			output.runtime_flags[qbe_runtime_float_string_slot()] = 1
+		elsif mir_operand_type(value_types, instruction.first) == mir_type_boolean()
+			runtime = "$trbn_puts_boolean"
+			output.runtime_flags[qbe_runtime_boolean_output_slot()] = 1
+		end
+		qbe_output_line(output, "\tcall " + runtime + "(l " + first + ")")
+		return emitted_value("", "Void")
+	end
+	result := emit_temporary(context)
+	if kind == mir_op_string_split()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_split(l " + first + ", l " + operands[instruction.second] + ")")
+	elsif kind == mir_op_string_replace()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_replace(l " + first + ", l " + operands[instruction.second] + ", l " + operands[instruction.payload] + ")")
+	elsif kind == mir_op_string_case()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_case(l " + first + ", l " + integer_string(instruction.payload) + ")")
+	elsif kind == mir_op_string_trim()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_trim(l " + first + ", l " + integer_string(instruction.payload) + ")")
+	elsif kind == mir_op_array_join()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_array_join(l " + first + ", l " + operands[instruction.second] + ")")
+	elsif kind == mir_op_string_slice()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_slice(l " + first + ", l " + operands[instruction.second] + ")")
+	elsif kind == mir_op_string_sequence()
+		if instruction.payload == mir_string_sequence_reverse()
+			qbe_output_line(output, "\t" + result + " =l call $trbn_string_reverse(l " + first + ")")
+		else
+			qbe_output_line(output, "\t" + result + " =l call $trbn_string_sequence(l " + first + ", l " + integer_string(instruction.payload) + ")")
+		end
+	elsif kind == mir_op_string_query()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_query(l " + first + ", l " + operands[instruction.second] + ", l " + integer_string(instruction.payload) + ")")
+	elsif kind == mir_op_string_size()
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + address + " =l add " + first + ", 16")
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+	elsif kind == mir_op_scalar_conversion()
+		output.runtime_flags[qbe_runtime_process_slot()] = 1
+		mut storage := "l"
+		mut conversion := "$trbn_integer_to_string(l "
+		if instruction.payload == mir_convert_string_to_integer()
+			conversion = "$trbn_string_to_integer(l "
+		elsif instruction.payload == mir_convert_float_to_integer()
+			conversion = "$trbn_float_to_integer(d "
+		elsif instruction.payload == mir_convert_float_to_string()
+			conversion = "$trbn_float_to_string(d "
+			output.runtime_flags[qbe_runtime_float_string_slot()] = 1
+		elsif instruction.payload == mir_convert_boolean_to_string()
+			conversion = "$trbn_boolean_to_string(l "
+			output.runtime_flags[qbe_runtime_boolean_output_slot()] = 1
+		end
+		if instruction.payload == mir_convert_string_to_float()
+			conversion = "$trbn_string_to_float(l "
+			storage = "d"
+		elsif instruction.payload == mir_convert_string_integer_status()
+			conversion = "$trbn_string_integer_status(l "
+		elsif instruction.payload == mir_convert_string_float_status()
+			conversion = "$trbn_string_float_status(l "
+		end
+		qbe_output_line(output, "\t" + result + " =" + storage + " call " + conversion + first + ")")
+	else
+		mut runtime := "$trbn_string_concat"
+		if kind == mir_op_string_compare()
+			runtime = "$trbn_string_equal"
+			if instruction.payload == mir_string_compare_before()
+				runtime = "$trbn_string_before"
+			end
+		elsif kind == mir_op_string_index()
+			runtime = "$trbn_string_index"
+		end
+		qbe_output_line(output, "\t" + result + " =l call " + runtime + "(l " + first + ", l " + operands[instruction.second] + ")")
+		if kind == mir_op_string_compare() && instruction.payload == mir_string_compare_not_equal()
+			inverted := emit_temporary(context)
+			qbe_output_line(output, "\t" + inverted + " =l ceql " + result + ", 0")
+			return emitted_value(inverted, result_type)
+		end
+	end
+	return emitted_value(result, result_type)
+end
+
+# Share the bounded decoder between scalar access and the counting loop.
+# Inlining its control flow avoids a call for every non-ASCII code point; the
+# malformed, overlong, surrogate and truncated-byte rules still have one owner.
+def emit_utf8_width_blocks(data: String, remaining: String, first: String, finish: String, mut output: QbeOutput)
+	qbe_output_line(output, "\n@utf8_decode\n %utf8_low =w cultw " + first + ", 194\n %utf8_high =w cugtw " + first + ", 244\n %utf8_invalid =w or %utf8_low, %utf8_high\n jnz %utf8_invalid, @utf8_one, @utf8_classify")
+	qbe_output_line(output, "\n@utf8_classify\n %utf8_two =w cultw " + first + ", 224\n jnz %utf8_two, @utf8_two, @utf8_longer")
+	qbe_output_line(output, "\n@utf8_two\n %utf8_two_short =w csltl " + remaining + ", 2\n jnz %utf8_two_short, @utf8_one, @utf8_two_tail")
+	qbe_output_line(output, "\n@utf8_two_tail\n %utf8_two_address =l add " + data + ", 1\n %utf8_two_byte =w loadub %utf8_two_address\n %utf8_two_low =w cultw %utf8_two_byte, 128\n %utf8_two_high =w cugtw %utf8_two_byte, 191\n %utf8_two_bad =w or %utf8_two_low, %utf8_two_high\n jnz %utf8_two_bad, @utf8_one, @utf8_two_valid")
+	qbe_output_line(output, "\n@utf8_two_valid\n jmp @utf8_finish")
+	qbe_output_line(output, "\n@utf8_longer\n %utf8_three =w cultw " + first + ", 240\n jnz %utf8_three, @utf8_three, @utf8_four")
+	qbe_output_line(output, "\n@utf8_three\n %utf8_three_short =w csltl " + remaining + ", 3\n jnz %utf8_three_short, @utf8_one, @utf8_three_tail")
+	qbe_output_line(output, "\n@utf8_three_tail\n %utf8_three_a =l add " + data + ", 1\n %utf8_three_b =l add " + data + ", 2\n %utf8_second3 =w loadub %utf8_three_a\n %utf8_third3 =w loadub %utf8_three_b\n %utf8_second3_low =w cultw %utf8_second3, 128\n %utf8_second3_high =w cugtw %utf8_second3, 191\n %utf8_third3_low =w cultw %utf8_third3, 128\n %utf8_third3_high =w cugtw %utf8_third3, 191\n %utf8_second3_bad =w or %utf8_second3_low, %utf8_second3_high\n %utf8_third3_bad =w or %utf8_third3_low, %utf8_third3_high\n %utf8_tail3_bad =w or %utf8_second3_bad, %utf8_third3_bad\n %utf8_e0 =w ceqw " + first + ", 224\n %utf8_overlong3 =w cultw %utf8_second3, 160\n %utf8_bad_e0 =w and %utf8_e0, %utf8_overlong3\n %utf8_ed =w ceqw " + first + ", 237\n %utf8_surrogate =w cugtw %utf8_second3, 159\n %utf8_bad_ed =w and %utf8_ed, %utf8_surrogate\n %utf8_range3_bad =w or %utf8_bad_e0, %utf8_bad_ed\n %utf8_three_bad =w or %utf8_tail3_bad, %utf8_range3_bad\n jnz %utf8_three_bad, @utf8_one, @utf8_three_valid")
+	qbe_output_line(output, "\n@utf8_three_valid\n jmp @utf8_finish")
+	qbe_output_line(output, "\n@utf8_four\n %utf8_four_short =w csltl " + remaining + ", 4\n jnz %utf8_four_short, @utf8_one, @utf8_four_tail")
+	qbe_output_line(output, "\n@utf8_four_tail\n %utf8_four_a =l add " + data + ", 1\n %utf8_four_b =l add " + data + ", 2\n %utf8_four_c =l add " + data + ", 3\n %utf8_second4 =w loadub %utf8_four_a\n %utf8_third4 =w loadub %utf8_four_b\n %utf8_fourth4 =w loadub %utf8_four_c\n %utf8_second4_low =w cultw %utf8_second4, 128\n %utf8_second4_high =w cugtw %utf8_second4, 191\n %utf8_third4_low =w cultw %utf8_third4, 128\n %utf8_third4_high =w cugtw %utf8_third4, 191\n %utf8_fourth4_low =w cultw %utf8_fourth4, 128\n %utf8_fourth4_high =w cugtw %utf8_fourth4, 191\n %utf8_second4_bad =w or %utf8_second4_low, %utf8_second4_high\n %utf8_third4_bad =w or %utf8_third4_low, %utf8_third4_high\n %utf8_fourth4_bad =w or %utf8_fourth4_low, %utf8_fourth4_high\n %utf8_middle4_bad =w or %utf8_second4_bad, %utf8_third4_bad\n %utf8_tail4_bad =w or %utf8_middle4_bad, %utf8_fourth4_bad\n %utf8_f0 =w ceqw " + first + ", 240\n %utf8_overlong4 =w cultw %utf8_second4, 144\n %utf8_bad_f0 =w and %utf8_f0, %utf8_overlong4\n %utf8_f4 =w ceqw " + first + ", 244\n %utf8_too_large =w cugtw %utf8_second4, 143\n %utf8_bad_f4 =w and %utf8_f4, %utf8_too_large\n %utf8_range4_bad =w or %utf8_bad_f0, %utf8_bad_f4\n %utf8_four_bad =w or %utf8_tail4_bad, %utf8_range4_bad\n jnz %utf8_four_bad, @utf8_one, @utf8_four_valid")
+	qbe_output_line(output, "\n@utf8_four_valid\n jmp @utf8_finish")
+	qbe_output_line(output, "\n@utf8_one\n jmp @utf8_finish")
+	qbe_output_line(output, "\n@utf8_finish\n %utf8_width =l phi @utf8_one 1, @utf8_two_valid 2, @utf8_three_valid 3, @utf8_four_valid 4")
+	qbe_output_line(output, " jmp " + finish)
+end
+
+# String headers retain byte length and code-point count separately. UTF-8
+# decoding is bounded by byte length; ordinary index bounds are checked by MIR
+# lowering/runtime before converting the code-point position to a byte offset.
+def emit_utf8_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\nfunction l $trbn_utf8_width(l %data, l %remaining) {\n@start\n %first =w loadub %data\n jmp @utf8_decode")
+	emit_utf8_width_blocks("%data", "%remaining", "%first", "@finish", output)
+	qbe_output_line(output, "\n@finish\n ret %utf8_width\n}")
+	# Count complete ASCII words without reading beyond the supplied span.
+	# After decoding non-ASCII, resume word counting only at an ASCII byte.
+	# Dense Unicode keeps scalar decoding; each word load has eight bytes left.
+	qbe_output_line(output, "\nfunction l $trbn_utf8_count(l %data, l %length) {\n@start\n jmp @words\n@words\n %ascii_bytes =l phi @start 0, @ascii_word %next_ascii_bytes\n %left =l sub %length, %ascii_bytes\n %wide =w csgel %left, 8\n jnz %wide, @word, @tail\n@word\n %word_address =l add %data, %ascii_bytes\n %bytes =l loadl %word_address\n %high =l and %bytes, -9187201950435737472\n %nonascii =w cnel %high, 0\n jnz %nonascii, @tail, @ascii_word\n@ascii_word\n %next_ascii_bytes =l add %ascii_bytes, 8\n jmp @words\n@tail\n jmp @loop")
+	qbe_output_line(output, "\n@loop\n %offset =l phi @tail %ascii_bytes, @advance %next, @resume_ascii %resume_next\n %count =l phi @tail %ascii_bytes, @advance %next_count, @resume_ascii %resume_count\n %done =w cslel %length, %offset\n jnz %done, @finish, @read\n@read\n %address =l add %data, %offset\n %byte =w loadub %address\n %ascii =w cultw %byte, 128\n jnz %ascii, @ascii, @decode")
+	qbe_output_line(output, "\n@ascii\n %ascii_remaining =l sub %length, %offset\n %resume_wide =w csgel %ascii_remaining, 8\n jnz %resume_wide, @resume_word, @step")
+	qbe_output_line(output, "\n@resume_word\n %resume_bytes =l loadl %address\n %resume_high =l and %resume_bytes, -9187201950435737472\n %resume_nonascii =w cnel %resume_high, 0\n jnz %resume_nonascii, @step, @resume_ascii")
+	qbe_output_line(output, "\n@resume_ascii\n %resume_next =l add %offset, 8\n %resume_count =l add %count, 8\n jmp @loop")
+	qbe_output_line(output, "\n@decode\n %remaining =l sub %length, %offset\n jmp @utf8_decode")
+	emit_utf8_width_blocks("%address", "%remaining", "%byte", "@step", output)
+	qbe_output_line(output, "\n@step\n %width =l phi @ascii 1, @resume_word 1, @utf8_finish %utf8_width\n %next =l add %offset, %width\n %next_count =l add %count, 1\n jmp @advance")
+	qbe_output_line(output, "\n@advance\n jmp @loop")
+	qbe_output_line(output, "\n@finish\n ret %count\n}")
+	qbe_output_line(output, "\nfunction l $trbn_utf8_span(l %data, l %length, l %requested) {\n@start\n jmp @loop\n@loop\n %offset =l phi @start 0, @advance %next\n %count =l phi @start 0, @advance %next_count\n %done =w cslel %requested, %count\n jnz %done, @finish, @read\n@read\n %address =l add %data, %offset\n %remaining =l sub %length, %offset\n %width =l call $trbn_utf8_width(l %address, l %remaining)\n %next =l add %offset, %width\n %next_count =l add %count, 1\n jmp @advance\n@advance\n jmp @loop\n@finish\n ret %offset\n}")
+	qbe_output_line(output, "\nfunction l $trbn_string_offset(l %string, l %index) {\n@start\n %length_address =l add %string, 8\n %points_address =l add %string, 16\n %length =l loadl %length_address\n %points =l loadl %points_address\n %ascii =w ceql %length, %points\n jnz %ascii, @ascii, @unicode\n@ascii\n ret %index\n@unicode\n %data =l add %string, 24\n %offset =l call $trbn_utf8_span(l %data, l %length, l %index)\n ret %offset\n}")
+	qbe_output_line(output, "\nfunction l $trbn_utf8_scalar(l %data, l %remaining) {\n@start\n %first_word =w loadub %data\n %first =l extuw %first_word\n %ascii =w csltl %first, 128\n jnz %ascii, @ascii, @unicode\n@ascii\n ret %first\n@unicode\n %width =l call $trbn_utf8_width(l %data, l %remaining)\n %invalid =w ceql %width, 1\n jnz %invalid, @invalid, @initialize\n@invalid\n ret 65533\n@initialize\n %shift =l sub 7, %width\n %mask_high =l shl 1, %shift\n %mask =l sub %mask_high, 1\n %initial =l and %first, %mask\n jmp @loop\n@loop\n %index =l phi @initialize 1, @advance %next\n %point =l phi @initialize %initial, @advance %next_point\n %done =w cslel %width, %index\n jnz %done, @finish, @read\n@read\n %address =l add %data, %index\n %byte_word =w loadub %address\n %byte =l extuw %byte_word\n %payload =l and %byte, 63\n %scaled =l shl %point, 6\n %next_point =l or %scaled, %payload\n %next =l add %index, 1\n jmp @advance\n@advance\n jmp @loop\n@finish\n ret %point\n}")
+	qbe_output_line(output, "\nfunction l $trbn_string_from_codepoint(l %requested) {\n@start\n %negative =w csltl %requested, 0\n %large =w csgtl %requested, 1114111\n %surrogate_low =w csgel %requested, 55296\n %surrogate_high =w cslel %requested, 57343\n %surrogate =w and %surrogate_low, %surrogate_high\n %out =w or %negative, %large\n %invalid =w or %out, %surrogate\n jnz %invalid, @replacement, @valid\n@replacement\n jmp @classify\n@valid\n jmp @classify\n@classify\n %point =l phi @replacement 65533, @valid %requested\n %ascii =w csltl %point, 128\n jnz %ascii, @one, @multi\n@one\n jmp @allocate\n@multi\n %two =w csltl %point, 2048\n jnz %two, @two, @longer\n@two\n jmp @allocate\n@longer\n %three =w csltl %point, 65536\n jnz %three, @three, @four\n@three\n jmp @allocate\n@four\n jmp @allocate\n@allocate\n %width =l phi @one 1, @two 2, @three 3, @four 4\n %size =l add %width, 17\n %result =l call $trbn_string_alloc(l %size)\n %length_address =l add %result, 8\n storel %width, %length_address\n %points_address =l add %result, 16\n storel 1, %points_address\n %data =l add %result, 24\n %terminator =l add %data, %width\n storeb 0, %terminator\n jnz %ascii, @ascii_byte, @tail\n@ascii_byte\n storeb %point, %data\n ret %result\n@tail\n %last =l sub %width, 1\n jmp @loop\n@loop\n %index =l phi @tail %last, @write %previous\n %remaining_point =l phi @tail %point, @write %next_point\n %done =w ceql %index, 0\n jnz %done, @head, @write\n@write\n %low =l and %remaining_point, 63\n %byte =l or %low, 128\n %address =l add %data, %index\n storeb %byte, %address\n %next_point =l shr %remaining_point, 6\n %previous =l sub %index, 1\n jmp @loop\n@head\n %head_shift =l sub 8, %width\n %head_bits =l shl 255, %head_shift\n %first =l or %head_bits, %remaining_point\n storeb %first, %data\n ret %result\n}")
+	qbe_output_line(output, "\nfunction l $trbn_string_bytes(l %string) {\n@start\n %length_address =l add %string, 8\n %length =l loadl %length_address\n %data =l add %string, 24\n %array =l call $trbn_array_new(l $trbn_desc_array_scalar)\n jmp @loop\n@loop\n %index =l phi @start 0, @advance %next\n %done =w cslel %length, %index\n jnz %done, @finish, @read\n@read\n %address =l add %data, %index\n %byte_word =w loadub %address\n %byte =l extuw %byte_word\n call $trbn_array_push(l %array, l %byte)\n %next =l add %index, 1\n jmp @advance\n@advance\n jmp @loop\n@finish\n ret %array\n}")
+	qbe_output_line(output, "\nfunction l $trbn_string_is_utf8(l %string) {\n@start\n %length_address =l add %string, 8\n %length =l loadl %length_address\n %data =l add %string, 24\n jmp @loop\n@loop\n %offset =l phi @start 0, @advance %next\n %done =w cslel %length, %offset\n jnz %done, @valid, @read\n@read\n %address =l add %data, %offset\n %remaining =l sub %length, %offset\n %width =l call $trbn_utf8_width(l %address, l %remaining)\n %byte =w loadub %address\n %nonascii =w cugtw %byte, 127\n %single =w ceql %width, 1\n %bad =w and %nonascii, %single\n jnz %bad, @invalid, @advance\n@advance\n %next =l add %offset, %width\n jmp @loop\n@valid\n ret 1\n@invalid\n ret 0\n}")
+	return
+end
+
+# The canonical split safe point retains its normal roots and fresh result.
+def emit_mir_string_split(function: Integer, plan: MirStringSplit, source: String, separator: String, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	result := emit_temporary(context)
+	if plan.first_field >= 0
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_split_fields(l " + source + ", l " + separator + ", l " + integer_string(plan.first_field) + ", l " + integer_string(plan.last_field) + ")")
+		return emitted_value(result, "Array<String>")
+	end
+	name := "$trbn_split_" + integer_string(function) + "_" + integer_string(plan.instruction)
+	qbe_output_line(output, "\t" + result + " =l call $trbn_literal_split(l " + name + ", l " + integer_string(plan.fragments.size()) + ")")
+	return emitted_value(result, "Array<String>")
+end

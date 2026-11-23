@@ -1,0 +1,28 @@
+def triangular(value: Integer): Integer
+	return value * (value + 1) / 2 + 1
+end
+
+def pair(left: Integer, right: Integer): Integer
+	return (left + right) * (left + right + 1) / 2 + left + 1
+end
+
+def argument(value: Integer): Integer
+	puts(value.to_s())
+	return value
+end
+
+def main()
+	values := [0, 1, 33554431, 33554432, -1, -2, 67108863, 67108864]
+	mut index := 0
+	while index < values.size()
+		puts(triangular(argument(values[index])).to_s())
+		index += 1
+	end
+	inputs := [[33554431, 0], [33554432, 0], [0, 33554432], [-1, 2], [2, -1]]
+	index = 0
+	while index < inputs.size()
+		entry := inputs[index]
+		puts(pair(argument(entry[0]), argument(entry[1])).to_s())
+		index += 1
+	end
+end

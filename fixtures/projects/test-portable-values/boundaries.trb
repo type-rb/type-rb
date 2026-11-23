@@ -1,0 +1,53 @@
+import { describe, expect, test } from trb/std/test
+import trb/std/string_builder
+newtype Label = String
+record Wide
+ field0: Integer
+ field1: Integer
+ field2: Integer
+ field3: Integer
+ field4: Integer
+ field5: Integer
+ field6: Integer
+ field7: Integer
+ field8: Integer
+ field9: Integer
+ field10: Integer
+ field11: Integer
+ field12: Integer
+ field13: Integer
+ field14: Integer
+ field15: Integer
+ field16: Integer
+end
+enum Raw
+ Nul = "a\u0000b"
+end
+describe("Boundaries") do
+ test("integer hash limit") do
+  expect({19 => "v", 18 => "v", 17 => "v", 16 => "v", 15 => "v", 14 => "v", 13 => "v", 12 => "v", 11 => "v", 10 => "v", 9 => "v", 8 => "v", 7 => "v", 6 => "v", 5 => "v", 4 => "v", 3 => "v", 2 => "v", 1 => "v", 0 => "v"}).to_be_nil()
+ end
+ test("string hash limit") do
+  expect({"t" => 19, "s" => 18, "r" => 17, "q" => 16, "p" => 15, "o" => 14, "n" => 13, "m" => 12, "l" => 11, "k" => 10, "j" => 9, "i" => 8, "h" => 7, "g" => 6, "f" => 5, "e" => 4, "d" => 3, "c" => 2, "b" => 1, "a" => 0}).to_be_nil()
+ end
+ test("field limit") do
+  expect(Wide.new(field0: 0, field1: 1, field2: 2, field3: 3, field4: 4, field5: 5, field6: 6, field7: 7, field8: 8, field9: 9, field10: 10, field11: 11, field12: 12, field13: 13, field14: 14, field15: 15, field16: 16)).to_be_nil()
+ end
+ test("raw enum embedded NUL") do
+  expect(Raw::Nul).to_be_nil()
+ end
+ test("exceptional floats") do
+  expect([0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0, -0.0]).to_be_nil()
+ end
+ test("transparent newtype") do
+  expect(Label.new("text")).to_be_nil()
+ end
+ test("opaque provider value") do
+  mut value := StringBuilder.new()
+  value.append("text")
+  expect(value).to_be_nil()
+ end
+ test("continued") do
+  expect(1).to_equal(1)
+ end
+end

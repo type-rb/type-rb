@@ -1,0 +1,105 @@
+import { character_in, compiler_source_slice, interpolation_quote_end } from frontend/syntax/lexer
+import { unicode_identifier_part, unicode_identifier_start } from support/unicode_identifiers
+
+# Formatting owns lossless spelling, not the compiler's decoded/fused tokens.
+# In particular comments and the contents of quoted literals remain opaque.
+record FormatToken
+	text: String
+	start: Integer
+	finish: Integer
+	kind: Integer
+end
+
+record FormatTokens
+	tokens: Array<FormatToken>
+	error: String
+end
+
+def format_identifier(character: String): Boolean
+	return character_in(character, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_@") || unicode_identifier_start(character)
+end
+
+def format_identifier_part(character: String): Boolean
+	return format_identifier(character) || character_in(character, "0123456789") || unicode_identifier_part(character)
+end
+
+def format_prefix(source: String, position: Integer, word: String): Boolean
+	return position + word.size() <= source.size() && compiler_source_slice(source, position, position + word.size()) == word
+end
+
+def format_lex(source: String): FormatTokens
+	mut tokens: Array<FormatToken> := []
+	mut interpolation := [false]
+	mut index := 0
+	while index < source.size()
+		start := index
+		character := source[index]
+		index += 1
+		if character == " " || character == "\t" || character == "\r"
+			next
+		end
+		mut kind := 0
+		if character == "\n"
+			kind = 5
+		elsif character == "#"
+			kind = 4
+			while index < source.size() && source[index] != "\n"
+				index += 1
+			end
+		elsif character == "\"" || character == "'"
+			kind = 3
+			finish := interpolation_quote_end(source, source.size(), index, character, interpolation)
+			if finish < 0
+				return FormatTokens.new(tokens: tokens, error: "unterminated quoted literal")
+			end
+			index = finish + 1
+		elsif format_identifier(character)
+			kind = 1
+			while index < source.size() && format_identifier_part(source[index])
+				index += 1
+			end
+			if index < source.size() && (source[index] == "?" || source[index] == "!")
+				if index + 1 == source.size() || source[index + 1] != "="
+					index += 1
+				end
+			end
+		elsif character_in(character, "0123456789")
+			kind = 2
+			mut digits := "0123456789_"
+			if character == "0" && index < source.size() && character_in(source[index], "xXoObB")
+				index += 1
+				digits = "0123456789_abcdefABCDEF"
+			end
+			while index < source.size() && character_in(source[index], digits)
+				index += 1
+			end
+			if index + 1 < source.size() && source[index] == "." && character_in(source[index + 1], "0123456789")
+				index += 1
+				while index < source.size() && character_in(source[index], "0123456789_")
+					index += 1
+				end
+			end
+			if index < source.size() && (source[index] == "e" || source[index] == "E")
+				index += 1
+				if index < source.size() && (source[index] == "+" || source[index] == "-")
+					index += 1
+				end
+				while index < source.size() && character_in(source[index], "0123456789_")
+					index += 1
+				end
+			end
+		else
+			operators := ["...", "<=>", "&&=", "||=", "**=", "<<=", ">>=", ":=", "::", "->", "=>", "&.", "..", "==", "!=", "<=", ">=", "&&", "||", "**", "+=", "-=", "*=", "/=", "%=", "<<", ">>", "=~", "!~"]
+			mut operator := 0
+			while operator < operators.size()
+				if format_prefix(source, start, operators[operator])
+					index = start + operators[operator].size()
+					break
+				end
+				operator += 1
+			end
+		end
+		tokens.push(FormatToken.new(text: compiler_source_slice(source, start, index), start: start, finish: index, kind: kind))
+	end
+	return FormatTokens.new(tokens: tokens, error: "")
+end

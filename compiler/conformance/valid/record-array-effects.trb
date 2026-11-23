@@ -1,0 +1,21 @@
+record Entry
+	id: Integer
+	label: String
+end
+def grow(mut values: Array<Entry>): Entry
+	mut index := 0
+	while index < 64
+		values.push(Entry.new(id: index + 100, label: "added" + index.to_s()))
+		index += 1
+	end
+	return Entry.new(id: 9, label: "replacement")
+end
+def main()
+	mut values := [Entry.new(id: 1, label: "one"), Entry.new(id: 2, label: "two")]
+	values[-1] = grow(values)
+	puts(values[0].id)
+	puts(values[1].id)
+	puts(values[1].label)
+	puts(values[-1].label)
+	puts(values.size())
+end

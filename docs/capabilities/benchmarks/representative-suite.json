@@ -1,0 +1,602 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "log-pipeline-small-valid",
+      "workload": "log-pipeline",
+      "count": 64,
+      "variant": "valid",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "log-pipeline-small-mixed",
+      "workload": "log-pipeline",
+      "count": 64,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "log-pipeline-medium-valid",
+      "workload": "log-pipeline",
+      "count": 1024,
+      "variant": "valid",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "log-pipeline-medium-mixed",
+      "workload": "log-pipeline",
+      "count": 1024,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "log-pipeline-large-valid",
+      "workload": "log-pipeline",
+      "count": 16384,
+      "variant": "valid",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "log-pipeline-large-mixed",
+      "workload": "log-pipeline",
+      "count": 16384,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "json-transform-small-valid",
+      "workload": "json-transform",
+      "count": 16,
+      "variant": "valid",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "json-transform-small-mixed",
+      "workload": "json-transform",
+      "count": 16,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "json-transform-medium-valid",
+      "workload": "json-transform",
+      "count": 128,
+      "variant": "valid",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "json-transform-medium-mixed",
+      "workload": "json-transform",
+      "count": 128,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "json-transform-large-valid",
+      "workload": "json-transform",
+      "count": 1024,
+      "variant": "valid",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "json-transform-large-mixed",
+      "workload": "json-transform",
+      "count": 1024,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "worker-small-mixed",
+      "workload": "worker",
+      "count": 64,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "worker-medium-mixed",
+      "workload": "worker",
+      "count": 1024,
+      "variant": "mixed",
+      "batches": 100,
+      "size": "medium"
+    },
+    {
+      "id": "worker-large-mixed",
+      "workload": "worker",
+      "count": 16384,
+      "variant": "mixed",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "hash-small-hits",
+      "workload": "hash",
+      "count": 64,
+      "variant": "hits",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "hash-small-miss-heavy",
+      "workload": "hash",
+      "count": 64,
+      "variant": "miss-heavy",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "hash-medium-hits",
+      "workload": "hash",
+      "count": 4096,
+      "variant": "hits",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "hash-medium-miss-heavy",
+      "workload": "hash",
+      "count": 4096,
+      "variant": "miss-heavy",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "hash-large-hits",
+      "workload": "hash",
+      "count": 65536,
+      "variant": "hits",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "hash-large-miss-heavy",
+      "workload": "hash",
+      "count": 65536,
+      "variant": "miss-heavy",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "strings-small-short",
+      "workload": "strings",
+      "count": 64,
+      "variant": "short",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "strings-small-long",
+      "workload": "strings",
+      "count": 64,
+      "variant": "long",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "strings-medium-short",
+      "workload": "strings",
+      "count": 1024,
+      "variant": "short",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "strings-medium-long",
+      "workload": "strings",
+      "count": 1024,
+      "variant": "long",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "strings-large-short",
+      "workload": "strings",
+      "count": 16384,
+      "variant": "short",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "strings-large-long",
+      "workload": "strings",
+      "count": 16384,
+      "variant": "long",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "arrays-small-random",
+      "workload": "arrays",
+      "count": 64,
+      "variant": "random",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "arrays-small-sorted",
+      "workload": "arrays",
+      "count": 64,
+      "variant": "sorted",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "arrays-small-reverse",
+      "workload": "arrays",
+      "count": 64,
+      "variant": "reverse",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "arrays-small-duplicates",
+      "workload": "arrays",
+      "count": 64,
+      "variant": "duplicates",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "arrays-medium-random",
+      "workload": "arrays",
+      "count": 4096,
+      "variant": "random",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "arrays-medium-sorted",
+      "workload": "arrays",
+      "count": 4096,
+      "variant": "sorted",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "arrays-medium-reverse",
+      "workload": "arrays",
+      "count": 4096,
+      "variant": "reverse",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "arrays-medium-duplicates",
+      "workload": "arrays",
+      "count": 4096,
+      "variant": "duplicates",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "arrays-large-random",
+      "workload": "arrays",
+      "count": 65536,
+      "variant": "random",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "arrays-large-sorted",
+      "workload": "arrays",
+      "count": 65536,
+      "variant": "sorted",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "arrays-large-reverse",
+      "workload": "arrays",
+      "count": 65536,
+      "variant": "reverse",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "arrays-large-duplicates",
+      "workload": "arrays",
+      "count": 65536,
+      "variant": "duplicates",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "allocation-small-short-lived",
+      "workload": "allocation",
+      "count": 64,
+      "variant": "short-lived",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "allocation-small-retained",
+      "workload": "allocation",
+      "count": 64,
+      "variant": "retained",
+      "batches": 5,
+      "size": "small"
+    },
+    {
+      "id": "allocation-medium-short-lived",
+      "workload": "allocation",
+      "count": 4096,
+      "variant": "short-lived",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "allocation-medium-retained",
+      "workload": "allocation",
+      "count": 4096,
+      "variant": "retained",
+      "batches": 5,
+      "size": "medium"
+    },
+    {
+      "id": "allocation-large-short-lived",
+      "workload": "allocation",
+      "count": 65536,
+      "variant": "short-lived",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "allocation-large-retained",
+      "workload": "allocation",
+      "count": 65536,
+      "variant": "retained",
+      "batches": 5,
+      "size": "large"
+    },
+    {
+      "id": "json-document-small-ascii",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "ascii",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-unicode",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "unicode",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-escaped",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "escaped",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-wide-array",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "wide-array",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-wide-object",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "wide-object",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-medium-ascii",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "ascii",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-unicode",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "unicode",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-escaped",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "escaped",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-wide-array",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "wide-array",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-wide-object",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "wide-object",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-large-ascii",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "ascii",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-unicode",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "unicode",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-escaped",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "escaped",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-wide-array",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "wide-array",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-wide-object",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "wide-object",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-small-integer-array",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "integer-array",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-fractional-array",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "fractional-array",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-small-mixed-number-object",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "mixed-number-object",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-medium-integer-array",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "integer-array",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-fractional-array",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "fractional-array",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-medium-mixed-number-object",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "mixed-number-object",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-large-integer-array",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "integer-array",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-fractional-array",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "fractional-array",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-large-mixed-number-object",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "mixed-number-object",
+      "batches": 20,
+      "size": "large"
+    },
+    {
+      "id": "json-document-small-precise-fractional-array",
+      "workload": "json-document",
+      "count": 8,
+      "variant": "precise-fractional-array",
+      "batches": 20,
+      "size": "small"
+    },
+    {
+      "id": "json-document-medium-precise-fractional-array",
+      "workload": "json-document",
+      "count": 128,
+      "variant": "precise-fractional-array",
+      "batches": 20,
+      "size": "medium"
+    },
+    {
+      "id": "json-document-large-precise-fractional-array",
+      "workload": "json-document",
+      "count": 2048,
+      "variant": "precise-fractional-array",
+      "batches": 20,
+      "size": "large"
+    }
+  ],
+  "inputProfiles": {
+    "registered": {
+      "label": "Original batches",
+      "batchMultipliers": {
+        "small": 1,
+        "medium": 1,
+        "large": 1
+      }
+    },
+    "sustained-v1": {
+      "label": "Longer fixed batches v1",
+      "batchMultipliers": {
+        "small": 200,
+        "medium": 40,
+        "large": 8
+      },
+      "caseMultipliers": {
+        "worker-medium-mixed": 1
+      }
+    }
+  }
+}

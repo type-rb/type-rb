@@ -1,0 +1,139 @@
+import { cli_absolute, cli_error, cli_find_config } from main
+import { compiler_collect_test_paths, compiler_file_exists, compiler_read_source } from compiler
+import { format_source } from format/source
+import { parse_project_config } from project/config
+import { path_directory, path_join, string_ends_with, string_starts_with } from support/path
+import { integer_string } from support/literals
+import { native_cli_cwd, native_cli_directory_stat, native_cli_file_read, native_cli_file_scope, native_cli_file_write, native_cli_filesystem_message, native_cli_write } from host
+
+def cli_format_command(arguments: Array<String>): Integer
+	mut check := false
+	mut write := true
+	mut paths: Array<String> := []
+	mut flags := true
+	mut index := 1
+	while index < arguments.size()
+		argument := arguments[index]
+		if flags && argument == "--"
+			flags = false
+		elsif flags && (argument == "--check" || argument == "-check" || argument == "--check=true" || argument == "-check=true")
+			check = true
+		elsif flags && (argument == "--check=false" || argument == "-check=false")
+			check = false
+		elsif flags && (argument == "-w=false" || argument == "--w=false")
+			write = false
+		elsif flags && (argument == "-w" || argument == "--w" || argument == "-w=true" || argument == "--w=true")
+			write = true
+		elsif flags && (argument == "--help" || argument == "-h")
+			puts("Usage: trbn fmt [--check] [-w=false] [PATH ... | -]")
+			return 0
+		elsif flags && argument != "-" && string_starts_with(argument, "-")
+			return cli_error("unknown fmt option " + argument)
+		else
+			flags = false
+			paths.push(argument)
+		end
+		index += 1
+	end
+	if paths.size() == 1 && paths[0] == "-"
+		mut source := [""]
+		status := native_cli_file_read(0, 9007199254740991, 1, source)
+		if status != 0
+			return cli_error("cannot read stdin: " + native_cli_filesystem_message(status))
+		end
+		result := format_source(source[0], "stdin", "\t")
+		if result.error != ""
+			native_cli_write(result.error + "\n", 2)
+			return 1
+		end
+		if native_cli_file_write(1, result.text) != 0
+			return cli_error("cannot write stdout")
+		end
+		return 0
+	end
+	cwd := native_cli_cwd()
+	if paths.size() == 0
+		config_path := cli_find_config(cwd)
+		if config_path != ""
+			config := parse_project_config(compiler_read_source(config_path))
+			if config.error == ""
+				paths.push(path_join(path_directory(config_path), config.source_dir))
+			end
+		end
+		if paths.size() == 0
+			paths.push(".")
+		end
+	end
+	mut files: Array<String> := []
+	mut seen: Hash<String, Boolean> := {}
+	index = 0
+	while index < paths.size()
+		path := paths[index]
+		absolute := cli_absolute(path, cwd)
+		mut kind := [0]
+		status := native_cli_directory_stat(absolute, 1, kind)
+		if status != 0
+			return cli_error(path + ": " + native_cli_filesystem_message(status))
+		end
+		mut selected: Array<String> := []
+		if kind[0] == 1
+			collected := compiler_collect_test_paths(absolute, path_join(absolute, ".trb"))
+			if collected.error != ""
+				return cli_error(collected.error)
+			end
+			selected = collected.paths
+		elsif string_ends_with(path, ".trb")
+			selected.push(absolute)
+		else
+			return cli_error(path + " is not a .trb file")
+		end
+		selected.each do |file|
+			if !seen.key?(file)
+				files.push(file)
+				seen[file] = true
+			end
+		end
+		index += 1
+	end
+	files = files.sort()
+	mut changed := 0
+	index = 0
+	while index < files.size()
+		file := files[index]
+		if !compiler_file_exists(file)
+			return cli_error("cannot read " + file)
+		end
+		source := compiler_read_source(file)
+		result := format_source(source, file, "\t")
+		if result.error != ""
+			native_cli_write(result.error + "\n", 2)
+			return 1
+		end
+		if source != result.text
+			changed += 1
+			if !check && write
+				mut phase := [0, 0]
+				writer := fn(descriptor: Integer): Integer
+					return native_cli_file_write(descriptor, result.text)
+				end
+				status := native_cli_file_scope(file, 1, writer, phase)
+				if status != 0
+					return cli_error(file + ": " + native_cli_filesystem_message(status))
+				end
+				if phase[1] != 0
+					return cli_error(file + ": " + native_cli_filesystem_message(phase[1]))
+				end
+			end
+			mut descriptor := 1
+			if check
+				descriptor = 2
+			end
+			native_cli_write(file + "\n", descriptor)
+		end
+		index += 1
+	end
+	if check && changed > 0
+		return cli_error(integer_string(changed) + " file(s) are not formatted")
+	end
+	return 0
+end

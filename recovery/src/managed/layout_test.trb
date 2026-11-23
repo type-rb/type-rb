@@ -1,0 +1,331 @@
+import { RecoveryManagedField, RecoveryManagedLayoutKind, RecoveryManagedTypeDefinition, RecoveryManagedValueType, RecoveryManagedVariant, compute_recovery_managed_layout, recovery_managed_field_layout, recovery_managed_value_is_managed, recovery_managed_value_types_equal, recovery_managed_variant_field_layout, recovery_managed_variant_layout, verify_recovery_managed_layouts } from managed/layout
+import { ScalarType } from scalar/mir
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_scalar(value_type: ScalarType): RecoveryManagedValueType
+	return RecoveryManagedValueType::Scalar(value_type)
+end
+
+def _recovery_managed_field(name: String, value_type: RecoveryManagedValueType): RecoveryManagedField
+	return RecoveryManagedField.new(name: name, value_type: value_type)
+end
+
+def _recovery_managed_layout_definitions(): Array<RecoveryManagedTypeDefinition>
+	return [
+		RecoveryManagedTypeDefinition::Record(
+			"example#Point",
+			[
+				_recovery_managed_field("visible", _recovery_managed_scalar(ScalarType::Boolean)),
+				_recovery_managed_field("x", _recovery_managed_scalar(ScalarType::Integer)),
+				_recovery_managed_field("y", _recovery_managed_scalar(ScalarType::Float)),
+			],
+		),
+		RecoveryManagedTypeDefinition::Record(
+			"example#Envelope",
+			[
+				_recovery_managed_field("point", RecoveryManagedValueType::Aggregate("example#Point")),
+				_recovery_managed_field("selected", _recovery_managed_scalar(ScalarType::Boolean)),
+			],
+		),
+		RecoveryManagedTypeDefinition::Tagged(
+			"example#Outcome",
+			[
+				RecoveryManagedVariant.new(name: "None", fields: []),
+				RecoveryManagedVariant.new(
+					name: "Count",
+					fields: [_recovery_managed_field("value", _recovery_managed_scalar(ScalarType::Integer))],
+				),
+				RecoveryManagedVariant.new(
+					name: "Located",
+					fields: [_recovery_managed_field("point", RecoveryManagedValueType::Aggregate("example#Point"))],
+				),
+			],
+		),
+		RecoveryManagedTypeDefinition::String("String"),
+		RecoveryManagedTypeDefinition::Array("Array<String>", RecoveryManagedValueType::Aggregate("String")),
+		RecoveryManagedTypeDefinition::Function(
+			"(String) -> String",
+			[RecoveryManagedValueType::Aggregate("String")],
+			RecoveryManagedValueType::Aggregate("String"),
+		),
+		RecoveryManagedTypeDefinition::Record(
+			"example#Message",
+			[
+				_recovery_managed_field("text", RecoveryManagedValueType::Aggregate("String")),
+				_recovery_managed_field("lines", RecoveryManagedValueType::Aggregate("Array<String>")),
+			],
+		),
+		RecoveryManagedTypeDefinition::Tagged(
+			"example#ManagedOutcome",
+			[
+				RecoveryManagedVariant.new(name: "Empty", fields: []),
+				RecoveryManagedVariant.new(
+					name: "Found",
+					fields: [_recovery_managed_field("message", RecoveryManagedValueType::Aggregate("example#Message"))],
+				),
+			],
+		),
+	]
+end
+
+describe("Managed recovery static aggregate layout") do
+	test("lays out scalar and nested record fields deterministically") do
+		definitions := _recovery_managed_layout_definitions()
+		case compute_recovery_managed_layout(definitions, "example#Point")
+		when Result::Ok(layout)
+			expect(layout.kind).to_equal(RecoveryManagedLayoutKind::Record)
+			expect(layout.size).to_equal(24)
+			expect(layout.alignment).to_equal(8)
+			expect(recovery_managed_field_layout(layout, "visible").offset).to_equal(0)
+			expect(recovery_managed_field_layout(layout, "x").offset).to_equal(8)
+			expect(recovery_managed_field_layout(layout, "y").offset).to_equal(16)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+		case compute_recovery_managed_layout(definitions, "example#Envelope")
+		when Result::Ok(layout)
+			expect(layout.size).to_equal(32)
+			expect(layout.alignment).to_equal(8)
+			expect(recovery_managed_field_layout(layout, "point").offset).to_equal(0)
+			expect(recovery_managed_field_layout(layout, "selected").offset).to_equal(24)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("lays out tags and maximum payload storage") do
+		case compute_recovery_managed_layout(_recovery_managed_layout_definitions(), "example#Outcome")
+		when Result::Ok(layout)
+			expect(layout.kind).to_equal(RecoveryManagedLayoutKind::Tagged)
+			expect(layout.payload_offset).to_equal(8)
+			expect(layout.size).to_equal(32)
+			expect(layout.alignment).to_equal(8)
+			none := recovery_managed_variant_layout(layout, "None")
+			count := recovery_managed_variant_layout(layout, "Count")
+			located := recovery_managed_variant_layout(layout, "Located")
+			expect(none.tag).to_equal(0)
+			expect(none.payload_size).to_equal(0)
+			expect(count.tag).to_equal(1)
+			if count != nil
+				expect(recovery_managed_variant_field_layout(count, "value").offset).to_equal(8)
+			end
+			expect(located.tag).to_equal(2)
+			if located != nil
+				expect(recovery_managed_variant_field_layout(located, "point").size).to_equal(24)
+			end
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("retains nominal identity for identical shapes") do
+		left := RecoveryManagedValueType::Aggregate("example#Left")
+		right := RecoveryManagedValueType::Aggregate("example#Right")
+		expect(recovery_managed_value_types_equal(left, left)).to_be_true()
+		expect(recovery_managed_value_types_equal(left, right)).to_be_false()
+		expect(
+			compute_recovery_managed_layout(_recovery_managed_layout_definitions(), "example#Outcome")
+		).to_equal(compute_recovery_managed_layout(_recovery_managed_layout_definitions(), "example#Outcome"))
+	end
+
+	test("classifies managed references and boxes aggregates that contain them") do
+		definitions := _recovery_managed_layout_definitions()
+		case compute_recovery_managed_layout(definitions, "String")
+		when Result::Ok(layout)
+			expect(layout.kind).to_equal(RecoveryManagedLayoutKind::String)
+			expect(layout.managed).to_be_true()
+			expect(layout.size).to_equal(8)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+		case compute_recovery_managed_layout(definitions, "example#Message")
+		when Result::Ok(layout)
+			expect(layout.kind).to_equal(RecoveryManagedLayoutKind::Record)
+			expect(layout.managed).to_be_true()
+			expect(layout.size).to_equal(16)
+			expect(recovery_managed_field_layout(layout, "text").managed).to_be_true()
+			expect(recovery_managed_field_layout(layout, "lines").offset).to_equal(8)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+		case recovery_managed_value_is_managed(definitions, RecoveryManagedValueType::Aggregate("example#ManagedOutcome"))
+		when Result::Ok(managed)
+			expect(managed).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("boxes scalar records retained by Arrays and propagates their managed layout") do
+		mut definitions := _recovery_managed_layout_definitions()
+		definitions.push(RecoveryManagedTypeDefinition::Array("Array<Point>", RecoveryManagedValueType::Aggregate("example#Point")))
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+		case compute_recovery_managed_layout(definitions, "example#Point")
+		when Result::Ok(layout)
+			expect(layout.managed).to_be_true()
+			expect(layout.size).to_equal(24)
+			expect(recovery_managed_field_layout(layout, "x").managed).to_be_false()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+		case compute_recovery_managed_layout(definitions, "example#Envelope")
+		when Result::Ok(layout)
+			expect(layout.managed).to_be_true()
+			expect(recovery_managed_field_layout(layout, "point").size).to_equal(8)
+			expect(recovery_managed_field_layout(layout, "point").managed).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects Array element types outside the registered managed subset") do
+		definitions := [
+			RecoveryManagedTypeDefinition::Array("Array<Float>", _recovery_managed_scalar(ScalarType::Float)),
+		]
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.message).to_equal("unsupported Managed recovery Array element type")
+		end
+	end
+
+	test("accepts recursively managed Array elements") do
+		definitions := [
+			RecoveryManagedTypeDefinition::Array(
+				"Array<Integer>",
+				_recovery_managed_scalar(ScalarType::Integer),
+			),
+			RecoveryManagedTypeDefinition::Array(
+				"Array<Array<Integer>>",
+				RecoveryManagedValueType::Aggregate("Array<Integer>"),
+			),
+		]
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects recursive by-value layouts") do
+		definitions := [
+			RecoveryManagedTypeDefinition::Record(
+				"example#Recursive",
+				[_recovery_managed_field("next", RecoveryManagedValueType::Aggregate("example#Recursive"))],
+			),
+		]
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.message).to_equal("recursive by-value aggregate layout is unsupported")
+		end
+	end
+
+	test("rejects duplicate fields and variants") do
+		duplicate_fields := [
+			RecoveryManagedTypeDefinition::Record(
+				"example#Duplicate",
+				[
+					_recovery_managed_field("value", _recovery_managed_scalar(ScalarType::Integer)),
+					_recovery_managed_field("value", _recovery_managed_scalar(ScalarType::Float)),
+				],
+			),
+		]
+		case verify_recovery_managed_layouts(duplicate_fields)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.message).to_equal("field name is duplicated")
+		end
+		duplicate_variants := [
+			RecoveryManagedTypeDefinition::Tagged(
+				"example#DuplicateTag",
+				[
+					RecoveryManagedVariant.new(name: "Same", fields: []),
+					RecoveryManagedVariant.new(name: "Same", fields: []),
+				],
+			),
+		]
+		case verify_recovery_managed_layouts(duplicate_variants)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.message).to_equal("variant name is duplicated")
+		end
+	end
+
+	test("rejects unknown aggregate field types") do
+		definitions := [
+			RecoveryManagedTypeDefinition::Record(
+				"example#Broken",
+				[_recovery_managed_field("missing", RecoveryManagedValueType::Aggregate("example#Missing"))],
+			),
+		]
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.message).to_equal("aggregate type does not exist")
+		end
+	end
+
+	test("rejects duplicate type identities") do
+		definitions := [
+			RecoveryManagedTypeDefinition::Record("example#Same", []),
+			RecoveryManagedTypeDefinition::Tagged(
+				"example#Same",
+				[RecoveryManagedVariant.new(name: "Only", fields: [])],
+			),
+		]
+		case verify_recovery_managed_layouts(definitions)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.message).to_equal("type identifier is duplicated")
+		end
+	end
+
+	test("enforces the configured aggregate byte limit") do
+		mut chunk_fields: Array<RecoveryManagedField> := []
+		mut index := 0
+		while index < 256
+			chunk_fields.push(_recovery_managed_field("word" + index.to_s(), _recovery_managed_scalar(ScalarType::Integer)))
+			index += 1
+		end
+		mut page_fields: Array<RecoveryManagedField> := []
+		index = 0
+		while index < 256
+			page_fields.push(_recovery_managed_field("chunk" + index.to_s(), RecoveryManagedValueType::Aggregate("example#Chunk")))
+			index += 1
+		end
+		definitions := [
+			RecoveryManagedTypeDefinition::Record("example#Chunk", chunk_fields),
+			RecoveryManagedTypeDefinition::Record("example#Page", page_fields),
+			RecoveryManagedTypeDefinition::Record(
+				"example#TooLarge",
+				[
+					_recovery_managed_field("first", RecoveryManagedValueType::Aggregate("example#Page")),
+					_recovery_managed_field("second", RecoveryManagedValueType::Aggregate("example#Page")),
+					_recovery_managed_field("third", RecoveryManagedValueType::Aggregate("example#Page")),
+				],
+			),
+		]
+		case compute_recovery_managed_layout(definitions, "example#TooLarge")
+		when Result::Ok(_layout)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0005")
+			expect(diagnostic.message).to_equal("aggregate layout exceeds the Managed recovery byte limit")
+		end
+	end
+end

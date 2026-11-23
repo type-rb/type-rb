@@ -1,0 +1,72 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { MirModule } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { describe, expect, test } from trb/std/test
+
+def hash_lookup_test_interval_allowed(native_module: MirModule, start: Integer, finish: Integer): Boolean
+	mut at := start
+	while at < finish
+		instruction := native_module.instructions[at]
+		kind := instruction.kind
+		allowed := kind == 1 || kind == 2 || kind == 3 || kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 12 || kind == 28
+		if !allowed
+			return false
+		end
+		effect := mir_instruction_effects(native_module, instruction)
+		if effect != 0 && effect != 8
+			return false
+		end
+		at += 1
+	end
+	return true
+end
+
+def hash_lookup_test_same_key_pairs(native_module: MirModule, guarded: Boolean): Integer
+	mut count := 0
+	native_module.functions.each do |function|
+		mut b := function.block_start
+		while b < function.block_start + function.block_count
+			block := native_module.blocks[b]
+			mut at := block.instruction_start
+			while at < block.instruction_start + block.instruction_count
+				store := native_module.instructions[at]
+				if store.kind == 29
+					mut prior := at - 1
+					mut found := false
+					while prior >= block.instruction_start && !found
+						read := native_module.instructions[prior]
+						if read.kind == 28 && read.first == store.first && read.second == store.second
+							found = true
+							if !guarded || hash_lookup_test_interval_allowed(native_module, prior + 1, at)
+								count += 1
+							end
+						end
+						prior -= 1
+					end
+				end
+				at += 1
+			end
+			b += 1
+		end
+	end
+	return count
+end
+
+describe("Hash MIR prerequisite") do
+	test("ordinary") do
+		mut state := logical_checked_source("def increment(mut values: Hash<String, Integer>, key: String)\nvalues[key] = values[key] + 1\nend\ndef increment_integer(mut values: Hash<Integer, Integer>, key: Integer)\nvalues[key] = values[key] + 1\nend\ndef main()\nmut words: Hash<String, Integer> := {}\nwords[\"alpha\"] = 1\nincrement(words, \"alpha\")\nputs(words[\"alpha\"])\nmut numbers: Hash<Integer, Integer> := {}\nnumbers[7] = 2\nincrement_integer(numbers, 7)\nputs(numbers[7])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(hash_lookup_test_same_key_pairs(state.scalar_mir, false)).to_equal(2)
+		expect(hash_lookup_test_same_key_pairs(state.scalar_mir, true)).to_equal(2)
+	end
+	test("invalidation") do
+		mut state := logical_checked_source("def mutate(mut values: Hash<String, Integer>, key: String): Integer\nvalues[key] = 9\nreturn 1\nend\ndef alias_write(mut values: Hash<String, Integer>, key: String)\nmut other: Hash<String, Integer> := values\nprevious := values[key]\nother[\"unrelated\"] = 2\nvalues[key] = previous + 1\nend\ndef call_write(mut values: Hash<String, Integer>, key: String)\nvalues[key] = values[key] + mutate(values, key)\nend\ndef rebound_key(mut values: Hash<String, Integer>, key: String)\nmut selected := key\nprevious := values[selected]\nselected = selected + \"!\"\nvalues[selected] = previous + 1\nend\ndef main()\nmut values: Hash<String, Integer> := {}\nvalues[\"alpha\"] = 1\nalias_write(values, \"alpha\")\ncall_write(values, \"alpha\")\nrebound_key(values, \"alpha\")\nputs(values[\"alpha\"])\nputs(values[\"alpha!\"])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(hash_lookup_test_same_key_pairs(state.scalar_mir, false)).to_equal(2)
+		expect(hash_lookup_test_same_key_pairs(state.scalar_mir, true)).to_equal(0)
+	end
+end

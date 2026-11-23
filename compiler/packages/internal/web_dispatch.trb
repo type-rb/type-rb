@@ -1,0 +1,231 @@
+import trb/internal/runtime as Runtime
+import { Body, Header, Headers, HttpMethod } from trb/http
+import { Context, Next, Request, Response } from trb/web
+import { Middleware, compose } from trb/web/middleware
+import trb/std/url
+import trb/std/result
+
+module WebDispatch
+end
+
+record Route
+	path: String
+	segments: Array<String>
+	method: String
+	handler: Next
+	middlewares: Array<Middleware>
+end
+
+class FixedResponse implements Next
+	@response: Response
+	def initialize(response: Response)
+		@response = response
+	end
+	def call(_context: Context): Response
+		return @response
+	end
+end
+
+def protocol(status: Integer, error: String): Response
+	return Response.new(status: status, headers: Headers.new([Header.new(name: "content-type", value: "application/json; charset=utf-8")]), body: Body.new(("{\"error\":\"" + error + "\"}").to_bytes()))
+end
+
+def valid_response(response: Response): Boolean
+	if response.status < 100 || response.status > 999
+		return false
+	end
+	response.headers.entries().each do |header|
+		if header.name == ""
+			return false
+		end
+		header.name.codepoints().each do |point|
+			if !(point >= 65 && point <= 90) && !(point >= 97 && point <= 122) && !(point >= 48 && point <= 57) && !"!#$%&'*+-.^_`|~".codepoints().include?(point)
+				return false
+			end
+		end
+		if header.value.codepoints().include?(10) || header.value.codepoints().include?(13)
+			return false
+		end
+	end
+	return true
+end
+
+def checked_response(response: Response): Response
+	if !valid_response(response)
+		return protocol(500, "internal_server_error")
+	end
+	return response
+end
+
+def normalized_request(request: Request): Request
+	mut entries: Array<Header> := []
+	request.headers.entries().each do |header|
+		entries.push(Header.new(name: header.name.downcase(), value: header.value))
+	end
+	return Request.new(method: HttpMethod.new(request.method.to_s().upcase()), path: request.path, query_string: request.query_string, headers: Headers.new(entries), body: request.body)
+end
+
+def normalized_path(path: String): String?
+	if !path.start_with?("/") || path.codepoints().include?(92)
+		return nil
+	end
+	mut parts: Array<String> := []
+	path.split("/").each do |part|
+		case URL.decode_component(part)
+		when Result::Ok(value)
+			if value == "." || value == ".." || value.codepoints().include?(47) || value.codepoints().include?(92)
+				return nil
+			end
+			parts.push(value)
+		when Result::Err(_error)
+			return nil
+		end
+	end
+	return parts.join("/")
+end
+
+def matches(pattern: Array<String>, segments: Array<String>): Boolean
+	mut catch_all := false
+	if pattern.size() > 0 && pattern[pattern.size() - 1].start_with?("*")
+		catch_all = true
+	end
+	if (!catch_all && pattern.size() != segments.size()) || (catch_all && segments.size() < pattern.size())
+		return false
+	end
+	mut index := 0
+	while index < pattern.size()
+		part := pattern[index]
+		if !part.start_with?(":") && !part.start_with?("*") && part != segments[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def parameters(pattern: Array<String>, segments: Array<String>): Hash<String, String>
+	mut values: Hash<String, String> := {}
+	mut index := 0
+	while index < pattern.size()
+		part := pattern[index]
+		if part.start_with?(":")
+			values[part.slice(1...part.size())] = segments[index]
+		elsif part.start_with?("*")
+			mut tail: Array<String> := []
+			mut rest := index
+			while rest < segments.size()
+				tail.push(segments[rest])
+				rest += 1
+			end
+			values[part.slice(1...part.size())] = tail.join("/")
+		end
+		index += 1
+	end
+	return values
+end
+
+class DispatchCore implements Next
+	@routes: Array<Route>
+	@limit: Integer
+	def initialize(routes: Array<Route>, limit: Integer)
+		@routes = routes
+		@limit = limit
+	end
+	def call(context: Context): Response
+		action := fn(): Response
+			return self.dispatch(context)
+		end
+		return Runtime.recover<Response>(action, protocol(500, "internal_server_error"))
+	end
+	def dispatch(context: Context): Response
+		request := context.request
+		if request.body.size() > @limit
+			return protocol(413, "payload_too_large")
+		end
+		mut segments: Array<String> := []
+		if request.path != "/"
+			segments = request.path.slice(1...request.path.size()).split("/")
+		end
+		mut matched := -1
+		mut index := 0
+		while index < @routes.size() && matched < 0
+			if matches(@routes[index].segments, segments)
+				matched = index
+			end
+			index += 1
+		end
+		if matched < 0
+			return protocol(404, "not_found")
+		end
+		first := @routes[matched]
+		mut allowed: Array<String> := ["OPTIONS"]
+		@routes.each do |route|
+			if route.path == first.path
+				if !allowed.include?(route.method)
+					allowed.push(route.method)
+				end
+				if route.method == "GET" && !allowed.include?("HEAD")
+					allowed.push("HEAD")
+				end
+			end
+		end
+		allowed = allowed.sort()
+		mut method := request.method.to_s().upcase()
+		mut explicit_head := false
+		@routes.each do |route|
+			if route.path == first.path && route.method == "HEAD"
+				explicit_head = true
+			end
+		end
+		if method == "HEAD" && !explicit_head && allowed.include?("GET")
+			method = "GET"
+		end
+		@routes.each do |route|
+			if route.path == first.path && route.method == method
+				# Match the reference's fresh routed context boundary.
+				routed := Context.new(request: request, path_parameters: parameters(route.segments, segments))
+				return checked_response(compose(routed, route.handler, route.middlewares))
+			end
+		end
+		if method == "OPTIONS"
+			response := Response.new(status: 204, headers: Headers.new([Header.new(name: "allow", value: allowed.join(", "))]), body: Body.empty())
+			routed := Context.new(request: request, path_parameters: parameters(first.segments, segments))
+			return checked_response(compose(routed, FixedResponse.new(response), first.middlewares))
+		end
+		return protocol(405, "method_not_allowed").with_header("allow", allowed.join(", "))
+	end
+end
+
+def dispatch_request(request: Request, routes: Array<Route>, middlewares: Array<Middleware>, limit: Integer, status: Integer): Response
+	mut normalized := normalized_request(request)
+	path := normalized_path(normalized.path)
+	mut terminal: Next := FixedResponse.new(protocol(400, "bad_request"))
+	if path != nil && status == 0
+		normalized = Request.new(method: normalized.method, path: path, query_string: normalized.query_string, headers: normalized.headers, body: normalized.body)
+		terminal = DispatchCore.new(routes, limit)
+	end
+	if status == 413
+		terminal = FixedResponse.new(protocol(413, "payload_too_large"))
+	elsif status == 431
+		terminal = FixedResponse.new(protocol(431, "request_header_fields_too_large"))
+	end
+	context := Context.new(request: normalized, path_parameters: {})
+	response := checked_response(compose(context, terminal, middlewares))
+	if normalized.method.to_s() == "HEAD"
+		return Response.new(status: response.status, headers: response.headers, body: Body.empty())
+	end
+	return response
+end
+
+# The outer boundary catches root middleware failures; the core boundary above
+# returns a recovered response through Next so the root middleware can resume.
+def run(request: Request, routes: Array<Route>, middlewares: Array<Middleware>, limit: Integer = 1048576, status: Integer = 0): Response
+	action := fn(): Response
+		return dispatch_request(request, routes, middlewares, limit, status)
+	end
+	response := Runtime.recover<Response>(action, protocol(500, "internal_server_error"))
+	if request.method.to_s().upcase() == "HEAD"
+		return Response.new(status: response.status, headers: response.headers, body: Body.empty())
+	end
+	return response
+end

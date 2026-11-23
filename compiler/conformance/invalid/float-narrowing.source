@@ -1,0 +1,4 @@
+def main()
+	value: Integer := 1.5
+	return
+end

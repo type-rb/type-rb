@@ -1,0 +1,15 @@
+def main()
+	mut kept: Array<Array<Boolean>> := [[true, false]]
+	mut index := 0
+	while index < 70000
+		mut flags := [index % 2 == 0]
+		if index % 2 == 0
+			flags.push(false)
+		end
+		kept[0] = flags
+		index += 1
+	end
+	puts(index)
+	puts(kept[0][0])
+	puts(kept[0].size())
+end

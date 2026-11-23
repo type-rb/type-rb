@@ -1,0 +1,25 @@
+record Converted
+	parts: Array<String>
+	text: String
+end
+
+def change(mut source: Array<String>, value: String): String
+	source[0] = "changed"
+	return value + ""
+end
+
+def main()
+	mut source := ["a:b:a"]
+	result := source[0].replace_all(change(source, "a"), change(source, "x"))
+	kept := Converted.new(parts: result.split(":"), text: result.upcase())
+	puts(kept.parts.join("/"))
+	puts(kept.text.downcase())
+	puts(source[0])
+	mut saved: Array<String> := []
+	["A:B", "C:D"].each do |text|
+		text.downcase().split(":").each do |part|
+			saved.push(part.replace_all("a", "e"))
+		end
+	end
+	puts(saved.join("/"))
+end

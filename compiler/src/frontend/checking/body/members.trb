@@ -1,0 +1,566 @@
+import { check_orm_query, orm_literal_column_method } from frontend/checking/body/orm_queries
+import { concurrent_mutation, concurrent_value } from frontend/checking/body/concurrency
+import { check_orm_transaction } from frontend/checking/body/orm_transactions
+import { check_file_acquisition } from frontend/checking/body/file_acquisition
+import { scoped_resource_name } from frontend/types/resource_types
+import { nominal_application_end } from frontend/syntax/generic_syntax
+import { web_context_kind } from frontend/providers/web_context
+import { check_inferred_web_context } from frontend/checking/builtins/web_context
+import { time_codec_method_arguments_valid } from frontend/providers/time_codecs
+import { web_input_names_valid } from frontend/providers/web_inputs
+import { checked_category_enum, checked_category_function, checked_category_initializer, checked_category_math, checked_category_newtype, checked_category_object, checked_category_readonly, checked_category_record, checked_category_value } from frontend/types/value_categories
+import { json_provider_kind, json_provider_response } from frontend/providers/json_declarations
+import { check_inferred_json_encoding } from frontend/checking/builtins/json_codecs
+import { mir_state_enabled_slot, nullable_state_head_slot } from state/local_slots
+import { binary_add_assign } from frontend/types/operators
+import { mir_op_newtype_construct, mir_op_newtype_project, mir_op_nullable_extract, mir_op_nullable_none, mir_op_string_index } from mir/model/instructions
+import { checked_object_field } from frontend/checking/nominal/object_fields
+import { find_object_type, object_field_index, object_function_owner } from frontend/types/object_types
+import { generic_arguments } from frontend/types/generic_arguments
+import { object_method_function } from frontend/resolution/object_methods
+import { mir_checked_object_new } from mir/lowering/objects
+import { check_union_member, union_member_type } from frontend/checking/nominal/union_members
+import { mir_checked_nullable, mir_literal_scalar } from mir/lowering/nullable
+import { find_newtype_type, newtype_type } from frontend/types/newtype_types
+import { newtype_method_function } from frontend/resolution/newtype_methods
+import { mir_newtype_operation } from mir/lowering/newtypes
+import { checked_raw_enum_from } from frontend/checking/nominal/raw_enums
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { union_parts } from frontend/types/union_types
+import { checked_reference_name, namespace_member_access } from frontend/resolution/namespace_references
+import { callable_parts } from frontend/types/callable_types
+import { advance, expect, expect_identifier, parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { find_enum_type } from frontend/types/enum_types
+import { nullable_apply, nullable_finish, nullable_nil_condition, nullable_read } from frontend/checking/nominal/nullable_flow
+import { nullable_element, nullable_type } from frontend/types/nullable_types
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { mir_checked_record_field } from mir/lowering/records
+import { mir_checked_array_index } from mir/lowering/arrays
+import { type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_bound_value, checked_mir_value, checked_value, checked_view, scalar_mir_disable } from frontend/checking/body/values
+import { hash_key_type } from frontend/types/hash_types
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_control_branch, mir_control_enter, mir_control_jump } from mir/build/control
+import { binary_operator_id, parse_argument_label, syntax_iteration_suffix } from frontend/syntax/syntax_forms
+import { array_element_type, find_field, find_record_type, resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { CompilerState, find_module, has_diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { check_expression } from frontend/checking/body/expressions
+import { checked_hash_index } from frontend/checking/body/collections
+import { check_call, check_callable_call, check_method_call, check_record_new } from frontend/checking/body/calls
+import { check_transform } from frontend/checking/body/iteration
+
+def check_never_postfix(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, value: CheckedValue): CheckedValue
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	scalar_mir_disable(locals)
+	mut scanning := true
+	while scanning && !has_diagnostic(state)
+		if token_is(state, position[0], ".")
+			if syntax_iteration_suffix(state, position[0]) >= 0
+				break
+			end
+			advance(position)
+			expect_identifier(state, position)
+		elsif token_is(state, position[0], "[")
+			advance(position)
+			skip_newlines(state, position)
+			check_expression(state, position, locals, 1, "")
+			skip_newlines(state, position)
+			expect(state, position, "]")
+		elsif token_is(state, position[0], "(")
+			advance(position)
+			skip_newlines(state, position)
+			while !token_is(state, position[0], ")") && !has_diagnostic(state)
+				parse_argument_label(state, position)
+				check_expression(state, position, locals, 1, "")
+				if !token_is(state, position[0], ",")
+					break
+				end
+				advance(position)
+				skip_newlines(state, position)
+			end
+			skip_newlines(state, position)
+			expect(state, position, ")")
+		else
+			scanning = false
+		end
+	end
+	locals.mir_state[mir_state_enabled_slot()] = saved_mir
+	return value
+end
+
+def check_member(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, member: String): CheckedValue
+	return concurrent_value(state, check_member_value(state, position, locals, receiver, member), receiver.concurrent_borrowed)
+end
+
+def check_member_value(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, member: String): CheckedValue
+	mut value := mir_literal_scalar(state, locals, checked_view(receiver, receiver.type_name, receiver.category), position[0])
+	if find_object_type(state, value.type_name) >= 0
+		return check_object_member(state, position, locals, value, member)
+	end
+	if find_newtype_type(state, value.type_name) >= 0
+		return check_newtype_member(state, position, locals, value, member)
+	end
+	if value.category == checked_category_enum()
+		owner := find_enum_type(state, value.type_name)
+		raw_type := raw_enum_type(state, owner)
+		origin := position[0]
+		if member != "from_raw" || raw_type == "" || !token_is(state, origin, "(")
+			return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "enum type requires a valid from_raw call")
+		end
+		advance(position)
+		skip_newlines(state, position)
+		argument := check_expression(state, position, locals, 1, raw_type)
+		skip_newlines(state, position)
+		expect(state, position, ")")
+		if argument.type_name == "Never"
+			return argument
+		end
+		return checked_raw_enum_from(state, locals, owner, argument, origin)
+	end
+	owner := find_record_type(state, value.type_name)
+	if owner >= 0
+		field := find_field(state, owner, member)
+		if field >= 0 && callable_parts(load_string(state.declarations.field_types, field)).size() > 0
+			return mir_checked_record_field(state, locals, value, field, load_string(state.declarations.field_types, field), position[0] - 1)
+		end
+	end
+	if union_parts(value.type_name).size() > 0 && callable_parts(union_member_type(state, value.type_name, member)).size() > 0
+		return check_union_member(state, locals, value, member, position[0] - 1)
+	end
+	if token_is(state, position[0], "(")
+		# Checked dispatch owns receiver admission and diagnostics. Concrete
+		# bodies still require independently verified MIR before emission.
+		if value.category >= checked_category_math()
+			if member != "sqrt"
+				value = type_diagnostic(
+					state,
+					load_integer(state.source_tokens.token_lines, position[0]),
+					"unsupported standard package member",
+				)
+			end
+		else
+			if value.category == checked_category_record()
+				if member == "new"
+					value = check_record_new(
+						state,
+						position,
+						locals,
+						value.origin,
+					)
+				else
+					value = type_diagnostic(
+						state,
+						load_integer(state.source_tokens.token_lines, position[0]),
+						"unsupported record constructor member " + member,
+					)
+				end
+			else
+				value = check_method_call(state, position, locals, value, member)
+			end
+		end
+	else
+		if union_parts(value.type_name).size() > 0
+			return check_union_member(state, locals, value, member, position[0] - 1)
+		end
+		record_index := find_record_type(state, value.type_name)
+		if record_index < 0
+			value = type_diagnostic(
+				state,
+				load_integer(state.source_tokens.token_lines, position[0]),
+				"field access requires a record value",
+			)
+		else
+			field_index := find_field(state, record_index, member)
+			if field_index < 0
+				value = type_diagnostic(
+					state,
+					load_integer(state.source_tokens.token_lines, position[0]),
+					"unknown field " + member + " on " + type_display(state, value.type_name),
+				)
+			else
+				mut binding := -1
+				if value.nullable_field == -1
+					binding = value.nullable_binding
+				end
+				value = mir_checked_record_field(state, locals, value, field_index, load_string(state.declarations.field_types, field_index), position[0] - 1)
+				value = nullable_read(state, locals, value, binding, field_index, position[0] - 1)
+			end
+		end
+	end
+	return value
+end
+
+def check_postfix(
+		mut state: CompilerState,
+		mut position: Array<Integer>,
+		mut locals: CheckedLocals,
+		initial: CheckedValue,
+	): CheckedValue
+	mut value := CheckedValue.new(concurrent_borrowed: initial.concurrent_borrowed, presentation: initial.presentation, type_name: initial.type_name, category: initial.category, origin: initial.origin, mutable: initial.mutable, binding: initial.binding, readonly: initial.readonly, immutable_reference: initial.immutable_reference, nullable_binding: initial.nullable_binding, nullable_field: initial.nullable_field, truth: initial.truth, falsity: initial.falsity, flow_type: initial.flow_type)
+	mut scanning := true
+	while scanning
+		if value.type_name == "Never"
+			return check_never_postfix(state, position, locals, value)
+		end
+		if syntax_iteration_suffix(state, position[0]) >= 0
+			break
+		end
+		if token_is(state, position[0], "&.")
+			value = check_safe_member(state, position, locals, value)
+			if has_diagnostic(state)
+				return value
+			end
+			next
+		end
+		if token_is(state, position[0], "[")
+			if hash_key_type(value.type_name) != "" || value.type_name == "Hash"
+				value = checked_hash_index(state, position, locals, value)
+				if has_diagnostic(state)
+					return value
+				end
+				next
+			end
+		end
+		if token_is(state, position[0], "(")
+			if callable_parts(value.type_name).size() > 0
+				value = check_callable_call(state, position, locals, value)
+				if has_diagnostic(state)
+					return value
+				end
+				next
+			end
+			if value.category < 0
+				value = checked_value(value.type_name, checked_category_value(), value.origin, value.mutable)
+			end
+			if value.category == checked_category_readonly()
+				value = checked_value(value.type_name, checked_category_value(), value.origin, value.mutable)
+			end
+			if value.category == checked_category_value()
+				value = type_diagnostic(
+					state,
+					load_integer(state.source_tokens.token_lines, position[0]),
+					"value is not directly callable",
+				)
+				scanning = false
+			else
+				value = check_call(
+					state,
+					position,
+					locals,
+					value.category,
+					checked_reference_name(state, value.origin),
+					-1, -1, false,
+				)
+			end
+		else
+			if token_is(state, position[0], ".")
+				if sparse_integer_at(state.parsed.transform_origins, position[0]) > 0
+					value = check_transform(state, position, locals, value)
+					if has_diagnostic(state)
+						return value
+					end
+					next
+				end
+				advance(position)
+				member := expect_identifier(state, position)
+				if member == "each" && syntax_iteration_suffix(state, position[0] - 2) >= 0
+					position[0] -= 2
+					break
+				end
+				value = check_member(state, position, locals, value, member)
+			else
+				if token_is(state, position[0], "[")
+					index_origin := position[0]
+					line := load_integer(state.source_tokens.token_lines, position[0])
+					receiver_id := checked_mir_value(value)
+					concurrent_borrowed := value.concurrent_borrowed
+					advance(position)
+					index := check_expression(state, position, locals, 1, "Integer")
+					if index.type_name == "Never"
+						expect(state, position, "]")
+						value = index
+						next
+					end
+					index_id := checked_mir_value(index)
+					if token_is(state, position[0] + 1, "=") || binary_operator_id(load_string(state.source_tokens.token_texts, position[0] + 1)) >= binary_add_assign()
+						concurrent_mutation(state, locals, value, index_origin)
+					end
+					mut lowered := false
+					if locals.mir_state[mir_state_enabled_slot()] == 1 && array_element_type(value.type_name) != ""
+						mut assignment := token_is(state, position[0] + 1, "=")
+						if binary_operator_id(load_string(state.source_tokens.token_texts, position[0] + 1)) >= binary_add_assign()
+							assignment = true
+						end
+						value = mir_checked_array_index(state, locals, value, index, array_element_type(value.type_name), index_origin, assignment)
+						lowered = true
+					end
+					if !lowered && value.type_name == "String"
+						value = mir_checked_string_operation(state, locals, mir_op_string_index(), receiver_id, index_id, 0, "String", index_origin)
+						lowered = true
+					end
+					if !lowered
+						scalar_mir_disable(locals)
+					end
+					expect(state, position, "]")
+					if !lowered
+						if value.type_name == "String"
+							value = checked_value("String", checked_category_value(), 9007199254740991, 0)
+						else
+							element_type := array_element_type(value.type_name)
+							if element_type == ""
+								value = type_diagnostic(
+									state,
+									line,
+									"indexing is unavailable on " + value.type_name,
+								)
+								scanning = false
+							else
+								value = checked_bound_value(element_type, checked_category_value(), index_origin, value.mutable, value.binding)
+							end
+						end
+					end
+					value = concurrent_value(state, value, concurrent_borrowed)
+				else
+					scanning = false
+				end
+			end
+		end
+	end
+	return value
+end
+
+def check_safe_present_member(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue): CheckedValue
+	if sparse_integer_at(state.parsed.transform_origins, position[0]) > 0
+		return check_transform(state, position, locals, receiver)
+	end
+	advance(position)
+	member := expect_identifier(state, position)
+	mut value := check_member(state, position, locals, receiver, member)
+	if callable_parts(value.type_name).size() > 0 && token_is(state, position[0], "(")
+		value = check_callable_call(state, position, locals, value)
+	end
+	return value
+end
+
+# The receiver dominates both edges. Only the present edge evaluates authored
+# arguments and blocks; the absent edge contributes none, or no Void result.
+def check_safe_member(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	element := nullable_element(receiver.type_name)
+	if element == ""
+		value := check_safe_present_member(state, position, locals, receiver)
+		store_integer(state.callables.checked[0].safe_finishes, origin, position[0])
+		store_string(state.callables.checked[0].safe_types, origin, value.type_name)
+		return value
+	end
+	flow_parent := locals.nullable_state[nullable_state_head_slot()]
+	flow_first := locals.nullable_facts.size()
+	condition := nullable_nil_condition(state, locals, receiver, true, origin)
+	alternate := mir_control_branch(state, locals, condition, line)
+	nullable_apply(locals, condition.truth)
+	payload := mir_checked_nullable(state, locals, mir_op_nullable_extract(), receiver, element, 0, origin)
+	value := check_safe_present_member(state, position, locals, checked_view(receiver, element, payload.category))
+	nullable_finish(locals, flow_parent, flow_first, locals.count[0])
+	mut result_type := nullable_type(value.type_name)
+	if value.type_name == "Void"
+		result_type = "Void"
+	end
+	if value.type_name == "Never"
+		result_type = "Nil"
+	end
+	if has_diagnostic(state) || result_type == ""
+		return type_diagnostic(state, line, "safe navigation result is unavailable")
+	end
+	mut join := mir_value_join(locals, line)
+	if value.type_name == "Void"
+		mir_control_jump(state, locals, join.target, locals.count[0])
+	elsif value.type_name != "Never"
+		mir_value_exit(state, locals, join, value)
+	end
+	mir_control_enter(state, locals, alternate, line)
+	mut result := checked_value("Void", checked_category_value(), 9007199254740991, 0)
+	if result_type == "Void"
+		mir_control_jump(state, locals, join.target, locals.count[0])
+		mir_control_enter(state, locals, join.target, line)
+	else
+		none := mir_checked_nullable(state, locals, mir_op_nullable_none(), receiver, result_type, 0, origin)
+		mir_value_exit(state, locals, join, none)
+		result = mir_value_complete(state, locals, join, result_type, origin)
+	end
+	store_integer(state.callables.checked[0].safe_finishes, origin, position[0])
+	store_string(state.callables.checked[0].safe_types, origin, result_type)
+	return concurrent_value(state, result, value.concurrent_borrowed)
+end
+
+def check_newtype_member(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, member: String): CheckedValue
+	owner := find_newtype_type(state, receiver.type_name)
+	definition := state.nominal.newtypes[owner]
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	class_method := receiver.category == checked_category_newtype()
+	mut method_arguments: Array<String> := []
+	if token_is(state, position[0], "<")
+		mut application := [position[0] - 1]
+		raw := parse_type(state, application)
+		generic_arguments(raw).each do |argument|
+			method_arguments.push(resolve_type_name(state, state.module_graph.active_module[0], argument, false))
+		end
+		position[0] = application[0]
+	end
+	if !token_is(state, position[0], "(")
+		return type_diagnostic(state, line, "newtype member requires an explicit call")
+	end
+	if method_arguments.size() > 0 && ((class_method && member == "new") || (!class_method && member == "value"))
+		return type_diagnostic(state, line, "newtype construction and projection do not accept type arguments")
+	end
+	if class_method && member == "new"
+		if definition.closed && (state.module_graph.active_module[0] != definition.source_id || state.global_bindings.declaration_owner[0] != definition.name)
+			return type_diagnostic(state, line, "raw constructor for closed newtype " + definition.name + " is private")
+		end
+		advance(position)
+		skip_newlines(state, position)
+		value := check_expression(state, position, locals, 1, definition.representation)
+		skip_newlines(state, position)
+		if token_is(state, position[0], ",")
+			advance(position)
+			skip_newlines(state, position)
+		end
+		expect(state, position, ")")
+		if value.type_name == "Never"
+			return value
+		end
+		return concurrent_value(state, mir_newtype_operation(state, locals, mir_op_newtype_construct(), value, owner, newtype_type(owner), origin), value.concurrent_borrowed)
+	end
+	if !class_method && member == "value"
+		advance(position)
+		skip_newlines(state, position)
+		expect(state, position, ")")
+		return mir_newtype_operation(state, locals, mir_op_newtype_project(), receiver, owner, definition.representation, origin)
+	end
+	function := newtype_method_function(state, receiver.type_name, member, class_method, method_arguments)
+	if function < 0
+		return type_diagnostic(state, line, "newtype " + definition.name + " has no matching member " + member)
+	end
+	if !namespace_member_access(state, definition.source_id, definition.name + "::" + member, origin)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	store_integer(state.callables.checked[0].generic_calls, position[0], function + 1)
+	return check_call(state, position, locals, checked_category_function(), "", function, checked_mir_value(receiver), !class_method)
+end
+
+# Capture receiver and authored argument once before the live bounds/key query.
+def check_object_member(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, member: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	owner := find_object_type(state, receiver.type_name)
+	instance := state.nominal.object_instances[owner]
+	definition := state.nominal.objects[instance.definition]
+	if definition.interface_type && receiver.category == checked_category_object()
+		return type_diagnostic(state, line, "interface cannot be constructed or used as a class receiver")
+	end
+	mut method_arguments: Array<String> := []
+	if token_is(state, position[0], "<") && nominal_application_end(state, position[0] - 1) > position[0]
+		mut application := [position[0] - 1]
+		raw := parse_type(state, application)
+		arguments := generic_arguments(raw)
+		if !time_codec_method_arguments_valid(state, owner, member, arguments, line)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		if member == "bind" && !web_input_names_valid(state, owner, arguments, line)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		arguments.each do |argument|
+			method_arguments.push(resolve_type_name(state, state.module_graph.active_module[0], argument, false))
+		end
+		position[0] = application[0]
+	end
+	if !token_is(state, position[0], "(")
+		field := object_field_index(state, owner, "@" + member)
+		if receiver.category != checked_category_object() && field >= 0
+			mut internal := false
+			if receiver.origin >= 0 && receiver.origin < state.source_tokens.token_count[0] && token_is(state, receiver.origin, "self") && state.global_bindings.declaration_owner[0] == definition.name && state.module_graph.active_module[0] == definition.source_id
+				internal = true
+			end
+			return checked_object_field(state, locals, receiver, field, origin - 1, position[0], internal)
+		end
+		return type_diagnostic(state, line, "unknown class field or missing method call")
+	end
+	class_member := receiver.category == checked_category_object()
+	if (member == "where" || member == "order" || member == "find_by" || member == "exists?" || member == "ids" || orm_literal_column_method(member)) && method_arguments.size() == 0
+		root := object_method_function(state, receiver.type_name, "$orm_query", class_member, [], origin)
+		if root >= 0
+			return check_orm_query(state, position, locals, receiver, class_member, root, member)
+		end
+	end
+	if member == "transaction" && definition.source_id == find_module(state, "trb/orm/index") && ((class_member && definition.name == "Database") || (!class_member && definition.name == "Transaction"))
+		if method_arguments.size() > 1
+			return type_diagnostic(state, line, "transaction accepts one result type argument")
+		end
+		mut declared := ""
+		if method_arguments.size() == 1
+			declared = method_arguments[0]
+		end
+		return check_orm_transaction(state, position, locals, receiver, class_member, declared)
+	end
+	if class_member && member == "open" && scoped_resource_name(state, receiver.type_name) == "File"
+		if method_arguments.size() > 1
+			return type_diagnostic(state, line, "File.open accepts one result type argument")
+		end
+		mut declared := ""
+		if method_arguments.size() == 1
+			declared = method_arguments[0]
+		end
+		return check_file_acquisition(state, position, locals, receiver.type_name, declared)
+	end
+	if class_member && member == "new"
+		resource := scoped_resource_name(state, receiver.type_name)
+		if resource != ""
+			return type_diagnostic(state, line, resource + " cannot be constructed directly; use " + resource + ".open() with a block")
+		end
+		if method_arguments.size() > 0
+			return type_diagnostic(state, line, "constructor type arguments belong to the class")
+		end
+		initializer := object_method_function(state, receiver.type_name, "initialize", false, [], origin)
+		if initializer >= 0
+			if load_string(state.declarations.function_result_types, initializer) != "Void"
+				return type_diagnostic(state, line, "class initializer must return Void")
+			end
+			store_integer(state.callables.checked[0].generic_calls, position[0], initializer + 1)
+			return check_call(state, position, locals, checked_category_initializer(), "initialize", initializer, owner, true)
+		else
+			advance(position)
+			skip_newlines(state, position)
+			expect(state, position, ")")
+		end
+		return mir_checked_object_new(state, locals, owner, receiver.type_name, origin)
+	end
+	if !class_member && method_arguments.size() == 0
+		definition.methods.each do |method|
+			kind := web_context_kind(state, method.generic_function)
+			if !method.class_member && method.name == member && kind > 0 && kind < 3
+				return check_inferred_web_context(state, position, locals, receiver, method.generic_function)
+			end
+		end
+	end
+	if class_member && method_arguments.size() == 0
+		definition.methods.each do |method|
+			if method.class_member && method.name == member && json_provider_kind(state, method.generic_function) == json_provider_response()
+				return check_inferred_json_encoding(state, position, locals, method.generic_function)
+			end
+		end
+	end
+	function := object_method_function(state, receiver.type_name, member, class_member, method_arguments, origin)
+	if function < 0
+		return type_diagnostic(state, line, "unknown class method " + member)
+	end
+	declaring_owner := object_function_owner(state, function)
+	declaring := state.nominal.objects[declaring_owner]
+	if !namespace_member_access(state, declaring.source_id, declaring.name + "::" + member, origin)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	store_integer(state.callables.checked[0].generic_calls, position[0], function + 1)
+	return check_call(state, position, locals, checked_category_function(), "", function, checked_mir_value(receiver), true)
+end

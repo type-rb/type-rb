@@ -1,0 +1,212 @@
+import { mir_object_id } from mir/model/objects
+import { mir_op_union_inject } from mir/model/instructions
+import { MirModule } from mir/model/module
+import { mir_representation_type } from mir/model/newtypes
+import { mir_type_boolean, mir_type_composite_start, mir_type_float, mir_type_float_array, mir_type_integer, mir_type_integer_array, mir_type_string } from mir/model/type_ids
+import { mir_type_kind_any, mir_type_kind_array, mir_type_kind_bytes, mir_type_kind_callable, mir_type_kind_class, mir_type_kind_empty_array, mir_type_kind_empty_hash, mir_type_kind_enum, mir_type_kind_hash, mir_type_kind_interface, mir_type_kind_nil, mir_type_kind_nullable, mir_type_kind_range, mir_type_kind_record, mir_type_kind_union } from mir/model/type_kinds
+
+# Deep test equality is a distinct language operation. Its reference identity
+# shortcuts belong here, above ABI adaptation; record/enum values never receive
+# a pointer shortcut merely because Native stores them in managed allocations.
+record MirTestComparisonNode
+	type_id: Integer
+	kind: String
+	identity: Boolean
+	children: Array<Integer>
+	variants: Array<Integer>
+	fields: Array<Array<Integer>>
+end
+
+record MirTestComparisonPlan
+	nodes: Array<MirTestComparisonNode>
+	error: String
+end
+
+def mir_test_comparison_object(native_module: MirModule, contract: Integer, candidate: Integer): Boolean
+	owner := native_module.objects[contract]
+	if owner.interface_type
+		native_module.object_witnesses.each do |witness|
+			if witness.contract == contract && witness.owner == candidate
+				return true
+			end
+		end
+		return false
+	end
+	mut current := candidate
+	mut remaining := native_module.objects.size() + 1
+	while current >= 0 && remaining > 0
+		if current == contract
+			return true
+		end
+		current = mir_object_id(native_module, native_module.objects[current].superclass)
+		remaining -= 1
+	end
+	return false
+end
+
+def mir_test_comparison_node(native_module: MirModule, type_id: Integer): MirTestComparisonNode
+	mut kind := "unsupported"
+	mut identity := false
+	mut children: Array<Integer> := []
+	mut variants: Array<Integer> := []
+	mut fields: Array<Array<Integer>> := []
+	representation := mir_representation_type(native_module, type_id)
+	if representation != type_id && representation > 0
+		kind = "alias"
+		children.push(representation)
+	elsif type_id == mir_type_integer() || type_id == mir_type_boolean()
+		kind = "word"
+	elsif type_id == mir_type_float()
+		kind = "float"
+	elsif type_id == mir_type_string()
+		kind = "string"
+	elsif type_id == mir_type_integer_array() || type_id == mir_type_float_array()
+		kind = "array"
+		identity = true
+		mut element := mir_type_integer()
+		if type_id == mir_type_float_array()
+			element = mir_type_float()
+		end
+		children.push(element)
+	elsif type_id >= mir_type_composite_start() && type_id - mir_type_composite_start() < native_module.types.size()
+		row := native_module.types[type_id - mir_type_composite_start()]
+		if row.kind == mir_type_kind_array()
+			kind = "array"
+			identity = true
+			children.push(row.element)
+		elsif row.kind == mir_type_kind_hash()
+			kind = "hash"
+			identity = true
+			children.push(row.element)
+		elsif row.kind == mir_type_kind_nullable()
+			kind = "nullable"
+			identity = true
+			children.push(row.element)
+		elsif row.kind == mir_type_kind_nil()
+			kind = "nil"
+		elsif row.kind == mir_type_kind_callable()
+			kind = "callable"
+		elsif row.kind == mir_type_kind_bytes()
+			kind = "bytes"
+			identity = true
+		elsif row.kind == mir_type_kind_empty_array() || row.kind == mir_type_kind_empty_hash()
+			kind = "empty"
+		elsif row.kind == mir_type_kind_range()
+			kind = "fields"
+			children = [mir_type_integer(), mir_type_integer(), mir_type_boolean()]
+		elsif row.kind == mir_type_kind_record()
+			kind = "fields"
+			if row.declaration < 0 || row.declaration >= native_module.records.size()
+				kind = "unsupported"
+			else
+				definition := native_module.records[row.declaration]
+				mut index := 0
+				while index < definition.field_count
+					children.push(native_module.fields[definition.field_start + index].type_id)
+					index += 1
+				end
+			end
+		elsif row.kind == mir_type_kind_enum()
+			kind = "enum"
+			if row.declaration < 0 || row.declaration >= native_module.enums.size()
+				kind = "unsupported"
+			else
+				owner := native_module.enums[row.declaration]
+				mut index := 0
+				while index < owner.variant_count
+					variant := owner.variant_start + index
+					item := native_module.enum_variants[variant]
+					mut values: Array<Integer> := []
+					mut field := 0
+					while field < item.field_count
+						values.push(native_module.enum_fields[item.field_start + field].type_id)
+						field += 1
+					end
+					variants.push(variant)
+					fields.push(values)
+					index += 1
+				end
+			end
+		elsif row.kind == mir_type_kind_class() || row.kind == mir_type_kind_interface()
+			kind = "object"
+			identity = true
+			if row.kind == mir_type_kind_interface()
+				kind = "interface"
+			end
+			if row.declaration < 0 || row.declaration >= native_module.objects.size() || native_module.objects[row.declaration].resource_kind > 0
+				kind = "unsupported"
+			else
+				# A base or interface value retains its dynamic class descriptor.
+				# Compare that complete layout, including subclass/private fields.
+				native_module.objects.each do |object|
+					if !object.interface_type && object.resource_kind == 0 && mir_test_comparison_object(native_module, row.declaration, object.declaration)
+						variants.push(object.declaration)
+						mut values: Array<Integer> := []
+						object.fields.each do |field|
+							values.push(field.type_id)
+						end
+						fields.push(values)
+					end
+				end
+			end
+		elsif row.kind == mir_type_kind_union()
+			kind = "tagged"
+			children = native_module.unions[row.declaration].alternatives
+		elsif row.kind == mir_type_kind_any()
+			kind = "tagged"
+			# In a closed Native module, verified union injections are the only
+			# constructors of dynamic tags. Unboxed unrelated types need no
+			# comparator. Include every injected tag, conservatively including
+			# explicit unions; never skip an unsupported boxed payload.
+			native_module.instructions.each do |instruction|
+				if instruction.kind == mir_op_union_inject()
+					mut present := false
+					children.each do |child|
+						if child == instruction.payload
+							present = true
+						end
+					end
+					if !present
+						children.push(instruction.payload)
+					end
+				end
+			end
+		end
+	end
+	return MirTestComparisonNode.new(type_id: type_id, kind: kind, identity: identity, children: children, variants: variants, fields: fields)
+end
+
+def mir_test_comparison_plan(native_module: MirModule, roots: Array<Integer>): MirTestComparisonPlan
+	mut pending: Array<Integer> := []
+	roots.each do |root|
+		pending.push(root)
+	end
+	mut nodes: Array<MirTestComparisonNode> := []
+	mut index := 0
+	while index < pending.size()
+		type_id := pending[index]
+		mut seen := false
+		nodes.each do |node|
+			if node.type_id == type_id
+				seen = true
+			end
+		end
+		if !seen
+			node := mir_test_comparison_node(native_module, type_id)
+			if node.kind == "unsupported"
+				return MirTestComparisonPlan.new(nodes: [], error: "test equality requires a supported verified value layout")
+			end
+			nodes.push(node)
+			node.children.each do |child|
+				pending.push(child)
+			end
+			node.fields.each do |fields|
+				fields.each do |child|
+					pending.push(child)
+				end
+			end
+		end
+		index += 1
+	end
+	return MirTestComparisonPlan.new(nodes: nodes, error: "")
+end

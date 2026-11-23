@@ -1,0 +1,13 @@
+def final_bound(mut values: Array<Integer>): Integer
+	values[0] = 9
+	return 2
+end
+
+def main()
+	mut values := [0]
+	bounds := values[0]..final_bound(values)
+	bounds.each do |value|
+		puts(value)
+	end
+	puts(values[0])
+end

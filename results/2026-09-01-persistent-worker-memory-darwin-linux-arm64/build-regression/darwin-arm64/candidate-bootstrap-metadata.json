@@ -1,0 +1,15 @@
+{
+  "architecture": "arm64",
+  "asset": "static-string-compactness-candidate",
+  "attestationSubjectSha256": "03ee5b3dd5fcee9889741bd29cc700e768f4156f7499b5d3c2ae0312ac11ee34",
+  "ccBoundary": "system-cc",
+  "mode": "0755",
+  "os": "darwin",
+  "profile": "darwin-arm64-v0",
+  "qbeBinarySha256": "860594a894a0c0e3f2a8da36b068b128dc13c0e3d8b2a81922902f4b2ea8d133",
+  "qbeBinarySize": 404192,
+  "qbeTarget": "arm64_apple",
+  "runnerImage": "macos-15",
+  "sha256": "03ee5b3dd5fcee9889741bd29cc700e768f4156f7499b5d3c2ae0312ac11ee34",
+  "size": 283080
+}

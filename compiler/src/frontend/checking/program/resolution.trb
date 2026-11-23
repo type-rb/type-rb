@@ -1,0 +1,305 @@
+import { validate_resource_declarations } from frontend/checking/program/resource_declarations
+import { validate_web_routes } from frontend/checking/program/web_routes
+import { validate_web_endpoints } from frontend/checking/program/web_endpoints
+import { resolve_projected_types } from frontend/resolution/projected_types
+import { ProjectedType } from state/source_state
+import { standard_source_errors, standard_source_result, standard_source_unit, standard_source_unowned } from state/standard_source_kinds
+import { declaration_function, declaration_namespace } from frontend/types/declaration_kinds
+import { resolution_local_add, resolve_body_names } from frontend/resolution/body_resolution
+import { object_initializer_owner } from frontend/types/object_types
+import { resolve_object_declarations, validate_object_inheritance } from frontend/resolution/object_resolution
+import { builtin_result_source } from frontend/checking/builtins/results
+import { resolve_newtype_declarations, validate_closed_newtypes } from frontend/resolution/newtype_resolution
+import { resolve_raw_enum_results } from frontend/resolution/raw_enum_resolution
+import { declare_global_functions } from frontend/syntax/global_declarations
+import { namespace_parent } from frontend/types/namespace_model
+import { validate_generic_functions } from frontend/resolution/generic_functions
+import { load_standard_source, standard_source_kind } from project/standard_library
+import { find_declaration_in_module } from frontend/resolution/declaration_lookup
+import { resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { validate_alias_declarations, validate_generic_declarations } from frontend/resolution/generic_validation
+import { CompilerState, diagnostic, has_diagnostic, select_checked_body } from state/state
+import { ResolutionLocals, resolution_locals_new } from state/resolution_locals
+import { load_integer, load_string, sparse_string_at, store_integer, store_string } from support/storage
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { import_path_value, resolve_bare_imports, validate_import_bindings } from frontend/resolution/import_resolution
+import { resolve_enum_declarations } from frontend/resolution/enum_resolution
+
+def resolve_declarations(mut state: CompilerState): Boolean
+	return resolve_declarations_with_entry(state, true)
+end
+
+def resolve_declarations_with_entry(mut state: CompilerState, require_entry: Boolean): Boolean
+	state.global_bindings.namespaces.each do |declaration|
+		mut kind := declaration_function()
+		while kind < declaration_namespace()
+			if find_declaration_in_module(state, declaration.source_id, declaration.name, kind) >= 0
+				state.module_graph.active_module[0] = declaration.source_id
+				diagnostic(state, "TRBN4003", declaration.line, "duplicate declaration " + declaration.name)
+			end
+			kind += 1
+		end
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	if !validate_import_bindings(state)
+		return false
+	end
+	if !validate_resource_declarations(state)
+		return false
+	end
+	if !validate_alias_declarations(state)
+		return false
+	end
+	if !validate_generic_functions(state)
+		return false
+	end
+	if !validate_generic_declarations(state)
+		return false
+	end
+	if !resolve_object_declarations(state)
+		return false
+	end
+	if !resolve_enum_declarations(state)
+		return false
+	end
+	if !resolve_newtype_declarations(state)
+		return false
+	end
+	mut record_index := 0
+	while record_index < state.declarations.record_count[0]
+		module_index := load_integer(state.declarations.record_modules, record_index)
+		state.module_graph.active_module[0] = module_index
+		mut other_record := record_index - 1
+		state.global_bindings.declaration_owner[0] = namespace_parent(load_string(state.declarations.record_names, record_index))
+		while other_record >= 0
+			if load_integer(state.declarations.record_modules, other_record) != module_index
+				other_record = -1
+			else
+				if load_string(state.declarations.record_names, other_record) == load_string(state.declarations.record_names, record_index)
+					diagnostic(
+						state,
+						"TRBN4003",
+						load_integer(state.declarations.record_lines, record_index),
+						"duplicate record declaration " + load_string(state.declarations.record_names, record_index),
+					)
+				end
+				other_record -= 1
+			end
+		end
+		start := load_integer(state.declarations.record_field_starts, record_index)
+		finish := start + load_integer(state.declarations.record_field_counts, record_index)
+		mut field_index := start
+		while field_index < finish
+			mut other_field := start
+			while other_field < field_index
+				if load_string(state.declarations.field_names, other_field) == load_string(state.declarations.field_names, field_index)
+					diagnostic(
+						state,
+						"TRBN4003",
+						load_integer(state.declarations.field_lines, field_index),
+						"duplicate field declaration " + load_string(state.declarations.field_names, field_index),
+					)
+				end
+				other_field += 1
+			end
+			raw_type := load_string(state.declarations.field_types, field_index)
+			resolved_type := resolve_type_name(state, module_index, raw_type, false)
+			if resolved_type == ""
+				diagnostic(state, "TRBN4003", load_integer(state.declarations.field_lines, field_index), "unknown field type " + type_display(state, raw_type))
+			else
+				store_string(state.declarations.field_types, field_index, resolved_type)
+			end
+			field_index += 1
+		end
+		record_index += 1
+	end
+	if !validate_closed_newtypes(state)
+		return false
+	end
+	mut main_count := 0
+	mut declared_functions: Hash<String, Integer> := {}
+	mut declared_module := -1
+	mut function_index := 0
+	while function_index < state.declarations.function_count[0]
+		module_index := load_integer(state.declarations.function_modules, function_index)
+		if module_index != declared_module
+			declared_functions = {}
+			declared_module = module_index
+		end
+		state.module_graph.active_module[0] = module_index
+		if require_entry && module_index == state.module_graph.entry_module[0]
+			if load_string(state.declarations.function_names, function_index) == "main"
+				main_count += 1
+				if load_integer(state.declarations.function_parameter_counts, function_index) != 0
+					diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, function_index), "main must take no parameters")
+				end
+				if load_string(state.declarations.function_result_types, function_index) != "Void"
+					diagnostic(
+						state,
+						"TRBN4003",
+						load_integer(state.declarations.function_lines, function_index),
+						"main must return Void, found " + load_string(state.declarations.function_result_types, function_index),
+					)
+				end
+			end
+		end
+		name := load_string(state.declarations.function_names, function_index)
+		state.global_bindings.declaration_owner[0] = namespace_parent(name)
+		if declared_functions.key?(name)
+			diagnostic(
+				state,
+				"TRBN4003",
+				load_integer(state.declarations.function_lines, function_index),
+				"duplicate function declaration " + name,
+			)
+		else
+			declared_functions[name] = 0
+		end
+		parameter_start := load_integer(state.declarations.function_parameter_starts, function_index)
+		parameter_finish := parameter_start + load_integer(state.declarations.function_parameter_counts, function_index)
+		mut parameter_index := parameter_start
+		while parameter_index < parameter_finish
+			mut other_parameter := parameter_start
+			while other_parameter < parameter_index
+				if load_string(state.declarations.parameter_names, other_parameter) == load_string(state.declarations.parameter_names, parameter_index)
+					diagnostic(
+						state,
+						"TRBN4003",
+						load_integer(state.declarations.parameter_lines, parameter_index),
+						"duplicate parameter declaration " + load_string(state.declarations.parameter_names, parameter_index),
+					)
+				end
+				other_parameter += 1
+			end
+			raw_type := load_string(state.declarations.parameter_types, parameter_index)
+			resolved_type := resolve_type_name(state, module_index, raw_type, false)
+			if resolved_type == ""
+				diagnostic(state, "TRBN4003", load_integer(state.declarations.parameter_lines, parameter_index), "unknown parameter type " + type_display(state, raw_type))
+			else
+				store_string(state.declarations.parameter_types, parameter_index, resolved_type)
+			end
+			parameter_index += 1
+		end
+		raw_result := load_string(state.declarations.function_result_types, function_index)
+		resolved_result := resolve_type_name(state, module_index, raw_result, true)
+		if resolved_result == ""
+			diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, function_index), "unknown result type " + type_display(state, raw_result))
+		else
+			store_string(state.declarations.function_result_types, function_index, resolved_result)
+		end
+		function_index += 1
+	end
+	if require_entry && main_count != 1
+		state.module_graph.active_module[0] = state.module_graph.entry_module[0]
+		diagnostic(state, "TRBN4003", 1, "program must declare exactly one main function")
+	end
+	return !has_diagnostic(state)
+end
+
+def resolve_function_body(
+		mut state: CompilerState,
+		function_index: Integer,
+		mut locals: ResolutionLocals,
+	): Boolean
+	select_checked_body(state, function_index)
+	module_index := load_integer(state.declarations.function_modules, function_index)
+	state.module_graph.active_module[0] = module_index
+	body_start := load_integer(state.declarations.function_body_starts, function_index)
+	state.global_bindings.declaration_owner[0] = sparse_string_at(state.source_tokens.token_namespaces, body_start)
+	body_finish := load_integer(state.declarations.function_body_ends, function_index)
+	parameter_start := load_integer(state.declarations.function_parameter_starts, function_index)
+	parameter_finish := parameter_start + load_integer(state.declarations.function_parameter_counts, function_index)
+	mut parameter_index := parameter_start
+	while parameter_index < parameter_finish
+		resolution_local_add(
+			locals,
+			load_string(state.declarations.parameter_names, parameter_index),
+			load_string(state.declarations.parameter_types, parameter_index),
+		)
+		parameter_index += 1
+	end
+	owner := object_initializer_owner(state, function_index)
+	if owner >= 0
+		state.nominal.object_instances[owner].fields.each do |field|
+			if field.default_start >= 0 && !resolve_body_names(state, field.default_start, field.default_finish, locals)
+				return false
+			end
+		end
+	end
+	return resolve_body_names(state, body_start, body_finish, locals)
+end
+
+# Resolve one owned lexical region, shared by named and anonymous bodies.
+def resolve(mut state: CompilerState): Boolean
+	return resolve_with_projected_types(state, [])
+end
+
+def resolve_with_projected_types(mut state: CompilerState, projected_types: Array<ProjectedType>): Boolean
+	return resolve_program(state, projected_types, true)
+end
+
+# Project validation for the REPL resolves the complete graph without imposing
+# executable-entry rules. Ordinary checking retains those rules by default.
+def resolve_without_entry(mut state: CompilerState): Boolean
+	return resolve_program(state, [], false)
+end
+
+def resolve_program(mut state: CompilerState, projected_types: Array<ProjectedType>, require_entry: Boolean): Boolean
+	if state.nominal.raw_enum_values.size() > 0 || builtin_result_source(state) || state.callables.call_blocks.size() > 0
+		load_standard_source(state, standard_source_result(), 1)
+		load_standard_source(state, standard_source_errors(), 1)
+	end
+	if state.callables.call_blocks.size() > 0
+		load_standard_source(state, standard_source_unit(), 1)
+	end
+	previous_module := state.module_graph.active_module[0]
+	mut import_index := 0
+	while import_index < state.module_graph.import_count[0]
+		kind := standard_source_kind(import_path_value(load_string(state.module_graph.import_paths, import_index)))
+		if kind > standard_source_unowned()
+			state.module_graph.active_module[0] = load_integer(state.module_graph.import_modules, import_index)
+			store_integer(state.module_graph.import_targets, import_index, load_standard_source(state, kind, load_integer(state.module_graph.import_lines, import_index)))
+			if has_diagnostic(state)
+				state.module_graph.active_module[0] = previous_module
+				return false
+			end
+		end
+		import_index += 1
+	end
+	state.module_graph.active_module[0] = previous_module
+	if !resolve_bare_imports(state)
+		return false
+	end
+	if !resolve_declarations_with_entry(state, require_entry)
+		return false
+	end
+	if !validate_web_routes(state)
+		return false
+	end
+	if !resolve_raw_enum_results(state)
+		return false
+	end
+	if !validate_web_endpoints(state)
+		return false
+	end
+	declare_default_functions(state)
+	if !resolve_projected_types(state, projected_types)
+		return false
+	end
+	if !declare_global_functions(state)
+		return false
+	end
+	mut function_index := 0
+	while function_index < state.declarations.function_count[0]
+		mut locals := resolution_locals_new(state.source_tokens.token_count[0] + 1)
+		resolve_function_body(state, function_index, locals)
+		declare_default_functions(state)
+		function_index += 1
+		if has_diagnostic(state)
+			return false
+		end
+	end
+	return validate_object_inheritance(state)
+end

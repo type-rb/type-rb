@@ -1,0 +1,24 @@
+export function d $probe_d(d %x) {
+@start
+	%result =d sqrt %x
+	ret %result
+}
+
+export function s $probe_s(s %x) {
+@start
+	%result =s sqrt %x
+	ret %result
+}
+
+export function d $constant_root() {
+@start
+	%result =d sqrt d_9.0
+	ret %result
+}
+
+export function d $memory_root(l %address) {
+@start
+	%value =d loadd %address
+	%result =d sqrt %value
+	ret %result
+}

@@ -1,0 +1,105 @@
+name: Representative performance snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Fixed input batches (starts a separate measurement series)
+        type: choice
+        default: registered
+        options:
+          - registered
+          - sustained-v1
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: representative-performance
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Restore independent representative state
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/representative-performance/publication.py restore --state "$RUNNER_TEMP/representative/state.json"
+
+      - name: Record this attempt before preparation
+        run: python3 tools/representative-performance/publication.py start --state "$RUNNER_TEMP/representative/state.json"
+
+      - name: Resolve the exact reference compiler
+        id: reference
+        run: echo "revision=$(cat TYPE_RB_REVISION)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          repository: type-rb/type-rb
+          ref: ${{ steps.reference.outputs.revision }}
+          path: .type-rb
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+
+      - name: Build the current Native CLI and pinned reference
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld time
+          python3 tools/build-crypto-dependencies.py --archives "$RUNNER_TEMP/crypto-sources" --output bin/crypto
+          ./trbn --version
+          test "$(git -C .type-rb rev-parse HEAD)" = "$(cat TYPE_RB_REVISION)"
+          python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb" --trimpath
+
+      - name: Measure every registered input on one logical CPU
+        id: measurement
+        env:
+          INPUT_PROFILE: ${{ inputs.profile }}
+        run: |
+          sudo swapoff -a
+          cpu=$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')
+          taskset -c "$cpu" python3 tools/representative-performance/measure.py \
+            --native bin/trbn --reference "$RUNNER_TEMP/trb" --go "$(command -v go)" \
+            --profile "$INPUT_PROFILE" --gc-probes --evidence "$RUNNER_TEMP/measurements"
+
+      - name: Retain measurements including unsuccessful attempts
+        id: evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: representative-performance-evidence
+          path: |
+            ${{ runner.temp }}/measurements
+            bin/build-info.txt
+            bin/qbe-backend.json
+            bin/crypto/crypto-build.json
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Record results or retain the previous complete measurement
+        if: always() && steps.restore.outcome == 'success'
+        run: |
+          python3 tools/representative-performance/publication.py finish \
+            --state "$RUNNER_TEMP/representative/state.json" \
+            --manifest "$RUNNER_TEMP/measurements/manifest.json" --evidence-status '${{ steps.evidence.outcome }}'
+
+      - name: Retain independent publication state
+        if: always() && steps.restore.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: representative-performance-state
+          path: ${{ runner.temp }}/representative/state.json
+          retention-days: 90
+          if-no-files-found: error

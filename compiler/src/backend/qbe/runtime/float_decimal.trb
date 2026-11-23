@@ -1,0 +1,65 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { emit_float_decimal_powers } from backend/qbe/runtime/float_powers
+
+# Portions derived from Go 1.27.3 internal/strconv/uscale.go.
+# Copyright 2026 The Go Authors. BSD license: third_party/go-float/LICENSE.
+# Arithmetic invariants and pinned provenance: docs/native-float-decimal.md.
+# These helpers use raw unsigned words internally, not TypeRB Integer values.
+# No helper allocates managed storage or changes the floating-point environment.
+def emit_float_decimal_runtime(mut output: QbeOutput)
+	emit_float_decimal_powers(output)
+	emit_decimal_multiply_high(output)
+	emit_decimal_scale(output)
+	emit_decimal_shortest(output)
+end
+
+# Four 32x32 products and bounded carries recover the high 64 bits.
+# All intermediate sums fit in an unsigned word; no target intrinsic is needed.
+def emit_decimal_multiply_high(mut output: QbeOutput)
+	qbe_output_line(output, "function l $trbn_decimal_multiply_high(l %left, l %right) {\n")
+	qbe_output_line(output, "@start\n %left_low =l and %left, 4294967295\n %left_high =l shr %left, 32\n %right_low =l and %right, 4294967295\n %right_high =l shr %right, 32\n %low_product =l mul %left_low, %right_low\n %low_carry =l shr %low_product, 32\n %cross_product =l mul %left_high, %right_low\n %cross =l add %cross_product, %low_carry\n %carry =l shr %cross, 32\n %cross_low =l and %cross, 4294967295\n %other_product =l mul %left_low, %right_high\n %other_cross =l add %other_product, %cross_low\n %other_carry =l shr %other_cross, 32\n %high_product =l mul %left_high, %right_high\n %with_carry =l add %high_product, %carry\n %result =l add %with_carry, %other_carry\n ret %result\n}\n")
+end
+
+# The low two bits retain rounding/sticky information. Only exact upper
+# boundaries need the low reciprocal product and its unsigned borrow.
+def emit_decimal_scale(mut output: QbeOutput)
+	qbe_output_line(output, "function l $trbn_decimal_scale(l %mantissa, l %high, l %low, l %shift) {\n")
+	qbe_output_line(output, "@start\n %upper =l call $trbn_decimal_multiply_high(l %mantissa, l %high)\n %middle =l mul %mantissa, %high\n %shifted =l shr %upper, %shift\n %restored =l shl %shifted, %shift\n %inexact =w cnel %restored, %upper\n jnz %inexact, @sticky, @boundary\n")
+	qbe_output_line(output, "@sticky\n %sticky_result =l or %shifted, 1\n ret %sticky_result\n")
+	qbe_output_line(output, "@boundary\n %lower_upper =l call $trbn_decimal_multiply_high(l %mantissa, l %low)\n %borrow =w cultl %middle, %lower_upper\n %wide_borrow =l extuw %borrow\n %adjusted =l sub %upper, %wide_borrow\n %difference =l sub %middle, %lower_upper\n %nonzero_tail =w cugtl %difference, 1\n %wide_tail =l extuw %nonzero_tail\n %adjusted_shifted =l shr %adjusted, %shift\n %result =l or %adjusted_shifted, %wide_tail\n ret %result\n}\n")
+end
+
+# Normalize the mantissa, scale both rounding-interval endpoints, then
+# choose their shortest decimal coefficient. Powers of two have a half-width
+# lower interval; parity excludes ties when the binary significand is odd.
+# Binary64 stores 52 fraction bits with exponent bias 1023. Aligning its
+# 53-bit significand to a 64-bit word adds 11 bits; the exponent subtracts
+# 1023 + 63 = 1086 (1085 at the smallest normal/subnormal boundary).
+# The integer logarithms use the upstream exact-in-range approximations:
+# floor(log10(2^e)) = (e * 78913) >> 18 and
+# floor(log2(10^p)) = (p * 108853) >> 15. For the asymmetric interval,
+# floor(log10(3/4 * 2^e)) = (e * 631305 - 261663) >> 21.
+# The 512/1024 offsets are half/full intervals after the 11-bit alignment.
+def emit_decimal_shortest(mut output: QbeOutput)
+	qbe_output_line(output, "function l $trbn_float_decimal(d %magnitude, l %power_out) {\n")
+	qbe_output_line(output, "@start\n %bits =l cast %magnitude\n %encoded_exponent =l shr %bits, 52\n %fraction =l and %bits, 4503599627370495\n %aligned_fraction =l shl %fraction, 11\n %normal =w cnel %encoded_exponent, 0\n jnz %normal, @normal, @subnormal\n")
+	qbe_output_line(output, "@normal\n %normal_mantissa =l or %aligned_fraction, -9223372036854775808\n %normal_exponent =l sub %encoded_exponent, 1086\n jmp @bounds\n")
+	qbe_output_line(output, "@subnormal\n jmp @normalize\n")
+	qbe_output_line(output, "@normalize\n %subnormal_mantissa =l phi @subnormal %aligned_fraction, @shift %next_mantissa\n %subnormal_exponent =l phi @subnormal -1085, @shift %next_exponent\n %aligned =w csltl %subnormal_mantissa, 0\n jnz %aligned, @normalized, @shift\n")
+	qbe_output_line(output, "@shift\n %next_mantissa =l shl %subnormal_mantissa, 1\n %next_exponent =l sub %subnormal_exponent, 1\n jmp @normalize\n")
+	qbe_output_line(output, "@normalized\n jmp @bounds\n")
+	qbe_output_line(output, "@bounds\n %mantissa =l phi @normal %normal_mantissa, @normalized %subnormal_mantissa\n %exponent =l phi @normal %normal_exponent, @normalized %subnormal_exponent\n %power_of_two =w ceql %mantissa, -9223372036854775808\n %above_minimum =w csgtl %exponent, -1085\n %asymmetric =w and %power_of_two, %above_minimum\n jnz %asymmetric, @asymmetric, @regular\n")
+	qbe_output_line(output, "@asymmetric\n %binary_spacing =l add %exponent, 11\n %skewed_product =l mul %binary_spacing, 631305\n %skewed_offset =l sub %skewed_product, 261663\n %skewed_log =l sar %skewed_offset, 21\n %asymmetric_power =l sub 0, %skewed_log\n %asymmetric_lower =l sub %mantissa, 512\n %asymmetric_upper =l add %mantissa, 1024\n jmp @scale\n")
+	qbe_output_line(output, "@regular\n %small =w csltl %exponent, -1085\n jnz %small, @small, @ordinary\n")
+	qbe_output_line(output, "@small\n %small_separation =l sub -1074, %exponent\n jmp @symmetric\n")
+	qbe_output_line(output, "@ordinary\n jmp @symmetric\n")
+	qbe_output_line(output, "@symmetric\n %symmetric_separation =l phi @small %small_separation, @ordinary 11\n %spacing =l add %exponent, %symmetric_separation\n %log_product =l mul %spacing, 78913\n %spacing_log =l sar %log_product, 18\n %symmetric_power =l sub 0, %spacing_log\n %half_shift =l sub %symmetric_separation, 1\n %half_spacing =l shl 1, %half_shift\n %symmetric_lower =l sub %mantissa, %half_spacing\n %symmetric_upper =l add %mantissa, %half_spacing\n jmp @scale\n")
+	qbe_output_line(output, "@scale\n %decimal_power =l phi @asymmetric %asymmetric_power, @symmetric %symmetric_power\n %lower =l phi @asymmetric %asymmetric_lower, @symmetric %symmetric_lower\n %upper =l phi @asymmetric %asymmetric_upper, @symmetric %symmetric_upper\n %separation =l phi @asymmetric 11, @symmetric %symmetric_separation\n %significand =l shr %mantissa, %separation\n %odd =l and %significand, 1\n %power_product =l mul %decimal_power, 108853\n %binary_power =l sar %power_product, 15\n %combined_power =l add %exponent, %binary_power\n %with_guard_bits =l add %combined_power, 3\n %shift_count =l sub 0, %with_guard_bits\n %table_index =l add %decimal_power, 292\n %bad_index =w cugtl %table_index, 616\n %bad_shift =w cugtl %shift_count, 63\n %invalid =w or %bad_index, %bad_shift\n jnz %invalid, @fail, @constants\n")
+	qbe_output_line(output, "@constants\n %table_offset =l shl %table_index, 4\n %entry =l add $trbn_float_decimal_powers, %table_offset\n %low_entry =l add %entry, 8\n %high =l loadl %entry\n %low =l loadl %low_entry\n %lower_scaled =l call $trbn_decimal_scale(l %lower, l %high, l %low, l %shift_count)\n %lower_nudged =l add %lower_scaled, %odd\n %lower_ceiling =l add %lower_nudged, 3\n %minimum =l shr %lower_ceiling, 2\n %upper_scaled =l call $trbn_decimal_scale(l %upper, l %high, l %low, l %shift_count)\n %upper_nudged =l sub %upper_scaled, %odd\n %maximum =l shr %upper_nudged, 2\n %shorter =l udiv %maximum, 10\n %shorter_scaled =l mul %shorter, 10\n %fits_shorter =w cugel %shorter_scaled, %minimum\n jnz %fits_shorter, @shorter, @nearest_check\n")
+	qbe_output_line(output, "@shorter\n %shorter_power =l sub 1, %decimal_power\n storel %shorter_power, %power_out\n ret %shorter\n")
+	qbe_output_line(output, "@nearest_check\n %ambiguous =w cultl %minimum, %maximum\n jnz %ambiguous, @nearest, @sole\n")
+	qbe_output_line(output, "@nearest\n %unrounded =l call $trbn_decimal_scale(l %mantissa, l %high, l %low, l %shift_count)\n %floor =l shr %unrounded, 2\n %tie_odd =l and %floor, 1\n %round_bias =l add %tie_odd, 1\n %biased =l add %unrounded, %round_bias\n %rounded =l shr %biased, 2\n jmp @finish\n")
+	qbe_output_line(output, "@sole\n jmp @finish\n")
+	qbe_output_line(output, "@finish\n %digits =l phi @nearest %rounded, @sole %minimum\n %power =l sub 0, %decimal_power\n storel %power, %power_out\n ret %digits\n")
+	qbe_output_line(output, "@fail\n call $trbn_fail(l $trbn_float_format_error, l 31)\n hlt\n}\n")
+end

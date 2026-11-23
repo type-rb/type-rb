@@ -1,0 +1,355 @@
+import { mir_scalar_boolean_and } from mir/model/scalar_operators
+import { binary_less, binary_less_equal, binary_not_equal } from frontend/types/operators
+import { mir_type_boolean, mir_type_integer } from mir/model/type_ids
+import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_array_position, mir_op_array_size, mir_op_array_store, mir_op_scalar_binary } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { MirBlock, MirFunction, MirInstruction, MirModule, MirValue } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { MirLoopBound, mir_array_bound_guard, mir_array_bound_identity, mir_array_guard_fallbacks, mir_loop_bound, mir_loop_bounded_index, mir_loop_successor_index } from mir/analysis/array_bounds
+import { mir_array_loop, mir_array_loop_candidate } from mir/analysis/array_loops
+import { MirArraySeparation, mir_array_value_separations } from mir/analysis/array_values
+import { mir_array_promotion_separations } from mir/analysis/array_promotions
+import { mir_planned_instruction_effects } from mir/analysis/callables
+import { MirFlow, MirFlowAliases, mir_build_flow, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks, mir_flow_dominates, mir_value_available } from mir/analysis/flow
+import { mir_nonnegative_values } from mir/analysis/ranges
+import { mir_natural_loop } from mir/analysis/loops
+import { mir_live_add, mir_managed_contains } from mir/analysis/liveness
+import { mir_rewrite_block, mir_rewrite_confined_values, mir_rewrite_function, mir_rewrite_instruction, mir_rewrite_next_block, mir_rewrite_next_value } from mir/passes/rewrite
+import { integer_string } from support/literals
+
+record MirArrayVersion
+	header: Integer
+	preheader: Integer
+	bound: MirLoopBound
+	owners: Array<Integer>
+	strict_owners: Array<Integer>
+	members: Array<Integer>
+	separations: Array<MirArraySeparation>
+end
+
+def mir_no_array_version(): MirArrayVersion
+	return MirArrayVersion.new(header: -1, preheader: -1, bound: MirLoopBound.new(value: -1, owner: -1), owners: [], strict_owners: [], members: [], separations: [])
+end
+
+# A complete natural loop is cloned, including nested loops and early exits.
+# Keep growth bounded, and reject effects which could invalidate a length guard.
+def mir_array_version_members(native_module: MirModule, function: MirFunction, flow: MirFlow, header: Integer): Array<Integer>
+	mut members: Array<Integer> := [header]
+	mut pending: Array<Integer> := []
+	flow.predecessors[header].each do |previous|
+		if mir_flow_dominates(flow, header, previous)
+			pending.push(previous)
+		end
+	end
+	mut cursor := 0
+	while cursor < pending.size()
+		member := pending[cursor]
+		cursor += 1
+		if !mir_managed_contains(members, member)
+			if !mir_flow_dominates(flow, header, member) || members.size() >= 16
+				return []
+			end
+			mir_live_add(members, member)
+			flow.predecessors[member].each do |previous|
+				pending.push(previous)
+			end
+		end
+	end
+	mut instructions := 0
+	members.each do |member|
+		block := native_module.blocks[function.block_start + member]
+		instructions += block.instruction_count
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[position]
+			effects := mir_planned_instruction_effects(native_module, instruction, position)
+			if instruction.kind != mir_op_array_store() && effects != mir_effect_none() && effects != mir_effect_failure()
+				return []
+			end
+			position += 1
+		end
+	end
+	if instructions > 256
+		return []
+	end
+	return members
+end
+
+# Recognize either arm of an existing guard, including the original fallback.
+# This makes repeated optimization idempotent without persistent pass markers.
+def mir_array_version_guarded(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, header: Integer, bound: MirLoopBound, owner: Integer): Boolean
+	mut index := 0
+	while index < function.block_count
+		if !mir_flow_dominates(flow, header, index) && mir_flow_dominates(flow, index, header)
+			guard := native_module.blocks[function.block_start + index]
+			if mir_array_bound_guard(native_module, flow, aliases, guard, bound, owner, false) >= 0
+				# A later loop after both arms rejoin is independent. Guard
+				# dominance alone must not consume its versioning opportunity.
+				first := mir_flow_block_index(flow, guard.first_target)
+				second := mir_flow_block_index(flow, guard.second_target)
+				if mir_flow_dominates(flow, first, header) || mir_flow_dominates(flow, second, header)
+					return true
+				end
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+# Guard operands available before an enclosing loop retain their identities.
+# The existing member scan rejects resizing and observing effects throughout
+# that wider region. Choose its fast or checked path once, keeping cold values
+# out of the repeated fast loop without changing any arithmetic or access.
+def mir_array_version_enclosing(native_module: MirModule, function: MirFunction, flow: MirFlow, plan: MirArrayVersion): MirArrayVersion
+	mut result := MirArrayVersion.new(header: plan.header, preheader: plan.preheader, bound: plan.bound, owners: plan.owners, strict_owners: plan.strict_owners, members: plan.members, separations: plan.separations)
+	mut operands: Array<Integer> := []
+	if plan.bound.owner >= 0
+		mir_live_add(operands, plan.bound.owner)
+	else
+		mir_live_add(operands, plan.bound.value)
+	end
+	plan.owners.each do |owner|
+		mir_live_add(operands, owner)
+	end
+	plan.separations.each do |pair|
+		mir_live_add(operands, pair.reader)
+		mir_live_add(operands, pair.writer)
+	end
+	mut header := 0
+	while header < function.block_count
+		if header != result.header && mir_flow_dominates(flow, header, result.header)
+			loop := mir_natural_loop(native_module, function, flow, header)
+			if loop.preheader >= 0 && mir_managed_contains(loop.members, result.header) && mir_managed_contains(loop.members, result.preheader)
+				preheader := native_module.blocks[function.block_start + loop.preheader]
+				mut available := true
+				operands.each do |value|
+					if !mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, value)
+						available = false
+					end
+				end
+				if available
+					members := mir_array_version_members(native_module, function, flow, header)
+					if members.size() > 0 && mir_rewrite_confined_values(native_module, function, members).size() > 0
+						result = MirArrayVersion.new(header: header, preheader: loop.preheader, bound: plan.bound, owners: plan.owners, strict_owners: plan.strict_owners, members: members, separations: plan.separations)
+					end
+				end
+			end
+		end
+		header += 1
+	end
+	return result
+end
+
+def mir_array_version_candidate(native_module: MirModule, function: MirFunction): MirArrayVersion
+	if function.kind != mir_function_control()
+		return mir_no_array_version()
+	end
+	mut headers: Array<Integer> := []
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if mir_array_loop_candidate(native_module, block)
+			mir_live_add(headers, block.id)
+		end
+		index += 1
+	end
+	if headers.size() == 0
+		return mir_no_array_version()
+	end
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	nonnegative := mir_nonnegative_values(native_module, function, flow)
+	origins := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+	headers.each do |id|
+		header_index := mir_flow_block_index(flow, id)
+		plan := mir_array_loop(native_module, function, flow, nonnegative, header_index)
+		if plan.header >= 0
+			header := native_module.blocks[function.block_start + header_index]
+			preheader := native_module.blocks[function.block_start + mir_flow_block_index(flow, plan.preheader)]
+			aliases := mir_flow_aliases(native_module, function, flow, header)
+			bound := mir_loop_bound(native_module, flow, aliases, origins, header, preheader)
+			if bound.value >= 0 || bound.owner >= 0
+				mut owners: Array<Integer> := []
+				mut strict_owners: Array<Integer> := []
+				mut already_guarded := false
+				plan.headers.each do |candidate|
+					owner := mir_array_bound_identity(origins, candidate.owner)
+					if owner >= 0 && owner != bound.owner && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, owner)
+						mut useful := false
+						mut strict := false
+						candidate.accesses.each do |access|
+							instruction := native_module.instructions[access]
+							if instruction.kind >= mir_op_array_position() && instruction.kind <= mir_op_array_store()
+								if mir_loop_bounded_index(native_module, flow, aliases, origins, header, preheader, instruction.second)
+									useful = true
+								elsif mir_loop_successor_index(native_module, flow, aliases, header, instruction.second)
+									useful = true
+									strict = true
+								end
+							end
+						end
+						if useful
+							if mir_array_version_guarded(native_module, function, flow, origins, header_index, bound, owner)
+								already_guarded = true
+							else
+								mir_live_add(owners, owner)
+								if strict
+									mir_live_add(strict_owners, owner)
+								end
+							end
+						end
+					end
+				end
+				# A shared fallback can be reached before later peer guards.
+				# One dominating peer guard identifies that existing version
+				# boundary; do not recursively version its partial failures.
+				if owners.size() > 0 && !already_guarded
+					members := mir_array_version_members(native_module, function, flow, header_index)
+					if members.size() > 0 && mir_rewrite_confined_values(native_module, function, members).size() > 0
+						separations := mir_array_value_separations(native_module, function, flow, origins, preheader, members)
+						promotion_separations := mir_array_promotion_separations(native_module, function, flow, origins, nonnegative, preheader, members, separations)
+						version := MirArrayVersion.new(header: header_index, preheader: mir_flow_block_index(flow, preheader.id), bound: bound, owners: owners, strict_owners: strict_owners, members: members, separations: promotion_separations)
+						return mir_array_version_enclosing(native_module, function, flow, version)
+					end
+				end
+			end
+		end
+	end
+	return mir_no_array_version()
+end
+
+def mir_array_version_instruction(mut native_module: MirModule, function: MirFunction, origin: MirBlock, kind: Integer, type_id: Integer, result: Integer, first: Integer, second: Integer, payload: Integer)
+	native_module.values.push(MirValue.new(function_id: function.id, id: result, type_id: type_id, source_id: origin.source_id, line: origin.line))
+	native_module.instructions.push(MirInstruction.new(kind: kind, result: result, first: first, second: second, payload: payload, failure: -1, source_id: origin.source_id, line: origin.line))
+end
+
+def mir_apply_array_version(mut native_module: MirModule, function_index: Integer, plan: MirArrayVersion)
+	function := native_module.functions[function_index]
+	preheader := native_module.blocks[function.block_start + plan.preheader]
+	header := native_module.blocks[function.block_start + plan.header]
+	mut next_value := mir_rewrite_next_value(native_module, function)
+	guard_start := mir_rewrite_next_block(native_module, function)
+	slow := guard_start + 1
+	fast := slow + 1
+	mut next_block := fast + 1
+	mut blocks: Hash<String, Integer> := {}
+	mut values: Hash<String, Integer> := {}
+	names := mir_rewrite_confined_values(native_module, function, plan.members)
+	mut rows: Array<MirValue> := []
+	native_module.values.each do |value|
+		if value.function_id == function.id && mir_managed_contains(names, value.id)
+			rows.push(value)
+		end
+	end
+	rows.each do |value|
+		values[integer_string(value.id)] = next_value
+		native_module.values.push(MirValue.new(function_id: function.id, id: next_value, type_id: value.type_id, source_id: value.source_id, line: value.line))
+		next_value += 1
+	end
+	plan.members.each do |member|
+		blocks[integer_string(native_module.blocks[function.block_start + member].id)] = next_block
+		next_block += 1
+	end
+	start := native_module.blocks.size()
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if index == plan.preheader
+			native_module.blocks.push(mir_block(block.id, block.source_id, block.line, block.parameter_start, block.parameter_count, block.instruction_start, block.instruction_count, mir_terminator_jump(), -1, guard_start, -1, 0, 0, 0, 0, -1))
+		else
+			native_module.blocks.push(block)
+		end
+		index += 1
+	end
+	# Length reads and comparisons cannot fail. A single conjunction lets
+	# later loop-invariant code motion reuse the complete guard as one value.
+	guard_instruction_start := native_module.instructions.size()
+	mut bound := plan.bound.value
+	if plan.bound.owner >= 0
+		bound = next_value
+		mir_array_version_instruction(native_module, function, header, mir_op_array_size(), mir_type_integer(), bound, plan.bound.owner, -1, 0)
+		next_value += 1
+	end
+	mut combined := -1
+	index = 0
+	while index < plan.owners.size()
+		length := next_value
+		condition := length + 1
+		next_value += 2
+		mir_array_version_instruction(native_module, function, header, mir_op_array_size(), mir_type_integer(), length, plan.owners[index], -1, 0)
+		mut comparison := binary_less_equal()
+		if mir_managed_contains(plan.strict_owners, plan.owners[index])
+			comparison = binary_less()
+		end
+		mir_array_version_instruction(native_module, function, header, mir_op_scalar_binary(), mir_type_boolean(), condition, bound, length, comparison)
+		if combined < 0
+			combined = condition
+		else
+			conjunction := next_value
+			next_value += 1
+			mir_array_version_instruction(native_module, function, header, mir_op_scalar_binary(), mir_type_boolean(), conjunction, combined, condition, mir_scalar_boolean_and())
+			combined = conjunction
+		end
+		index += 1
+	end
+	plan.separations.each do |pair|
+		condition := next_value
+		conjunction := condition + 1
+		next_value += 2
+		mir_array_version_instruction(native_module, function, header, mir_op_scalar_binary(), mir_type_boolean(), condition, pair.reader, pair.writer, binary_not_equal())
+		mir_array_version_instruction(native_module, function, header, mir_op_scalar_binary(), mir_type_boolean(), conjunction, combined, condition, mir_scalar_boolean_and())
+		combined = conjunction
+	end
+	native_module.blocks.push(mir_block(guard_start, header.source_id, header.line, 0, 0, guard_instruction_start, native_module.instructions.size() - guard_instruction_start, mir_terminator_branch(), combined, fast, slow, 0, 0, 0, 0, -1))
+	# Keep original identities on the common fast path. Deterministic, bounded
+	# inline selection must not spend its budget on a cold cloned fallback first.
+	native_module.blocks.push(mir_block(slow, preheader.source_id, preheader.line, 0, 0, 0, 0, mir_terminator_jump(), -1, blocks[integer_string(header.id)], -1, preheader.first_argument_start, preheader.first_argument_count, 0, 0, -1))
+	native_module.blocks.push(mir_block(fast, preheader.source_id, preheader.line, 0, 0, 0, 0, mir_terminator_jump(), -1, header.id, -1, preheader.first_argument_start, preheader.first_argument_count, 0, 0, -1))
+	plan.members.each do |member|
+		block := native_module.blocks[function.block_start + member]
+		instruction_start := native_module.instructions.size()
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			native_module.instructions.push(mir_rewrite_instruction(native_module, native_module.instructions[position], values, blocks))
+			position += 1
+		end
+		native_module.blocks.push(mir_rewrite_block(native_module, block, values, blocks, instruction_start, block.instruction_count))
+	end
+	native_module.functions[function_index] = mir_rewrite_function(function, start, native_module.blocks.size() - start)
+end
+
+# Count distinct canonical fallback preheaders, not guard blocks: several
+# peer Arrays share a fallback. Existing source guards may conservatively
+# consume budget too; the optimization never needs hidden persistent state.
+def mir_array_version_count(native_module: MirModule, function: MirFunction): Integer
+	if function.kind != mir_function_control()
+		return 0
+	end
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	return mir_array_guard_fallbacks(native_module, function, flow).size()
+end
+
+def mir_version_array_loops(mut native_module: MirModule): Boolean
+	if native_module.functions.size() > 96
+		return false
+	end
+	mut changed := false
+	mut index := 0
+	while index < native_module.functions.size()
+		mut count := mir_array_version_count(native_module, native_module.functions[index])
+		# Bound total cloning across repeated optimization, while admitting
+		# a third independent loop after earlier guard arms have rejoined.
+		while count < 3
+			plan := mir_array_version_candidate(native_module, native_module.functions[index])
+			if plan.header < 0
+				break
+			end
+			mir_apply_array_version(native_module, index, plan)
+			changed = true
+			count += 1
+		end
+		index += 1
+	end
+	return changed
+end

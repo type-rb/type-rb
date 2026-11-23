@@ -1,0 +1,21 @@
+def probe()
+	mut calls := 0
+	bounds := fn(): Range<Integer>
+		calls += 1
+		return 1..2
+	end
+	absent: String? := nil
+	present: String? := "A日本😀"
+	puts(absent&.slice(bounds()) == nil)
+	puts(calls)
+	part := present&.slice(bounds())
+	if part != nil
+		puts(part)
+	end
+	puts(calls)
+
+end
+
+def main()
+	probe()
+end

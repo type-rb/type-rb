@@ -1,0 +1,24 @@
+def main()
+	_ascending := [3, 1, 2].sort()
+	_descending := [3.0, 1.0].sort_descending()
+	_keyed := [2, 1].sort_by { |value| value }
+	_present := [1, 2].include?(1)
+	_index := [1, 2].index(2)
+	_count := [1, 2, 1].count(1)
+	_unique := [1, 2, 1].uniq()
+	_range := (1..3).to_a()
+	mut total := 2
+	unchanged := 7
+	update := fn(): Integer
+		total += unchanged
+		return total
+	end
+	puts(update())
+	puts(update())
+	puts(total)
+	_repeated := ["z", "a"].sort()
+	other := fn(): Integer
+		return total + unchanged
+	end
+	puts(other())
+end

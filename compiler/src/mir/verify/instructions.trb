@@ -1,0 +1,450 @@
+import { mir_op_deadline_checkpoint, mir_op_file_scope } from mir/model/instructions
+import { mir_file_scope_error } from mir/verify/file_scopes
+import { mir_op_object_copy, mir_op_object_identity } from mir/model/instructions
+import { mir_scalar_boolean_and, mir_scalar_boolean_or } from mir/model/scalar_operators
+import { mir_guard_clamp_bounds, mir_guard_concurrent_limit, mir_guard_enum_variant } from mir/model/operation_modes
+import { mir_scalar_contract_multiply, mir_scalar_inline_add, mir_scalar_inline_multiply } from mir/model/scalar_operators
+import { binary_add, binary_divide, binary_greater_equal, binary_multiply, binary_not_equal, binary_power, binary_remainder, unary_negate, unary_not, unary_positive } from frontend/types/operators
+import { mir_type_boolean, mir_type_float, mir_type_integer, mir_type_none, mir_type_string } from mir/model/type_ids
+import { mir_op_array_address, mir_op_array_address_load, mir_op_array_copy, mir_op_array_join, mir_op_array_length, mir_op_array_mutate, mir_op_array_new, mir_op_array_push, mir_op_bytes_valid_utf8, mir_op_callable_new, mir_op_direct_call, mir_op_enum_compare, mir_op_enum_new, mir_op_global_read, mir_op_global_write, mir_op_guard, mir_op_hash_method, mir_op_hash_new, mir_op_indirect_call, mir_op_integer_add, mir_op_integer_immediate, mir_op_integer_less, mir_op_integer_to_float, mir_op_literal_widen, mir_op_newtype_construct, mir_op_newtype_project, mir_op_nullable_extract, mir_op_nullable_none, mir_op_object_convert, mir_op_object_new, mir_op_object_store, mir_op_puts, mir_op_range_field, mir_op_range_new, mir_op_record_field, mir_op_record_new, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_scalar_unary, mir_op_singleton_literal, mir_op_string_case, mir_op_string_literal, mir_op_string_query, mir_op_string_sequence, mir_op_string_slice, mir_op_string_split, mir_op_string_to_bytes, mir_op_string_trim, mir_op_union_extract, mir_op_union_inject, mir_op_value_copy } from mir/model/instructions
+import { mir_bytes_instruction_error } from mir/lowering/bytes
+import { mir_object_conversion_error } from mir/lowering/object_dispatch
+import { mir_object_instruction_error } from mir/lowering/objects
+import { mir_literal_instruction_error } from mir/lowering/literals
+import { mir_newtype_instruction_error } from mir/lowering/newtypes
+import { mir_union_instruction_error } from mir/lowering/unions
+import { mir_global_instruction_error } from mir/lowering/globals
+import { mir_callable_instruction_error } from mir/lowering/callables
+import { mir_enum_instruction_error } from mir/lowering/enums
+import { mir_nullable_instruction_error } from mir/lowering/nullable
+import { mir_range_instruction_error } from mir/lowering/ranges
+import { mir_hash_instruction_error } from mir/lowering/hashes
+import { mir_record_instruction_error } from mir/lowering/records
+import { mir_array_instruction_error } from mir/lowering/arrays
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { float_literal_in_range, number_is_float, small_nonnegative_integer_operand } from support/literals
+import { MirBlock, MirFunction, MirModule, mir_array_element_type, mir_failure_error, mir_origin_valid } from mir/model/module
+import { mir_scalar_literal } from mir/analysis/ranges
+import { mir_call_error } from mir/lowering/calls
+import { mir_string_instruction_error } from mir/lowering/strings
+
+def mir_instruction_error(
+		flow: MirFlow,
+		native_module: MirModule,
+		function: MirFunction,
+		block: MirBlock,
+		instruction_index: Integer,
+		call_effects: Array<Integer>,
+	): String
+	instruction := native_module.instructions[instruction_index]
+	if !mir_origin_valid(instruction.source_id, instruction.line, native_module.source_count[0])
+		return "MIR instruction origin is invalid"
+	end
+	result_type := mir_flow_type(flow, instruction.result)
+	first_type := mir_flow_type(flow, instruction.first)
+	second_type := mir_flow_type(flow, instruction.second)
+	first_available := mir_value_available(
+		flow,
+		block,
+		instruction_index,
+		instruction.first,
+	)
+	second_available := mir_value_available(
+		flow,
+		block,
+		instruction_index,
+		instruction.second,
+	)
+	if instruction.kind == mir_op_deadline_checkpoint()
+		if instruction.result != -1 || instruction.first != -1 || instruction.second != -1 || instruction.payload != 0 || instruction.failure != -1
+			return "MIR deadline checkpoint shape differs"
+		end
+		return ""
+	end
+	if instruction.kind == mir_op_file_scope()
+		return mir_file_scope_error(native_module, flow, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_value_copy()
+		if instruction.second != -1 || instruction.payload != 0 || instruction.failure != -1
+			return "MIR value copy shape differs"
+		end
+		if !first_available || first_type != result_type || (result_type != mir_type_integer() && result_type != mir_type_boolean() && result_type != mir_type_float() && result_type != mir_type_string())
+			return "MIR value copy type or operand differs"
+		end
+		return ""
+	end
+	if instruction.kind >= mir_op_string_to_bytes() && instruction.kind <= mir_op_bytes_valid_utf8()
+		return mir_bytes_instruction_error(flow, native_module, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_object_convert()
+		return mir_object_conversion_error(flow, native_module, block, instruction_index, instruction)
+	end
+	if (instruction.kind >= mir_op_object_new() && instruction.kind <= mir_op_object_store()) || instruction.kind == mir_op_object_copy() || instruction.kind == mir_op_object_identity()
+		return mir_object_instruction_error(flow, native_module, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_singleton_literal() || instruction.kind == mir_op_literal_widen()
+		return mir_literal_instruction_error(flow, native_module, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_newtype_construct() || instruction.kind == mir_op_newtype_project()
+		return mir_newtype_instruction_error(flow, native_module, block, instruction_index, instruction)
+	end
+	if instruction.kind >= mir_op_union_inject() && instruction.kind <= mir_op_union_extract()
+		return mir_union_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_global_read() || instruction.kind == mir_op_global_write()
+		return mir_global_instruction_error(native_module, instruction, result_type, first_type, first_available)
+	end
+	if instruction.kind == mir_op_guard()
+		if instruction.payload == mir_guard_enum_variant() && native_module.enum_variants.size() == 0
+			return "MIR enum guard requires a declared variant"
+		end
+		if instruction.result != -1 || instruction.second != -1 || (instruction.payload < mir_guard_clamp_bounds() || instruction.payload > mir_guard_concurrent_limit())
+			return "MIR guard shape differs"
+		end
+		if !first_available || first_type != mir_type_boolean()
+			return "MIR guard requires an available Boolean"
+		end
+		return mir_failure_error(native_module, function, instruction.failure)
+	end
+	if instruction.kind == mir_op_callable_new() || instruction.kind == mir_op_indirect_call()
+		return mir_callable_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind >= mir_op_enum_new() && instruction.kind <= mir_op_enum_compare()
+		return mir_enum_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind >= mir_op_nullable_none() && instruction.kind <= mir_op_nullable_extract()
+		return mir_nullable_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_range_new() || instruction.kind == mir_op_range_field()
+		return mir_range_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind >= mir_op_hash_new() && instruction.kind <= mir_op_hash_method()
+		return mir_hash_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_record_new() || instruction.kind == mir_op_record_field()
+		return mir_record_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if (instruction.kind >= mir_op_array_new() && instruction.kind <= mir_op_array_push()) || instruction.kind == mir_op_array_copy() || instruction.kind == mir_op_array_mutate()
+		return mir_array_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if (instruction.kind >= mir_op_string_literal() && instruction.kind <= mir_op_puts()) || instruction.kind == mir_op_string_query() || instruction.kind == mir_op_string_sequence() || instruction.kind == mir_op_string_slice() || instruction.kind == mir_op_array_join() || instruction.kind == mir_op_string_trim() || (instruction.kind >= mir_op_string_split() && instruction.kind <= mir_op_string_case())
+		return mir_string_instruction_error(flow, native_module, function, block, instruction_index, instruction)
+	end
+	if instruction.kind == mir_op_direct_call()
+		return mir_call_error(flow, native_module, function, block, instruction_index, instruction, call_effects)
+	end
+	if instruction.kind == mir_op_integer_immediate()
+		if result_type != mir_type_integer()
+			return "MIR Integer constant result type differs"
+		end
+		if instruction.first == -1
+			if instruction.second == -1
+				if instruction.failure == -1
+					return ""
+				end
+			end
+		end
+		return "MIR Integer constant shape differs"
+	end
+	if instruction.kind == mir_op_integer_add()
+		if instruction.payload != 0
+			return "MIR checked Integer add shape differs"
+		end
+		if result_type == mir_type_integer()
+			if first_available
+				if first_type == mir_type_integer()
+					if second_available
+						if second_type == mir_type_integer()
+							return mir_failure_error(native_module, function, instruction.failure)
+						end
+					end
+				end
+			end
+		end
+		return "MIR checked Integer add type differs"
+	end
+	if instruction.kind == mir_op_integer_less()
+		if instruction.payload == 0
+			if instruction.failure == -1
+				if result_type == mir_type_boolean()
+					if first_available
+						if first_type == mir_type_integer()
+							if second_available
+								if second_type == mir_type_integer()
+									return ""
+								end
+							end
+						end
+					end
+				end
+				return "MIR Integer comparison type differs"
+			end
+		end
+		return "MIR Integer comparison shape differs"
+	end
+	if instruction.kind == mir_op_array_length()
+		if instruction.second == -1
+			if instruction.payload == 0
+				if instruction.failure == -1
+					if result_type == mir_type_integer()
+						if first_available
+							if mir_array_element_type(first_type) > mir_type_none()
+								return ""
+							end
+						end
+					end
+					return "MIR Array length type differs"
+				end
+			end
+		end
+		return "MIR Array length shape differs"
+	end
+	if instruction.kind == mir_op_array_address()
+		if instruction.payload != 0
+			return "MIR Array address shape differs"
+		end
+		if result_type == first_type + 1
+			if first_available
+				if mir_array_element_type(first_type) > mir_type_none()
+					if second_available
+						if second_type == mir_type_integer()
+							error := mir_failure_error(native_module, function, instruction.failure)
+							if error != ""
+								return error
+							end
+							return ""
+						end
+					end
+				end
+			end
+		end
+		return "MIR Array address type differs"
+	end
+	if instruction.kind == mir_op_scalar_literal()
+		if instruction.first < 0
+			return "MIR scalar literal shape differs"
+		end
+		if instruction.first > 1
+			return "MIR scalar literal shape differs"
+		end
+		if instruction.second != -1
+			return "MIR scalar literal shape differs"
+		end
+		if instruction.failure != -1
+			return "MIR scalar literal shape differs"
+		end
+		if instruction.payload < 0
+			return "MIR scalar literal index is invalid"
+		end
+		if instruction.payload >= native_module.literal_texts.size()
+			return "MIR scalar literal index is invalid"
+		end
+		literal := native_module.literal_texts[instruction.payload]
+		if result_type == mir_type_integer()
+			if !number_is_float(literal)
+				if mir_scalar_literal(literal) >= 0
+					mut expected_fact := 0
+					if small_nonnegative_integer_operand(literal)
+						expected_fact = 1
+					end
+					if instruction.first == expected_fact
+						return ""
+					end
+					return "MIR Integer literal fact differs"
+				end
+			end
+			return "MIR Integer literal is invalid"
+		end
+		if result_type == mir_type_boolean()
+			if instruction.first != 0
+				return "MIR Boolean literal fact differs"
+			end
+			if literal == "true"
+				return ""
+			end
+			if literal == "false"
+				return ""
+			end
+			return "MIR Boolean literal is invalid"
+		end
+		if result_type == mir_type_float()
+			if instruction.first != 0
+				return "MIR Float literal fact differs"
+			end
+			if number_is_float(literal)
+				if float_literal_in_range(literal)
+					return ""
+				end
+			end
+			return "MIR Float literal is invalid"
+		end
+		return "MIR scalar literal result type differs"
+	end
+	if instruction.kind == mir_op_scalar_binary()
+		if !first_available
+			return "MIR scalar binary operand is undefined"
+		end
+		if !second_available
+			return "MIR scalar binary operand is undefined"
+		end
+		mut operator := instruction.payload
+		if operator == mir_scalar_contract_multiply()
+			if result_type != mir_type_float() || instruction.failure != -1
+				return "MIR contractible multiply requires an unchecked Float result"
+			end
+			operator = binary_multiply()
+		end
+		if operator == mir_scalar_inline_multiply()
+			operator = binary_multiply()
+		end
+		if operator == mir_scalar_inline_add()
+			operator = binary_add()
+		end
+		mut numeric := false
+		if first_type == mir_type_integer()
+			if second_type == mir_type_integer()
+				numeric = true
+			end
+			if second_type == mir_type_float()
+				numeric = true
+			end
+		end
+		if first_type == mir_type_float()
+			if second_type == mir_type_integer()
+				numeric = true
+			end
+			if second_type == mir_type_float()
+				numeric = true
+			end
+		end
+		mut valid := false
+		mut checked := false
+		# Eager Boolean operations combine already evaluated SSA values.
+		# Source short-circuit evaluation remains explicit control flow.
+		if operator == mir_scalar_boolean_and() || operator == mir_scalar_boolean_or()
+			if first_type == mir_type_boolean() && second_type == mir_type_boolean()
+				valid = result_type == mir_type_boolean()
+			end
+		end
+		if operator >= binary_add()
+			if operator <= binary_divide() || operator == binary_power()
+				if numeric
+					mut expected := mir_type_integer()
+					if first_type == mir_type_float()
+						expected = mir_type_float()
+					end
+					if second_type == mir_type_float()
+						expected = mir_type_float()
+					end
+					valid = result_type == expected
+					checked = expected == mir_type_integer()
+				end
+			else
+				if operator == binary_remainder()
+					valid = first_type == mir_type_integer()
+					if valid
+						valid = second_type == mir_type_integer()
+					end
+					if valid
+						valid = result_type == mir_type_integer()
+					end
+					checked = valid
+				else
+					if operator <= binary_greater_equal()
+						if result_type == mir_type_boolean()
+							if operator <= binary_not_equal()
+								valid = numeric
+								if !valid
+									valid = first_type == second_type
+								end
+							else
+								valid = numeric
+							end
+						end
+					end
+				end
+			end
+		end
+		if !valid
+			return "MIR scalar binary type differs"
+		end
+		if checked
+			return mir_failure_error(native_module, function, instruction.failure)
+		end
+		if instruction.failure != -1
+			return "MIR scalar binary failure shape differs"
+		end
+		return ""
+	end
+	if instruction.kind == mir_op_scalar_unary()
+		if instruction.second != -1
+			return "MIR scalar unary shape differs"
+		end
+		if instruction.failure != -1
+			return "MIR scalar unary shape differs"
+		end
+		if !first_available
+			return "MIR scalar unary operand is undefined"
+		end
+		if instruction.payload == unary_not()
+			if first_type == mir_type_boolean()
+				if result_type == mir_type_boolean()
+					return ""
+				end
+			end
+		else
+			if instruction.payload == unary_negate()
+				if first_type == result_type
+					if result_type == mir_type_integer()
+						return ""
+					end
+					if result_type == mir_type_float()
+						return ""
+					end
+				end
+			end
+			if instruction.payload == unary_positive()
+				if first_type == result_type
+					if result_type == mir_type_integer()
+						return ""
+					end
+					if result_type == mir_type_float()
+						return ""
+					end
+				end
+			end
+		end
+		return "MIR scalar unary type differs"
+	end
+	if instruction.kind == mir_op_integer_to_float()
+		if instruction.second == -1
+			if instruction.payload == 0
+				if instruction.failure == -1
+					if first_available
+						if first_type == mir_type_integer()
+							if result_type == mir_type_float()
+								return ""
+							end
+						end
+					end
+				end
+			end
+		end
+		return "MIR Integer-to-Float conversion type differs"
+	end
+	if instruction.kind == mir_op_array_address_load()
+		if instruction.second == -1
+			if instruction.payload == 0
+				if instruction.failure == -1
+					if first_available
+						if result_type == mir_array_element_type(first_type - 1)
+							return ""
+						end
+					end
+				end
+			end
+		end
+		return "MIR Array load type differs"
+	end
+	return "MIR instruction kind is unsupported"
+end

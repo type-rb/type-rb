@@ -1,0 +1,27 @@
+import trb/std/math
+
+def main()
+	zero := 0.0
+	negative_zero := -zero
+	puts(1.0 / Math.sqrt(negative_zero) < 0.0)
+	puts(1.0 / Math.sqrt(zero) > 0.0)
+	infinity := 1.0 / zero
+	puts(Math.sqrt(infinity) == infinity)
+	negative_infinity := -infinity
+	negative_root := square_root(negative_infinity)
+	puts(negative_root != negative_root)
+	nan := Math.sqrt(-1.0)
+	puts(nan != nan)
+	puts(Math.sqrt(nan) != Math.sqrt(nan))
+	values := [0.0, 1.0, 2.0, 4.0, 9.0, 100.0]
+	values.each do |value|
+		puts(Math.sqrt(value).to_i())
+	end
+	root := square_root
+	puts(root(49.0).to_i())
+	return
+end
+
+def square_root(value: Float): Float
+	return Math.sqrt(value)
+end

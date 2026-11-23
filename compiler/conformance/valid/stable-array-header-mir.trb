@@ -1,0 +1,109 @@
+def stable_sum(input: Array<Integer>, mut output: Array<Integer>)
+	mut outer := 0
+	while outer < input.size()
+		mut inner := 0
+		mut total := 0
+		while inner < input.size()
+			total += input[inner]
+			inner += 1
+		end
+		output[outer] = total
+		outer += 1
+	end
+	return
+end
+
+def indexed(input: Array<Integer>, index: Integer): Integer
+	return input[index]
+end
+
+def grow(mut input: Array<Integer>)
+	input.push(9)
+	return
+end
+
+def rebind(mut input: Array<Integer>): Integer
+	input = [9, 10]
+	return input[-1]
+end
+
+def opaque(input: Array<Integer>)
+	return
+end
+
+def sum_with_call(input: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < input.size()
+		opaque(input)
+		total += input[index]
+		index += 1
+	end
+	return total
+end
+
+def sum_with_allocation(input: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < input.size()
+		empty: Array<Integer> := []
+		total += input[index] + empty.size()
+		index += 1
+	end
+	return total
+end
+
+def increment_alias(input: Array<Integer>, mut output: Array<Integer>)
+	mut index := 0
+	while index < input.size()
+		output[index] = input[index] + 1
+		index += 1
+	end
+	return
+end
+
+def grow_after_access(mut input: Array<Integer>): Integer
+	mut total := 0
+	mut outer := 0
+	while outer < 1
+		total += input[0]
+		mut index := 0
+		while index < 3
+			total += input[index]
+			input.push(index + 2)
+			index += 1
+		end
+		outer += 1
+	end
+	return total
+end
+
+def main()
+	input := [1, 2, 3]
+	mut output := [0, 0, 0]
+	stable_sum(input, output)
+	puts(output[0].to_s())
+	puts(output[1].to_s())
+	puts(output[2].to_s())
+	empty: Array<Integer> := []
+	mut empty_output: Array<Integer> := []
+	stable_sum(empty, empty_output)
+	puts(empty_output.size().to_s())
+	puts(indexed(input, 1).to_s())
+	puts(indexed(input, -1).to_s())
+	mut grown := [5]
+	grow(grown)
+	puts(grown[-1].to_s())
+	mut rebound := [6]
+	puts(rebind(rebound).to_s())
+	puts(rebound[0].to_s())
+	mut aliased := [7, 8]
+	increment_alias(aliased, aliased)
+	puts(aliased[0].to_s())
+	puts(aliased[1].to_s())
+	puts(sum_with_call(input).to_s())
+	puts(sum_with_allocation(input).to_s())
+	mut growing := [1]
+	puts(grow_after_access(growing).to_s())
+	return
+end

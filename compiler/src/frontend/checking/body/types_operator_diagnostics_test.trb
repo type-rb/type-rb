@@ -1,0 +1,51 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Operator diagnostic origins") do
+	test("reports operand types at the authored operator including compact spelling") do
+		cases := ["s+\"aaa\"", "s + \"aaa\"", "\ts + \"aaa\"", "s +\n\"aaa\""]
+		columns := [2, 3, 4, 3]
+		lines := [3, 3, 3, 3]
+		mut index := 0
+		while index < cases.size()
+			mut state := logical_checked_source("def main()\ns := 123\n" + cases[index] + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("operator + does not support Integer and String")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(lines[index])
+			expect(load_integer(state.diagnostics.columns, 0)).to_equal(columns[index])
+			index += 1
+		end
+	end
+
+	test("reports unary failures and logical operand pairs with their types") do
+		values := ["!123", "-true", "+\"value\"", "1 && true", "true || 2", "1.5 % 2.0"]
+		messages := ["operator ! does not support Integer", "operator - does not support Boolean", "operator + does not support String", "operator && does not support Integer and Boolean", "operator || does not support Boolean and Integer", "operator % does not support Float and Float"]
+		columns := [1, 1, 1, 3, 6, 5]
+		mut index := 0
+		while index < values.size()
+			mut state := logical_checked_source("def main()\n" + values[index] + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal(messages[index])
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+			expect(load_integer(state.diagnostics.columns, 0)).to_equal(columns[index])
+			index += 1
+		end
+	end
+
+	test("displays authored nominal names at the operator origin") do
+		mut state := logical_checked_source("record Point\nx: Integer\nend\ndef main()\npoint := Point.new(x: 1)\n\tpoint + 1\nend\n")
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("operator + does not support Point and Integer")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(6)
+		expect(load_integer(state.diagnostics.columns, 0)).to_equal(8)
+	end
+	test("uses the declared generic parameter name in template rejection") do
+		mut state := logical_checked_source("def doubled<Element>(value: Element): Element\nreturn value + value\nend\ndef main()\nreturn\nend\n")
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("operator + does not support Element and Element")
+	end
+
+end

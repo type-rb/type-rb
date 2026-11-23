@@ -1,0 +1,55 @@
+import { standard_filesystem_host } from frontend/resolution/filesystem_intrinsics
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { standard_source_filesystem_host } from state/standard_source_kinds
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Filesystem host declaration identity") do
+	test("requires the owned source and exact immutable borrow and output signature") do
+		mut state := logical_checked_source("import trb/std/file\ndef use(_file: File)\nend\ndef main()\nend\n")
+		mut source := -1
+		mut index := 0
+		while index < state.module_graph.module_count[0]
+			if sparse_integer_at(state.standard_modules, index) == standard_source_filesystem_host()
+				source = index
+			end
+			index += 1
+		end
+		function := find_function_in_module(state, source, "read_bytes")
+		expect(function >= 0).to_be_true()
+		expect(standard_filesystem_host(state, function)).to_equal(0)
+		parameter := load_integer(state.declarations.function_parameter_starts, function)
+		name := load_string(state.declarations.parameter_types, parameter)
+		store_string(state.declarations.parameter_types, parameter, "Integer")
+		expect(standard_filesystem_host(state, function)).to_equal(-1)
+		store_string(state.declarations.parameter_types, parameter, name)
+		store_integer(state.declarations.parameter_mutable, parameter, 1)
+		expect(standard_filesystem_host(state, function)).to_equal(-1)
+		store_integer(state.declarations.parameter_mutable, parameter, 0)
+		store_integer(state.declarations.parameter_mutable, parameter + 2, 0)
+		expect(standard_filesystem_host(state, function)).to_equal(-1)
+		store_integer(state.declarations.parameter_mutable, parameter + 2, 1)
+		finish := load_integer(state.declarations.function_body_ends, function)
+		store_integer(state.declarations.function_body_ends, function, finish + 1)
+		expect(standard_filesystem_host(state, function)).to_equal(-1)
+		store_integer(state.declarations.function_body_ends, function, finish)
+		store_integer(state.standard_modules, source, 0)
+		expect(standard_filesystem_host(state, function)).to_equal(-1)
+	end
+
+	test("rejects an authored import of the private host even when File already loaded it") do
+		["", "import trb/std/file\n", "import trb/std/dir\n"].each do |prefix|
+			mut state := compiler_new(1048576)
+			source := prefix + "import { FileHost } from trb/internal/filesystem_host\ndef main()\nend\n"
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			expect(resolve(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("internal filesystem operations are reserved for the owned File and Dir implementations")
+		end
+	end
+end

@@ -1,0 +1,52 @@
+import { contained_scoped_resource, scoped_resource_name } from frontend/types/resource_types
+import { CheckedValue } from frontend/checking/body/values
+import { CheckedLocals } from state/local_state
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Only source parameters declared as exact immutable resource borrows authorize
+# passing a handle. A generic T instantiated with File does not acquire that
+# declaration contract, although a generic helper may declare File separately.
+def checked_resource_parameter(state: CompilerState, function: Integer, slot: Integer): Boolean
+	if function < 0 || slot < 0 || slot >= load_integer(state.declarations.function_parameter_counts, function)
+		return false
+	end
+	parameter := load_integer(state.declarations.function_parameter_starts, function) + slot
+	if scoped_resource_name(state, load_string(state.declarations.parameter_types, parameter)) == "" || load_integer(state.declarations.parameter_mutable, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+		return false
+	end
+	mut direct := true
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			definition := state.type_resolution.generic_functions[instance.definition]
+			definition.type_parameters.each do |name|
+				if definition.parameters[slot].type_name == name
+					direct = false
+				end
+			end
+		end
+	end
+	return direct
+end
+
+# Inspect the checked binding before Any/nullable coercion can erase its type.
+# Grouping preserves binding identity; calls, projections and joins cannot mint
+# a checked resource origin. A lexical alias preserves the same lifetime.
+def checked_resource_use(mut state: CompilerState, locals: CheckedLocals, value: CheckedValue, expected: String, borrowed: Boolean, line: Integer): Boolean
+	resource := contained_scoped_resource(state, value.type_name)
+	if resource == ""
+		if scoped_resource_name(state, expected) != ""
+			diagnostic(state, "TRBN4004", line, "scoped resource requires a checked acquisition or borrow origin")
+			return false
+		end
+		return true
+	end
+	slot := value.nullable_binding
+	if borrowed && scoped_resource_name(state, value.type_name) != "" && (expected == "" || expected == value.type_name) && slot >= 0 && slot < locals.count[0] && value.nullable_field == -1 && value.binding && value.origin < state.source_tokens.token_count[0]
+		if load_string(locals.types, slot) == value.type_name && load_integer(locals.mutable, slot) == 0 && (slot >= locals.capture_parents.size() || locals.file_body[0])
+			return true
+		end
+	end
+	diagnostic(state, "TRBN4004", line, "scoped resource " + resource + " may only be used as a receiver, immutable local alias, or checked borrow argument")
+	return false
+end

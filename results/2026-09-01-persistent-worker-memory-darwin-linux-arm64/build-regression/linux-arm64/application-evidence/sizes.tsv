@@ -1,0 +1,5 @@
+case	artifact	baseline_bytes	candidate_bytes	added_bytes	maximum_added_bytes	status
+no-long	qbe	30188	32160	1972	4096	pass
+no-long	executable	14592	15224	632	1024	pass
+long	qbe	38330	40302	1972	4096	pass
+long	executable	16272	16920	648	1024	pass

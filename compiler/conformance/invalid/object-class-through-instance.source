@@ -1,0 +1,8 @@
+class Box
+def self.value(): Integer
+return 1
+end
+end
+def main()
+puts(Box.new().value())
+end

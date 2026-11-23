@@ -1,0 +1,576 @@
+import { civil_days, day_parts, floor_div, leap, month_days } from trb/internal/time_calendar
+import { digit, number, separator } from trb/internal/time_parse
+import trb/internal/time_host as Host
+
+record ZoneData
+	transitions: Array<Integer>
+	types: Array<Integer>
+	offsets: Array<Integer>
+	daylight: Array<Integer>
+	footer: String
+	error: String
+end
+
+record ZoneFile
+	data: String
+	status: Integer
+	error: String
+end
+
+# These are ordinary module globals with persistent managed roots. Local and
+# ZONEINFO initialize independently on first use, as in the reference runtime.
+mut local_cache: Array<ZoneData> := []
+mut source_cache: Array<String> := []
+
+def invalid(message: String): ZoneData
+	return ZoneData.new(transitions: [], types: [], offsets: [], daylight: [], footer: "", error: message)
+end
+
+def unsigned(bytes: Bytes, start: Integer, width: Integer): Integer
+	mut value := 0
+	mut index := start
+	while index < start + width
+		value = value * 256 + bytes.at(index)
+		index += 1
+	end
+	return value
+end
+
+def signed(bytes: Bytes, start: Integer, width: Integer): Integer
+	mut value := 0
+	if bytes.at(start) >= 128
+		value = -1
+	end
+	mut index := start
+	while index < start + width
+		# TZif permits int64 sentinels outside TypeRB's Integer and civil range.
+		# Saturate only outside all supported instants, before multiplication.
+		if value > 3906250000
+			return 1000000000000
+		end
+		if value < -3906250000
+			return -1000000000000
+		end
+		value = value * 256 + bytes.at(index)
+		index += 1
+	end
+	return value
+end
+
+def header(bytes: Bytes, start: Integer): Array<Integer>
+	if start < 0 || start + 44 > bytes.size()
+		return []
+	end
+	if bytes.at(start) != 84 || bytes.at(start + 1) != 90 || bytes.at(start + 2) != 105 || bytes.at(start + 3) != 102
+		return []
+	end
+	mut counts: Array<Integer> := []
+	mut index := 0
+	while index < 6
+		count := unsigned(bytes, start + 20 + index * 4, 4)
+		if count > bytes.size()
+			return []
+		end
+		counts.push(count)
+		index += 1
+	end
+	if counts[4] == 0 || counts[4] > 256 || counts[5] == 0
+		return []
+	end
+	return counts
+end
+
+def block_size(counts: Array<Integer>, width: Integer): Integer
+	return counts[3] * (width + 1) + counts[4] * 6 + counts[5] + counts[2] * (width + 4) + counts[0] + counts[1]
+end
+
+# TZif v1/v2/v3 layout follows RFC 9636. Zone decisions and POSIX footer
+# evaluation remain ordinary checked TypeRB; the host supplies bounded bytes.
+def decode(bytes: Bytes): ZoneData
+	mut counts := header(bytes, 0)
+	if counts.size() == 0
+		return invalid("malformed time zone information")
+	end
+	version := bytes.at(4)
+	mut width := 4
+	mut start := 44
+	if version == 50 || version == 51
+		start += block_size(counts, 4)
+		counts = header(bytes, start)
+		if counts.size() == 0
+			return invalid("malformed time zone information")
+		end
+		width = 8
+		start += 44
+	elsif version != 0
+		return invalid("malformed time zone information")
+	end
+	finish := start + block_size(counts, width)
+	if finish > bytes.size()
+		return invalid("malformed time zone information")
+	end
+	mut transitions: Array<Integer> := []
+	mut types: Array<Integer> := []
+	mut offsets: Array<Integer> := []
+	mut daylight: Array<Integer> := []
+	mut index := 0
+	while index < counts[3]
+		transitions.push(signed(bytes, start + index * width, width))
+		type_index := bytes.at(start + counts[3] * width + index)
+		if type_index >= counts[4]
+			return invalid("malformed time zone information")
+		end
+		types.push(type_index)
+		index += 1
+	end
+	zone_start := start + counts[3] * (width + 1)
+	index = 0
+	while index < counts[4]
+		position := zone_start + index * 6
+		if bytes.at(position + 4) > 1 || bytes.at(position + 5) >= counts[5]
+			return invalid("malformed time zone information")
+		end
+		offsets.push(signed(bytes, position, 4))
+		daylight.push(bytes.at(position + 4))
+		index += 1
+	end
+	mut footer := ""
+	if width == 8 && finish + 1 < bytes.size() && bytes.at(finish) == 10
+		index = finish + 1
+		while index < bytes.size() && bytes.at(index) != 10
+			octet := bytes.at(index)
+			if octet < 32 || octet > 126
+				return invalid("malformed time zone information")
+			end
+			footer += " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"[octet - 32]
+			index += 1
+		end
+	end
+	return ZoneData.new(transitions: transitions, types: types, offsets: offsets, daylight: daylight, footer: footer, error: "")
+end
+
+def utc_zone(): ZoneData
+	return ZoneData.new(transitions: [], types: [], offsets: [0], daylight: [0], footer: "", error: "")
+end
+
+def read_zone_file(path: String, start: Integer, length: Integer): ZoneFile
+	mut parts := ["", ""]
+	status := Host.zone_data(path, start, length, parts)
+	mut message := parts[1]
+	if status == -1
+		message = "time: file " + path + " is too large"
+	elsif message != ""
+		# Go's syscall error table uses a lowercase initial on these hosts.
+		message = message[0].downcase() + message.slice(1...message.size())
+	end
+	return ZoneFile.new(data: parts[0], status: status, error: message)
+end
+
+def zip_integer(bytes: Bytes, start: Integer, width: Integer): Integer
+	mut value := 0
+	mut index := start + width
+	while index > start
+		index -= 1
+		value = value * 256 + bytes.at(index)
+	end
+	return value
+end
+
+def zip_name(bytes: Bytes, start: Integer, length: Integer, name: Bytes): Boolean
+	if length != name.size() || start < 0 || start + length > bytes.size()
+		return false
+	end
+	mut index := 0
+	while index < length
+		if bytes.at(start + index) != name.at(index)
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def corrupt_zip(path: String): ZoneFile
+	return ZoneFile.new(data: "", status: -2, error: "corrupt zip file " + path)
+end
+
+# Read only the central directory and selected stored member. Names and every
+# binary extent are checked before indexing; no extraction or path traversal
+# is delegated to the host, and no compression dependency is required.
+def read_zone_zip(path: String, identifier: String): ZoneFile
+	tail_file := read_zone_file(path, -22, 22)
+	if tail_file.status > 0
+		return tail_file
+	end
+	if tail_file.status != 0
+		return corrupt_zip(path)
+	end
+	tail := tail_file.data.to_bytes()
+	if tail.size() != 22 || zip_integer(tail, 0, 4) != 101010256
+		return corrupt_zip(path)
+	end
+	count := zip_integer(tail, 10, 2)
+	length := zip_integer(tail, 12, 4)
+	start := zip_integer(tail, 16, 4)
+	directory_file := read_zone_file(path, start, length)
+	if directory_file.status != 0
+		return corrupt_zip(path)
+	end
+	directory := directory_file.data.to_bytes()
+	name := identifier.to_bytes()
+	mut index := 0
+	mut entry := 0
+	while entry < count
+		if index + 46 > directory.size()
+			return corrupt_zip(path)
+		end
+		if zip_integer(directory, index, 4) != 33639248
+			break
+		end
+		method := zip_integer(directory, index + 10, 2)
+		size := zip_integer(directory, index + 24, 4)
+		name_length := zip_integer(directory, index + 28, 2)
+		extra_length := zip_integer(directory, index + 30, 2)
+		comment_length := zip_integer(directory, index + 32, 2)
+		offset := zip_integer(directory, index + 42, 4)
+		finish := index + 46 + name_length + extra_length + comment_length
+		if finish > directory.size()
+			return corrupt_zip(path)
+		end
+		if zip_name(directory, index + 46, name_length, name)
+			if method != 0
+				return ZoneFile.new(data: "", status: -2, error: "unsupported compression for " + identifier + " in " + path)
+			end
+			local_file := read_zone_file(path, offset, 30 + name_length)
+			if local_file.status != 0
+				return corrupt_zip(path)
+			end
+			local := local_file.data.to_bytes()
+			if local.size() != 30 + name_length || zip_integer(local, 0, 4) != 67324752 || zip_integer(local, 8, 2) != method || zip_integer(local, 26, 2) != name_length || !zip_name(local, 30, name_length, name)
+				return corrupt_zip(path)
+			end
+			data := read_zone_file(path, offset + 30 + name_length + zip_integer(local, 28, 2), size)
+			if data.status != 0
+				return corrupt_zip(path)
+			end
+			return data
+		end
+		index = finish
+		entry += 1
+	end
+	return ZoneFile.new(data: "", status: 2, error: "no such file or directory")
+end
+
+def read_zone_source(source: String, identifier: String): ZoneFile
+	if source.end_with?(".zip")
+		return read_zone_zip(source, identifier)
+	end
+	mut path := source
+	if path != "" && !path.end_with?("/")
+		path += "/"
+	end
+	return read_zone_file(path + identifier, 0, -1)
+end
+
+def system_sources(): Array<String>
+	return ["/usr/share/zoneinfo/", "/usr/share/lib/zoneinfo/", "/usr/lib/locale/TZ/", "/etc/zoneinfo"]
+end
+
+def load_sources(identifier: String, sources: Array<String>): ZoneData
+	mut first_error := ""
+	mut index := 0
+	while index < sources.size()
+		file := read_zone_source(sources[index], identifier)
+		mut error := file.error
+		if file.status == 0
+			zone := decode(file.data.to_bytes())
+			if zone.error == ""
+				return zone
+			end
+			error = zone.error
+		end
+		if first_error == "" && file.status != 2
+			first_error = error
+		end
+		index += 1
+	end
+	if first_error == ""
+		first_error = "unknown time zone " + identifier
+	end
+	return invalid(first_error)
+end
+
+def initialize_local(): ZoneData
+	mut environment := ["", ""]
+	if !Host.zone_environment(environment)
+		zone := load_sources("localtime", ["/etc"])
+		if zone.error == ""
+			return zone
+		end
+		return utc_zone()
+	end
+	mut name := environment[0]
+	if name.start_with?(":")
+		name = name.slice(1...name.size())
+	end
+	if name != "" && name != "UTC"
+		mut sources := system_sources()
+		if name.start_with?("/")
+			sources = [""]
+		end
+		zone := load_sources(name, sources)
+		if zone.error == ""
+			return zone
+		end
+	end
+	return utc_zone()
+end
+
+def load(identifier: String): ZoneData
+	if identifier == "" || identifier == "UTC"
+		return utc_zone()
+	end
+	if identifier == "Local"
+		if local_cache.size() == 0
+			local_cache.push(initialize_local())
+		end
+		return local_cache[0]
+	end
+	if identifier.start_with?("/") || identifier.start_with?("\\") || identifier.include?("..")
+		return invalid("time: invalid location name")
+	end
+	if identifier.include?("\x00")
+		return invalid("invalid argument")
+	end
+	if source_cache.size() == 0
+		mut environment := ["", ""]
+		Host.zone_environment(environment)
+		source_cache.push(environment[1])
+	end
+	mut first_error := ""
+	if source_cache[0] != ""
+		file := read_zone_source(source_cache[0], identifier)
+		if file.status == 0
+			zone := decode(file.data.to_bytes())
+			if zone.error == ""
+				return zone
+			end
+			# The pinned reference falls through after a configured TZif parse
+			# failure; only configured read/ZIP errors take error precedence.
+		elsif file.status != 2
+			first_error = file.error
+		end
+	end
+	zone := load_sources(identifier, system_sources())
+	if zone.error == "" || first_error == ""
+		return zone
+	end
+	return invalid(first_error)
+end
+
+def first_type(zone: ZoneData): Integer
+	if !zone.types.include?(0)
+		return 0
+	end
+	if zone.types.size() > 0 && zone.daylight[zone.types[0]] != 0
+		mut index := zone.types[0] - 1
+		while index >= 0
+			if zone.daylight[index] == 0
+				return index
+			end
+			index -= 1
+		end
+	end
+	mut index := 0
+	while index < zone.daylight.size()
+		if zone.daylight[index] == 0
+			return index
+		end
+		index += 1
+	end
+	return 0
+end
+
+def name(value: String, mut position: Array<Integer>): Boolean
+	start := position[0]
+	if separator(value, position, "<")
+		while position[0] < value.size() && value[position[0]] != ">"
+			position[0] += 1
+		end
+		return separator(value, position, ">")
+	end
+	while position[0] < value.size()
+		character := value[position[0]]
+		if digit(character) >= 0 || character == "," || character == "-" || character == "+"
+			break
+		end
+		position[0] += 1
+	end
+	return position[0] - start >= 3
+end
+
+def offset_value(value: String, mut position: Array<Integer>): Array<Integer>
+	mut sign := 1
+	if separator(value, position, "-")
+		sign = -1
+	else
+		separator(value, position, "+")
+	end
+	hour := number(value, position, 1, 3)
+	if hour < 0 || hour > 168
+		return []
+	end
+	mut result := hour * 3600
+	if separator(value, position, ":")
+		minute := number(value, position, 1, 2)
+		if minute < 0 || minute > 59
+			return []
+		end
+		result += minute * 60
+		if separator(value, position, ":")
+			second := number(value, position, 1, 2)
+			if second < 0 || second > 59
+				return []
+			end
+			result += second
+		end
+	end
+	return [sign * result]
+end
+
+def rule(value: String, mut position: Array<Integer>): Array<Integer>
+	mut kind := 0
+	mut first := 0
+	mut second := 0
+	mut third := 0
+	if separator(value, position, "M")
+		kind = 2
+		first = number(value, position, 1, 2)
+		if first < 1 || first > 12 || !separator(value, position, ".")
+			return []
+		end
+		second = number(value, position, 1, 1)
+		if second < 1 || second > 5 || !separator(value, position, ".")
+			return []
+		end
+		third = number(value, position, 1, 1)
+		if third < 0 || third > 6
+			return []
+		end
+	elsif separator(value, position, "J")
+		kind = 1
+		first = number(value, position, 1, 3)
+		if first < 1 || first > 365
+			return []
+		end
+	else
+		first = number(value, position, 1, 3)
+		if first < 0 || first > 365
+			return []
+		end
+	end
+	mut seconds := 7200
+	if separator(value, position, "/")
+		parsed := offset_value(value, position)
+		if parsed.size() == 0
+			return []
+		end
+		seconds = parsed[0]
+	end
+	return [kind, first, second, third, seconds]
+end
+
+def rule_epoch(year: Integer, parts: Array<Integer>, prior_offset: Integer): Integer
+	mut days := civil_days(year, 1, 1) + parts[1]
+	if parts[0] == 1
+		days -= 1
+		if leap(year) && parts[1] >= 60
+			days += 1
+		end
+	elsif parts[0] == 2
+		start := civil_days(year, parts[1], 1)
+		weekday := start + 4 - floor_div(start + 4, 7) * 7
+		mut day := 1 + (parts[3] - weekday + 7) % 7 + (parts[2] - 1) * 7
+		if day > month_days(year, parts[1])
+			day -= 7
+		end
+		days = start + day - 1
+	end
+	return days * 86400 + parts[4] - prior_offset
+end
+
+def footer_offset(value: String, seconds: Integer): Array<Integer>
+	mut position := [0]
+	if !name(value, position)
+		return []
+	end
+	standard := offset_value(value, position)
+	if standard.size() == 0
+		return []
+	end
+	std_offset := -standard[0]
+	if position[0] == value.size()
+		return [std_offset]
+	end
+	if !name(value, position)
+		return []
+	end
+	mut dst_offset := std_offset + 3600
+	if position[0] < value.size() && value[position[0]] != "," && value[position[0]] != ";"
+		summer := offset_value(value, position)
+		if summer.size() == 0
+			return []
+		end
+		dst_offset = -summer[0]
+	end
+	mut start_rule := [2, 3, 2, 0, 7200]
+	mut end_rule := [2, 11, 1, 0, 7200]
+	if position[0] < value.size()
+		if !separator(value, position, ",") && !separator(value, position, ";")
+			return []
+		end
+		start_rule = rule(value, position)
+		if start_rule.size() == 0 || !separator(value, position, ",")
+			return []
+		end
+		end_rule = rule(value, position)
+		if end_rule.size() == 0 || position[0] != value.size()
+			return []
+		end
+	end
+	year := day_parts(floor_div(seconds, 86400))[0]
+	start := rule_epoch(year, start_rule, std_offset)
+	finish := rule_epoch(year, end_rule, dst_offset)
+	mut summer := seconds >= start && seconds < finish
+	if finish < start
+		summer = seconds >= start || seconds < finish
+	end
+	if summer
+		return [dst_offset]
+	end
+	return [std_offset]
+end
+
+def offset(zone: ZoneData, seconds: Integer): Integer
+	count := zone.transitions.size()
+	if zone.footer != "" && (count == 0 || seconds >= zone.transitions[count - 1])
+		future := footer_offset(zone.footer, seconds)
+		if future.size() > 0
+			return future[0]
+		end
+	end
+	if count == 0 || seconds < zone.transitions[0]
+		return zone.offsets[first_type(zone)]
+	end
+	mut low := 0
+	mut high := count
+	while low + 1 < high
+		middle := (low + high) / 2
+		if zone.transitions[middle] <= seconds
+			low = middle
+		else
+			high = middle
+		end
+	end
+	return zone.offsets[zone.types[low]]
+end

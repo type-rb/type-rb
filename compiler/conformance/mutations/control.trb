@@ -1,0 +1,9 @@
+def main()
+	value := 40
+	if value + 2 == 42
+		puts("mutation-control")
+	else
+		puts("mutation-bad")
+	end
+	return
+end

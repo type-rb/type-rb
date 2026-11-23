@@ -1,0 +1,69 @@
+import { check } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { compiler_new, diagnostic, has_diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, load_string } from support/storage
+import { compiler_phase_failure, expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler test pipeline diagnostics") do
+	test("reports the lex phase and the original malformed String diagnostic") do
+		mut state := compiler_new(32)
+		passed := lex(state, "\"unfinished")
+		expect(passed).to_be_false()
+		expect(compiler_phase_failure(state, "lex", passed)).to_equal("lex failed: TRBN4001 at line 1: unterminated String literal")
+	end
+
+	test("reports the parse phase after successful lexing") do
+		source := "import {} from sample\n"
+		mut state := compiler_new(source.size() + 1)
+		expect_compiler_phase(state, "lex", lex(state, source))
+		passed := parse_module(state, 0, state.module_graph.entry_module[0])
+		expect(passed).to_be_false()
+		expect(compiler_phase_failure(state, "parse", passed)).to_equal("parse failed: TRBN4002 at line 1: named import must contain at least one declaration")
+	end
+
+	test("reports unresolved declarations at the resolve phase") do
+		source := "record Box\nvalue: Missing\nend\ndef main()\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect_compiler_phase(state, "lex", lex(state, source))
+		expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+		passed := resolve(state)
+		expect(passed).to_be_false()
+		expect(compiler_phase_failure(state, "resolve", passed)).to_equal("resolve failed: TRBN4003 at line 2: unknown field type Missing")
+	end
+
+	test("reports a checking failure with its original diagnostic") do
+		mut state := logical_checked_source("def value(): Integer\nreturn \"bad\"\nend\ndef main()\nputs(value())\nend\n")
+		passed := check(state)
+		expect(passed).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0) != "").to_be_true()
+		expect(compiler_phase_failure(state, "check", passed)).to_equal("check failed: " + load_string(state.diagnostics.codes, 0) + " at line " + integer_string(load_integer(state.diagnostics.lines, 0)) + ": " + load_string(state.diagnostics.messages, 0))
+	end
+
+	test("keeps successful phases silent and preserves their state") do
+		mut state := logical_checked_source("def main()\nputs(7)\nend\n")
+		passed := check(state)
+		expect_compiler_phase(state, "check", passed)
+		expect(compiler_phase_failure(state, "check", passed)).to_equal("")
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+	end
+
+	test("does not hide false results when a diagnostic is missing") do
+		state := compiler_new(0)
+		expect(compiler_phase_failure(state, "check", false)).to_equal("check failed without a compiler diagnostic")
+	end
+
+	test("preserves the Boolean acceptance condition and first diagnostic") do
+		mut state := compiler_new(0)
+		diagnostic(state, "TRBN4003", 4, "first error")
+		diagnostic(state, "TRBN4004", 8, "later error")
+		expect(compiler_phase_failure(state, "resolve", false)).to_equal("resolve failed: TRBN4003 at line 4: first error")
+		expect_compiler_phase(state, "resolve", true)
+		expect(compiler_phase_failure(state, "resolve", true)).to_equal("")
+	end
+end

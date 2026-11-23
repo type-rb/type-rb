@@ -1,0 +1,311 @@
+module Oidc
+end
+
+import { OidcAuthError, OidcAuthErrorKind, OidcBearerOptions, OidcPrincipal } from trb/auth/oidc
+import { Request } from trb/web
+import trb/std/result
+import { Instant } from trb/std/time
+import { JsonNode } from trb/internal/json
+import trb/internal/auth/oidc_json as Codec
+import trb/internal/auth/oidc_host as Host
+import trb/internal/auth/oidc_http as Http
+
+record ProviderEntry
+	uri: String
+	expires: Float
+end
+
+record KeysEntry
+	keys: Array<Hash<String, String>>
+	expires: Float
+	refresh_after: Float
+end
+
+# The application runtime has one managed mutator. A synchronous foreign call
+# never enters managed code, so cache transitions cannot interleave here.
+PROVIDERS: Hash<String, ProviderEntry> := {}
+KEYS: Hash<String, KeysEntry> := {}
+
+def now(): Float
+	value := Instant.now()
+	return value.epoch_seconds().to_f() + value.nanosecond().to_f() / 1000000000.0
+end
+
+def failure(kind: OidcAuthErrorKind, message: String): OidcAuthError
+	return OidcAuthError.new(kind: kind, message: message)
+end
+
+def invalid(message: String): Result<OidcPrincipal, OidcAuthError>
+	return Result<OidcPrincipal, OidcAuthError>::Err(failure(OidcAuthErrorKind::InvalidCredentials, message))
+end
+
+def retrieve(uri: String, label: String): Result<Bytes, OidcAuthError>
+	mut output := ["".to_bytes(), "".to_bytes(), "".to_bytes()]
+	status := Http.fetch(uri, output)
+	if status == -2
+		return Result<Bytes, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, label + " response is too large"))
+	elsif status < 0
+		return Result<Bytes, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, label + ": " + output[1].to_s()))
+	elsif status != 200
+		return Result<Bytes, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, label + ": HTTP " + status.to_s()))
+	end
+	return Result<Bytes, OidcAuthError>::Ok(output[0])
+end
+
+def provider(issuer: String, mut cache: Hash<String, ProviderEntry>): Result<String, OidcAuthError>
+	time := now()
+	if cache.key?(issuer) && time < cache.fetch(issuer).expires
+		return Result<String, OidcAuthError>::Ok(cache.fetch(issuer).uri)
+	end
+	mut base := issuer
+	while base.end_with?("/")
+		base = base.slice(0...base.size() - 1)
+	end
+	body := retrieve(base + "/.well-known/openid-configuration", "load OIDC discovery") catch |error|
+		return Result<String, OidcAuthError>::Err(error)
+	end
+	metadata := Codec.parse_strings(body, ["issuer", "jwks_uri"])
+	if !metadata.valid
+		return Result<String, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, "load OIDC discovery response is invalid"))
+	end
+	uri := Codec.get(metadata.fields, "jwks_uri")
+	if Codec.get(metadata.fields, "issuer") != issuer || uri == ""
+		return Result<String, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, "OIDC discovery response is invalid"))
+	end
+	cache[issuer] = ProviderEntry.new(uri: uri, expires: time + 300.0)
+	return Result<String, OidcAuthError>::Ok(uri)
+end
+
+def keys(uri: String, force: Boolean, mut cache: Hash<String, KeysEntry>): Result<Array<Hash<String, String>>, OidcAuthError>
+	time := now()
+	mut refresh := 0.0
+	if cache.key?(uri)
+		entry := cache.fetch(uri)
+		refresh = entry.refresh_after
+		if (force && time < refresh) || (!force && time < entry.expires)
+			return Result<Array<Hash<String, String>>, OidcAuthError>::Ok(entry.keys)
+		end
+		if force
+			refresh = time + 30.0
+			# Throttle a failed refresh too, retaining the previous usable keys.
+			cache[uri] = KeysEntry.new(keys: entry.keys, expires: entry.expires, refresh_after: refresh)
+		end
+	end
+	body := retrieve(uri, "load OIDC JWKS") catch |error|
+		return Result<Array<Hash<String, String>>, OidcAuthError>::Err(error)
+	end
+	document := Codec.parse_keys(body)
+	if !document.valid
+		return Result<Array<Hash<String, String>>, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, "load OIDC JWKS response is invalid"))
+	elsif document.keys.empty?()
+		return Result<Array<Hash<String, String>>, OidcAuthError>::Err(failure(OidcAuthErrorKind::Provider, "OIDC JWKS response is invalid"))
+	end
+	if force
+		refresh = time + 30.0
+	end
+	cache[uri] = KeysEntry.new(keys: document.keys, expires: time + 300.0, refresh_after: refresh)
+	return Result<Array<Hash<String, String>>, OidcAuthError>::Ok(document.keys)
+end
+
+def select_key(keys: Array<Hash<String, String>>, kid: String): Hash<String, String>?
+	mut index := 0
+	while index < keys.size()
+		key := keys[index]
+		use := Codec.get(key, "use")
+		algorithm := Codec.get(key, "alg")
+		if Codec.get(key, "kid") == kid && Codec.get(key, "kty") == "RSA" && (use == "" || use == "sig") && (algorithm == "" || algorithm == "RS256")
+			return key
+		end
+		index += 1
+	end
+	return nil
+end
+
+def valid_key(modulus: Bytes, exponent: Bytes): Boolean
+	if modulus.size() == 0 || exponent.size() == 0 || exponent.size() > 4
+		return false
+	end
+	mut first := 0
+	while first < modulus.size() && modulus.at(first) == 0
+		first += 1
+	end
+	if modulus.size() - first < 256 || (modulus.size() - first == 256 && modulus.at(first) < 128)
+		return false
+	end
+	mut number := 0
+	mut index := 0
+	while index < exponent.size()
+		number = number * 256 + exponent.at(index)
+		index += 1
+	end
+	return number >= 3 && number % 2 == 1
+end
+
+def verify_jwt(token: String, options: OidcBearerOptions, mut providers: Hash<String, ProviderEntry>, mut key_cache: Hash<String, KeysEntry>): Result<OidcPrincipal, OidcAuthError>
+	mut uri := ""
+	if options.jwks_uri != nil
+		uri = options.jwks_uri
+	end
+	# Discovery precedes token decoding in the reference implementation.
+	if uri == ""
+		uri = provider(options.issuer, providers) catch |error|
+			return Result<OidcPrincipal, OidcAuthError>::Err(error)
+		end
+	end
+	segments := token.split(".")
+	if segments.size() != 3
+		return invalid("JWT must contain three segments")
+	end
+	header_bytes := Codec.decode(segments[0])
+	if header_bytes == nil
+		return invalid("JWT header is not base64url")
+	end
+	payload := Codec.decode(segments[1])
+	if payload == nil
+		return invalid("JWT payload is not base64url")
+	end
+	signature := Codec.decode(segments[2])
+	if signature == nil
+		return invalid("JWT signature is not base64url")
+	end
+	header := Codec.parse_strings(header_bytes, ["alg", "kid"])
+	kid := Codec.get(header.fields, "kid")
+	if !header.valid || Codec.get(header.fields, "alg") != "RS256" || kid == ""
+		return invalid("JWT must use RS256 with a key id")
+	end
+	available := keys(uri, false, key_cache) catch |error|
+		return Result<OidcPrincipal, OidcAuthError>::Err(error)
+	end
+	mut selected := select_key(available, kid)
+	if selected == nil
+		updated := keys(uri, true, key_cache) catch |error|
+			return Result<OidcPrincipal, OidcAuthError>::Err(error)
+		end
+		selected = select_key(updated, kid)
+	end
+	if selected == nil
+		return invalid("JWT signing key was not found")
+	end
+	modulus := Codec.decode(Codec.get(selected, "n"))
+	exponent := Codec.decode(Codec.get(selected, "e"))
+	if modulus == nil || exponent == nil
+		return invalid("OIDC signing key is invalid")
+	end
+	if !valid_key(modulus, exponent)
+		return invalid("OIDC signing key is invalid")
+	end
+	if !Host.verify_rs256(modulus, exponent, (segments[0] + "." + segments[1]).to_bytes(), signature)
+		return invalid("JWT signature is invalid")
+	end
+	claims := Codec.parse_claims(payload)
+	if claims == nil
+		return invalid("JWT claims are invalid")
+	end
+	if Codec.text(Codec.field(claims, "iss")) != options.issuer
+		return invalid("JWT issuer does not match")
+	end
+	mut audience_matches := false
+	audience := Codec.field(claims, "aud")
+	case audience
+	when JsonNode::String(value)
+		audience_matches = value == options.audience
+	when JsonNode::Array(items)
+		claims.arrays[items].each do |item|
+			if Codec.text(claims.nodes[item]) == options.audience
+				audience_matches = true
+			end
+		end
+	else
+		nil
+	end
+	if !audience_matches
+		return invalid("JWT audience does not match")
+	end
+	time := Instant.now().epoch_seconds().to_f()
+	skew := options.clock_skew_seconds.to_f()
+	expiration := Codec.number(Codec.field(claims, "exp"))
+	if expiration == nil
+		return invalid("JWT is expired")
+	end
+	if Host.timestamp(expiration) <= time - skew
+		return invalid("JWT is expired")
+	end
+	not_before := Codec.number(Codec.field(claims, "nbf"))
+	if not_before != nil && Host.timestamp(not_before) > time + skew
+		return invalid("JWT is not active")
+	end
+	subject := Codec.text(Codec.field(claims, "sub"))
+	if subject == ""
+		return invalid("JWT subject is missing")
+	end
+	mut roles: Array<String> := []
+	case claims.nodes[0]
+	when JsonNode::Object(members)
+		if claims.objects[members].key?(options.roles_claim)
+			case Codec.field(claims, options.roles_claim)
+			when JsonNode::Array(items)
+				mut index := 0
+				while index < claims.arrays[items].size()
+					case claims.nodes[claims.arrays[items][index]]
+					when JsonNode::String(role)
+						roles.push(role)
+					else
+						return invalid("JWT roles claim is invalid")
+					end
+					index += 1
+				end
+			else
+				return invalid("JWT roles claim is invalid")
+			end
+		end
+	else
+		nil
+	end
+	mut name: String? := nil
+	mut email: String? := nil
+	name_text := Codec.text(Codec.field(claims, "name"))
+	email_text := Codec.text(Codec.field(claims, "email"))
+	if name_text != ""
+		name = name_text
+	end
+	if email_text != ""
+		email = email_text
+	end
+	return Result<OidcPrincipal, OidcAuthError>::Ok(OidcPrincipal.new(subject: subject, name: name, email: email, roles: roles))
+end
+
+def whitespace(point: Integer): Boolean
+	return (point >= 9 && point <= 13) || point == 32 || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
+end
+
+def verify_bearer(request: Request, options: OidcBearerOptions): Result<OidcPrincipal, OidcAuthError>
+	if options.issuer == "" || options.audience == "" || options.roles_claim == "" || options.clock_skew_seconds < 0
+		return Result<OidcPrincipal, OidcAuthError>::Err(failure(OidcAuthErrorKind::Configuration, "OIDC bearer configuration is invalid"))
+	end
+	values := request.headers.values("authorization")
+	if values.empty?()
+		return Result<OidcPrincipal, OidcAuthError>::Err(failure(OidcAuthErrorKind::MissingCredentials, "Authorization header is required"))
+	elsif values.size() != 1
+		return invalid("exactly one Authorization header is required")
+	end
+	mut parts: Array<String> := []
+	mut word := ""
+	value := values[0]
+	value.codepoints().each.with_index do |point, index|
+		if whitespace(point)
+			if word != ""
+				parts.push(word)
+				word = ""
+			end
+		else
+			word += value[index]
+		end
+	end
+	if word != ""
+		parts.push(word)
+	end
+	if parts.size() != 2 || Codec.fold(parts[0]) != "bearer"
+		return invalid("Authorization header must use Bearer")
+	end
+	return verify_jwt(parts[1], options, PROVIDERS, KEYS)
+end

@@ -1,0 +1,16 @@
+def main()
+	values := "::a::::b::".split("::")
+	puts(values.size())
+	puts(values.join("/"))
+	puts("".split(",").size())
+	puts("aaa".replace_all("aa", "X"))
+	puts("a.b.a".replace_all("a", "$&$1\\"))
+	puts("same".replace_all("missing", "unused"))
+	present: String? := "a:b"
+	absent: String? := nil
+	parts := present&.split(":")
+	if parts != nil
+		puts(parts.join("/"))
+	end
+	puts(absent&.replace_all("", "unreached") == nil)
+end

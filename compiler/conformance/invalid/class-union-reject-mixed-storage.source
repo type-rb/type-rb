@@ -1,0 +1,14 @@
+record RecordValue
+value: String
+end
+class ObjectValue
+@value: String := "object"
+end
+alias Mixed = RecordValue | ObjectValue
+def read(value: Mixed): String
+return value.value
+end
+
+def main()
+puts(read(ObjectValue.new()))
+end

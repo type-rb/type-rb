@@ -1,0 +1,45 @@
+import { CompilerProjectSources, load_project_sources } from compiler
+import { load_standard_source, standard_source_kind } from project/standard_library
+import { add_module, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Owned standard URL sources") do
+	test("loads unchanged public URL declarations with trusted source identity") do
+		mut state := compiler_new(1048576)
+		owner := load_standard_source(state, standard_source_kind("trb/std/url"), 1)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(load_string(state.module_graph.module_names, owner)).to_equal("trb/std/url/index")
+		expect(state.module_graph.module_count[0]).to_equal(1)
+	end
+
+	test("rejects an authored internal import even after the adapter is cached") do
+		mut state := compiler_new(1048576)
+		entry := add_module(state, "main", "main.trb")
+		cached := add_module(state, "trb/internal/url/index", "<trb/internal/url/index>")
+		store_integer(state.standard_modules, cached, standard_source_kind("trb/internal/url"))
+		state.module_graph.active_module[0] = entry
+		expect(load_standard_source(state, standard_source_kind("trb/internal/url"), 2)).to_equal(-1)
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+		expect(state.module_graph.module_count[0]).to_equal(2)
+	end
+
+	test("rejects internal imports through authored dependency modules") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/helper.trb"],
+				sources: ["import { hidden } from helper\ndef main()\nhidden()\nend\n", "import trb/internal/url as hidden_url\ndef hidden()\nreturn\nend\n"], error: ""))
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("internal package imports are reserved for verified standard sources: trb/internal/url")
+	end
+
+	test("does not trust a forged standard module name") do
+		mut state := compiler_new(1048576)
+		owner := add_module(state, "trb/std/url/index", "authored.trb")
+		state.module_graph.active_module[0] = owner
+		expect(load_standard_source(state, standard_source_kind("trb/internal/url"), 12)).to_equal(-1)
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(12)
+		expect(state.module_graph.module_count[0]).to_equal(1)
+	end
+end

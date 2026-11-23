@@ -1,0 +1,77 @@
+import { hash_action_delete, hash_action_empty, hash_action_fetch, hash_action_index_write, hash_action_literal, hash_action_size, hash_action_update } from mir/model/hash_actions
+import { hash_key_type, hash_type, hash_value_type, native_value_layout } from frontend/types/hash_types
+
+# This checked MIR region owns Hash representation, mutation effects, and
+# literal capacity. It does not claim complete block/value MIR admission.
+record MirHashOperation
+	kind: Integer
+	origin: Integer
+	finish: Integer
+	receiver_origin: Integer
+	type_name: String
+	key_type: String
+	value_type: String
+	mutable: Boolean
+	entries: Integer
+	capacity: Integer
+end
+
+def mir_hash_capacity(entries: Integer): Integer
+	if entries == 0
+		return 0
+	end
+	mut capacity := 8
+	while entries > capacity / 4 * 3
+		capacity *= 2
+	end
+	return capacity
+end
+
+def mir_hash_operation(kind: Integer, origin: Integer, finish: Integer, receiver: Integer, type_name: String, mutable: Boolean, entries: Integer): MirHashOperation
+	return MirHashOperation.new(kind: kind, origin: origin, finish: finish, receiver_origin: receiver, type_name: type_name, key_type: hash_key_type(type_name), value_type: hash_value_type(type_name), mutable: mutable, entries: entries, capacity: mir_hash_capacity(entries))
+end
+
+def mir_hash_valid(plan: MirHashOperation, token_count: Integer, pending: Boolean): Boolean
+	if plan.kind < hash_action_literal() || plan.kind > hash_action_fetch() || plan.origin < 0 || plan.finish <= plan.origin || plan.finish >= token_count
+		return false
+	end
+	if plan.kind == hash_action_literal()
+		if plan.receiver_origin != plan.origin
+			return false
+		end
+	elsif plan.receiver_origin != 9007199254740991
+		if plan.receiver_origin < 0 || plan.receiver_origin >= plan.origin
+			return false
+		end
+	end
+	if plan.entries < 0 || plan.entries > token_count
+		return false
+	end
+	if plan.kind != hash_action_literal() && plan.entries != 0
+		return false
+	end
+	if plan.capacity != mir_hash_capacity(plan.entries)
+		return false
+	end
+	if plan.kind == hash_action_index_write() || plan.kind == hash_action_delete() || plan.kind == hash_action_update()
+		if !plan.mutable
+			return false
+		end
+	end
+	if plan.type_name == "Hash"
+		if pending && (plan.kind == hash_action_literal() || plan.kind == hash_action_size() || plan.kind == hash_action_empty()) && plan.entries == 0
+			return true
+		end
+		return false
+	end
+	if plan.key_type == "" || plan.key_type != hash_key_type(plan.type_name)
+		return false
+	end
+	if plan.type_name != hash_type(plan.key_type, plan.value_type)
+		return false
+	end
+	if native_value_layout(plan.value_type) && plan.value_type == hash_value_type(plan.type_name)
+		return true
+	end
+	return false
+end

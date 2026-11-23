@@ -1,0 +1,101 @@
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { parse_call_block_syntax } from frontend/syntax/body_syntax
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new_with_mode } from state/state
+import { compiler_callable_analysis_fork } from state/callable_state
+import { load_string, sparse_integer_at } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Statement call block syntax") do
+	test("records do and brace bodies without treating their bindings as callbacks") do
+		["do |file|\n1\nend", "{ |file| 1 }"].each do |block|
+			source := "import trb/std/file\nimport trb/std/path\ndef main()\n_result := File.open(Path.new(\"input\")) " + block + "\nend\n"
+			mut state := compiler_new_with_mode(source.size() + 1, false)
+			expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(state.callables.call_blocks.size()).to_equal(1)
+			expect(state.callables.lambdas.size()).to_equal(0)
+			row := state.callables.call_blocks[0]
+			expect(row.parameters.size()).to_equal(1)
+			expect(row.parameters[0].name).to_equal("file")
+			expect(row.parameters[0].type_name).to_equal("")
+			expect(load_string(state.source_tokens.token_texts, row.call_start)).to_equal("File")
+			expect(resolve(state)).to_be_true()
+			mut position := [row.origin]
+			expect(parse_call_block_syntax(state, position, row.call_start)).to_be_true()
+			expect(position[0]).to_equal(row.finish)
+			expect(state.callables.call_blocks.size()).to_equal(1)
+			fork := compiler_callable_analysis_fork(state.callables, state.source_tokens.token_count[0] + 1)
+			expect(fork.call_blocks[0].finish).to_equal(row.finish)
+			expect(sparse_integer_at(fork.call_block_origins, row.origin)).to_equal(1)
+		end
+	end
+
+	test("keeps nested bodies and direct try catch regions separate") do
+		source := "import trb/std/file\nimport trb/std/path\ndef main()\n_result := try File.open(Path.new(\"outer\")) do |outer|\n_inner := File.open(Path.new(\"inner\")) { |inner| inner }\nouter\nend catch |failure|\n1\nend\nend\n"
+		mut state := compiler_new_with_mode(source.size() + 1, false)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(state.callables.call_blocks.size()).to_equal(2)
+		inner := state.callables.call_blocks[0]
+		outer := state.callables.call_blocks[1]
+		expect(outer.body_start < inner.origin && inner.finish < outer.body_finish).to_be_true()
+		expect(state.parsed.catch_syntax.size()).to_equal(1)
+		expect(state.parsed.catch_syntax[0].operand_finish).to_equal(outer.finish)
+		expect(load_string(state.source_tokens.token_texts, outer.call_start)).to_equal("try")
+	end
+
+	test("does not leak nested declarations iteration names or resource parameters") do
+		["hidden := 1\n", "[1].each do |hidden|\nputs(hidden)\nend\n", "1\n"].each do |body|
+			source := "import trb/std/file\nimport trb/std/path\ndef main()\n_result := File.open(Path.new(\"input\")) do |hidden|\n" + body + "end\nputs(hidden)\nend\n"
+			mut state := compiler_new_with_mode(source.size() + 1, false)
+			expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("unresolved local hidden")
+		end
+	end
+
+	test("rejects malformed parameter and delimiter syntax") do
+		["do |file, file|\n1\nend", "do |mut file|\n1\nend", "do |file: File|\n1\nend", "{ 1 }", "{ |file| 1 end", "do |file|\n1\n}"].each do |block|
+			source := "def main()\n_result := acquire() " + block + "\nend\n"
+			mut state := compiler_new_with_mode(source.size() + 1, false)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+		end
+	end
+
+	test("does not admit bodies nested inside an argument or array element") do
+		["consume(acquire() do |file|\n1\nend)", "[acquire() { |file| 1 }]"].each do |value|
+			source := "def main()\n_result := " + value + "\nend\n"
+			mut state := compiler_new_with_mode(source.size() + 1, false)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+		end
+	end
+
+	test("preserves iteration diagnostics instead of attaching a generic body") do
+		headers := ["{a: 1}.each(1)", "[1].each&.with_index", "[1].map&.with_index", "[1].each_slice(2)&.with_index"]
+		headers.each do |header|
+			["{ |value, index| puts(value) }", "do |value, index|\nputs(value)\nend"].each do |block|
+				source := "def main()\n" + header + " " + block + "\nend\n"
+				mut state := compiler_new_with_mode(source.size() + 1, false)
+				expect(lex(state, source)).to_be_true()
+				expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+				expect(state.callables.call_blocks.size()).to_equal(0)
+				mut delimiter := "do"
+				if block[0] == "{"
+					delimiter = "{"
+				end
+				expect(load_string(state.diagnostics.messages, 0)).to_equal("unexpected token " + delimiter + " after statement")
+			end
+		end
+	end
+
+	test("keeps ordinary iteration-named methods without bodies syntactically valid") do
+		["receiver.each(1)", "receiver.each_slice(2)", "receiver.with_index(3)"].each do |call|
+			source := "def main()\n" + call + "\nend\n"
+			mut state := compiler_new_with_mode(source.size() + 1, false)
+			expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(state.callables.call_blocks.size()).to_equal(0)
+		end
+	end
+end

@@ -1,0 +1,61 @@
+import { emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+def array_output_source(initial: String, body: String): String
+	return "def scan(mut values: Array<Integer>, mut other: Array<Integer>): Integer\n" + initial + "\nmut index := 0\nmut total := 0\nwhile index < values.size()\n" + body + "\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n"
+end
+
+describe("Array loops with fresh output growth") do
+	test("retains input headers across multiple distinct fresh output pushes") do
+		state := array_loop_mir_check(array_output_source("mut output: Array<Integer> := []\nmut second: Array<Integer> := []", "output.push(values[index])\nsecond.push(values[index] + 1)"))
+		plans := state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 0)]
+		expect(plans.size()).to_equal(1)
+		expect(plans[0].accesses.size()).to_equal(3)
+		caller := control_test_output(emit_qbe(state)).split("function l $trbnf0")[1].split("\n}\n")[0]
+		expect(caller.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_false()
+	end
+
+	test("rejects unknown aliases mutation of the input and unstable output identity") do
+		initials := ["mut output := other", "mut output := values", "mut output: Array<Integer> := []", "mut output: Array<Integer> := []", "mut output: Array<Float> := []"]
+		bodies := ["output.push(1)", "output.push(1)", "values.push(1)\noutput.push(2)", "output = values\noutput.push(1)", "output.push(1.5)"]
+		mut index := 0
+		while index < initials.size()
+			state := array_loop_mir_check(array_output_source(initials[index], bodies[index]))
+			expect(state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 0)].size()).to_equal(0)
+			index += 1
+		end
+	end
+
+	test("rejects a possible alias obtained after the fresh allocation") do
+		source := "def borrow(values: Array<Integer>): Array<Integer>\nreturn values\nend\ndef main()\nmut output := [1, 2]\nvalues := borrow(output)\nmut index := 0\nwhile index < values.size()\noutput.push(values[index])\nindex += 1\nend\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 1)].size()).to_equal(0)
+	end
+
+	test("rejects a stale plan after substituting the input as push target") do
+		mut state := array_loop_mir_check(array_output_source("mut output: Array<Integer> := []", "output.push(values[index])"))
+		plan := state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, 0)][0]
+		input := state.scalar_mir.instructions[plan.accesses[0]].first
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == 24
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, input)
+				break
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("keeps cached input storage alive through forced collection and output growth") do
+		managed_mir_test_fixture("array-disjoint-growth", 6)
+		managed_mir_test_fixture("array-selection-capacity", 4)
+	end
+end

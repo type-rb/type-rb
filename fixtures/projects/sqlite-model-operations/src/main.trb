@@ -1,0 +1,296 @@
+import { aggregate_values, print_aggregate_data_errors, print_aggregate_errors } from aggregates
+import { mismatched_predicate_scope, predicate_rows } from predicates
+import { print_projection_errors, projected_values } from projections
+import { exercise_queries, print_query_error, read_without_single_key } from queries
+import { exercise_times } from events
+import { exercise_metrics, scan_metrics } from metrics
+import { commit_under_reader, exercise_transactions } from transactions
+import { Report, Tag } from models
+import { DbErrorKind, DbResult } from trb/orm
+import trb/std/process
+
+def change_report()
+	original := Report.find(1) catch |error|
+		puts(error.message)
+		return
+	end
+	if original == nil
+		return
+	end
+	pending := original.with(title: "ready")
+	changed := original.update(note: "separate edit") catch |error|
+		puts(error.message)
+		return
+	end
+	puts(changed.title)
+	saved := pending.save() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(saved.title)
+	note := saved.note
+	if note != nil
+		puts(note)
+	end
+	again := pending.save() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(again.id)
+	cleared := saved.update(note: nil) catch |error|
+		puts(error.message)
+		return
+	end
+	puts(cleared.note == nil)
+	puts(original.title)
+	case original.update()
+	when DbResult::Err(error)
+		puts(error.message)
+	when DbResult::Ok(_unexpected)
+		puts("unexpected update")
+	end
+end
+
+def save_missing_report()
+	original := Report.find(1) catch |error|
+		puts(error.message)
+		return
+	end
+	if original == nil
+		return
+	end
+	pending := original.with(note: "after deletion")
+	_deleted := original.delete() catch |error|
+		puts(error.message)
+		return
+	end
+	case pending.save()
+	when DbResult::Err(error)
+		case error.kind
+		when DbErrorKind::InvalidData
+			puts("InvalidData")
+		else
+			puts("unexpected")
+		end
+		puts(error.message)
+	when DbResult::Ok(_unexpected)
+		puts("unexpected update")
+	end
+end
+
+def create_reports()
+	first := Report.create(title: "first") catch |error|
+		puts(error.message)
+		return
+	end
+	puts(first.id)
+	puts(first.title)
+	note := first.note
+	if note != nil
+		puts(note)
+	end
+	second := Report.create(note: nil, title: "second", id: 42) catch |error|
+		puts(error.message)
+		return
+	end
+	puts(second.id)
+	puts(second.note == nil)
+	case Report.create(id: 42, title: "duplicate", note: "text")
+	when DbResult::Ok(_unexpected)
+		puts("unexpected insert")
+	when DbResult::Err(error)
+		case error.kind
+		when DbErrorKind::Constraint
+			puts("Constraint")
+		else
+			puts("unexpected error")
+		end
+		puts(error.message)
+	end
+end
+
+def remove_tag()
+	tag := Tag.find("reader's copy") catch |error|
+		puts(error.message)
+		return
+	end
+	if tag == nil
+		puts("missing tag")
+		return
+	end
+	puts(tag.code)
+	first := tag.delete() catch |error|
+		case error.kind
+		when DbErrorKind::Constraint
+			puts("Constraint")
+		else
+			puts("unexpected")
+		end
+		puts(error.message)
+		return
+	end
+	puts(first)
+	again := tag.delete() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(again)
+end
+
+def show(id: Integer)
+	case Report.find(id)
+	when DbResult::Ok(item)
+		if item == nil
+			puts("missing")
+			return
+		end
+		puts(item.id)
+		puts(item.title)
+		note := item.note
+		if note != nil
+			puts(note)
+		end
+	when DbResult::Err(error)
+		case error.kind
+		when DbErrorKind::Connection
+			puts("Connection")
+		when DbErrorKind::InvalidData
+			puts("InvalidData")
+		when DbErrorKind::Query
+			puts("Query")
+		else
+			puts("unexpected")
+		end
+		puts(error.message)
+	end
+end
+
+def main()
+	operation := Process.environment("ORM_TEST_OPERATION")
+	if operation != nil
+		if operation == "predicates" || operation == "scope-mismatch" || operation == "savepoint-mismatch"
+			mut result := 0
+			if operation == "predicates"
+				result = predicate_rows() catch |error|
+					puts(error.message)
+					return
+				end
+			else
+				result = mismatched_predicate_scope(operation == "savepoint-mismatch") catch |error|
+					puts(error.message)
+					return
+				end
+			end
+			puts(result)
+			return
+		end
+		if operation == "aggregate-errors"
+			print_aggregate_errors()
+			return
+		end
+		if operation == "aggregate-data-errors"
+			print_aggregate_data_errors()
+			return
+		end
+		if operation == "aggregates"
+			case aggregate_values()
+			when DbResult::Ok(value)
+				puts(value)
+			when DbResult::Err(error)
+				print_query_error(error)
+			end
+			return
+		end
+		if operation == "without_single_key"
+			case read_without_single_key()
+			when DbResult::Ok(count)
+				puts(count)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "projection-errors"
+			print_projection_errors()
+			return
+		end
+		if operation == "projections"
+			case projected_values()
+			when DbResult::Ok(size)
+				puts(size)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "queries"
+			exercise_queries()
+			return
+		end
+		if operation == "times"
+			case exercise_times()
+			when DbResult::Ok(id)
+				puts(id)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "scan"
+			case scan_metrics()
+			when DbResult::Ok(checksum)
+				puts(checksum)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "metrics"
+			case exercise_metrics()
+			when DbResult::Ok(id)
+				puts(id)
+			when DbResult::Err(error)
+				puts(error.message)
+			end
+			return
+		end
+		if operation == "blocked_commit"
+			case commit_under_reader()
+			when DbResult::Err(error)
+				puts(error.message)
+			when DbResult::Ok(id)
+				puts(id)
+			end
+			return
+		end
+		if operation == "transactions"
+			exercise_transactions()
+			return
+		end
+		if operation == "update"
+			change_report()
+			return
+		end
+		if operation == "save_missing"
+			save_missing_report()
+			return
+		end
+		if operation == "insert"
+			create_reports()
+			return
+		end
+		if operation == "delete"
+			remove_tag()
+			return
+		end
+		if operation == "empty"
+			report := Report.new()
+			puts(report.id)
+			puts(report.title)
+			return
+		end
+	end
+	show(1)
+	show(2)
+	show(3)
+end

@@ -1,0 +1,345 @@
+# Runtime-selected inputs keep the coverage matrix independent of compilation.
+import trb/std/json
+import trb/std/process
+import trb/std/result
+
+class WorkerState
+	@cache: Array<String>
+	@completed: Integer
+
+	def initialize(cache: Array<String>)
+		@cache = cache
+		@completed = 0
+	end
+
+	def process_jobs(count: Integer, batch: Integer): Integer
+		mut checksum := 0
+		mut index := 0
+		while index < count
+			payload := "job-" + batch.to_s() + "-" + index.to_s() + "-" + repeated_text(8)
+			if index % 17 == 0
+				checksum += 1
+			else
+				mut result := payload
+				if index % 11 == 0
+					result += "-retry"
+				end
+				@cache[(index + batch) % @cache.size()] = result
+				@completed += 1
+				checksum += result.size()
+			end
+			index += 1
+		end
+		@cache.each { |payload| checksum += payload.size() }
+		return checksum + @completed
+	end
+end
+
+def repeated_text(length: Integer): String
+	mut parts: Array<String> := []
+	mut index := 0
+	while index < length
+		parts.push("aβ😀")
+		index += 1
+	end
+	return parts.join("")
+end
+
+def log_input(count: Integer, variant: String): Array<String>
+	mut lines: Array<String> := []
+	mut index := 0
+	while index < count
+		if variant == "mixed" && index % 17 == 0
+			lines.push("malformed")
+		else
+			lines.push("event\tgroup-" + (index % 127).to_s() + "\t" + (index % 1000).to_s() + "\t" + index.to_s())
+		end
+		index += 1
+	end
+	return lines
+end
+
+def aggregate_logs(lines: Array<String>): Integer
+	mut totals: Hash<String, Integer> := {}
+	mut rejected := 0
+	lines.each do |line|
+		fields := line.split("\t")
+		if fields.size() == 4
+			key := fields[1]
+			value := fields[2].to_i()
+			if totals.key?(key)
+				totals[key] = totals[key] + value
+			else
+				totals[key] = value
+			end
+		else
+			rejected += 1
+		end
+	end
+	mut output: Array<String> := []
+	totals.keys().sort().each do |key|
+		output.push(key + "=" + totals[key].to_s())
+	end
+	return output.join("\n").size() + rejected
+end
+
+def json_input(count: Integer, variant: String): Array<String>
+	mut documents: Array<String> := []
+	payload := repeated_text(4)
+	mut index := 0
+	while index < count
+		if variant == "mixed" && index % 17 == 0
+			documents.push("{invalid")
+		else
+			documents.push("{\"id\":" + index.to_s() + ",\"name\":\"" + payload + "\",\"active\":true,\"tags\":[\"one\",\"two\"]}")
+		end
+		index += 1
+	end
+	return documents
+end
+
+def transform_json(documents: Array<String>): Integer
+	mut checksum := 0
+	documents.each do |document|
+		case JSON.parse(document)
+		when Result::Ok(value)
+			case value
+			when JSON::Value::Object(fields)
+				case fields["id"]
+				when JSON::Value::Integer(id)
+					transformed := JSON::Value::Array([JSON::Value::Integer(id + 1), fields["name"], fields["active"]])
+					case JSON.stringify(transformed)
+					when Result::Ok(text)
+						checksum += text.size()
+					when Result::Err(_error)
+						checksum -= 1000000
+					end
+				else
+					checksum -= 1000000
+				end
+			else
+				checksum -= 1000000
+			end
+		when Result::Err(_error)
+			checksum += 1
+		end
+	end
+	return checksum
+end
+
+# Scale one document's width independently of the number of documents.
+def json_document(count: Integer, variant: String): String
+	mut parts: Array<String> := []
+	mut index := 0
+	while index < count
+		if variant == "wide-array"
+			parts.push("\"aβ😀\"")
+		elsif variant == "wide-object"
+			parts.push("\"key-" + index.to_s() + "\":\"aβ😀\"")
+		elsif variant == "integer-array"
+			parts.push((index % 127 - 63).to_s())
+		elsif variant == "fractional-array"
+			if index % 2 == 0
+				parts.push("0.5")
+			else
+				parts.push("1.25e-1")
+			end
+		elsif variant == "precise-fractional-array"
+			if index % 4 == 0
+				parts.push("0.12345678901234568")
+			elsif index % 4 == 1
+				parts.push("-0.8765432109876543")
+			elsif index % 4 == 2
+				parts.push("12345.678901234567")
+			else
+				parts.push("0.0012345678901234567")
+			end
+		elsif variant == "mixed-number-object"
+			mut number := (index % 127 - 63).to_s()
+			if index % 3 == 1
+				number = "0.5"
+			elsif index % 3 == 2
+				number = "1.25e-1"
+			end
+			parts.push("\"key-" + index.to_s() + "\":" + number)
+		elsif variant == "ascii"
+			parts.push("abcdef")
+		elsif variant == "escaped"
+			parts.push("a\\n\\\"<>&\\u2028")
+		else
+			parts.push("aβ😀")
+		end
+		index += 1
+	end
+	if variant == "wide-array" || variant == "integer-array" || variant == "fractional-array" || variant == "precise-fractional-array"
+		return "[" + parts.join(",") + "]"
+	elsif variant == "wide-object" || variant == "mixed-number-object"
+		return "{" + parts.join(",") + "}"
+	end
+	return "\"" + parts.join("") + "\""
+end
+
+def roundtrip_json(document: String): Integer
+	case JSON.parse(document)
+	when Result::Ok(value)
+		case JSON.stringify(value)
+		when Result::Ok(text)
+			return text.size()
+		when Result::Err(_error)
+			return -1000000
+		end
+	when Result::Err(_error)
+		return -1000000
+	end
+end
+
+def hash_batch(count: Integer, variant: String): Integer
+	mut values: Hash<String, Integer> := {}
+	mut index := 0
+	while index < count
+		values["key-" + index.to_s()] = index
+		index += 1
+	end
+	mut checksum := 0
+	index = 0
+	while index < count
+		mut selected := index
+		if variant == "miss-heavy" && index % 10 != 0
+			selected += count
+		end
+		key := "key-" + selected.to_s()
+		if values.key?(key)
+			checksum += values[key]
+		else
+			checksum += 1
+		end
+		index += 1
+	end
+	return checksum
+end
+
+def string_batch(count: Integer, variant: String): Integer
+	mut width := 4
+	if variant == "long"
+		width = 512
+	end
+	line := repeated_text(width) + ",last"
+	mut checksum := 0
+	mut index := 0
+	while index < count
+		parts := line.split(",")
+		parts.each do |part|
+			checksum += part.size()
+			if part.include?("😀")
+				checksum += 1
+			end
+		end
+		index += 1
+	end
+	return checksum
+end
+
+def array_batch(count: Integer, variant: String): Integer
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < count
+		mut value := (index * 7919 + 17) % 100003
+		if variant == "sorted"
+			value = index
+		elsif variant == "reverse"
+			value = count - index
+		elsif variant == "duplicates"
+			value = index % 8
+		end
+		values.push(value)
+		index += 1
+	end
+	sorted := values.sort()
+	mut checksum := 0
+	sorted.each.with_index { |value, position| checksum = (checksum + value * ((position % 7) + 1)) % 1000000007 }
+	return checksum
+end
+
+def allocation_batch(mut retained: Array<String>, count: Integer, variant: String, batch: Integer): Integer
+	mut checksum := 0
+	mut index := 0
+	while index < count
+		value := "object-" + batch.to_s() + "-" + index.to_s() + "-" + repeated_text(16)
+		checksum += value.size()
+		if variant == "retained"
+			retained[index % retained.size()] = value
+		end
+		index += 1
+	end
+	return checksum
+end
+
+def main()
+	arguments := Process.argv()
+	workload: String := arguments[0]
+	count: Integer := arguments[1].to_i()
+	variant: String := arguments[2]
+	batches: Integer := arguments[3].to_i()
+	summary := arguments.size() > 4 && arguments[4] == "summary"
+	mut lines: Array<String> := []
+	if workload == "log-pipeline"
+		lines = log_input(count, variant)
+	elsif workload == "json-transform"
+		lines = json_input(count, variant)
+	end
+	mut document := ""
+	if workload == "json-document"
+		document = json_document(count, variant)
+	end
+	mut cache: Array<String> := []
+	mut retained: Array<String> := []
+	mut index := 0
+	while index < 128
+		cache.push("")
+		index += 1
+	end
+	index = 0
+	if workload == "allocation" && variant == "retained"
+		while index < count
+			retained.push("")
+			index += 1
+		end
+	end
+	mut state := WorkerState.new(cache)
+	puts("ready")
+	mut batch := 0
+	mut total_checksum := 0
+	while batch < batches
+		mut checksum := 0
+		if workload == "log-pipeline"
+			checksum = aggregate_logs(lines)
+		elsif workload == "json-transform"
+			checksum = transform_json(lines)
+		elsif workload == "json-document"
+			checksum = roundtrip_json(document)
+		elsif workload == "worker"
+			checksum = state.process_jobs(count, batch)
+		elsif workload == "hash"
+			checksum = hash_batch(count, variant)
+		elsif workload == "strings"
+			checksum = string_batch(count, variant)
+		elsif workload == "arrays"
+			checksum = array_batch(count, variant)
+		elsif workload == "allocation"
+			checksum = allocation_batch(retained, count, variant, batch)
+		end
+		if summary
+			total_checksum = (total_checksum + checksum) % 1000000007
+		else
+			puts(batch.to_s() + "," + checksum.to_s())
+		end
+		batch += 1
+	end
+	# Reading retained values after the last batch makes their lifetime observable.
+	mut retained_size := 0
+	retained.each { |value| retained_size += value.size() }
+	if summary
+		puts("summary," + total_checksum.to_s())
+	end
+	puts("done," + retained_size.to_s())
+end

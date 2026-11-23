@@ -1,0 +1,11 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { CompilerState } from state/state
+import { expect } from trb/std/test
+
+def managed_test_state(): CompilerState
+	source := "def pair(a: String, b: String): String\nreturn a + b\nend\ndef choose(flag: Boolean): String\nmut dead := (10).to_s()\nkept := (20).to_s()\nif flag\ndead = (30).to_s()\nend\nreturn pair(kept, (40).to_s())\nend\ndef main()\nputs(choose(true))\nend\n"
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	return state
+end

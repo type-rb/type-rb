@@ -1,0 +1,17 @@
+def probe()
+	text := "abc"
+	mut chars := text.chars()
+	mut points := text.codepoints()
+	chars[0] = "changed"
+	points[0] = 999
+	puts(text)
+	puts(chars[0])
+	puts(points[0])
+	puts(text.chars()[0])
+	puts(text.codepoints()[0])
+
+end
+
+def main()
+	probe()
+end

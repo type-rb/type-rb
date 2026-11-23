@@ -1,0 +1,299 @@
+name: Formal TypeRB backend-pair builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact published Native seed used to close the current compiler chain
+        required: true
+        default: bootstrap-seed-2026-09-29-module-cycles
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TYPE_RB_REVISION: cc8c734f73f5149464838825cdbb2165058ed26d
+  BENCH_EXEC_VERSION: 3.35
+  BENCH_EXEC_DEB_SHA256: b6e42daf63a0284b597f1d05f0daf7690381f7ca9ebe21d0b5083495d01bbfe0
+  QBE_VERSION: 1.3
+  QBE_ARCHIVE_SHA256: d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320
+
+jobs:
+  measure-build:
+    name: Measure ${{ matrix.case }} build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - fannkuch-redux
+          - n-body
+          - spectral-norm
+    steps:
+      - name: Check out the exact measurement revision
+        uses: actions/checkout@v5
+
+      - name: Check out the pinned TypeRB compiler
+        uses: actions/checkout@v5
+        with:
+          repository: type-rb/type-rb
+          ref: ${{ env.TYPE_RB_REVISION }}
+          path: .type-rb
+
+      - name: Set up the pinned Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+
+      - name: Install the registered Linux build toolchain and BenchExec
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            jq \
+            lld \
+            strace
+          curl -L \
+            "https://github.com/sosy-lab/benchexec/releases/download/$BENCH_EXEC_VERSION/benchexec_$BENCH_EXEC_VERSION-1_all.deb" \
+            -o "$RUNNER_TEMP/benchexec_$BENCH_EXEC_VERSION-1_all.deb"
+          echo "$BENCH_EXEC_DEB_SHA256  $RUNNER_TEMP/benchexec_$BENCH_EXEC_VERSION-1_all.deb" \
+            | sha256sum -c -
+          (
+            cd "$RUNNER_TEMP"
+            sudo apt-get install -y --install-recommends \
+              "./benchexec_$BENCH_EXEC_VERSION-1_all.deb"
+          )
+          test "$(runexec --version)" = "runexec $BENCH_EXEC_VERSION"
+
+      - name: Build and verify the pinned TypeRB compiler
+        run: |
+          test "$(cat TYPE_RB_REVISION)" = "$TYPE_RB_REVISION"
+          test "$(git -C .type-rb rev-parse HEAD)" = "$TYPE_RB_REVISION"
+          python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb" --trimpath
+          test -x "$RUNNER_TEMP/trb"
+          "$RUNNER_TEMP/trb" version > "$RUNNER_TEMP/type-rb-version.txt"
+          "$RUNNER_TEMP/trb" --version > "$RUNNER_TEMP/type-rb-dash-version.txt"
+          cmp "$RUNNER_TEMP/type-rb-version.txt" "$RUNNER_TEMP/type-rb-dash-version.txt"
+
+      - name: Build the pinned Native QBE variant
+        id: qbe
+        run: |
+          python3 tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-1.3"
+          echo "path=$RUNNER_TEMP/qbe-1.3/qbe" >> "$GITHUB_OUTPUT"
+
+      - name: Download the immutable Linux previous-Native seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          /bin/sh tools/bootstrap-seed-download.sh "$RELEASE_TAG" \
+            04993b6bf598356a51143edd9dbde1a024c403cc \
+            type-rb-native-bootstrap-linux-arm64 "$RUNNER_TEMP/release"
+
+      - name: Close the current self-hosted Native compiler chain
+        env:
+          PUBLISHED_SEED: ${{ runner.temp }}/release/type-rb-native-bootstrap-linux-arm64
+          QBE: ${{ steps.qbe.outputs.path }}
+        run: |
+          mkdir -p \
+            "$RUNNER_TEMP/transition/first" \
+            "$RUNNER_TEMP/transition/current-runtime" \
+            "$RUNNER_TEMP/transition-evidence"
+          strace -f -e trace=process \
+            -o "$RUNNER_TEMP/transition-evidence/first-process.trace" \
+            "$PUBLISHED_SEED" build compiler/src/compiler.trb \
+              --output "$RUNNER_TEMP/transition/first/compiler" \
+              --qbe "$QBE" \
+              --cc /usr/bin/cc \
+              --target linux-arm64-v0 \
+              > "$RUNNER_TEMP/transition-evidence/first.stdout" \
+              2> "$RUNNER_TEMP/transition-evidence/first.stderr"
+          strace -f -e trace=process \
+            -o "$RUNNER_TEMP/transition-evidence/current-runtime-process.trace" \
+            "$RUNNER_TEMP/transition/first/compiler" build compiler/src/compiler.trb \
+              --output "$RUNNER_TEMP/transition/current-runtime/compiler" \
+              --qbe "$QBE" \
+              --cc /usr/bin/cc \
+              --target linux-arm64-v0 \
+              > "$RUNNER_TEMP/transition-evidence/current-runtime.stdout" \
+              2> "$RUNNER_TEMP/transition-evidence/current-runtime.stderr"
+          test ! -s "$RUNNER_TEMP/transition-evidence/first.stdout"
+          test ! -s "$RUNNER_TEMP/transition-evidence/first.stderr"
+          test ! -s "$RUNNER_TEMP/transition-evidence/current-runtime.stdout"
+          test ! -s "$RUNNER_TEMP/transition-evidence/current-runtime.stderr"
+          if grep -E 'execve\("[^"]*/(go|trb|sh|bash|zsh)"' \
+            "$RUNNER_TEMP/transition-evidence/first-process.trace" \
+            "$RUNNER_TEMP/transition-evidence/current-runtime-process.trace"; then
+            printf 'setup transition launched a forbidden executable\n' >&2
+            exit 1
+          fi
+          /bin/sh tools/bootstrap-seed.sh \
+            --mode previous \
+            --input "$RUNNER_TEMP/transition/current-runtime/compiler" \
+            --input-role transition \
+            --qbe "$QBE" \
+            --cc /usr/bin/cc \
+            --profile linux-arm64-v0 \
+            --runner-image ubuntu-24.04-arm \
+            --workspace "$RUNNER_TEMP/bootstrap-workspace" \
+            --output "$RUNNER_TEMP/candidate-compiler" \
+            --evidence "$RUNNER_TEMP/bootstrap-evidence" \
+            --metadata "$RUNNER_TEMP/bootstrap-metadata.json" \
+            --asset-name benchmarksgame-build-candidate-linux-arm64
+
+      - name: Configure and probe the isolated measurement host
+        id: host
+        run: |
+          mkdir -p "$RUNNER_TEMP/host-evidence"
+          sudo swapoff -a
+          /bin/sh tools/benchmarksgame-formal/delegate-cpuset-linux.sh \
+            "$RUNNER_TEMP/host-evidence/cpuset-before-discovery.txt"
+          set +e
+          python3 -m benchexec.check_cgroups \
+            > "$RUNNER_TEMP/host-evidence/cpuset-discovery.stdout" \
+            2> "$RUNNER_TEMP/host-evidence/cpuset-discovery.stderr"
+          cpuset_discovery_status=$?
+          set -e
+          printf 'status=%s\n' "$cpuset_discovery_status" \
+            > "$RUNNER_TEMP/host-evidence/cpuset-discovery.status"
+          /bin/sh tools/benchmarksgame-formal/delegate-cpuset-linux.sh \
+            "$RUNNER_TEMP/host-evidence/cpuset-after-discovery.txt"
+          python3 -m benchexec.check_cgroups \
+            > "$RUNNER_TEMP/host-evidence/check-cgroups.stdout" \
+            2> "$RUNNER_TEMP/host-evidence/check-cgroups.stderr"
+          allowed=$(awk -F: \
+            '$1 == "Cpus_allowed_list" { gsub(/[[:space:]]/, "", $2); print $2 }' \
+            /proc/self/status)
+          test -n "$allowed"
+          printf '%s\n' "$allowed" |
+            awk -F, '{
+              for (group_index = 1; group_index <= NF; group_index += 1) {
+                part_count = split($group_index, bounds, "-")
+                first = bounds[1] + 0
+                last = part_count == 1 ? first : bounds[2] + 0
+                for (cpu = first; cpu <= last; cpu += 1) print cpu
+              }
+            }' > "$RUNNER_TEMP/host-evidence/allowed-cpus.txt"
+          test "$(wc -l < "$RUNNER_TEMP/host-evidence/allowed-cpus.txt" | tr -d ' ')" -ge 4
+          four_cores=$(sed -n '1,4p' "$RUNNER_TEMP/host-evidence/allowed-cpus.txt" | paste -sd, -)
+          echo "four_cores=$four_cores" >> "$GITHUB_OUTPUT"
+          {
+            printf 'allowed=%s\n' "$allowed"
+            printf 'four_cores=%s\n' "$four_cores"
+          } > "$RUNNER_TEMP/host-evidence/allocation.txt"
+          /bin/sh tools/benchmarksgame-formal/cache-control-linux.sh \
+            "$RUNNER_TEMP/host-evidence/cache-probe.txt"
+          mkdir -p "$RUNNER_TEMP/host-probe-writable"
+          runexec \
+            --quiet \
+            --memlimit 64MB \
+            --walltimelimit 10s \
+            --cores "$four_cores" \
+            --read-only-dir / \
+            --overlay-dir /home \
+            --full-access-dir "$RUNNER_TEMP/host-probe-writable" \
+            --output "$RUNNER_TEMP/host-evidence/runexec-probe.log" \
+            -- /usr/bin/touch "$RUNNER_TEMP/host-probe-writable/probe" \
+            > "$RUNNER_TEMP/host-evidence/runexec-probe.stdout" \
+            2> "$RUNNER_TEMP/host-evidence/runexec-probe.stderr"
+          grep '^returnvalue=0$' "$RUNNER_TEMP/host-evidence/runexec-probe.stdout"
+          test -f "$RUNNER_TEMP/host-probe-writable/probe"
+          test ! -s "$RUNNER_TEMP/host-evidence/runexec-probe.stderr"
+
+      - name: Measure compiler builds and record distribution closure
+        env:
+          CASE: ${{ matrix.case }}
+          FOUR_CORES: ${{ steps.host.outputs.four_cores }}
+          QBE: ${{ steps.qbe.outputs.path }}
+        run: |
+          /bin/sh tools/benchmarksgame-build-formal/build-controller.sh \
+            formal "$(command -v runexec)" "$CASE" \
+            "$RUNNER_TEMP/candidate-compiler" \
+            "$RUNNER_TEMP/trb" \
+            "$QBE" \
+            /usr/bin/cc \
+            "$(command -v go)" \
+            linux-arm64-v0 \
+            "$FOUR_CORES" \
+            tools/benchmarksgame-formal/cache-control-linux.sh \
+            "$RUNNER_TEMP/build-workspace" \
+            "$RUNNER_TEMP/build-evidence"
+
+      - name: Record exact workflow and host context
+        if: always()
+        env:
+          CASE: ${{ matrix.case }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          evidence="$RUNNER_TEMP/workflow-evidence"
+          mkdir -p "$evidence"
+          {
+            printf 'repository_revision=%s\n' "$GITHUB_SHA"
+            printf 'repository_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'runner_image=%s\n' ubuntu-24.04-arm
+            printf 'case=%s\n' "$CASE"
+            printf 'release_tag=%s\n' "$RELEASE_TAG"
+            printf 'type_rb_revision=%s\n' "$TYPE_RB_REVISION"
+            uname -a
+            lscpu
+          } > "$evidence/context.txt" 2>&1
+          {
+            runexec --version
+            "$RUNNER_TEMP/trb" version
+            go version
+            go env GOROOT
+            /usr/bin/cc --version | sed -n '1p'
+            /usr/bin/ld.lld --version | sed -n '1p'
+            "$RUNNER_TEMP/qbe-1.3/qbe" -h
+          } > "$evidence/toolchains.txt" 2>&1 || true
+          dpkg-query -W \
+            -f='${binary:Package}\t${Version}\n' \
+            benchexec build-essential gcc lld strace \
+            > "$evidence/packages.tsv" 2>&1 || true
+          cp "$RUNNER_TEMP/qbe-1.3/build-info.json" "$evidence/qbe-build-info.json" 2>/dev/null || true
+          cp "$RUNNER_TEMP/type-rb-version.txt" "$evidence/type-rb-version.txt" 2>/dev/null || true
+          cp "$RUNNER_TEMP/release/release.json" "$evidence/release.json" 2>/dev/null || true
+          if test -f "$RUNNER_TEMP/qbe-1.3.tar.xz"; then
+            sha256sum "$RUNNER_TEMP/qbe-1.3.tar.xz" > "$evidence/qbe-source.sha256"
+          fi
+          if test -f "$RUNNER_TEMP/benchexec_$BENCH_EXEC_VERSION-1_all.deb"; then
+            sha256sum "$RUNNER_TEMP/benchexec_$BENCH_EXEC_VERSION-1_all.deb" \
+              > "$evidence/benchexec-deb.sha256"
+          fi
+
+      - name: Bundle all evidence after measurement
+        id: bundle
+        if: always()
+        run: |
+          python3 tools/evidence_bundle.py pack "$RUNNER_TEMP" "$RUNNER_TEMP/formal-evidence.jsonl.gz" \
+            bootstrap-evidence bootstrap-metadata.json transition-evidence host-evidence build-evidence workflow-evidence
+
+      - name: Upload complete evidence bundle
+        if: always() && steps.bundle.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmarksgame-build-${{ matrix.case }}
+          path: ${{ runner.temp }}/formal-evidence.jsonl.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Preserve original evidence if bundling fails
+        if: always() && steps.bundle.outcome != 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmarksgame-build-${{ matrix.case }}
+          path: |
+            ${{ runner.temp }}/bootstrap-evidence
+            ${{ runner.temp }}/bootstrap-metadata.json
+            ${{ runner.temp }}/transition-evidence
+            ${{ runner.temp }}/host-evidence
+            ${{ runner.temp }}/build-evidence
+            ${{ runner.temp }}/workflow-evidence
+          if-no-files-found: error
+          retention-days: 90

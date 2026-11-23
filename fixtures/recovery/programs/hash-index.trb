@@ -1,0 +1,60 @@
+record Names
+	entries: Hash<String, Integer>
+end
+
+alias ReadName = () -> Integer
+
+def reader(values: Hash<String, Integer>): ReadName
+	return fn(): Integer
+		return values["duplicate"]
+	end
+end
+
+def key(mut order: Array<Integer>): String
+	order.push(1)
+	return "duplicate"
+end
+
+def value(mut values: Hash<String, Integer>, mut order: Array<Integer>): Integer
+	order.push(2)
+	values["rhs"] = 41
+	return 9
+end
+
+def main()
+	mut empty: Hash<String, Integer> := {}
+	if empty.key?("")
+		puts("unexpected key")
+		return
+	end
+	empty[""] =- 9007199254740991
+	if empty[""] != - 9007199254740991
+		puts("empty key failed")
+		return
+	end
+	mut names := Names.new(entries: { "duplicate" => 1, "duplicate" => 2 })
+	mut shared := names.entries
+	read := reader(shared)
+	mut order: Array<Integer> := []
+	names.entries[key(order)] = value(shared, order)
+	if order[0] != 1 || order[1] != 2 || read() != 9 || names.entries.fetch("rhs") != 41
+		puts("evaluation or alias failed")
+		return
+	end
+	mut index := 0
+	mut name := ""
+	while index < 2000
+		name += "x"
+		shared[name] = index
+		index += 1
+	end
+	if !names.entries.key?(name) || names.entries[name] != 1999 || read() != 9
+		puts("growth or lifetime failed")
+		return
+	end
+	names.entries["é"] = 42
+	if names.entries["é"] == 42
+		puts("hash-index-ok")
+	end
+	return
+end

@@ -1,0 +1,7 @@
+import { describe, expect, test } from trb/std/test
+
+describe("Shared") do
+	test("same") do
+		expect(1).to_equal(2)
+	end
+end

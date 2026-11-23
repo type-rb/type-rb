@@ -1,0 +1,207 @@
+import { mir_type_composite_start, mir_type_float_array, mir_type_integer_array, mir_type_none } from mir/model/type_ids
+import { mir_type_kind_array, mir_type_kind_callable, mir_type_kind_empty_hash, mir_type_kind_enum, mir_type_kind_hash, mir_type_kind_literal, mir_type_kind_newtype, mir_type_kind_nil, mir_type_kind_nullable, mir_type_kind_range, mir_type_kind_record, mir_type_kind_union } from mir/model/type_kinds
+import { MirModule, mir_control_value_type, mir_origin_valid, mir_table_span_valid } from mir/model/module
+
+# ABI and GC consumers use this verified representation; semantic consumers
+# continue to use the nominal type ID. A bound prevents forged cycles hanging
+# verification or root derivation before a diagnostic can be produced.
+def mir_newtype_id(native_module: MirModule, type_id: Integer): Integer
+	if type_id >= mir_type_composite_start() && type_id - mir_type_composite_start() < native_module.types.size()
+		row := native_module.types[type_id - mir_type_composite_start()]
+		if row.kind == mir_type_kind_newtype()
+			return row.declaration
+		end
+	end
+	return -1
+end
+
+def mir_representation_type(native_module: MirModule, type_id: Integer): Integer
+	mut result := type_id
+	mut remaining := native_module.types.size() + 1
+	while remaining > 0
+		if result >= mir_type_composite_start() && result - mir_type_composite_start() < native_module.types.size()
+			row := native_module.types[result - mir_type_composite_start()]
+			if row.kind == mir_type_kind_literal()
+				result = row.element
+				remaining -= 1
+				next
+			end
+		end
+		owner := mir_newtype_id(native_module, result)
+		if owner < 0
+			return result
+		end
+		if owner >= native_module.newtypes.size()
+			return mir_type_none()
+		end
+		result = native_module.newtypes[owner].representation
+		remaining -= 1
+	end
+	return mir_type_none()
+end
+
+# Expansion through containers must terminate before a representation can be
+# erased. Nominal record/enum storage permits recursive fields independently.
+def mir_newtype_cycle(native_module: MirModule, type_id: Integer, seen: Array<Integer>): Boolean
+	if type_id < mir_type_composite_start()
+		return false
+	end
+	if type_id - mir_type_composite_start() >= native_module.types.size()
+		return true
+	end
+	row := native_module.types[type_id - mir_type_composite_start()]
+	if row.kind == mir_type_kind_newtype()
+		seen.each do |previous|
+			if previous == type_id
+				return true
+			end
+		end
+		if row.declaration < 0 || row.declaration >= native_module.newtypes.size()
+			return true
+		end
+		mut path: Array<Integer> := []
+		seen.each do |previous|
+			path.push(previous)
+		end
+		path.push(type_id)
+		return mir_newtype_cycle(native_module, native_module.newtypes[row.declaration].representation, path)
+	end
+	if row.kind == mir_type_kind_array() || row.kind == mir_type_kind_hash() || row.kind == mir_type_kind_nullable()
+		return mir_newtype_cycle(native_module, row.element, seen)
+	end
+	if row.kind == mir_type_kind_callable()
+		definition := native_module.callables[row.declaration]
+		if mir_newtype_cycle(native_module, definition.result, seen)
+			return true
+		end
+		definition.parameters.each do |parameter|
+			if mir_newtype_cycle(native_module, parameter, seen)
+				return true
+			end
+		end
+	elsif row.kind == mir_type_kind_union()
+		native_module.unions[row.declaration].alternatives.each do |alternative|
+			if mir_newtype_cycle(native_module, alternative, seen)
+				return true
+			end
+		end
+	end
+	return false
+end
+
+# Construction policy also remains independently verifiable after source erasure.
+def mir_newtype_immutable(native_module: MirModule, type_id: Integer, seen: Array<Integer>): Boolean
+	if mir_control_value_type(type_id)
+		return true
+	end
+	if type_id < mir_type_composite_start() || type_id - mir_type_composite_start() >= native_module.types.size()
+		return false
+	end
+	seen.each do |previous|
+		if previous == type_id
+			return true
+		end
+	end
+	mut path: Array<Integer> := []
+	seen.each do |previous|
+		path.push(previous)
+	end
+	path.push(type_id)
+	row := native_module.types[type_id - mir_type_composite_start()]
+	if row.kind == mir_type_kind_range() || row.kind == mir_type_kind_nil() || row.kind == mir_type_kind_literal()
+		return true
+	end
+	if row.kind == mir_type_kind_nullable()
+		return mir_newtype_immutable(native_module, row.element, path)
+	end
+	if row.kind == mir_type_kind_newtype()
+		if row.declaration < 0 || row.declaration >= native_module.newtypes.size()
+			return false
+		end
+		return mir_newtype_immutable(native_module, native_module.newtypes[row.declaration].representation, path)
+	end
+	if row.kind == mir_type_kind_union()
+		native_module.unions[row.declaration].alternatives.each do |alternative|
+			if !mir_newtype_immutable(native_module, alternative, path)
+				return false
+			end
+		end
+		return true
+	end
+	if row.kind == mir_type_kind_record()
+		definition := native_module.records[row.declaration]
+		if !mir_table_span_valid(definition.field_start, definition.field_count, native_module.fields.size())
+			return false
+		end
+		mut field := definition.field_start
+		while field < definition.field_start + definition.field_count
+			if !mir_newtype_immutable(native_module, native_module.fields[field].type_id, path)
+				return false
+			end
+			field += 1
+		end
+		return true
+	end
+	if row.kind == mir_type_kind_enum()
+		definition := native_module.enums[row.declaration]
+		if !mir_table_span_valid(definition.variant_start, definition.variant_count, native_module.enum_variants.size())
+			return false
+		end
+		mut variant := definition.variant_start
+		while variant < definition.variant_start + definition.variant_count
+			item := native_module.enum_variants[variant]
+			if !mir_table_span_valid(item.field_start, item.field_count, native_module.enum_fields.size())
+				return false
+			end
+			mut field := item.field_start
+			while field < item.field_start + item.field_count
+				if !mir_newtype_immutable(native_module, native_module.enum_fields[field].type_id, path)
+					return false
+				end
+				field += 1
+			end
+			variant += 1
+		end
+		return true
+	end
+	return false
+end
+
+def mir_newtype_types_error(native_module: MirModule): String
+	mut owner := 0
+	while owner < native_module.newtypes.size()
+		row := native_module.newtypes[owner]
+		if row.declaration != owner || mir_newtype_id(native_module, row.type_id) != owner
+			return "MIR newtype declaration ownership differs"
+		end
+		if row.name == "" || !mir_origin_valid(row.source_id, row.line, native_module.source_count[0])
+			return "MIR newtype declaration origin is invalid"
+		end
+		mut valid := mir_control_value_type(row.representation)
+		if row.representation == mir_type_integer_array() || row.representation == mir_type_float_array() || (row.representation >= mir_type_composite_start() && row.representation - mir_type_composite_start() < native_module.types.size())
+			valid = true
+		end
+		if !valid || mir_representation_type(native_module, row.type_id) == mir_type_none() || mir_newtype_cycle(native_module, row.type_id, [])
+			return "MIR newtype representation is invalid or cyclic"
+		end
+		if row.representation >= mir_type_composite_start()
+			kind := native_module.types[row.representation - mir_type_composite_start()].kind
+			if kind == mir_type_kind_empty_hash() || kind == mir_type_kind_nullable() || kind == mir_type_kind_nil()
+				return "MIR newtype representation must be concrete and nonnullable"
+			end
+		end
+		if row.closed && !mir_newtype_immutable(native_module, row.representation, [])
+			return "MIR closed newtype representation is mutable"
+		end
+		mut previous := 0
+		while previous < owner
+			other := native_module.newtypes[previous]
+			if other.source_id == row.source_id && other.name == row.name
+				return "MIR newtype declaration is duplicated"
+			end
+			previous += 1
+		end
+		owner += 1
+	end
+	return ""
+end

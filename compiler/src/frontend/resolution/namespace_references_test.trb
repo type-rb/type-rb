@@ -1,0 +1,70 @@
+import { find_function_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+import { namespace_test_check } from testing/namespaces
+
+describe("Native declaration namespaces") do
+	test("keeps nested methods and nominal declarations in their lexical owners") do
+		source := "module Outer\nrecord Box\nvalue: Integer\nend\ndef self.value(): Integer\nreturn 7\nend\nmodule Inner\ndef self.value(): Integer\nreturn Outer.value() + 1\nend\nend\ndef self.box(): Box\nreturn Box.new(value: value())\nend\nend\ndef main()\nvalue: Outer::Box := Outer.box()\nputs(value.value)\nputs(Outer::Inner.value())\nend\n"
+		state := namespace_test_check(source)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(find_record_in_module(state, 0, "Outer::Box")).to_equal(0)
+		expect(find_function_in_module(state, 0, "Outer::value")).to_equal(0)
+		expect(find_function_in_module(state, 0, "Outer::Inner::value")).to_equal(1)
+	end
+
+	test("preserves the owner of enum construction and exhaustive patterns") do
+		source := "module Outer\nenum State\nReady\nDone\nend\nend\ndef main()\nvalue := Outer::State::Ready\ncase value\nwhen Outer::State::Ready\nputs(1)\nwhen Outer::State::Done\nputs(2)\nend\nend\n"
+		state := namespace_test_check(source)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.nominal.enums[0].name).to_equal("Outer::State")
+	end
+
+	test("reopens the same namespace without merging different owners") do
+		source := "module First\ndef self.value(): Integer\nreturn 1\nend\nend\nmodule Second\ndef self.value(): Integer\nreturn 2\nend\nend\nmodule First\ndef self.other(): Integer\nreturn value()\nend\nend\ndef main()\nputs(First.other())\nputs(Second.value())\nend\n"
+		state := namespace_test_check(source)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.global_bindings.namespaces.size()).to_equal(2)
+	end
+
+	test("does not treat a module method named main as the program entry") do
+		source := "module Other\ndef self.main(): Integer\nreturn 7\nend\nend\ndef main()\nputs(Other.main())\nend\n"
+		state := namespace_test_check(source)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("checks qualified payload patterns") do
+		state := namespace_test_check("module Outer\nenum Value\nOne(value: Integer)\nTwo(text: String)\nend\nend\ndef main()\nitem := Outer::Value::One(7)\ncase item\nwhen Outer::Value::One(value)\nputs(value)\nwhen Outer::Value::Two(text)\nputs(text)\nend\nend\n")
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("resolves qualified generic nominal constructors and top-level calls") do
+		state := namespace_test_check("module Outer\nrecord Box<T>\nvalue: T\ncopy: T = value\nend\nalias Holder<T> = Box<T>\nend\ndef keep<T>(value: T): T\nreturn value\nend\ndef main()\nitem := Outer::Holder<Integer>.new(value: keep<Integer>(7))\nputs(item.copy)\nend\n")
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("retains lexical types when expanding aliases and defaults") do
+		state := namespace_test_check("module Outer\nrecord Item\nvalue: Integer\nend\nalias Entry = Item\ndef self.item(item: Entry = Item.new(value: 7)): Entry\nreturn item\nend\nmodule Inner\ndef self.make(): Entry\nreturn Item.new(value: 9)\nend\nend\nend\nrecord Other\ntext: String\nend\ndef main()\nvalue: Outer::Entry := Outer.item()\nputs(value.value)\nputs(Outer::Inner.make().value)\nend\n")
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("permits private calls only in their declaring module") do
+		state := namespace_test_check("module Outer\ndef self._value(): Integer\nreturn 7\nend\ndef self.value(): Integer\nreturn Outer._value()\nend\nend\ndef main()\ncallback := fn(): Integer; return Outer.value(); end\nputs(callback())\nend\n")
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects external private calls") do
+		state := namespace_test_check("module Outer\ndef self._value(): Integer\nreturn 7\nend\nend\ndef main()\nputs(Outer._value())\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+	end
+
+	test("rejects external private function values") do
+		state := namespace_test_check("module Outer\ndef self._value(): Integer\nreturn 7\nend\nend\ndef main()\ncallback := Outer._value\nputs(callback())\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+	end
+
+	test("rejects unsupported generic module methods") do
+		state := namespace_test_check("module Outer\ndef self._value<T>(value: T): T\nreturn value\nend\nend\ndef main()\nputs(Outer._value<Integer>(7))\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+	end
+
+end

@@ -1,0 +1,80 @@
+import { emit_hash_key_runtime } from backend/qbe/runtime/hash_key_runtime
+import { QbeOutput, qbe_hash_integer_reads, qbe_hash_string_reads, qbe_output_line } from backend/qbe/output
+
+def hash_read_suffix(key_mode: String): String
+	if key_mode == "integer"
+		return "_integer"
+	end
+	if key_mode == "string"
+		return "_string"
+	end
+	return ""
+end
+
+def emit_hash_probe_call(mut output: QbeOutput, key_mode: String)
+	qbe_output_line(output, "\n@start\n")
+	suffix := hash_read_suffix(key_mode)
+	if key_mode == "generic"
+		qbe_output_line(output, " %key =l call $trbn_hash_key(l %table, l %raw_key)\n %index =l call $trbn_hash_slot(l %table, l %key)\n")
+	else
+		qbe_output_line(output, " %index =l call $trbn_hash_slot" + suffix + "(l %table, l %raw_key)\n")
+	end
+end
+
+def emit_hash_required_lookup(mut output: QbeOutput, key_mode: String)
+	emit_hash_probe_call(output, key_mode)
+	qbe_output_line(output, " %missing =w csltl %index, 0\n jnz %missing, @missing, @found\n@missing\n call $trbn_fail(l $trbn_hash_missing, l 27)\n hlt\n@found\n")
+end
+
+def emit_hash_existing_slot(mut output: QbeOutput, key_mode: String)
+	# Return an integer, never a backing-array address retained across MIR work.
+	qbe_output_line(output, "\nfunction l $trbn_hash_existing_slot" + hash_read_suffix(key_mode) + "(l %table, l %raw_key) {")
+	emit_hash_required_lookup(output, key_mode)
+	qbe_output_line(output, " ret %index\n}\n")
+end
+
+def emit_hash_lookup_runtime(mut output: QbeOutput)
+	emit_hash_existing_slot(output, "generic")
+	if qbe_hash_integer_reads(output)
+		emit_hash_existing_slot(output, "integer")
+	end
+	if qbe_hash_string_reads(output)
+		emit_hash_existing_slot(output, "string")
+	end
+end
+
+def emit_hash_reads(mut output: QbeOutput, key_mode: String)
+	suffix := hash_read_suffix(key_mode)
+	qbe_output_line(output, "\nfunction l $trbn_hash_get" + suffix + "(l %table, l %raw_key) {")
+	emit_hash_required_lookup(output, key_mode)
+	qbe_output_line(output, " %address =l call $trbn_hash_value_address(l %table, l %index)\n %value =l loadl %address\n ret %value\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_contains" + suffix + "(l %table, l %raw_key) {")
+	emit_hash_probe_call(output, key_mode)
+	qbe_output_line(output, " %found =l csgel %index, 0\n ret %found\n}\n")
+end
+
+# Two word arrays share the existing precise GC descriptors. Deleted slots
+# clear managed payloads immediately; geometric rebuilds release sparse backing.
+def emit_hash_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_desc_hash = align 8 { l 1, l 2, l 48, l 24, l 32 }\ndata $trbn_hash_tombstone = align 8 { l 0, l 0 }\ndata $trbn_hash_missing = { b \"panic: Hash key is missing\", b 10 }\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_array(l %capacity, l %descriptor) {\n@start\n %bytes =l mul %capacity, 8\n %array =l call $trbn_gc_alloc(l %descriptor, l 24, l %bytes)\n %data =l call $calloc(l %capacity, l 8)\n %failed =w ceql %data, 0\n jnz %failed, @fail, @ready\n@fail\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n@ready\n %length_slot =l add %array, 8\n %capacity_slot =l add %array, 16\n %data_slot =l add %array, 24\n storel %capacity, %length_slot\n storel %capacity, %capacity_slot\n storel %data, %data_slot\n %heap =l loadl $trbn_gc_heap_bytes\n %next_heap =l add %heap, %bytes\n storel %next_heap, $trbn_gc_heap_bytes\n %allocated =l loadl $trbn_gc_allocated_bytes\n %next_allocated =l add %allocated, %bytes\n storel %next_allocated, $trbn_gc_allocated_bytes\n call $trbn_gc_update_peak(l %next_heap)\n ret %array\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_new(l %capacity, l %flags) {\n@start\n %table =l call $trbn_gc_alloc(l $trbn_desc_hash, l 48, l 0)\n %flags_slot =l add %table, 40\n storel %flags, %flags_slot\n %empty =w ceql %capacity, 0\n jnz %empty, @finish, @key_kind\n@key_kind\n %key_managed =l and %flags, 5\n %key_managed_nonzero =w cnel %key_managed, 0\n jnz %key_managed_nonzero, @managed_key, @scalar_key\n@managed_key\n jmp @keys\n@scalar_key\n jmp @keys\n@keys\n %key_descriptor =l phi @managed_key $trbn_desc_array_managed, @scalar_key $trbn_desc_array_scalar\n %key_array =l call $trbn_hash_array(l %capacity, l %key_descriptor)\n %key_slot =l add %table, 24\n storel %key_array, %key_slot\n %managed =l and %flags, 2\n %managed_nonzero =w cnel %managed, 0\n jnz %managed_nonzero, @managed_value, @scalar_value\n@managed_value\n jmp @values\n@scalar_value\n jmp @values\n@values\n %value_descriptor =l phi @managed_value $trbn_desc_array_managed, @scalar_value $trbn_desc_array_scalar\n %value_array =l call $trbn_hash_array(l %capacity, l %value_descriptor)\n %value_slot =l add %table, 32\n storel %value_array, %value_slot\n %capacity_slot =l add %table, 16\n storel %capacity, %capacity_slot\n@finish\n ret %table\n}\n")
+	emit_hash_key_runtime(output)
+	qbe_output_line(output, "\nfunction l $trbn_hash_value_address(l %table, l %index) {\n@start\n %values_slot =l add %table, 32\n %values =l loadl %values_slot\n %data_slot =l add %values, 24\n %data =l loadl %data_slot\n %scaled =l mul %index, 8\n %address =l add %data, %scaled\n ret %address\n}\n")
+	emit_hash_reads(output, "generic")
+	if qbe_hash_integer_reads(output)
+		emit_hash_reads(output, "integer")
+	end
+	if qbe_hash_string_reads(output)
+		emit_hash_reads(output, "string")
+	end
+	qbe_output_line(output, "\nfunction $trbn_hash_rehash(l %table, l %capacity) {\n@start\n %copy =l call $trbn_hash_copy(l %table, l %capacity)\n %keys_slot =l add %table, 24\n %copy_keys_slot =l add %copy, 24\n %keys =l loadl %copy_keys_slot\n storel %keys, %keys_slot\n %values_slot =l add %table, 32\n %copy_values_slot =l add %copy, 32\n %values =l loadl %copy_values_slot\n storel %values, %values_slot\n %capacity_slot =l add %table, 16\n storel %capacity, %capacity_slot\n %tombs_slot =l add %table, 48\n storel 0, %tombs_slot\n ret\n}\n")
+	qbe_output_line(output, "\nfunction $trbn_hash_put(l %table, l %key, l %value) {\n@start\n %position =l call $trbn_hash_slot(l %table, l %key)\n %found =w cslel 0, %position\n jnz %found, @replace, @capacity\n@replace\n %existing =l call $trbn_hash_value_address(l %table, l %position)\n storel %value, %existing\n ret\n@capacity\n %capacity_slot =l add %table, 16\n %capacity =l loadl %capacity_slot\n %count_slot =l add %table, 8\n %count =l loadl %count_slot\n %tombs_slot =l add %table, 48\n %tombs =l loadl %tombs_slot\n %occupied =l add %count, %tombs\n %next_occupied =l add %occupied, 1\n %scaled =l mul %next_occupied, 4\n %limit =l mul %capacity, 3\n %full =w csgtl %scaled, %limit\n jnz %full, @resize, @insert\n@resize\n %zero =w ceql %capacity, 0\n jnz %zero, @initial, @choose\n@initial\n jmp @rebuild\n@choose\n %live_next =l add %count, 1\n %live_scaled =l mul %live_next, 4\n %need_grow =w csgtl %live_scaled, %limit\n jnz %need_grow, @grow, @compact\n@grow\n %too_large =w cslel 1125899906842624, %capacity\n jnz %too_large, @fail, @double\n@fail\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n@double\n %doubled =l mul %capacity, 2\n jmp @rebuild\n@compact\n jmp @rebuild\n@rebuild\n %new_capacity =l phi @initial 8, @double %doubled, @compact %capacity\n call $trbn_hash_rehash(l %table, l %new_capacity)\n %resized_position =l call $trbn_hash_slot(l %table, l %key)\n jmp @insert\n@insert\n %available =l phi @capacity %position, @rebuild %resized_position\n %index =l sub -1, %available\n %keys_slot =l add %table, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n %offset =l mul %index, 8\n %key_address =l add %data, %offset\n %old_key =l loadl %key_address\n %reuse =w cnel %old_key, 0\n jnz %reuse, @reuse, @store\n@reuse\n %old_tombs =l loadl %tombs_slot\n %less_tombs =l sub %old_tombs, 1\n storel %less_tombs, %tombs_slot\n jmp @store\n@store\n storel %key, %key_address\n %value_address =l call $trbn_hash_value_address(l %table, l %index)\n storel %value, %value_address\n %new_count =l add %count, 1\n storel %new_count, %count_slot\n ret\n}\n")
+	qbe_output_line(output, "\nfunction $trbn_hash_set(l %table, l %raw_key, l %value) {\n@start\n %key =l call $trbn_hash_key(l %table, l %raw_key)\n call $trbn_hash_put(l %table, l %key, l %value)\n ret\n}\n")
+	qbe_output_line(output, "\nfunction $trbn_hash_update(l %table, l %source) {\n@start\n %flags_slot =l add %source, 40\n %flags =l loadl %flags_slot\n %key_managed =l and %flags, 5\n %capacity_slot =l add %source, 16\n %capacity =l loadl %capacity_slot\n %empty =w ceql %capacity, 0\n jnz %empty, @finish, @prepare\n@prepare\n %keys_slot =l add %source, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n jmp @loop\n@loop\n %index =l phi @prepare 0, @next %next_index\n %done =w ceql %index, %capacity\n jnz %done, @finish, @entry\n@entry\n %offset =l mul %index, 8\n %key_address =l add %data, %offset\n %key =l loadl %key_address\n %empty_key =w ceql %key, 0\n %integer_tomb =w ceql %key, -1\n %string_tomb_match =w ceql %key, $trbn_hash_tombstone\n %is_string =w cnel %key_managed, 0\n %string_tomb =w and %is_string, %string_tomb_match\n %unused =w or %empty_key, %integer_tomb\n %skip =w or %unused, %string_tomb\n jnz %skip, @next, @copy\n@copy\n %value_address =l call $trbn_hash_value_address(l %source, l %index)\n %value =l loadl %value_address\n call $trbn_hash_put(l %table, l %key, l %value)\n jmp @next\n@next\n %next_index =l add %index, 1\n jmp @loop\n@finish\n ret\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_copy(l %source, l %capacity) {\n@start\n %flags_slot =l add %source, 40\n %flags =l loadl %flags_slot\n %copy =l call $trbn_hash_new(l %capacity, l %flags)\n call $trbn_hash_update(l %copy, l %source)\n ret %copy\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_delete(l %table, l %raw_key) {")
+	emit_hash_required_lookup(output, "generic")
+	qbe_output_line(output, " %value_address =l call $trbn_hash_value_address(l %table, l %index)\n %value =l loadl %value_address\n %flags_slot =l add %table, 40\n %flags =l loadl %flags_slot\n %managed =l and %flags, 2\n %managed_nonzero =w cnel %managed, 0\n jnz %managed_nonzero, @root, @clear\n@root\n call $trbn_gc_temp_push(l %value)\n jmp @clear\n@clear\n storel 0, %value_address\n %keys_slot =l add %table, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n %offset =l mul %index, 8\n %key_address =l add %data, %offset\n %string =l and %flags, 5\n %string_nonzero =w cnel %string, 0\n jnz %string_nonzero, @string_tomb, @integer_tomb\n@string_tomb\n storel $trbn_hash_tombstone, %key_address\n jmp @count\n@integer_tomb\n storel -1, %key_address\n jmp @count\n@count\n %count_slot =l add %table, 8\n %count =l loadl %count_slot\n %remaining =l sub %count, 1\n storel %remaining, %count_slot\n %tombs_slot =l add %table, 48\n %tombs =l loadl %tombs_slot\n %next_tombs =l add %tombs, 1\n storel %next_tombs, %tombs_slot\n %capacity_slot =l add %table, 16\n %capacity =l loadl %capacity_slot\n %empty =w ceql %remaining, 0\n jnz %empty, @empty, @shrink\n@empty\n storel 0, %keys_slot\n %values_slot =l add %table, 32\n storel 0, %values_slot\n storel 0, %capacity_slot\n storel 0, %tombs_slot\n jmp @finish\n@shrink\n %large =w csgtl %capacity, 8\n %threshold =l shr %capacity, 3\n %sparse =w csltl %remaining, %threshold\n %should_shrink =w and %large, %sparse\n jnz %should_shrink, @rebuild, @finish\n@rebuild\n %smaller =l shr %capacity, 1\n call $trbn_hash_rehash(l %table, l %smaller)\n@finish\n ret %value\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_entries(l %table, l %values) {\n@start\n %flags_slot =l add %table, 40\n %flags =l loadl %flags_slot\n %key_managed =l and %flags, 5\n %value_managed =l and %flags, 2\n %values_nonzero =w cnel %values, 0\n jnz %values_nonzero, @values_kind, @keys_kind\n@values_kind\n jmp @kind\n@keys_kind\n jmp @kind\n@kind\n %managed =l phi @values_kind %value_managed, @keys_kind %key_managed\n %managed_nonzero =w cnel %managed, 0\n jnz %managed_nonzero, @managed, @scalar\n@managed\n jmp @array\n@scalar\n jmp @array\n@array\n %descriptor =l phi @managed $trbn_desc_array_managed, @scalar $trbn_desc_array_scalar\n %result =l call $trbn_array_new(l %descriptor)\n %capacity_slot =l add %table, 16\n %capacity =l loadl %capacity_slot\n %empty =w ceql %capacity, 0\n jnz %empty, @finish, @prepare\n@prepare\n %keys_slot =l add %table, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n jmp @loop\n@loop\n %index =l phi @prepare 0, @next %next_index\n %done =w ceql %index, %capacity\n jnz %done, @finish, @entry\n@entry\n %offset =l mul %index, 8\n %key_address =l add %data, %offset\n %key =l loadl %key_address\n %empty_key =w ceql %key, 0\n %integer_tomb =w ceql %key, -1\n %string_tomb_match =w ceql %key, $trbn_hash_tombstone\n %is_string =w cnel %key_managed, 0\n %string_tomb =w and %is_string, %string_tomb_match\n %unused =w or %empty_key, %integer_tomb\n %skip =w or %unused, %string_tomb\n jnz %skip, @next, @select\n@select\n %values_nonzero2 =w cnel %values, 0\n jnz %values_nonzero2, @value, @key\n@value\n %value_address =l call $trbn_hash_value_address(l %table, l %index)\n %value =l loadl %value_address\n jmp @append\n@key\n %key_managed_nonzero =w cnel %key_managed, 0\n jnz %key_managed_nonzero, @string_key, @integer_key\n@string_key\n jmp @append\n@integer_key\n %decoded =l sub %key, 9007199254740992\n jmp @append\n@append\n %element =l phi @value %value, @string_key %key, @integer_key %decoded\n call $trbn_array_push_paced(l %result, l %element)\n jmp @next\n@next\n %next_index =l add %index, 1\n jmp @loop\n@finish\n ret %result\n}\n")
+end

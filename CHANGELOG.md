@@ -1,6 +1,16 @@
 # Changelog
 
-This file records user-visible changes in stable TypeRB releases.
+This file records user-visible changes in TypeRB releases.
+
+## 0.5.0-alpha.1 - 2026-11-23
+
+- The default `trb` command installs the Native compiler on Arm64 macOS and
+  Linux. This alpha includes Native executable builds, the REPL, Native project
+  tests, and editor language services. See the release notes for feature gaps.
+- The maintained Go implementation moves to
+  [type-rb/type-rb-go](https://github.com/type-rb/type-rb-go). Install `trbg`
+  with Homebrew for Go, Ruby, and TypeScript workflows. Both commands can run
+  side by side.
 
 ## 0.4.11 - 2026-10-01
 

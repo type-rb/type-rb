@@ -1,0 +1,78 @@
+import { check, emit_qbe } from compiler
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Literal split Array materialization") do
+	test("matches ordinary capacity and independent mutation across growth boundaries") do
+		mut source := "def dynamic(text: String): Array<String>\nreturn text.split(\",\")\nend\ndef main()\n"
+		mut expected := ""
+		counts := [1, 4, 5, 10, 16, 17, 64]
+		counts.each do |count|
+			mut text := "x"
+			mut index := 1
+			while index < count
+				text += ",x"
+				index += 1
+			end
+			suffix := count.to_s()
+			source += "mut literal" + suffix + " := \"" + text + "\".split(\",\")\n"
+			source += "mut ordinary" + suffix + " := dynamic(\"" + text + "\")\n"
+			source += "literal" + suffix + "[0] = \"changed\"\n"
+			source += "literal" + suffix + ".push(\"tail\")\nordinary" + suffix + ".push(\"tail\")\n"
+			source += "puts(literal" + suffix + ".size())\nputs(ordinary" + suffix + ".size())\n"
+			source += "puts(literal" + suffix + "[0])\nputs(ordinary" + suffix + "[0])\n"
+			expected += (count + 1).to_s() + "\n" + (count + 1).to_s() + "\nchanged\nx\n"
+		end
+		mut state := logical_checked_source(source + "end\n")
+		expect(check(state)).to_be_true()
+		output := output_source(emit_qbe(state))
+		copy := " call $memcpy(l %data, l %fragments, l %copy_bytes)"
+		expect(output.split(copy).size()).to_equal(2)
+		mut instrumented := output.split(copy).join(" call $trbn_gc_collect(w 0)\n" + copy + "\n call $trbn_gc_collect(w 0)\n storel %capacity, $literal_observed_capacity")
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(instrumented.split(allocation).size()).to_equal(2)
+		instrumented = instrumented.split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+		finish := "@finish\n ret %result\n}"
+		expect(instrumented.split(finish).size()).to_equal(2)
+		instrumented = instrumented.split(finish).join("@finish\n %geometry_slot =l add %result, 16\n %ordinary_capacity =l loadl %geometry_slot\n %literal_capacity =l loadl $literal_observed_capacity\n %same_geometry =w ceql %ordinary_capacity, %literal_capacity\n jnz %same_geometry, @geometry_ok, @geometry_fail\n@geometry_fail\n hlt\n@geometry_ok\n ret %result\n}")
+		instrumented += "\ndata $literal_observed_capacity = align 8 { l 0 }\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, instrumented)
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains allocation failure for cached and direct backing") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		inputs := ["a", "a,b,c,d,e"]
+		inputs.each do |text|
+			mut state := logical_checked_source("def main()\nputs(\"" + text + "\".split(\",\").size())\nend\n")
+			expect(check(state)).to_be_true()
+			output := output_source(emit_qbe(state))
+			cached := " %cached_data =l call $trbn_array_backing_new()"
+			direct := " %direct_data =l call $calloc(l %capacity, l 8)"
+			expect(output.split(cached).size()).to_equal(2)
+			expect(output.split(direct).size()).to_equal(2)
+			mut failed := output.split(cached).join(" %cached_data =l copy 0")
+			failed = failed.split(direct).join(" %direct_data =l copy 0")
+			if qbe != nil
+				case logical_run_qbe(qbe, failed)
+				when Result::Ok(_)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error.include?("panic: allocation failed")).to_be_true()
+				end
+			end
+		end
+	end
+end

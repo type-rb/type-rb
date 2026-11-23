@@ -1,0 +1,95 @@
+import { recover_program_fixture } from testing/fixtures
+import { RecoveryScalarInstruction } from scalar/mir
+import { RecoveryManagedTypeDefinition } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedResultType, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def hash_recovery_module(extra: RecoveryManagedInstruction): RecoveryManagedModule
+	origin := SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+	return RecoveryManagedModule.new(
+		id: "hash-test", entry_function: "main",
+		sources: [NativeSource.new(id: "main", path: "main.trb")],
+		types: [RecoveryManagedTypeDefinition::String("String"), RecoveryManagedTypeDefinition::Hash("Hash<String, Integer>")],
+		functions: [RecoveryManagedFunction.new(id: "main", name: "main", parameters: [], result_type: RecoveryManagedResultType::Void, entry: "entry", origin: origin,
+				blocks: [RecoveryManagedBlock.new(id: "entry", parameters: [], origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::StringLiteral("key", "key", origin),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("value", 2, origin)),
+							RecoveryManagedInstruction::HashConstruct("table", "Hash<String, Integer>", [], [], origin),
+							extra,
+						], terminator: RecoveryManagedTerminator::Return(nil, origin))])],
+	)
+end
+
+def hash_recovery_program(name: String): Result<Boolean, String>
+	process := try recover_program_fixture(name, false)
+	if process == nil
+		return Result<Boolean, String>::Ok(false)
+	end
+	if name == "hash-missing"
+		expect(process.status).to_equal(2)
+		expect(process.stdout).to_equal("")
+		expect(process.stderr).to_equal("panic: Hash key is missing\n")
+	else
+		expect(process.success).to_be_true()
+		expect(process.stdout).to_equal("hash-index-ok\n")
+		expect(process.stderr).to_equal("")
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+describe("Hash snapshot recovery") do
+	test("rejects malformed types, entry counts and operands") do
+		origin := SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+		cases := [
+			RecoveryManagedInstruction::HashConstruct("bad", "Hash<String, Integer>", ["key"], [], origin),
+			RecoveryManagedInstruction::HashGet("bad", "String", "table", "key", origin),
+			RecoveryManagedInstruction::HashGet("bad", "Hash<String, Integer>", "value", "key", origin),
+			RecoveryManagedInstruction::HashGet("bad", "Hash<String, Integer>", "table", "value", origin),
+			RecoveryManagedInstruction::HashContains("bad", "Hash<String, Integer>", "table", "undefined", origin),
+			RecoveryManagedInstruction::HashSet("Hash<String, Integer>", "table", "key", "key", origin),
+		]
+		mut index := 0
+		while index < cases.size()
+			case verify_recovery_managed_mir(hash_recovery_module(cases[index]))
+			when Result::Ok(_value)
+				expect(false).to_be_true()
+			when Result::Err(_error)
+			end
+			index += 1
+		end
+	end
+
+	test("rejects a forged String key layout") do
+		origin := SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+		native_module := hash_recovery_module(RecoveryManagedInstruction::HashGet("found", "Hash<String, Integer>", "table", "key", origin))
+		mut types := native_module.types
+		types[0] = RecoveryManagedTypeDefinition::Record("String", [])
+		case verify_recovery_managed_mir(native_module)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(_error)
+		end
+	end
+
+	test("preserves lookup, overwrite, aliases, closure capture and collection") do
+		case hash_recovery_program("hash-index")
+		when Result::Ok(_verified)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("fails required lookup when a key is missing") do
+		case hash_recovery_program("hash-missing")
+		when Result::Ok(_verified)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end

@@ -1,0 +1,98 @@
+import { mir_function_control } from mir/model/control
+import { mir_op_record_field } from mir/model/instructions
+import { MirInstruction, MirModule } from mir/model/module
+import { mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_blocks, mir_value_available } from mir/analysis/flow
+import { mir_natural_loop } from mir/analysis/loops
+import { mir_function_body_size } from mir/passes/inline_calls
+import { mir_rewrite_block, mir_rewrite_function } from mir/passes/rewrite
+import { integer_string } from support/literals
+
+record MirRecordHoist
+	position: Integer
+	preheader: Integer
+	receiver: Integer
+	rank: Integer
+end
+
+# Record fields are immutable and reading a verified nonnullable record cannot
+# fail. Mutable object fields and Array elements deliberately have no rule here.
+# Moving a managed field changes liveness, so callers rebuild all root plans.
+def mir_hoist_function_records(mut native_module: MirModule, function_index: Integer): Boolean
+	function := native_module.functions[function_index]
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	aliases := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+	mut selected: Array<MirRecordHoist> := []
+	mut positions: Hash<String, Integer> := {}
+	mut header := 0
+	while header < function.block_count
+		loop := mir_natural_loop(native_module, function, flow, header)
+		if loop.preheader >= 0
+			preheader := native_module.blocks[function.block_start + loop.preheader]
+			loop.members.each do |member|
+				block := native_module.blocks[function.block_start + member]
+				mut position := block.instruction_start
+				while position < block.instruction_start + block.instruction_count
+					instruction := native_module.instructions[position]
+					if instruction.kind == mir_op_record_field()
+						receiver := mir_flow_alias(aliases, instruction.first)
+						if receiver >= 0 && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, receiver)
+							key := integer_string(position)
+							candidate := MirRecordHoist.new(position: position, preheader: loop.preheader, receiver: receiver, rank: flow.ranks[header])
+							if !positions.key?(key)
+								positions[key] = selected.size()
+								selected.push(candidate)
+							elsif candidate.rank < selected[positions[key]].rank
+								selected[positions[key]] = candidate
+							end
+						end
+					end
+					position += 1
+				end
+			end
+		end
+		header += 1
+	end
+	if selected.size() == 0
+		return false
+	end
+	start := native_module.blocks.size()
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		instruction_start := native_module.instructions.size()
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			if !positions.key?(integer_string(position))
+				native_module.instructions.push(native_module.instructions[position])
+			end
+			position += 1
+		end
+		selected.each do |candidate|
+			if candidate.preheader == index
+				instruction := native_module.instructions[candidate.position]
+				native_module.instructions.push(MirInstruction.new(kind: instruction.kind, result: instruction.result, first: candidate.receiver, second: instruction.second, payload: instruction.payload, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line))
+			end
+		end
+		native_module.blocks.push(mir_rewrite_block(native_module, block, {}, {}, instruction_start, native_module.instructions.size() - instruction_start))
+		index += 1
+	end
+	native_module.functions[function_index] = mir_rewrite_function(function, start, function.block_count)
+	return true
+end
+
+def mir_hoist_loop_records(mut native_module: MirModule)
+	if native_module.functions.size() > 96
+		return
+	end
+	mut index := 0
+	while index < native_module.functions.size()
+		function := native_module.functions[index]
+		if function.kind == mir_function_control() && function.block_count <= 64 && mir_function_body_size(native_module, function) <= 256
+			# A nested immutable record can become available after its parent
+			# moves. Each successful round moves a definition out of a loop.
+			while mir_hoist_function_records(native_module, index)
+			end
+		end
+		index += 1
+	end
+end

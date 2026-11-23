@@ -1,0 +1,113 @@
+import { emit_qbe } from compiler
+import { binary_less, binary_less_equal } from frontend/types/operators
+import { CompilerState } from state/state
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_instruction_with_payload } from mir/model/module
+import { mir_array_guard_conditions, mir_array_guard_fallbacks } from mir/analysis/array_bounds
+import { mir_build_flow, mir_flow_block_index, mir_flow_blocks } from mir/analysis/flow
+import { mir_managed_contains } from mir/analysis/liveness
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def successor_bounded_accesses(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops.each do |plans|
+		plans.each do |plan|
+			plan.headers.each do |header|
+				count += header.bounded_accesses.size()
+			end
+		end
+	end
+	return count
+end
+
+def successor_run(state: CompilerState, expected: String, failure: Boolean)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut expected_status := 0
+		if failure
+			expected_status = 2
+		end
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), expected_status)
+		when Result::Ok(actual)
+			expect(failure).to_be_false()
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			expect(failure).to_be_true()
+			expect(error).to_equal(expected)
+		end
+	end
+end
+
+describe("MIR Array successor guards") do
+	test("uses a strict guard without incrementing the limit and preserves early exits") do
+		source := "def sum(values: Array<Integer>, limit: Integer, stop: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nif index == stop\nbreak\nend\ntotal += values[index + 1]\nindex += 1\nend\nreturn total\nend\n"
+		mut state := array_loop_mir_check(source + "def main()\nputs(sum([0, 1, 2, 3], 2, -1))\nputs(sum([0, 1, 2, 3], 3, -1))\nputs(sum([], 0, -1))\nputs(sum([], -2, -1))\nputs(sum([0, 7], 9007199254740991, 1))\nend\n")
+		expect(successor_bounded_accesses(state) > 0).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		successor_run(state, "3\n6\n0\n0\n7\n", false)
+	end
+
+	test("keeps the checked fallback when the successor reaches the Array length") do
+		state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += values[index + 1]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([0, 1, 2], 3))\nend\n")
+		expect(successor_bounded_accesses(state) > 0).to_be_true()
+		successor_run(state, "panic: index is out of bounds\n", true)
+	end
+
+	test("does not infer a successor bound from a nonstrict source guard") do
+		state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\nmut index := 0\nwhile index < limit\ntotal += values[index + 1]\nindex += 1\nend\nend\nreturn total\nend\ndef main()\nputs(sum([0, 1, 2], 3))\nend\n")
+		expect(successor_bounded_accesses(state)).to_equal(0)
+		successor_run(state, "panic: index is out of bounds\n", true)
+	end
+
+	test("rejects a stale plan after its strict guard becomes nonstrict") do
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += values[index + 1]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+		function := state.scalar_mir.functions[0]
+		flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+		fallbacks := mir_array_guard_fallbacks(state.scalar_mir, function, flow)
+		mut changed := false
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[index]
+			if block.second_target >= 0 && mir_managed_contains(fallbacks, mir_flow_block_index(flow, block.second_target))
+				mir_array_guard_conditions(state.scalar_mir, flow, block).each do |position|
+					instruction := state.scalar_mir.instructions[position]
+					if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_less()
+						state.scalar_mir.instructions[position] = mir_instruction_with_payload(instruction, binary_less_equal())
+						changed = true
+					end
+				end
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("recovers a nested bound that stays fixed only during the inner loop") do
+		state := array_loop_mir_check("def shift(mut values: Array<Integer>, rounds: Integer): Integer\nmut round := 0\nwhile round < rounds\nlimit := round + 1\nmut index := 0\nwhile index < limit\nvalues[index] = values[index + 1]\nindex += 1\nend\nround += 1\nend\nreturn values[0] + values[1]\nend\ndef main()\nputs(shift([10, 20, 30, 40], 2))\nend\n")
+		expect(successor_bounded_accesses(state) > 0).to_be_true()
+		successor_run(state, "50\n", false)
+	end
+
+	test("keeps changing bounds and resizing calls on their checked paths") do
+		changing := array_loop_mir_check("def sum(values: Array<Integer>): Integer\nmut limit := 3\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += values[index + 1]\nlimit -= 1\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([0, 1, 2, 3]))\nend\n")
+		expect(successor_bounded_accesses(changing)).to_equal(0)
+		successor_run(changing, "3\n", false)
+		resizing := array_loop_mir_check("def shrink(mut values: Array<Integer>)\nvalues.pop()\nend\ndef sum(mut values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nshrink(values)\ntotal += values[index + 1]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([0, 1, 2], 2))\nend\n")
+		expect(successor_bounded_accesses(resizing)).to_equal(0)
+		successor_run(resizing, "panic: index is out of bounds\n", true)
+	end
+end

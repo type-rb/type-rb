@@ -1,0 +1,13 @@
+interface Named
+	name(): String
+end
+class Label implements Named
+	def name(): String
+		return "label"
+	end
+end
+
+def main()
+	items: Array<Named> := [Label.new(), Label.new()]
+	items.each { |item| puts(item.name()) }
+end

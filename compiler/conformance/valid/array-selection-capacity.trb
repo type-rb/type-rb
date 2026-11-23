@@ -1,0 +1,24 @@
+def main()
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 1025
+		values.push(index)
+		index += 1
+	end
+	empty := values.select { |value| value < 0 }
+	sparse := values.select { |value| value == 1024 }
+	dense := values.select { |value| value >= 0 }
+	puts(empty.size())
+	puts(sparse[0])
+	puts(dense.size())
+	puts(dense[1024])
+	mut live := [1, 2, 3, 4]
+	selected := live.select.with_index do |value, index|
+		if index == 0
+			live.push(5)
+		end
+		value > 0
+	end
+	puts(selected.size())
+	puts(selected[4])
+end

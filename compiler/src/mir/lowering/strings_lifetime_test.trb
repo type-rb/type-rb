@@ -1,0 +1,220 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirInstruction, MirRootPlan, mir_function_index } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { native_read_text } from project/native_file_system
+import { CompilerState } from state/state
+import { load_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+import { managed_test_state } from testing/mir/strings
+describe("Managed String MIR") do
+	test("retains direct managed aliases across owner replacement and later argument allocation") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root != nil
+			if qbe != nil
+				source := case native_read_text(root + "/compiler/conformance/valid/managed-alias-lifetime.trb")
+				when Result::Ok(text)
+					text
+				when Result::Err(error)
+					puts(error.message)
+					""
+				end
+				mut state := logical_checked_source(source)
+				expect(check(state)).to_be_true()
+				output := control_test_output(emit_qbe(state))
+				marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+				parts := output.split(marker)
+				expect(parts.size()).to_equal(2)
+				forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(actual)
+					expect(actual).to_equal("123456:kept\n123456:kept\n123456:kept\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("roots live call arguments without retaining undemanded branch bindings") do
+		state := managed_test_state()
+		index := mir_function_index(state.scalar_mir, 1)
+		mut plan := state.scalar_mir.root_plans[index]
+		expect(plan.capacity).to_equal(2)
+		expect(plan.instructions.size()).to_equal(5)
+		mut point := 0
+		while point < plan.instructions.size()
+			instruction := state.scalar_mir.instructions[plan.instructions[point]]
+			if instruction.kind == 11
+				call := state.scalar_mir.calls[instruction.payload]
+				first := state.scalar_mir.arguments[call.argument_start]
+				second := state.scalar_mir.arguments[call.argument_start + 1]
+				expect(plan.roots[point]).to_equal([first, second])
+			elsif instruction.line == 5 || instruction.line == 6
+				expect(plan.roots[point]).to_equal([])
+			else
+				# The discarded `dead` binding is never needed by a future op.
+				expect(plan.roots[point].size()).to_equal(1)
+			end
+			point += 1
+		end
+	end
+
+	test("rejects supplied missing incomplete excessive and reordered root plans") do
+		mut mode := 0
+		while mode < 5
+			mut state := managed_test_state()
+			index := mir_function_index(state.scalar_mir, 1)
+			mut plan := state.scalar_mir.root_plans[index]
+			mut capacity := plan.capacity
+			if mode == 0
+				capacity += 1
+			elsif mode == 1
+				plan.roots[4] = []
+			elsif mode == 2
+				plan.roots[0] = [999999999999]
+			elsif mode == 3
+				plan.instructions[0] = 999999999999
+			else
+				plan.roots[4] = [plan.roots[4][1], plan.roots[4][0]]
+			end
+			state.scalar_mir.root_plans[index] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: plan.roots, capacity: capacity)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+			mode += 1
+		end
+		state := managed_test_state()
+		expect(verify_mir(state.scalar_mir, false).empty?()).to_be_false()
+	end
+
+	test("rejects malformed String operands payloads and runtime failure continuations") do
+		mut mode := 0
+		while mode < 4
+			mut state := managed_test_state()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 13
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut first := instruction.first
+			mut second := instruction.second
+			mut payload := instruction.payload
+			mut failure := instruction.failure
+			if mode == 0
+				first = 999999999999
+			elsif mode == 1
+				second = -1
+			elsif mode == 2
+				payload = 1
+			else
+				failure = 1
+			end
+			state.scalar_mir.instructions[index] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: first, second: second, payload: payload, failure: failure, source_id: instruction.source_id, line: instruction.line)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+	end
+
+	test("requires live receiver roots at potentially allocating String indices") do
+		mut state := logical_checked_source("def point(text: String): String\nreturn text[-1]\nend\ndef main()\nputs(point(\"ab\"))\nend\n")
+		expect(check(state)).to_be_true()
+		mut found := false
+		state.scalar_mir.root_plans.each do |plan|
+			mut at := 0
+			while at < plan.instructions.size()
+				instruction := state.scalar_mir.instructions[plan.instructions[at]]
+				if instruction.kind == 16
+					found = true
+					expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+					expect(plan.roots[at]).to_equal([instruction.first])
+					plan.roots[at] = []
+				end
+				at += 1
+			end
+		end
+		expect(found).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("retains opaque calls and String allocation effects") do
+		state := managed_test_state()
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 11
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(15)
+			elsif instruction.kind == 13 || (instruction.kind == 17 && instruction.payload == 1)
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+			end
+		end
+	end
+
+	test("executes erased and reordered String MIR with collection before every String allocation") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root != nil
+			if qbe != nil
+				fixture := root + "/compiler/conformance/valid/managed-string-mir"
+				source := case native_read_text(fixture + ".trb")
+				when Result::Ok(text)
+					text
+				when Result::Err(error)
+					puts(error.message)
+					""
+				end
+				expected := case native_read_text(fixture + ".out")
+				when Result::Ok(text)
+					text
+				when Result::Err(error)
+					puts(error.message)
+					""
+				end
+				mut state := logical_checked_source(source)
+				expect(check(state)).to_be_true()
+				expect(state.scalar_mir.functions.size()).to_equal(state.declarations.function_count[0])
+				before := control_test_output(emit_qbe(state))
+				state.scalar_mir.functions.each do |function|
+					mut token := load_integer(state.declarations.function_body_starts, function.id)
+					while token < load_integer(state.declarations.function_body_ends, function.id)
+						store_string(state.source_tokens.token_texts, token, "unavailable")
+						token += 1
+					end
+				end
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				state.scalar_mir.functions.each do |function|
+					mut left := function.block_start
+					mut right := left + function.block_count - 1
+					while left < right
+						saved := state.scalar_mir.blocks[left]
+						state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+						state.scalar_mir.blocks[right] = saved
+						left += 1
+						right -= 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				output := control_test_output(emit_qbe(state))
+				marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+				parts := output.split(marker)
+				expect(parts.size()).to_equal(2)
+				# A test-only collector hook proves live roots even when normal GC
+				# pacing would let the same stale pointer appear to work.
+				forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(actual)
+					expect(actual).to_equal(expected)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end
+
+# Sparse plans include allocating operations with no live objects as well.

@@ -1,0 +1,18 @@
+import { resolution_local_add } from frontend/resolution/body_resolution
+import { resolution_local_find, resolution_locals_new } from state/resolution_locals
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Body name resolution") do
+	test("keeps the first declaration when pre-scanning repeated names") do
+		mut locals := resolution_locals_new(2)
+		resolution_local_add(locals, "self", "Receiver")
+		resolution_local_add(locals, "self", "")
+		resolution_local_add(locals, "value", "Integer")
+		resolution_local_add(locals, "value", "String")
+		expect(locals.count[0]).to_equal(2)
+		expect(resolution_local_find(locals, "self")).to_equal(0)
+		expect(load_string(locals.types, 0)).to_equal("Receiver")
+		expect(load_string(locals.types, 1)).to_equal("Integer")
+	end
+end

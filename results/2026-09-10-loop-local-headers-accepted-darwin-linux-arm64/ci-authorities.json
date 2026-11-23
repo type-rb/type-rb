@@ -1,0 +1,167 @@
+{
+  "attempt": 1,
+  "conclusion": "success",
+  "databaseId": 34423530952,
+  "headSha": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "status": "completed",
+  "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "jobs": [
+    {
+      "completedAt": "2026-09-10T00:58:21Z",
+      "conclusion": "success",
+      "databaseId": 102703835660,
+      "name": "plan",
+      "startedAt": "2026-09-10T00:58:15Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102703835660"
+    },
+    {
+      "completedAt": "2026-09-10T01:00:32Z",
+      "conclusion": "success",
+      "databaseId": 102703863451,
+      "name": "quick",
+      "startedAt": "2026-09-10T00:58:24Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102703863451"
+    },
+    {
+      "completedAt": "2026-09-10T01:00:43Z",
+      "conclusion": "success",
+      "databaseId": 102703863472,
+      "name": "tooling / verify",
+      "startedAt": "2026-09-10T00:58:31Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102703863472"
+    },
+    {
+      "completedAt": "2026-09-10T00:58:33Z",
+      "conclusion": "success",
+      "databaseId": 102703863549,
+      "name": "documentation / verify",
+      "startedAt": "2026-09-10T00:58:24Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102703863549"
+    },
+    {
+      "completedAt": "2026-09-10T01:02:12Z",
+      "conclusion": "success",
+      "databaseId": 102704319571,
+      "name": "memory / Verify linux-arm64 persistent worker memory",
+      "startedAt": "2026-09-10T01:00:36Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319571"
+    },
+    {
+      "completedAt": "2026-09-10T01:02:09Z",
+      "conclusion": "success",
+      "databaseId": 102704319584,
+      "name": "memory / Verify darwin-arm64 persistent worker memory",
+      "startedAt": "2026-09-10T01:00:40Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319584"
+    },
+    {
+      "completedAt": "2026-09-10T01:16:12Z",
+      "conclusion": "success",
+      "databaseId": 102704319601,
+      "name": "native / verify",
+      "startedAt": "2026-09-10T01:00:40Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319601"
+    },
+    {
+      "completedAt": "2026-09-10T01:02:36Z",
+      "conclusion": "success",
+      "databaseId": 102704319651,
+      "name": "targets / Regress Ubuntu 24.04 arm64",
+      "startedAt": "2026-09-10T01:00:37Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319651"
+    },
+    {
+      "completedAt": "2026-09-10T01:03:36Z",
+      "conclusion": "success",
+      "databaseId": 102704319653,
+      "name": "targets / Verify Ubuntu 24.04 x64",
+      "startedAt": "2026-09-10T01:00:34Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319653"
+    },
+    {
+      "completedAt": "2026-09-10T01:02:56Z",
+      "conclusion": "success",
+      "databaseId": 102704319814,
+      "name": "cli / build (ubuntu-24.04-arm, linux-arm64)",
+      "startedAt": "2026-09-10T01:00:37Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319814"
+    },
+    {
+      "completedAt": "2026-09-10T01:03:07Z",
+      "conclusion": "success",
+      "databaseId": 102704319864,
+      "name": "cli / build (macos-14, darwin-arm64)",
+      "startedAt": "2026-09-10T01:00:39Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704319864"
+    },
+    {
+      "completedAt": "2026-09-10T01:02:23Z",
+      "conclusion": "success",
+      "databaseId": 102704676014,
+      "name": "memory / Verify shared portable evidence and combined size",
+      "startedAt": "2026-09-10T01:02:14Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704676014"
+    },
+    {
+      "completedAt": "2026-09-10T01:03:43Z",
+      "conclusion": "success",
+      "databaseId": 102704971537,
+      "name": "targets / Compare target-neutral QBE",
+      "startedAt": "2026-09-10T01:03:38Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102704971537"
+    },
+    {
+      "completedAt": "2026-09-10T01:22:18Z",
+      "conclusion": "success",
+      "databaseId": 102707597203,
+      "name": "performance / Compare darwin-arm64",
+      "startedAt": "2026-09-10T01:16:23Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102707597203"
+    },
+    {
+      "completedAt": "2026-09-10T01:19:43Z",
+      "conclusion": "success",
+      "databaseId": 102707597313,
+      "name": "performance / Compare linux-arm64",
+      "startedAt": "2026-09-10T01:16:17Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102707597313"
+    },
+    {
+      "completedAt": "2026-09-10T01:22:28Z",
+      "conclusion": "success",
+      "databaseId": 102708840963,
+      "name": "performance / Verify cross-target identity and combined size",
+      "startedAt": "2026-09-10T01:22:23Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102708840963"
+    },
+    {
+      "completedAt": "2026-09-10T01:22:36Z",
+      "conclusion": "success",
+      "databaseId": 102708874207,
+      "name": "Native CI acceptance",
+      "startedAt": "2026-09-10T01:22:30Z",
+      "status": "completed",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952/job/102708874207"
+    }
+  ],
+  "acceptedSource": "8980b5978f0e8519964d200b7f7799b741796478",
+  "testedSource": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "testedMerge": "db0310c8f381ecf3957afc76d31be2ce167cd065",
+  "identicalTree": "39433c4030b974548f233cf2e64c086ce336845f"
+}

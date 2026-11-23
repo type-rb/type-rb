@@ -1,0 +1,379 @@
+import { DbError, DbErrorKind, Transaction } from trb/orm
+import trb/std/result
+import trb/internal/sqlite
+import trb/internal/runtime as Runtime
+import trb/std/process
+
+module OrmSql
+	record Lease
+		id: Integer
+	end
+end
+
+def _orm_database(database: String, environment: String, scope: Integer = 0): Result<String, DbError>
+	if scope != 0
+		return Result<String, DbError>::Ok("")
+	end
+	if environment == ""
+		return Result<String, DbError>::Ok(database)
+	end
+	configured := Process.environment(environment)
+	if configured == nil || configured == ""
+		return Result<String, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+	end
+	return Result<String, DbError>::Ok(configured)
+end
+
+def delete_row(database: String, environment: String, statement: String, key: SQLite::Parameter, scope: Integer): Result<Boolean, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
+		return Result<Boolean, DbError>::Err(error)
+	end
+	case SQLite.query_one(source, statement + " RETURNING 1", [key], [1], SQLite::QueryMode::WriteReturning, 0, scope)
+	when Result::Ok(row)
+		return Result<Boolean, DbError>::Ok(row != nil)
+	when Result::Err(error)
+		if error.code == -1
+			return Result<Boolean, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
+			return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Boolean, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database delete failed"))
+end
+
+def _closed_transaction(): DbError
+	return DbError.new(kind: DbErrorKind::InvalidData, message: "database transaction is closed")
+end
+
+def insert_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, projection: String, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
+		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
+	end
+	mut statement := "INSERT INTO " + table
+	if columns.size() == 0
+		statement += " DEFAULT VALUES"
+	else
+		mut parameters: Array<String> := []
+		columns.each do |_column|
+			parameters.push("?")
+		end
+		statement += " (" + columns.join(", ") + ") VALUES (" + parameters.join(", ") + ")"
+	end
+	statement += " RETURNING " + projection
+	return _returning(source, statement, values, width, false, scope)
+end
+
+def update_row(database: String, environment: String, table: String, columns: Array<String>, values: Array<SQLite::Parameter>, predicate: String, key: SQLite::Parameter, projection: String, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
+	if columns.size() == 0
+		return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update requires at least one value"))
+	end
+	source := _orm_database(database, environment, scope) catch |error|
+		return Result<Array<SQLite::Parameter>, DbError>::Err(error)
+	end
+	mut assignments: Array<String> := []
+	columns.each do |column|
+		assignments.push(column + " = ?")
+	end
+	mut parameters: Array<SQLite::Parameter> := []
+	values.each { |value| parameters.push(value) }
+	parameters.push(key)
+	statement := "UPDATE " + table + " SET " + assignments.join(", ") + " WHERE " + predicate + " = ? RETURNING " + projection
+	return _returning(source, statement, parameters, width, true, scope)
+end
+
+def _returning(source: String, statement: String, values: Array<SQLite::Parameter>, width: Integer, updating: Boolean, scope: Integer): Result<Array<SQLite::Parameter>, DbError>
+	case SQLite.query_one(source, statement, values, _row_shape(width), SQLite::QueryMode::WriteReturning, 0, scope)
+	when Result::Ok(row)
+		if row != nil
+			return Result<Array<SQLite::Parameter>, DbError>::Ok(row)
+		elsif updating
+			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database update target was not found"))
+		end
+	when Result::Err(error)
+		if error.code == -1
+			return Result<Array<SQLite::Parameter>, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
+			return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	if updating
+		return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database update failed"))
+	end
+	return Result<Array<SQLite::Parameter>, DbError>::Err(DbError.new(kind: DbErrorKind::Constraint, message: "database insert failed"))
+end
+
+def _row_shape(width: Integer): Array<Integer>
+	mut shape: Array<Integer> := []
+	while shape.size() < width
+		shape.push(0)
+	end
+	return shape
+end
+
+def lookup(database: String, environment: String, statement: String, key: SQLite::Parameter, width: Integer, scope: Integer): Result<Array<SQLite::Parameter>?, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
+		return Result<Array<SQLite::Parameter>?, DbError>::Err(error)
+	end
+	case SQLite.query_one(source, statement, [key], _row_shape(width), SQLite::QueryMode::ReadOrCreate, 0, scope)
+	when Result::Ok(row)
+		return Result<Array<SQLite::Parameter>?, DbError>::Ok(row)
+	when Result::Err(error)
+		if error.code == -1
+			return Result<Array<SQLite::Parameter>?, DbError>::Err(_closed_transaction())
+		elsif error.code == 14
+			return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Array<SQLite::Parameter>?, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database query failed"))
+end
+
+def count_rows(database: String, environment: String, statement: String, scope: Integer, values: Array<SQLite::Parameter> = []): Result<Integer, DbError>
+	source := _orm_database(database, environment, scope) catch |error|
+		return Result<Integer, DbError>::Err(error)
+	end
+	case SQLite.query_one(source, statement, values, [1], SQLite::QueryMode::ReadOrCreate, 0, scope)
+	when Result::Ok(row)
+		if row != nil
+			case row[0]
+			when SQLite::Parameter::Integer(count)
+				if count > 9007199254740991
+					return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database Integer is outside the portable range"))
+				end
+				return Result<Integer, DbError>::Ok(count)
+			else
+				return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database count failed"))
+			end
+		end
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Integer, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: "database count failed"))
+end
+
+# Each chain owns a new query description. Shared parameter arrays are read-only.
+module OrmSql
+	record Selection
+		scope: Integer
+		predicate: String
+		values: Array<SQLite::Parameter>
+		ordering: String
+		row_limit: Integer?
+		row_offset: Integer?
+	end
+	enum Subquery<T>
+		Projected(query: Selection, projection: String)
+	end
+end
+
+def selection(scope: Integer): OrmSql::Selection
+	return OrmSql::Selection.new(scope: scope, predicate: "", values: [], ordering: "", row_limit: nil, row_offset: nil)
+end
+
+def _filter_clause(query: OrmSql::Selection, clause: String, parameters: Array<SQLite::Parameter>): OrmSql::Selection
+	predicate := query.predicate + (query.predicate.empty?() ? " WHERE " : " AND ") + clause
+	mut values := query.values.dup()
+	parameters.each { |value| values.push(value) }
+	return OrmSql::Selection.new(scope: query.scope, predicate: predicate, values: values, ordering: query.ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def filter(query: OrmSql::Selection, column: String, operator: String, value: SQLite::Parameter): OrmSql::Selection
+	case value
+	when SQLite::Parameter::Null
+		return _filter_clause(query, column + (operator == "!=" ? " IS NOT NULL" : " IS NULL"), [])
+	else
+		return _filter_clause(query, column + " " + operator + " ?", [value])
+	end
+end
+
+def filter_range(query: OrmSql::Selection, column: String, first: Integer, last: Integer, exclusive: Boolean): OrmSql::Selection
+	clause := "(" + column + " >= ? AND " + column + (exclusive ? " < ?)" : " <= ?)")
+	return _filter_clause(query, clause, [SQLite::Parameter::Integer(first), SQLite::Parameter::Integer(last)])
+end
+
+def filter_subquery(query: OrmSql::Selection, column: String, operator: String, inner: OrmSql::Selection, projection: String): OrmSql::Selection
+	if inner.scope != 0 && inner.scope != query.scope
+		return Runtime.fail<OrmSql::Selection>("ORM subquery transaction scope must match the base query")
+	end
+	clause := column + (operator == "!=" ? " NOT IN (" : " IN (") + read_statement(inner, projection, false) + ")"
+	return _filter_clause(query, clause, inner.values)
+end
+
+def ordered(query: OrmSql::Selection, column: String, direction: String): OrmSql::Selection
+	ordering := query.ordering + (query.ordering.empty?() ? " ORDER BY " : ", ") + column + (direction == "asc" ? " ASC" : " DESC")
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: ordering, row_limit: query.row_limit, row_offset: query.row_offset)
+end
+
+def limited(query: OrmSql::Selection, count: Integer): OrmSql::Selection
+	if count < 0
+		return Runtime.fail<OrmSql::Selection>("ORM limit must be non-negative")
+	end
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: query.ordering, row_limit: count, row_offset: query.row_offset)
+end
+
+def skipped(query: OrmSql::Selection, count: Integer): OrmSql::Selection
+	if count < 0
+		return Runtime.fail<OrmSql::Selection>("ORM offset must be non-negative")
+	end
+	return OrmSql::Selection.new(scope: query.scope, predicate: query.predicate, values: query.values, ordering: query.ordering, row_limit: query.row_limit, row_offset: count)
+end
+
+def read_statement(query: OrmSql::Selection, project: String, first: Boolean): String
+	mut sql := project + query.predicate + query.ordering
+	mut cap := query.row_limit
+	if first && (cap == nil || cap > 1)
+		cap = 1
+	end
+	offset := query.row_offset
+	if cap != nil
+		sql += " LIMIT " + cap.to_s()
+	elsif offset != nil
+		sql += " LIMIT -1"
+	end
+	if offset != nil
+		sql += " OFFSET " + offset.to_s()
+	end
+	return sql
+end
+
+def read_rows(database: String, environment: String, query: OrmSql::Selection, projection: String, width: Integer, first: Boolean, failure: String = "database query failed"): Result<Array<Array<SQLite::Parameter>>, DbError>
+	return _read_page_rows(database, environment, query, read_statement(query, projection, first), width, failure)
+end
+
+def aggregate_value(database: String, environment: String, query: OrmSql::Selection, projection: String, expression: String): Result<SQLite::Parameter, DbError>
+	page := read_statement(query, projection, false)
+	rows := try _read_page_rows(database, environment, query, "SELECT " + expression + " FROM (" + page + ") AS trb_aggregate", 1, "database aggregate query failed")
+	if rows.empty?()
+		return Result<SQLite::Parameter, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database aggregate result was missing"))
+	end
+	return Result<SQLite::Parameter, DbError>::Ok(rows[0][0])
+end
+
+def average_value(raw: SQLite::Parameter): Result<Float?, DbError>
+	case raw
+	when SQLite::Parameter::Null
+		return Result<Float?, DbError>::Ok(nil)
+	when SQLite::Parameter::Float(value)
+		return Result<Float?, DbError>::Ok(value)
+	when SQLite::Parameter::Integer(value)
+		return Result<Float?, DbError>::Ok(value.to_f())
+	else
+		return Result<Float?, DbError>::Err(DbError.new(kind: DbErrorKind::InvalidData, message: "database aggregate result was invalid"))
+	end
+end
+
+def _read_page_rows(database: String, environment: String, query: OrmSql::Selection, statement: String, width: Integer, failure: String): Result<Array<Array<SQLite::Parameter>>, DbError>
+	source := try _orm_database(database, environment, query.scope)
+	case SQLite.query_rows(source, statement, query.values, width, query.scope)
+	when Result::Ok(rows)
+		return Result<Array<Array<SQLite::Parameter>>, DbError>::Ok(rows)
+	when Result::Err(error)
+		if error.code == 14
+			return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+	end
+	return Result<Array<Array<SQLite::Parameter>>, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: failure))
+end
+
+# The reference SQLite driver binds UTC instants using Go's time.Time form.
+def time_parameter(text: String, kind: String): String
+	if kind == "DateTime"
+		return text.replace_all("T", " ")
+	elsif kind == "Instant"
+		return text.slice(0...text.size() - 1).replace_all("T", " ") + " +0000 UTC"
+	end
+	return text
+end
+
+def time_text(input: String, kind: String): String
+	mut text := input.strip()
+	if kind == "Date" && text.size() > 10
+		return text.slice(0...10)
+	elsif kind == "TimeOfDay"
+		mut i := 0
+		while i < text.size()
+			if text[i] == "T" || text[i] == " "
+				return text.slice(i + 1...text.size())
+			end
+			i += 1
+		end
+	elsif kind == "DateTime" || kind == "Instant"
+		if text.size() > 10 && text[10] == " "
+			text = text.slice(0...10) + "T" + text.slice(11...text.size())
+		end
+		if kind == "Instant"
+			if text.end_with?(" UTC")
+				text = text.slice(0...text.size() - 4).strip()
+			end
+			text = text.replace_all(" +", "+").replace_all(" -", "-")
+			mut offset := 11
+			while offset < text.size() && text[offset] != "+" && text[offset] != "-" && text[offset] != "Z"
+				offset += 1
+			end
+			if offset >= text.size()
+				text += "Z"
+			elsif text.size() - offset == 5
+				text = text.slice(0...offset + 3) + ":" + text.slice(offset + 3...text.size())
+			end
+		end
+	end
+	return text
+end
+
+# database/sql also accepts the standard textual Boolean spellings.
+def boolean_value(text: String): Boolean?
+	if text == "1" || text == "t" || text == "T" || text == "TRUE" || text == "true" || text == "True"
+		return true
+	elsif text == "0" || text == "f" || text == "F" || text == "FALSE" || text == "false" || text == "False"
+		return false
+	end
+	return nil
+end
+
+def scope_id(tx: Transaction): Integer
+	lease := tx._orm_lease
+	if lease == nil
+		return -1
+	end
+	return lease.id
+end
+
+def _orm_nested<T>(parent: Transaction, action: (Transaction) -> Result<T, DbError>): Result<T, DbError>
+	return _transact<T>(parent, "", "", action)
+end
+
+def _transact<T>(parent: Transaction?, database: String, environment: String, action: (Transaction) -> Result<T, DbError>): Result<T, DbError>
+	mut scope := 0
+	mut name := "database transaction"
+	if parent == nil
+		source := _orm_database(database, environment) catch |error|
+			return Result<T, DbError>::Err(error)
+		end
+		scope = SQLite.transaction(0, source, 0)
+	else
+		name = "database savepoint"
+		scope = SQLite.transaction(1, "", scope_id(parent))
+	end
+	if scope <= 0
+		if scope == -21
+			return Result<T, DbError>::Err(_closed_transaction())
+		elsif scope == -14
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Connection, message: "database connection failed"))
+		end
+		return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to begin"))
+	end
+	tx := Transaction.new(OrmSql::Lease.new(id: scope))
+	result := action(tx)
+	case result
+	when Result::Ok(_value)
+		if SQLite.transaction(2, "", scope) != 0
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to commit"))
+		end
+	when Result::Err(_error)
+		if SQLite.transaction(3, "", scope) != 0
+			return Result<T, DbError>::Err(DbError.new(kind: DbErrorKind::Query, message: name + " failed to roll back"))
+		end
+	end
+	return result
+end

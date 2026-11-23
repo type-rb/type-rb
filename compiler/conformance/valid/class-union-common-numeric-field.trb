@@ -1,0 +1,15 @@
+class Count
+	@value: Integer := 3
+end
+class Ratio
+	@value: Float := 2.5
+end
+alias NumericChoice = Count | Ratio
+def read(value: NumericChoice): Float
+	return value.value
+end
+
+def main()
+	puts(read(Count.new()))
+	puts(read(Ratio.new()))
+end

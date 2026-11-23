@@ -1,0 +1,24 @@
+def float_kernel(iterations: Integer): Float
+	mut index := 0
+	mut value := 1.0
+	while index < iterations
+		value = value * 1.0000001 + 0.0000003
+		value = value / 1.00000005 - 0.0000001
+		value = value * 0.99999998 + 0.0000002
+		value = value / 1.00000001 - 0.00000005
+		index += 1
+	end
+	return value
+end
+
+def main()
+	value := float_kernel(5000000)
+	if value > 2.9456
+		if value < 2.9457
+			puts("float-kernel-ok")
+			return
+		end
+	end
+	puts("float-kernel-failed")
+	return
+end

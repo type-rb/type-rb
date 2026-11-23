@@ -1,0 +1,17 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_string } from support/storage
+
+def namespace_test_check(source: String): CompilerState
+	mut state := compiler_new(source.size() + 1)
+	if lex(state, source) && parse_module(state, 0, 0) && resolve(state)
+		check(state)
+	end
+	if has_diagnostic(state)
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	return state
+end

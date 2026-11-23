@@ -1,0 +1,127 @@
+import { emit_qbe } from compiler
+import { binary_subtract } from frontend/types/operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_numeric_proven_arithmetic_mode } from mir/model/numeric_modes
+import { mir_build_flow, mir_flow_blocks, mir_flow_position } from mir/analysis/flow
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def reflected_array_accesses(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.functions.each.with_index do |function, index|
+		flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+		state.scalar_mir.array_loops[index].each do |plan|
+			plan.headers.each do |header|
+				header.bounded_accesses.each do |access|
+					position := mir_flow_position(flow, state.scalar_mir.instructions[access].second)
+					if position >= 0
+						instruction := state.scalar_mir.instructions[position]
+						if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_subtract()
+							count += 1
+						end
+					end
+				end
+			end
+		end
+	end
+	return count
+end
+
+def array_reflection_body(update: String): String
+	return "def reverse_prefix(mut values: Array<Integer>, mut last: Integer)\nlimit := (last + 1) / 2\nmut index := 0\nwhile index < limit\nright := last - index\ntemporary := values[index]\nvalues[index] = values[right]\nvalues[right] = temporary\n" + update + "\nindex += 1\nend\nend\n"
+end
+
+def reflected_array_arithmetic(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		plan.operations.each do |operation|
+			instruction := state.scalar_mir.instructions[operation.instruction]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_subtract() && operation.mode == mir_numeric_proven_arithmetic_mode()
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+describe("MIR reflected Array indexes") do
+	test("matches odd even empty and negative prefix boundaries after source erasure") do
+		mut calls := ""
+		mut expected := ""
+		mut last := -3
+		while last < 9
+			calls += "run(" + last.to_s() + ")\n"
+			mut index := 0
+			while index < 9
+				mut value := index
+				if index <= last
+					value = last - index
+				end
+				expected += (value + 10).to_s() + "\n"
+				index += 1
+			end
+			last += 1
+		end
+		source := array_reflection_body("") + "def run(last: Integer)\nmut values := [10, 11, 12, 13, 14, 15, 16, 17, 18]\nreverse_prefix(values, last)\nmut index := 0\nwhile index < values.size()\nputs(values[index])\nindex += 1\nend\nend\ndef main()\n" + calls + "end\n"
+		mut state := array_loop_mir_check(source)
+		expect(reflected_array_accesses(state) > 0).to_be_true()
+		expect(reflected_array_arithmetic(state) > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains the reflected check when the endpoint changes on a backedge") do
+		state := array_loop_mir_check(array_reflection_body("last += 2") + "def main()\nreverse_prefix([10, 20, 30, 40], 3)\nend\n")
+		expect(reflected_array_accesses(state)).to_equal(0)
+		expect(reflected_array_arithmetic(state)).to_equal(0)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: index is out of bounds\n")
+			end
+		end
+	end
+
+	test("preserves oversized endpoint and portable addition failures") do
+		["4", "9007199254740991"].each do |last|
+			state := array_loop_mir_check(array_reflection_body("") + "def main()\nreverse_prefix([10, 20, 30, 40], " + last + ")\nend\n")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				mut expected := "panic: index is out of bounds\n"
+				if last == "9007199254740991"
+					expected = "panic: Integer is outside the portable range\n"
+				end
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error).to_equal(expected)
+				end
+			end
+		end
+	end
+end

@@ -1,0 +1,51 @@
+import { resolution_local_bind, resolution_local_find, resolution_locals_new } from state/resolution_locals
+import { load_string, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Resolution local ownership") do
+	test("preserves ordered shadowing and declared receiver types") do
+		mut locals := resolution_locals_new(3)
+		expect(resolution_local_find(locals, "missing")).to_equal(-1)
+		resolution_local_bind(locals, "self", "Outer")
+		resolution_local_bind(locals, "value", "Integer")
+		resolution_local_bind(locals, "self", "Inner")
+		expect(resolution_local_find(locals, "self")).to_equal(2)
+		expect(load_string(locals.types, resolution_local_find(locals, "self"))).to_equal("Inner")
+		expect(load_string(locals.types, 0)).to_equal("Outer")
+		expect(resolution_local_find(locals, "value")).to_equal(1)
+	end
+
+	test("shares one environment through aliases and isolates fresh environments") do
+		mut locals := resolution_locals_new(2)
+		shared := locals
+		mut sibling := resolution_locals_new(2)
+		resolution_local_bind(shared, "self", "Receiver")
+		expect(locals.count[0]).to_equal(1)
+		expect(resolution_local_find(locals, "self")).to_equal(0)
+		expect(sibling.count[0]).to_equal(0)
+		resolution_local_bind(sibling, "self", "Sibling")
+		store_string(shared.types, 0, "Updated")
+		expect(load_string(locals.types, 0)).to_equal("Updated")
+		expect(load_string(sibling.types, 0)).to_equal("Sibling")
+	end
+
+	test("keeps bounded stores separate from the logical insertion count") do
+		mut empty := resolution_locals_new(0)
+		resolution_local_bind(empty, "outside", "Integer")
+		expect(empty.count[0]).to_equal(1)
+		expect(empty.names.used[0]).to_equal(0)
+		expect(empty.types.used[0]).to_equal(0)
+		expect(empty.names.chunks.size()).to_equal(0)
+
+		mut locals := resolution_locals_new(1)
+		resolution_local_bind(locals, "self", "Receiver")
+		resolution_local_bind(locals, "outside", "String")
+		expect(locals.count[0]).to_equal(2)
+		expect(locals.names.limit[0]).to_equal(1)
+		expect(locals.types.limit[0]).to_equal(1)
+		expect(locals.names.used[0]).to_equal(1)
+		expect(locals.types.used[0]).to_equal(1)
+		expect(load_string(locals.names, 0)).to_equal("self")
+		expect(load_string(locals.types, 0)).to_equal("Receiver")
+	end
+end

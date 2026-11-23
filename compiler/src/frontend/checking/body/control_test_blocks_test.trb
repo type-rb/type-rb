@@ -1,0 +1,68 @@
+import { check_transfer_value } from frontend/checking/body/control
+import { lex_module } from frontend/syntax/lexer
+import { parse_module_with_tests } from frontend/syntax/parser
+import { CompilerState, add_module, compiler_new, has_diagnostic, select_checked_body } from state/state
+import { locals_new } from state/local_state
+import { mir_state_function_slot } from state/local_slots
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def test_control_source(body: String): CompilerState
+	source := "import { describe, test } from trb/std/test\ndescribe(\"A\") do\ntest(\"B\") do\n  " + body + "\nend\nend\n"
+	mut state := compiler_new(source.size() * 4 + 64)
+	add_module(state, "control_test", "/project/control_test.trb")
+	expect(lex_module(state, source, 0) && parse_module_with_tests(state, 0, 0, true)).to_be_true()
+	select_checked_body(state, state.parsed.tests[1].function_id)
+	return state
+end
+
+describe("Checked test control boundary") do
+	test("rejects escaping return break and next at the authored location") do
+		["return", "break", "next"].each do |keyword|
+			mut state := test_control_source(keyword)
+			function_id := state.parsed.tests[1].function_id
+			mut locals := locals_new(state.source_tokens.token_count[0] + 1)
+			locals.mir_state[mir_state_function_slot()] = function_id
+			mut position := [load_integer(state.declarations.function_body_starts, function_id)]
+			value := check_transfer_value(state, position, locals, "Void", -1, -1)
+			expect(value.type_name).to_equal("Invalid")
+			expect(load_string(state.diagnostics.messages, 0)).to_equal(keyword + " cannot cross the test() block boundary")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(4)
+			expect(load_integer(state.diagnostics.columns, 0)).to_equal(3)
+		end
+	end
+
+	test("preserves return ownership inside a nested anonymous function") do
+		mut state := test_control_source("_callback := fn()\nreturn\nend")
+		function_id := state.parsed.tests[1].function_id
+		mut locals := locals_new(state.source_tokens.token_count[0] + 1)
+		locals.mir_state[mir_state_function_slot()] = function_id
+		locals.lambda_result.push("Void")
+		mut origin := load_integer(state.declarations.function_body_starts, function_id)
+		while load_string(state.source_tokens.token_texts, origin) != "return"
+			origin += 1
+		end
+		mut position := [origin]
+		value := check_transfer_value(state, position, locals, "Void", -1, -1)
+		expect(value.type_name).to_equal("Never")
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("preserves break and next owned by a local loop") do
+		["break", "next"].each do |keyword|
+			mut state := test_control_source("while true\n" + keyword + "\nend")
+			function_id := state.parsed.tests[1].function_id
+			mut locals := locals_new(state.source_tokens.token_count[0] + 1)
+			locals.mir_state[mir_state_function_slot()] = function_id
+			loop_origin := load_integer(state.declarations.function_body_starts, function_id)
+			mut origin := loop_origin
+			while load_string(state.source_tokens.token_texts, origin) != keyword
+				origin += 1
+			end
+			mut position := [origin]
+			value := check_transfer_value(state, position, locals, "Void", loop_origin, -1)
+			expect(value.type_name).to_equal("Never")
+			expect(has_diagnostic(state)).to_be_false()
+		end
+	end
+end

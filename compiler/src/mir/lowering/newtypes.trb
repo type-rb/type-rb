@@ -1,0 +1,47 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_op_newtype_construct, mir_op_newtype_project } from mir/model/instructions
+import { mir_control_prepare } from mir/build/control
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirInstruction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id } from mir/model/types
+import { mir_newtype_id } from mir/model/newtypes
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# Nominal construction and projection preserve storage, but never type identity.
+# Newtype construction retains nominal identity; projection exposes its representation.
+def mir_newtype_operation(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, value: CheckedValue, owner: Integer, result_type: String, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+	if result < 0
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	scalar_mir_instruction(state, locals, kind, result, checked_mir_value(value), -1, owner, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(result_type, result, 9007199254740991, 0)
+end
+
+def mir_newtype_instruction_error(flow: MirFlow, native_module: MirModule, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.payload < 0 || instruction.payload >= native_module.newtypes.size() || instruction.second != -1 || instruction.failure != -1
+		return "MIR newtype instruction shape differs"
+	end
+	if !mir_value_available(flow, block, index, instruction.first)
+		return "MIR newtype operand is unavailable"
+	end
+	first := mir_flow_type(flow, instruction.first)
+	result := mir_flow_type(flow, instruction.result)
+	definition := native_module.newtypes[instruction.payload]
+	if instruction.kind == mir_op_newtype_construct()
+		if mir_newtype_id(native_module, result) != instruction.payload || first != definition.representation
+			return "MIR newtype construction identity or representation differs"
+		end
+	elsif instruction.kind == mir_op_newtype_project()
+		if mir_newtype_id(native_module, first) != instruction.payload || result != definition.representation
+			return "MIR newtype projection identity or representation differs"
+		end
+	else
+		return "MIR newtype operation is invalid"
+	end
+	return ""
+end

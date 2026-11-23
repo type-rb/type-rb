@@ -31,7 +31,8 @@
     {
       "title": "Tooling",
       "pages": [
-        { "source": "cli.md", "label": "Command line" },
+        { "source": "native-cli.md", "label": "Native command line" },
+        { "source": "cli.md", "label": "Go command line" },
         { "source": "configuration.md", "label": "Configuration" },
         { "source": "editor-support.md", "label": "Editor support" },
         { "source": "guides/linting.md", "label": "Linting" },

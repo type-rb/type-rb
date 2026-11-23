@@ -1,0 +1,8 @@
+case	candidate	status	stderr_empty	stdout_exact
+spectral-norm	typerb-native	0	true	true
+spectral-norm	typerb-go	0	true	true
+spectral-norm	c	0	true	true
+spectral-norm	cpp	0	true	true
+spectral-norm	go	0	true	true
+spectral-norm	rust	0	true	true
+spectral-norm	java	0	true	true

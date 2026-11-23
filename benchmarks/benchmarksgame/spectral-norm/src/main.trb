@@ -1,0 +1,106 @@
+# Derived from the Computer Language Benchmarks Game spectral-norm
+# specification and its portable single-threaded C implementation.
+# See ../../licenses/spectral-norm.txt.
+
+import trb/std/math
+import trb/std/process
+
+def fixed_nine(value: Float): String
+	mut magnitude := value
+	mut sign := ""
+	if magnitude < 0.0
+		sign = "-"
+		magnitude = -magnitude
+	end
+	scaled := (magnitude * 1000000000.0 + 0.5).to_i()
+	whole := scaled / 1000000000
+	mut fractional := (scaled % 1000000000).to_s()
+	while fractional.size() < 9
+		fractional = "0" + fractional
+	end
+	return sign + whole.to_s() + "." + fractional
+end
+
+def eval_a(row: Integer, column: Integer): Float
+	sum := row + column
+	denominator := sum * (sum + 1) / 2 + row + 1
+	return 1.0 / denominator
+end
+
+def eval_a_times_u(input: Array<Float>, mut output: Array<Float>)
+	mut row := 0
+	while row < input.size()
+		mut total: Float := 0
+		mut column := 0
+		while column < input.size()
+			total += eval_a(row, column) * input[column]
+			column += 1
+		end
+		output[row] = total
+		row += 1
+	end
+	return
+end
+
+def eval_at_times_u(input: Array<Float>, mut output: Array<Float>)
+	mut row := 0
+	while row < input.size()
+		mut total: Float := 0
+		mut column := 0
+		while column < input.size()
+			total += eval_a(column, row) * input[column]
+			column += 1
+		end
+		output[row] = total
+		row += 1
+	end
+	return
+end
+
+def eval_ata_times_u(input: Array<Float>, mut output: Array<Float>)
+	mut temporary: Array<Float> := []
+	mut index := 0
+	while index < input.size()
+		temporary.push(0)
+		index += 1
+	end
+	eval_a_times_u(input, temporary)
+	eval_at_times_u(temporary, output)
+	return
+end
+
+def spectral_norm(size: Integer): Float
+	mut u: Array<Float> := []
+	mut v: Array<Float> := []
+	mut index := 0
+	while index < size
+		u.push(1)
+		v.push(0)
+		index += 1
+	end
+	index = 0
+	while index < 10
+		eval_ata_times_u(u, v)
+		eval_ata_times_u(v, u)
+		index += 1
+	end
+	mut v_bv: Float := 0
+	mut vv: Float := 0
+	index = 0
+	while index < size
+		v_bv += u[index] * v[index]
+		vv += v[index] * v[index]
+		index += 1
+	end
+	return Math.sqrt(v_bv / vv)
+end
+
+def main()
+	arguments := Process.argv()
+	mut size := 100
+	if arguments.size() > 0
+		size = arguments[0].to_i()
+	end
+	puts(fixed_nine(spectral_norm(size)))
+	return
+end

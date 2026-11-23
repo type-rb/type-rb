@@ -1,0 +1,115 @@
+import { binary_greater_equal, binary_less } from frontend/types/operators
+import { mir_function_control, mir_terminator_branch, mir_terminator_return } from mir/model/control
+import { mir_op_direct_call, mir_op_scalar_binary, mir_op_scalar_literal } from mir/model/instructions
+import { MirCallReturnGuard, MirFunction, MirModule, mir_block_index, mir_type_id, mir_value_type } from mir/model/module
+import { mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks } from mir/analysis/flow
+import { mir_scalar_literal } from mir/analysis/ranges
+
+# Bound expansion to the identity base case of an actually recursive scalar
+# function. Every other path still executes the original call, with its effects.
+def mir_call_return_guard(native_module: MirModule, function: MirFunction): MirCallReturnGuard
+	none := MirCallReturnGuard.new(function_id: -1, comparison: 0, bound: 0)
+	if function.kind != mir_function_control() || function.parameter_count != 1 || function.result_type != "Integer"
+		return none
+	end
+	parameter := native_module.arguments[function.parameter_start]
+	if mir_value_type(native_module, function.id, parameter) != mir_type_id("Integer")
+		return none
+	end
+	entry_index := mir_block_index(native_module, function, function.entry_block)
+	if entry_index < 0
+		return none
+	end
+	entry := native_module.blocks[entry_index]
+	if entry.parameter_count != 0 || entry.instruction_count != 2 || entry.terminator != mir_terminator_branch() || entry.first_target == entry.second_target
+		return none
+	end
+	literal := native_module.instructions[entry.instruction_start]
+	comparison := native_module.instructions[entry.instruction_start + 1]
+	if literal.kind != mir_op_scalar_literal() || literal.payload < 0 || literal.payload >= native_module.literal_texts.size()
+		return none
+	end
+	if mir_value_type(native_module, function.id, literal.result) != mir_type_id("Integer")
+		return none
+	end
+	bound := mir_scalar_literal(native_module.literal_texts[literal.payload])
+	if bound < 0 || comparison.kind != mir_op_scalar_binary() || comparison.payload < binary_less() || comparison.payload > binary_greater_equal() || comparison.failure != -1
+		return none
+	end
+	if comparison.first != parameter || comparison.second != literal.result || entry.condition != comparison.result
+		return none
+	end
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	successor := mir_flow_block_index(flow, entry.first_target)
+	if successor == flow.entry || flow.predecessors[successor].size() != 1 || flow.predecessors[successor][0] != flow.entry
+		return none
+	end
+	returned := native_module.blocks[function.block_start + successor]
+	if returned.instruction_count != 0 || returned.terminator != mir_terminator_return()
+		return none
+	end
+	aliases := mir_flow_aliases(native_module, function, flow, entry)
+	if mir_flow_alias(aliases, returned.return_value) != parameter
+		return none
+	end
+	mut recursive := false
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut cursor := block.instruction_start
+		while cursor < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[cursor]
+			if instruction.kind == mir_op_direct_call() && native_module.calls[instruction.payload].callee == function.id
+				recursive = true
+			end
+			cursor += 1
+		end
+		index += 1
+	end
+	if !recursive
+		return none
+	end
+	return MirCallReturnGuard.new(function_id: function.id, comparison: comparison.payload, bound: bound)
+end
+
+def mir_call_return_plans(native_module: MirModule): Array<MirCallReturnGuard>
+	mut plans: Array<MirCallReturnGuard> := []
+	native_module.functions.each do |function|
+		plan := mir_call_return_guard(native_module, function)
+		if plan.function_id >= 0
+			plans.push(plan)
+			mut position := plans.size() - 1
+			while position > 0 && plans[position - 1].function_id > plan.function_id
+				plans[position] = plans[position - 1]
+				position -= 1
+			end
+			plans[position] = plan
+		end
+	end
+	return plans
+end
+
+def mir_call_return_equal(left: Array<MirCallReturnGuard>, right: Array<MirCallReturnGuard>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].function_id != right[index].function_id || left[index].comparison != right[index].comparison || left[index].bound != right[index].bound
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_call_return_find(plans: Array<MirCallReturnGuard>, function_id: Integer): Integer
+	mut index := 0
+	while index < plans.size()
+		if plans[index].function_id == function_id
+			return index
+		end
+		index += 1
+	end
+	return -1
+end

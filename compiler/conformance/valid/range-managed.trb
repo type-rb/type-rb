@@ -1,0 +1,39 @@
+record Window
+	bounds: Range<Integer>
+end
+
+def first(bounds: Range<Integer>): Integer
+	bounds.each { |value| return value }
+	return -1
+end
+
+def main()
+	mut values: Array<Range<Integer>> := [40..42]
+	mut boxes := [Window.new(bounds: 7..9)]
+	mut table: Hash<String, Range<Integer>> := { "saved" => 11..13 }
+	mut kept := values[0]
+	values[0].each.with_index do |value, index|
+		kept = table["saved"]
+		mut iteration := 0
+		while iteration < 70000
+			values[0] = iteration..iteration
+			boxes[0] = Window.new(bounds: iteration...iteration)
+			table["saved"] = iteration..iteration
+			iteration += 1
+		end
+		puts(value + index)
+	end
+	puts(first(kept))
+	puts(first(values[0]))
+	puts(first(boxes[0].bounds))
+	puts(first(table["saved"]))
+	# Checked local identities inside a Range with_index include its ordinal.
+	(0..2).each.with_index do |value, ordinal|
+		mut data := [value, ordinal]
+		mut index := 0
+		while index < data.size()
+			puts(data[index])
+			index += 1
+		end
+	end
+end

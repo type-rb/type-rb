@@ -1,0 +1,25 @@
+def rewrite(mut values: Array<Integer>)
+	puts("end")
+	if true
+		puts("if")
+		values = [123]
+	end
+	mut index := 0
+	while index < 100000
+		scratch := [index]
+		if scratch[0] != index
+			puts("bad")
+		end
+		index += 1
+	end
+	puts("while")
+	puts(values[0].to_s())
+	return
+end
+
+def main()
+	mut values := [7]
+	rewrite(values)
+	puts(values[0].to_s())
+	return
+end

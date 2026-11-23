@@ -1,0 +1,14 @@
+class Pair
+	@left: Integer
+	@right: Integer
+	def initialize(*, left: Integer, right: Integer = 4)
+		@left = left
+		@right = right
+	end
+end
+def main()
+	first := Pair.new(left: 3)
+	second := Pair.new(right: 6, left: 5)
+	puts(first.left + first.right)
+	puts(second.left + second.right)
+end

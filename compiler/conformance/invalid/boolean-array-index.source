@@ -1,0 +1,4 @@
+def main()
+values := [true]
+puts(values[false])
+end

@@ -1,0 +1,141 @@
+import { compiler_string_bytes } from support/compiler_bytes
+
+# SHA-256 words stay within the portable Integer range. Nibble tables supply
+# Boolean word operations without backend-specific bitwise instructions.
+def package_word_tables(): Array<Array<Integer>>
+	mut conjunction: Array<Integer> := []
+	mut exclusive: Array<Integer> := []
+	mut left := 0
+	while left < 16
+		mut right := 0
+		while right < 16
+			mut both := 0
+			mut different := 0
+			mut bit := 1
+			while bit < 16
+				a := (left / bit) % 2
+				b := (right / bit) % 2
+				if a == 1 && b == 1
+					both += bit
+				end
+				if a != b
+					different += bit
+				end
+				bit *= 2
+			end
+			conjunction.push(both)
+			exclusive.push(different)
+			right += 1
+		end
+		left += 1
+	end
+	return [conjunction, exclusive]
+end
+
+def package_word_pair(mut left: Integer, mut right: Integer, table: Array<Integer>): Integer
+	mut result := 0
+	mut weight := 1
+	mut nibble := 0
+	while nibble < 8
+		result += table[(left % 16) * 16 + right % 16] * weight
+		left /= 16
+		right /= 16
+		weight *= 16
+		nibble += 1
+	end
+	return result
+end
+
+def package_word_xor(a: Integer, b: Integer, c: Integer, table: Array<Integer>): Integer
+	return package_word_pair(package_word_pair(a, b, table), c, table)
+end
+
+def package_word_rotate(value: Integer, divisor: Integer): Integer
+	return value / divisor + (value % divisor) * (4294967296 / divisor)
+end
+
+def package_checksum(value: String): String
+	mut bytes := compiler_string_bytes(value)
+	return package_checksum_bytes(bytes)
+end
+
+# Binary package contents and relative filenames need byte-preserving hashing.
+def package_checksum_bytes(mut bytes: Array<Integer>): String
+	length := bytes.size() * 8
+	bytes.push(128)
+	while bytes.size() % 64 != 56
+		bytes.push(0)
+	end
+	mut shift := 281474976710656
+	# Compiler inputs are bounded below 2^53 bits; write the high byte as zero.
+	bytes.push(0)
+	while shift > 0
+		bytes.push((length / shift) % 256)
+		shift /= 256
+	end
+	constants := [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
+	mut hash := [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]
+	tables := package_word_tables()
+	both := tables[0]
+	xor := tables[1]
+	mut offset := 0
+	while offset < bytes.size()
+		mut words: Array<Integer> := []
+		mut index := 0
+		while index < 16
+			start := offset + index * 4
+			words.push(bytes[start] * 16777216 + bytes[start + 1] * 65536 + bytes[start + 2] * 256 + bytes[start + 3])
+			index += 1
+		end
+		while index < 64
+			a := words[index - 15]
+			b := words[index - 2]
+			small_a := package_word_xor(package_word_rotate(a, 128), package_word_rotate(a, 262144), a / 8, xor)
+			small_b := package_word_xor(package_word_rotate(b, 131072), package_word_rotate(b, 524288), b / 1024, xor)
+			words.push((words[index - 16] + small_a + words[index - 7] + small_b) % 4294967296)
+			index += 1
+		end
+		mut a := hash[0]
+		mut b := hash[1]
+		mut c := hash[2]
+		mut d := hash[3]
+		mut e := hash[4]
+		mut f := hash[5]
+		mut g := hash[6]
+		mut h := hash[7]
+		index = 0
+		while index < 64
+			large_e := package_word_xor(package_word_rotate(e, 64), package_word_rotate(e, 2048), package_word_rotate(e, 33554432), xor)
+			choose := package_word_pair(package_word_pair(e, f, both), package_word_pair(4294967295 - e, g, both), xor)
+			first := (h + large_e + choose + constants[index] + words[index]) % 4294967296
+			large_a := package_word_xor(package_word_rotate(a, 4), package_word_rotate(a, 8192), package_word_rotate(a, 4194304), xor)
+			majority := package_word_xor(package_word_pair(a, b, both), package_word_pair(a, c, both), package_word_pair(b, c, both), xor)
+			second := (large_a + majority) % 4294967296
+			h = g
+			g = f
+			f = e
+			e = (d + first) % 4294967296
+			d = c
+			c = b
+			b = a
+			a = (first + second) % 4294967296
+			index += 1
+		end
+		values := [a, b, c, d, e, f, g, h]
+		index = 0
+		while index < 8
+			hash[index] = (hash[index] + values[index]) % 4294967296
+			index += 1
+		end
+		offset += 64
+	end
+	mut result := "sha256:"
+	hash.each do |word|
+		mut divisor := 268435456
+		while divisor > 0
+			result += "0123456789abcdef"[(word / divisor) % 16]
+			divisor /= 16
+		end
+	end
+	return result
+end

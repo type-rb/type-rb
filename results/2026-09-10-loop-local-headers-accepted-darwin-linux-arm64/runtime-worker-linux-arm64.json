@@ -1,0 +1,24 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10131870174,
+    "name": "runtime-worker-linux-arm64",
+    "size_in_bytes": 441844,
+    "digest": "sha256:86bc18f43fffdf6b1effb7c483cb17babd31ee5ea6bced44bf2f42728c026f5d"
+  },
+  "evidence": {
+    "build-evidence/chain.txt": "profile=linux-arm64-v0\nsetup_first_size=341032\nsetup_current_runtime_size=332440\nb2_size=332440\nb3_size=332440\nb4_size=332440\n",
+    "build-evidence/process-inventory.txt": "[setup-first]\n/home/runner/work/_temp/release/type-rb-native-bootstrap-linux-arm64\n/home/runner/work/_temp/qbe-1.3/qbe\n/usr/bin/cc\n/usr/bin/as\n/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\n/usr/bin/ld.lld\n[setup-current-runtime]\n/home/runner/work/_temp/chain/first/compiler\n/home/runner/work/_temp/qbe-1.3/qbe\n/usr/bin/cc\n/usr/bin/as\n/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\n/usr/bin/ld.lld\n[b2]\n/home/runner/work/_temp/chain/second/compiler\n/home/runner/work/_temp/qbe-1.3/qbe\n/usr/bin/cc\n/usr/bin/as\n/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\n/usr/bin/ld.lld\n[b3]\n/home/runner/work/_temp/chain/third/compiler\n/home/runner/work/_temp/qbe-1.3/qbe\n/usr/bin/cc\n/usr/bin/as\n/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\n/usr/bin/ld.lld\n[b4]\n/home/runner/work/_temp/chain/fourth/compiler\n/home/runner/work/_temp/qbe-1.3/qbe\n/usr/bin/cc\n/usr/bin/as\n/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\n/usr/bin/ld.lld\n",
+    "release/selection.txt": "release_tag=bootstrap-seed-2026-09-09-record-arrays\n",
+    "worker-smoke-evidence/collector-statistics.txt": "collections=175\nautomatic_collections=174\nallocated_bytes=182400576\nreclaimed_bytes=182400576\nlive_bytes=0\npeak_heap_bytes=1047808\n",
+    "worker-smoke-evidence/compiler-size-bytes.txt": "332432\n",
+    "worker-smoke-evidence/environment.txt": "Linux runnervmfx5wp 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:12:01 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64 (default), arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+    "worker-smoke-evidence/gc-trace-analysis.txt": "observation_count=3\nautomatic_observation_count=2\nmanual_observation_count=1\nfinal_collection=175\nmaximum_sampled_live_bytes=3568\nmaximum_root_count=3\nroot_capacity_words=64\n",
+    "worker-smoke-evidence/identities.txt": "mode=smoke\nprofile=linux-arm64-v0\nphases=1\nbatches_per_phase=40000\noriginal_jobs_per_batch=128\nprocessed_attempts_per_batch=136\ncompiler_size=332440\nstripped_compiler_size=332432\ncompiler_sha256=d5a68818d61afded4a976b1f86e953507b7c85b37882d0db492f60cef737fe61\nqbe_sha256=510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c\nworkload_sha256=56738c1ab9d50f3c1658e490ae20d927fb6a2e2099491913c8072be33731a98e\nqbe_output_sha256=ccfc583706490e0791000c5d037145de53e825553019cab363c7faecbac9995a\nnative_program_sha256=02b37b57059b729bce973fcf0233a3465d6a90e0a55e9bcdd0ac51fb80ace85d\nreference_trb_version=0.4.6-dev\nreference_program_sha256=128d118f18687860f8c6637857a3d5e305d4dd0f5cc0a5c69cf1f7c6c5f3b40b\n",
+    "worker-smoke-evidence/invocation.txt": "controller=/bin/sh tools/runtime-worker-soak/runtime-worker-soak.sh\nmode=smoke\ncompiler=/home/runner/work/_temp/chain/fifth/compiler\nqbe=/home/runner/work/_temp/qbe-1.3/qbe\ncc=/usr/bin/cc\nreference_trb=/home/runner/work/_temp/trb\nprofile=linux-arm64-v0\nworkspace=/home/runner/work/_temp/worker-smoke-workspace\nevidence=/home/runner/work/_temp/worker-smoke-evidence\nruntime_stats=1\nruntime_trace=1\n",
+    "worker-smoke-evidence/native-runtime.txt": "elapsed_seconds=0.12\n",
+    "worker-smoke-evidence/reference-runtime.txt": "elapsed_seconds=0.16\n",
+    "workflow-evidence/context.txt": "repository_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\nrepository_ref=refs/pull/389/merge\nworkflow=.github/workflows/runtime-worker-memory.yml\nworkflow_run_id=34423530952\nrunner=ubuntu-24.04-arm\nprofile=linux-arm64-v0\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\ntype_rb_version=0.4.6-dev\n"
+  }
+}

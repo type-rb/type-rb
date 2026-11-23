@@ -1,0 +1,138 @@
+import { CompilerProjectSources, check, emit_qbe, load_package_project_sources_with_tests } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { standard_test_finish } from frontend/resolution/test_intrinsics
+import { project_packages_new } from project/packages
+import { append_native_test_runner } from project/test_runner
+import { CompilerState, has_diagnostic } from state/state
+import { standard_source_test_runner } from state/standard_source_kinds
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { output_source } from testing/compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def test_runner_fixture(reporter: String, failure: Boolean): CompilerState
+	mut body := "puts(11)"
+	if failure
+		body = "divisor := 0\nputs(1 / divisor)"
+	end
+	paths := ["/project/src/z_test.trb", "/project/src/main.trb", "/project/src/a_test.trb"]
+	sources := ["import { describe, test } from trb/std/test\ndescribe(\"Suite\") do\n test(\"same\") do\n  puts(22)\n end\nend\n", "def main()\nputs(99)\nend\n", "import { describe, test } from trb/std/test\ndescribe(\"Suite\") do\n test(\"same\") do\n  " + body + "\n end\nend\n"]
+	mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: paths, sources: sources, error: ""), ["z_test", "main", "a_test"], [-1, -1, -1], project_packages_new(""), false, false, [paths[0], paths[2]])
+	expect_compiler_phase(state, "load", !has_diagnostic(state))
+	expect_compiler_phase(state, "runner", append_native_test_runner(state, reporter))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+def test_runner_observation(reporter: String, failure: Boolean, collect: Boolean): String
+	mut state := test_runner_fixture(reporter, failure)
+	mut runtime := output_source(emit_qbe(state))
+	expect_compiler_phase(state, "emit", !has_diagnostic(state))
+	intrinsic_mir_erase(state)
+	expect(output_source(emit_qbe(state))).to_equal(runtime)
+	if collect
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+	end
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut status := 0
+		if failure
+			status = 1
+		end
+		case logical_run_qbe_arguments(qbe, runtime, [], status)
+		when Result::Ok(actual)
+			return actual
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+	return ""
+end
+
+describe("Compiler-owned Native test runner") do
+	test("preserves typed bounds failures through collection and continues later cases") do
+		source := "import { describe, test } from trb/std/test\ndescribe(\"Bounds\") do\n test(\"array\") do\n  values := [1]\n  puts(values[2])\n end\n test(\"string\") do\n  value := \"one\"\n  puts(value[4])\n end\n test(\"continued\") do\n end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		mut runtime := output_source(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(runtime)
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, runtime, [], 1)
+			when Result::Ok(actual)
+				expect(actual).to_equal("FAIL Bounds / array\n  /project/src/sample_test.trb:3:2: Array index is out of bounds\nFAIL Bounds / string\n  /project/src/sample_test.trb:7:2: String index is out of bounds\nPASS Bounds / continued\n\n3 test(s), 2 failure(s)\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("runs duplicate names in module order without invoking application main") do
+		actual := test_runner_observation("human", false, false)
+		if Process.environment("TYPE_RB_NATIVE_QBE") != nil
+			expect(actual).to_equal("11\nPASS Suite / same\n22\nPASS Suite / same\n\n2 test(s), 0 failure(s)\n")
+		end
+	end
+
+	test("retains case callbacks and reporting data through forced collection") do
+		actual := test_runner_observation("human", false, true)
+		if Process.environment("TYPE_RB_NATIVE_QBE") != nil
+			expect(actual).to_equal("11\nPASS Suite / same\n22\nPASS Suite / same\n\n2 test(s), 0 failure(s)\n")
+		end
+	end
+
+	test("continues after a runtime failure and returns a failing process status") do
+		actual := test_runner_observation("json", true, true)
+		if Process.environment("TYPE_RB_NATIVE_QBE") != nil
+			expect(actual.split("\"type\":\"test_started\"").size()).to_equal(3)
+			expect(actual.split("\"type\":\"test_failed\"").size()).to_equal(2)
+			expect(actual.split("\"type\":\"test_passed\"").size()).to_equal(2)
+			expect(actual.split("\"file\":\"/project/src/a_test.trb\",\"line\":3").size()).to_equal(3)
+			expect(actual.split("{\"failed\":1,\"total\":2,\"type\":\"test_summary\"}").size()).to_equal(2)
+		end
+	end
+
+	test("never exposes unspellable case identities or exit to authored lookalikes") do
+		mut state := test_runner_fixture("human", false)
+		entry := state.module_graph.entry_module[0]
+		expect(sparse_integer_at(state.standard_modules, entry)).to_equal(standard_source_test_runner())
+		state.parsed.tests.each do |item|
+			if item.function_id >= 0
+				name := load_string(state.declarations.function_names, item.function_id)
+				state.module_graph.active_module[0] = entry
+				expect(find_function_in_module(state, item.source_id, name)).to_equal(item.function_id)
+				state.module_graph.active_module[0] = item.source_id
+				expect(find_function_in_module(state, item.source_id, name)).to_equal(-1)
+			end
+		end
+		mut matched := false
+		state.scalar_mir.signatures.each do |signature|
+			if standard_test_finish(state, signature.id)
+				matched = true
+				owner := load_integer(state.declarations.function_modules, signature.id)
+				store_integer(state.standard_modules, owner, 0)
+				expect(standard_test_finish(state, signature.id)).to_be_false()
+			end
+		end
+		expect(matched).to_be_true()
+	end
+end

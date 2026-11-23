@@ -1,0 +1,95 @@
+name: Capability map Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Daily performance snapshot, Weekly language comparison, Representative performance snapshot]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: capability-map-pages
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'type-rb/type-rb-native'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out TypeRB Native
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Check the capability catalog
+        run: |
+          python3 tools/native-language-coverage.py --check-pages-data docs/capabilities/ordinary-language.js
+          node tools/capability-map-check.mjs
+          python3 tools/dependency-pages.py --check
+
+      - name: Check the benchmark explorer
+        run: |
+          node tools/benchmark-pages-data.mjs --check
+          node tools/benchmark-pages-check.mjs
+
+      - name: Compose the latest daily data without committing generated measurements
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+          TRIGGER_WORKFLOW: ${{ github.event.workflow_run.name }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          event_run="$TRIGGER_RUN_ID"
+          if test "$TRIGGER_WORKFLOW" != "Daily performance snapshot"; then export TRIGGER_RUN_ID=; fi
+          python3 tools/daily-performance/state.py restore --state "$RUNNER_TEMP/daily-state.json"
+          python3 tools/daily-performance/state.py site --state "$RUNNER_TEMP/daily-state.json" \
+            --output docs/capabilities/benchmarks/daily-state.json
+          export TRIGGER_RUN_ID=
+          if test "$TRIGGER_WORKFLOW" = "Weekly language comparison"; then export TRIGGER_RUN_ID="$event_run"; fi
+          python3 tools/daily-performance/state.py restore --tier weekly --state "$RUNNER_TEMP/weekly-state.json" || \
+            python3 tools/weekly-performance/pages-fallback.py "$RUNNER_TEMP/weekly-state.json"
+          python3 tools/daily-performance/state.py site --tier weekly --state "$RUNNER_TEMP/weekly-state.json" \
+            --output docs/capabilities/benchmarks/weekly-state.json
+
+      - name: Compose representative coverage without running benchmarks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_RUN_ID: ${{ github.event.workflow_run.name == 'Representative performance snapshot' && github.event.workflow_run.id || '' }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TRIGGER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          python3 tools/representative-performance/publication.py restore --state "$RUNNER_TEMP/representative-state.json"
+          python3 tools/representative-performance/publication.py site --state "$RUNNER_TEMP/representative-state.json" \
+            --output docs/capabilities/benchmarks/representative-state.json
+
+      - name: Upload the GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/capabilities
+
+  deploy:
+    # PR verification belongs to the required documentation authority. A main push
+    # refreshes freshness metadata, while daily completion refreshes measurements.
+    # Neither event compiles a program or reruns a benchmark here.
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pages: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

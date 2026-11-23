@@ -1,0 +1,81 @@
+import { allocate_compiler_recovery_workspace, compiler_recovery_workspace_receipt, compiler_recovery_workspace_valid, discard_empty_compiler_recovery_workspace } from compiler/workspace
+import { native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler recovery workspace ownership") do
+	test("accepts only the exact generated workspace shape") do
+		expect(compiler_recovery_workspace_valid("/tmp/trbn-recovery.aZ0129")).to_be_true()
+		invalid := ["", "/", "/tmp", "/tmp/trbn-recovery.", "/tmp/trbn-recovery.12345", "/tmp/trbn-recovery.1234567", "/tmp/trbn-recovery.123/56", "/tmp/trbn-recovery.12345.", "/tmp/trbn-recovery.123456/child", "/tmp/trbn-recovery.12345\n", "../trbn-recovery.123456"]
+		mut index := 0
+		while index < invalid.size()
+			expect(compiler_recovery_workspace_valid(invalid[index])).to_be_false()
+			index += 1
+		end
+		expect(compiler_recovery_workspace_receipt("/tmp/trbn-recovery.aZ0129")).to_equal("trbn-recovery-workspace-v1\n/tmp/trbn-recovery.aZ0129\n")
+	end
+
+	test("allocates distinct owned directories and removes only the selected empty one") do
+		case allocate_compiler_recovery_workspace("")
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		when Result::Ok(first)
+			case allocate_compiler_recovery_workspace(first + "/receipt")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			when Result::Ok(second)
+				expect(first == second).to_be_false()
+				# A populated peer is never recursively removed by empty rollback.
+				expect(discard_empty_compiler_recovery_workspace(first)).to_be_false()
+				case native_read_text(first + "/receipt")
+				when Result::Ok(receipt)
+					expect(receipt).to_equal(compiler_recovery_workspace_receipt(second))
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+				expect(discard_empty_compiler_recovery_workspace(second)).to_be_true()
+				case native_read_text(first + "/.trbn-recovery-owner")
+				when Result::Ok(marker)
+					expect(marker).to_equal(compiler_recovery_workspace_receipt(first))
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+				# Remove the test-owned receipt before applying the empty-directory rollback.
+				case Process.run("/bin/rm", [first + "/receipt"])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+				expect(discard_empty_compiler_recovery_workspace(first)).to_be_true()
+			end
+		end
+	end
+
+	test("fails receipt publication and rolls back only the new empty workspace") do
+		case allocate_compiler_recovery_workspace("")
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		when Result::Ok(first)
+			# A directory cannot be used as the receipt file.
+			case allocate_compiler_recovery_workspace(first)
+			when Result::Ok(_unexpected)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("cannot write recovery receipt for /tmp/trbn-recovery.")).to_be_true()
+				expect(error.include?("empty workspace cleanup=true")).to_be_true()
+			end
+			case native_read_text(first + "/.trbn-recovery-owner")
+			when Result::Ok(marker)
+				expect(marker).to_equal(compiler_recovery_workspace_receipt(first))
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+			expect(discard_empty_compiler_recovery_workspace(first)).to_be_true()
+		end
+	end
+end

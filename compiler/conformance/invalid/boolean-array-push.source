@@ -1,0 +1,4 @@
+def main()
+mut values := [true]
+values.push(1)
+end

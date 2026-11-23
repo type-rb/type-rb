@@ -1,0 +1,21 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Checked readonly record fields") do
+	test("preserves mutable Array values and whole-record rebinding") do
+		source := "record Box\nvalue: Integer\nvalues: Array<Integer>\nend\nrecord Outer\nbox: Box\nend\ndef extend(mut values: Array<Integer>)\nvalues.push(4)\nend\ndef main()\nmut box := Box.new(value: 1, values: [2])\nbox.values[0] += 1\nextend(box.values)\nmut shared := box.values\nshared.push(5)\nputs(box.value.to_s())\nputs(box.values[0])\nputs(box.values.size())\nmut outer := Outer.new(box: box)\nouter.box.values[1] = 6\nputs(box.values[1])\noriginal := box\nbox = Box.new(value: 9, values: [8])\nputs(original.value)\nputs(box.value)\nputs(box.values[0])\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+end

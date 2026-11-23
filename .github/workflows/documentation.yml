@@ -1,0 +1,75 @@
+name: Documentation and development metadata
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out TypeRB Native
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check changed text
+        env:
+          BASE_SHA: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          test -n "$BASE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git diff --check "$BASE_SHA...HEAD"
+
+      - name: Test evidence archival and prevent result growth
+        env:
+          BASE_SHA: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          test -n "$BASE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          python3 -m unittest tools/result_archive_test.py tools/evidence_bundle_test.py
+          # The Native history import retains the existing evidence tree. Apply
+          # current size limits to changes made since that public Native source.
+          native_import=b42574ba3abebfc8acf6fc3180854f688108fc74
+          if git merge-base --is-ancestor "$native_import" HEAD &&
+             ! git merge-base --is-ancestor "$native_import" "$BASE_SHA"; then
+            BASE_SHA="$native_import"
+          fi
+          python3 tools/result_archive.py check "$BASE_SHA" HEAD
+
+      - name: Check development skill metadata
+        shell: bash
+        run: |
+          shopt -s nullglob
+          skills=(.agents/skills/*/SKILL.md)
+          test "${#skills[@]}" -gt 0
+          for skill in "${skills[@]}"; do
+            test "$(sed -n '1p' "$skill")" = "---"
+            boundary=$(grep -n '^---$' "$skill" | sed -n '2s/:.*//p')
+            test -n "$boundary"
+            name=$(sed -n "2,$((boundary - 1))s/^name: //p" "$skill")
+            description=$(sed -n "2,$((boundary - 1))s/^description: //p" "$skill")
+            test "$name" = "$(basename "$(dirname "$skill")")"
+            test -n "$description"
+          done
+
+      - name: Check public path hygiene
+        run: |
+          if git grep -n -E '/Users/|/private/tmp/' -- \
+            '*.md' '.agents/**' 'docs/**' ':!results/**'; then
+            printf 'public documentation contains a local workspace path\n' >&2
+            exit 1
+          fi
+
+      - name: Check generated documentation applications
+        run: |
+          python3 tools/native-language-coverage.py --check-feature-table docs/native-language-feature-inventory.md
+          python3 tools/native-language-coverage.py --check-pages-data docs/capabilities/ordinary-language.js
+          node tools/capability-map-check.mjs
+          python3 tools/dependency-pages.py --check
+          node tools/benchmark-pages-data.mjs --check
+          node tools/benchmark-pages-check.mjs
+          node --test tools/daily-performance/ui-test.mjs
+          python3 -m unittest discover -s tools/daily-performance -p 'test_*.py'

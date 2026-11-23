@@ -1,0 +1,95 @@
+import { mir_type_integer, mir_type_string } from mir/model/type_ids
+import { checked_category_value } from frontend/types/value_categories
+import { mir_op_literal_widen, mir_op_singleton_literal } from mir/model/instructions
+import { union_parts } from frontend/types/union_types
+import { literal_integer_type, literal_string_type, literal_type_base, literal_type_payload } from frontend/types/literal_types
+import { source_literal_type } from frontend/syntax/literal_type_syntax
+import { nullable_assignable, nullable_element } from frontend/types/nullable_types
+import { mir_control_prepare } from mir/build/control
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirInstruction, MirModule, mir_type_id } from mir/model/module
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string } from support/storage
+
+# 57 materializes a checked singleton; 58 widens it to its scalar storage type.
+# Neither operation allocates. Verification compares the constant with the type.
+def mir_literal_context(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, expected: String, start: Integer, finish: Integer): CheckedValue
+	if expected == "" || nullable_assignable(value.type_name, expected)
+		return value
+	end
+	if nullable_element(expected) != "" && union_parts(nullable_element(expected)).size() == 0
+		return value
+	end
+	literal := source_literal_type(state, start, finish)
+	if literal == "" || !nullable_assignable(literal, expected)
+		return value
+	end
+	mir_control_prepare(state, locals)
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, literal), start)
+	if result < 0
+		return checked_value(literal, checked_category_value(), start, 0)
+	end
+	mut text := literal_type_payload(literal)
+	if literal_type_base(literal) == "String"
+		mut origin := start
+		while load_string(state.source_tokens.token_texts, origin) == "("
+			origin += 1
+		end
+		text = load_string(state.source_tokens.token_texts, origin)
+	end
+	payload := locals.mir_literal_texts.size()
+	locals.mir_literal_texts.push(text)
+	scalar_mir_instruction(state, locals, mir_op_singleton_literal(), result, mir_type_id(literal_type_base(literal)), -1, payload, -1, load_integer(state.source_tokens.token_lines, start))
+	return mir_checked_value(literal, result, start, 0)
+end
+
+def mir_literal_widen(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, origin: Integer): CheckedValue
+	base := literal_type_base(value.type_name)
+	if base == ""
+		return value
+	end
+	mir_control_prepare(state, locals)
+	result := scalar_mir_value(state, locals, mir_type_id(base), origin)
+	if result < 0
+		return checked_value(base, checked_category_value(), origin, 0)
+	end
+	scalar_mir_instruction(state, locals, mir_op_literal_widen(), result, checked_mir_value(value), -1, 0, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(base, result, origin, 0)
+end
+
+def mir_literal_instruction_error(flow: MirFlow, native_module: MirModule, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.second != -1 || instruction.failure != -1
+		return "MIR literal instruction shape differs"
+	end
+	result := mir_flow_type(flow, instruction.result)
+	if instruction.kind == mir_op_singleton_literal()
+		if (instruction.first != mir_type_integer() && instruction.first != mir_type_string()) || instruction.payload < 0 || instruction.payload >= native_module.literal_texts.size()
+			return "MIR literal constant shape differs"
+		end
+		name := mir_semantic_type_name(native_module, result)
+		text := native_module.literal_texts[instruction.payload]
+		base := literal_type_base(name)
+		if instruction.first != mir_type_id(base)
+			return "MIR literal storage tag differs"
+		end
+		if base == "Integer" && literal_integer_type(text) == name
+			return ""
+		end
+		if base == "String" && literal_string_type(text) == name
+			return ""
+		end
+		return "MIR literal constant disagrees with its singleton type"
+	end
+	if instruction.kind != mir_op_literal_widen() || instruction.payload != 0 || !mir_value_available(flow, block, index, instruction.first)
+		return "MIR literal widening shape or operand differs"
+	end
+	first := mir_semantic_type_name(native_module, mir_flow_type(flow, instruction.first))
+	base := literal_type_base(first)
+	if base == "" || mir_type_id(base) != result
+		return "MIR literal widening type differs"
+	end
+	return ""
+end

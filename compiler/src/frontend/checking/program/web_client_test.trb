@@ -1,0 +1,92 @@
+import { browser_client_decode_call, web_client_source } from frontend/checking/program/web_client
+import { browser_client_builder, browser_client_import, browser_client_imports, browser_client_method_name } from frontend/checking/program/web_client_types
+import { browser_client_query } from frontend/checking/program/web_client_request
+import { resolve } from frontend/checking/program/resolution
+import { check } from compiler
+import { compiler_new, has_diagnostic } from state/state
+import { ProjectWebEndpoint } from state/web_routes
+import { load_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { web_endpoint_test_state } from testing/web_endpoints
+import { describe, expect, test } from trb/std/test
+
+describe("Checked Web browser client generation") do
+	test("generates deterministic status decoding without changing the active owner") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 201)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		state.module_graph.active_module[0] = 0
+		state.global_bindings.declaration_owner[0] = ""
+		source := web_client_source(state, " ApiClient ")
+		expect(has_diagnostic(state)).to_be_false()
+		expect(source.include?("Status200(response: Response<String>)\n\tStatus201(response: Response<String>)")).to_be_true()
+		expect(source.include?("def items(*, headers: Headers = Headers.new(), timeout_milliseconds: Integer? = nil)")).to_be_true()
+		expect(source.include?("decoded := try raw.json<String>()")).to_be_true()
+		expect(source.include?("RequestErrorKind::Contract")).to_be_true()
+		expect(state.module_graph.active_module[0]).to_equal(0)
+		expect(state.global_bindings.declaration_owner[0]).to_equal("")
+		expect(web_client_source(state, "")).to_equal(source)
+	end
+
+	test("rejects route local response types only during generation") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<Item>(status: 200)", "record Item\nname: String\nend")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(web_client_source(state, "ApiClient")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("must be imported by the endpoint from a shared module")).to_be_true()
+	end
+
+	test("rejects a client name that collides with a result type") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(web_client_source(state, "ItemsEndpointResult")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("declared more than once")).to_be_true()
+	end
+
+	test("validates names and catalog ownership before dereferencing metadata") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		state.module_graph.web_endpoints[0] = ProjectWebEndpoint.new(object_id: -1, route_index: 0, input_type: "", input_name: "", responses: [])
+		expect(web_client_source(state, "ApiClient")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("catalog identity")).to_be_true()
+		mut invalid := compiler_new(4096)
+		expect(web_client_source(invalid, "bad-name")).to_equal("")
+		expect(load_string(invalid.diagnostics.messages, 0).include?("must be a TypeRB class identifier")).to_be_true()
+	end
+
+	test("orders imports and keeps root imports before named imports") do
+		mut builder := browser_client_builder()
+		browser_client_import(builder, "z/types", "Item")
+		browser_client_import(builder, "a/types", "Zed")
+		browser_client_import(builder, "a/types", "")
+		browser_client_import(builder, "a/types", "Alpha")
+		browser_client_import(builder, "a/types", "Zed")
+		expect(browser_client_imports(builder)).to_equal("import a/types\nimport { Alpha, Zed } from a/types\nimport { Item } from z/types\n")
+	end
+
+	test("assigns distinct query locals through nullable and repeated values") do
+		state := compiler_new(4096)
+		mut builder := browser_client_builder()
+		expected := "\tquery_value_0 := input.tags\n\tif query_value_0 != nil\n\t\tquery_value_0.each do |query_item_1|\n\t\t\tquery.push(URL::QueryParameter.new(name: \"tag\", value: query_item_1))\n\t\tend\n\tend\n"
+		expect(browser_client_query(state, builder, "Array<String>?", "input.tags", "tag", "\t", 0)).to_equal(expected)
+		expect(builder.sequence[0]).to_equal(2)
+		expect(browser_client_query(state, builder, "Integer?", "input.page", "page", "", 0).include?("query_value_2.to_s()")).to_be_true()
+	end
+
+	test("derives method names from acronym and digit boundaries") do
+		expect(browser_client_method_name("HTTPItemsEndpoint")).to_equal("http_items")
+		expect(browser_client_method_name("Item2DViewEndpoint")).to_equal("item2_d_view")
+		expect(browser_client_method_name("Read_ThingEndpoint")).to_equal("read_thing")
+		expect(browser_client_method_name("Endpoint")).to_equal("endpoint")
+		expect(browser_client_method_name("InitializeEndpoint")).to_equal("initialize")
+	end
+
+	test("preserves formatter boundaries around nullable and nested type calls") do
+		expect(browser_client_decode_call("String?")).to_equal("raw.json<String?> ()")
+		expect(browser_client_decode_call("Array<String?>")).to_equal("raw.json<Array<String?>>()")
+		expect(browser_client_decode_call("Array<Array<String>>")).to_equal("raw.json<Array<Array<String>>> ()")
+		expect(browser_client_decode_call("Array<Array<Array<String>>>")).to_equal("raw.json<Array<Array<Array<String>>>>()")
+	end
+end

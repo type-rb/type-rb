@@ -1,0 +1,39 @@
+def show(value: Integer?)
+	if value == nil
+		puts("nil")
+	else
+		puts(value)
+	end
+end
+alias Text = String
+record Entry
+	label: Text
+end
+
+def probe()
+	mut current := "old" + "ztail"
+	receiver := fn(): String
+		puts("receiver")
+		return current
+	end
+	argument := fn(): String
+		puts("argument")
+		current = "new"
+		return "z" + "tail"
+	end
+	show(receiver().index(argument()))
+	puts(current)
+	entry := Entry.new(label: "kept" + "qv")
+	find := fn(part: Text): Integer?
+		return entry.label.index(part)
+	end
+	show(find("qv"))
+	show(entry.label.rindex("missing"))
+	puts(entry.label)
+	values := ["qxq", "zxz"].map { |text| text.rindex("x") }
+	values.each { |value| show(value) }
+end
+
+def main()
+	probe()
+end

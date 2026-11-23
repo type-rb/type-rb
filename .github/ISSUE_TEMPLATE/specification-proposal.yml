@@ -1,0 +1,58 @@
+name: Specification proposal
+description: Propose a TypeRB specification improvement found while reproducing its behavior.
+type: Feature
+projects: ["type-rb/6"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Keep implementing the pinned reference behavior while this proposal is open.
+        Set Attention to Needs decision; the maintainer decides whether to adopt it
+        and where it lands.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Ambiguity or missing rule
+        - Documentation and behavior disagree
+        - Behavior differs between modes
+        - Unnecessary complexity
+        - Prevents an efficient implementation
+        - Poor diagnostics
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: A minimal generic reproduction, the commands, and the outcome at the pinned revision in TYPE_RB_REVISION.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed contract
+      description: The specified behavior you propose, stated independently of any implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale and impact
+      description: Why the change helps (clarity, portability, performance, diagnostics or simplicity) and how existing programs are affected.
+    validations:
+      required: true
+  - type: input
+    id: found
+    attributes:
+      label: Found while
+      description: The task, PR or scenario that exposed this, such as #123.
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Public repository
+      options:
+        - label: This issue contains only public information and synthetic reproductions.
+          required: true

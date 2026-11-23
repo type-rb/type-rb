@@ -1,0 +1,8 @@
+case	candidate	command	arg1	arg2	arg3	arg4	expected
+spectral-norm	typerb-native	/home/runner/work/_temp/prepare-workspace/backend-pair/spectral-norm/native	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	typerb-go	/home/runner/work/_temp/prepare-workspace/backend-pair/spectral-norm/reference	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	c	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/c/program	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	cpp	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/cpp/program	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	go	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/go/program	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	rust	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/rust/program	5500	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt
+spectral-norm	java	/usr/bin/java	-cp	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/java/classes	spectralnorm	5500	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/spectral-norm/expected/5500.txt

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Small-input weekly comparisons of TypeRB Native with Pure Go, C, C++, Rust and Java.">
+  <title>Other languages · TypeRB Native</title>
+  <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./daily.css">
+</head>
+<body>
+<header class="site-header"><div class="shell header-inner">
+  <a class="brand" href="../"><span class="brand-mark" aria-hidden="true">TR</span><span>TypeRB Native</span><span class="development">Development</span></a>
+  <nav class="site-nav" aria-label="Site navigation"><a href="../">Capabilities</a><a href="./" aria-current="page">Benchmarks</a></nav>
+</div></header>
+<main class="shell">
+  <div class="daily-header"><h1>Other languages</h1><a href="https://github.com/type-rb/type-rb-native/actions/workflows/weekly-performance.yml">Weekly measurement runs ↗</a></div>
+  <nav class="daily-nav" aria-label="Benchmark views"><a href="./">Current performance</a><a href="representative.html">Application workloads</a><a href="trends.html">Trends</a><a href="weekly.html" aria-current="page">Other languages</a><a href="comparison.html">Detailed comparison</a></nav>
+  <div id="status" class="daily-status" role="status">Loading the weekly comparison…</div>
+  <p id="context" class="daily-meta"></p>
+  <section id="results" aria-label="Weekly comparison results">
+    <div class="daily-controls"><div><span class="control-label">Metric</span><div id="metric" class="choice-group" role="group" aria-label="Metric"></div></div><div><span class="control-label">Workload and input</span><div id="case" class="choice-group" role="group" aria-label="Workload"></div></div></div>
+    <p id="metric-description" class="daily-meta"></p>
+    <div class="table-scroll"><table class="daily-table"><thead><tr><th scope="col">Implementation</th><th scope="col">Measured value</th><th scope="col">How Native compares</th></tr></thead><tbody id="result-body"></tbody></table></div>
+    <p id="evidence" class="daily-meta"></p>
+  </section>
+  <details class="method-details"><summary>Measurement details and scope</summary>
+    <p>This small-input comparison updates on Sunday around 05:23 JST when performance inputs changed, or on demand. It is independent of daily measurements and PR acceptance. Each weekly run includes current Native on the same host; values from different runs are never divided to produce comparisons.</p>
+    <p>The five external implementations are the same registered upstream sources used by the detailed comparison. Program structure and optimization choices contribute to the results. All six implementations share one logical CPU and checked output oracles. One warmup and five retained fresh processes include startup; Java JIT and JVM initialization occur in every process. This is not Java steady-state throughput or a general language ranking. Peak RSS is GNU time maximum RSS, not a process-tree sum.</p>
+    <p>Compiler warnings remain in raw build evidence. Runtime output, stderr, exits and timeouts are checked. Failed observations stay visible. Toolchain versions, source and executable hashes, inputs and raw samples accompany each run. <a href="https://github.com/type-rb/type-rb-native/blob/main/docs/daily-performance.md">Measurement strategy ↗</a></p>
+    <ul id="identities"></ul>
+  </details>
+  <footer><p>TypeRB Native · experimental measurements · <a href="comparison.html">Detailed cross-language snapshot</a></p></footer>
+</main>
+<script type="module" src="./weekly.js"></script>
+</body></html>

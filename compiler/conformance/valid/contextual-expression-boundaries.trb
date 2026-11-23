@@ -1,0 +1,58 @@
+def quotient(left: Integer, right: Integer): Float
+	return (left) / right
+end
+
+def nested_quotient(left: Integer, right: Integer): Float
+	return (((left) / (right)))
+end
+
+def direct_quotient(left: Integer, right: Integer): Float
+	mut result: Float := 0
+	mut index := 0
+	while index < 1
+		result = (left) / right
+		index += 1
+	end
+	return result
+end
+
+def empty_values(): Array<Float>
+	return (([]))
+end
+
+def main()
+	puts((7 / 2).to_s())
+	puts((((-7) / 2)).to_s())
+	puts(("12").to_i().to_s())
+	puts(([7, 2]).size().to_s())
+	puts(quotient(7, 2).to_i().to_s())
+	puts(quotient(-7, 2).to_i().to_s())
+	puts(nested_quotient(7, -2).to_i().to_s())
+	puts(direct_quotient(-7, -2).to_i().to_s())
+	if quotient(7, 2) != 3.0
+		puts("early-scalar-conversion")
+	end
+	if direct_quotient(7, 2) != 3.0
+		puts("early-direct-conversion")
+	end
+	values: Array<Float> := (([(7) / 2, (-7) / 2]))
+	if values[0] != 3.0
+		puts("early-element-conversion")
+	end
+	if values[1] != -3.0
+		puts("early-negative-element-conversion")
+	end
+	puts(values[0].to_i().to_s())
+	puts(values[1].to_i().to_s())
+	mut empty: Array<Float> := (([]))
+	empty.push((7) / 2)
+	if empty[0] != 3.0
+		puts("early-argument-conversion")
+	end
+	puts(empty[0].to_i().to_s())
+	puts(empty_values().size().to_s())
+	if (!(false)) == true
+		puts("boolean-context-ok")
+	end
+	return
+end

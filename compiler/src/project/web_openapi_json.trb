@@ -1,0 +1,75 @@
+import { json_array, json_object, json_string } from project/json_kinds
+import { PackageJson, package_json_parse, package_json_quote, package_sorted_indices } from project/package_json
+
+# Ordered fields model document records; maps request lexical key order.
+def openapi_object(names: Array<String>, values: Array<String>, sorted: Boolean): String
+	mut order: Array<Integer> := []
+	if sorted
+		order = package_sorted_indices(names)
+	else
+		mut index := 0
+		while index < names.size()
+			order.push(index)
+			index += 1
+		end
+	end
+	mut fields: Array<String> := []
+	order.each do |index|
+		fields.push(package_json_quote(names[index]) + ":" + values[index])
+	end
+	return "{" + fields.join(",") + "}"
+end
+
+def openapi_strings(values: Array<String>): String
+	mut quoted: Array<String> := []
+	values.each { |value| quoted.push(package_json_quote(value)) }
+	return "[" + quoted.join(",") + "]"
+end
+
+def openapi_indent(depth: Integer): String
+	mut result := ""
+	mut index := 0
+	while index < depth
+		result += "  "
+		index += 1
+	end
+	return result
+end
+
+def openapi_json_node(document: PackageJson, id: Integer, depth: Integer): String
+	row := document.nodes[id]
+	if row.kind == json_string()
+		return package_json_quote(row.text)
+	end
+	if row.kind != json_object() && row.kind != json_array()
+		return row.text
+	end
+	mut opening := "["
+	mut closing := "]"
+	if row.kind == json_object()
+		opening = "{"
+		closing = "}"
+	end
+	if row.children.size() == 0
+		return opening + closing
+	end
+	mut values: Array<String> := []
+	mut index := 0
+	while index < row.children.size()
+		mut prefix := ""
+		if row.kind == json_object()
+			prefix = package_json_quote(row.keys[index]) + ": "
+		end
+		values.push(openapi_indent(depth + 1) + prefix + openapi_json_node(document, row.children[index], depth + 1))
+		index += 1
+	end
+	return opening + "\n" + values.join(",\n") + "\n" + openapi_indent(depth) + closing
+end
+
+def openapi_json_format(source: String): String
+	document := package_json_parse(source)
+	if document.error[0] != ""
+		return ""
+	end
+	return openapi_json_node(document, 0, 0) + "\n"
+end

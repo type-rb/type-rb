@@ -1,0 +1,8 @@
+{
+  "name": "recovery-aggregate-result-control-flow",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-aggregate/result-control-flow"
+  }
+}

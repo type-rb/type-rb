@@ -1,0 +1,56 @@
+name: Task
+description: One reviewable change under an initiative.
+type: Task
+projects: ["type-rb/6"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        See the [project workflow](https://github.com/type-rb/type-rb-native/blob/main/docs/project-workflow.md).
+        Link the task as a sub-issue of its initiative. A PR completing this task
+        uses `Closes #<n>` for the task, never for its parent initiative.
+  - type: input
+    id: initiative
+    attributes:
+      label: Initiative
+      description: The parent initiative issue, such as #123.
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: The behavior, ownership or measurement this task changes.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable conditions and the validation that proves them.
+    validations:
+      required: true
+  - type: textarea
+    id: touches
+    attributes:
+      label: Touches
+      description: Main files or modules expected to change.
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Issues or PRs that must land first.
+  - type: textarea
+    id: specification
+    attributes:
+      label: Specification feedback
+      description: >-
+        Ambiguities or improvements noticed in the TypeRB specification while doing
+        this task. Open a Specification proposal for anything that needs a decision.
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Public repository
+      options:
+        - label: This issue contains only public information and synthetic reproductions.
+          required: true

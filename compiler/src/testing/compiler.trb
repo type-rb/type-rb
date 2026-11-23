@@ -1,0 +1,86 @@
+import { string_starts_at } from compiler
+import { MirInstruction } from mir/model/module
+import { load_string } from support/storage
+import { native_read_text } from project/native_file_system
+import { QbeOutput } from backend/qbe/output
+import trb/std/result
+import trb/std/string_builder
+
+def compiler_test_instruction_with_cell(instruction: MirInstruction, field: Integer, value: Integer): MirInstruction
+	mut row := [instruction.kind, instruction.result, instruction.first, instruction.second, instruction.payload, instruction.failure, instruction.source_id, instruction.line]
+	row[field] = value
+	return MirInstruction.new(kind: row[0], result: row[1], first: row[2], second: row[3], payload: row[4], failure: row[5], source_id: row[6], line: row[7])
+end
+
+def frontend_test_source(): String
+	return "record Pair\n\tleft: Integer\n\tright: Integer\nend\n\ndef add(left: Integer, right: Integer): Integer\n\treturn left + right\nend\n\ndef main()\n\tpair := Pair.new(left: 20, right: 22)\n\tmut values: Array<Integer> := []\n\tvalues.push(add(pair.left, pair.right))\n\tmessage := \"o\" + \"k\"\n\tmut repetitions := 0\n\twhile repetitions < 1000000\n\t\trepeated := repetitions\n\t\trepetitions = repeated + 1\n\tend\n\tif values[0] == 42\n\t\tif message != \"bad\"\n\t\t\tif repetitions == 1000000\n\t\t\t\tputs(message)\n\t\t\telse\n\t\t\t\tputs(\"bad\")\n\t\t\tend\n\t\telse\n\t\t\tputs(\"bad\")\n\t\tend\n\telse\n\t\tputs(\"bad\")\n\tend\n\treturn\nend\n"
+end
+
+def output_source(output: QbeOutput): String
+	mut writer := StringBuilder.new()
+	mut index := 0
+	while index < output.lines.used[0]
+		writer.append(load_string(output.lines, index))
+		writer.append("\n")
+		index += 1
+	end
+	return writer.to_s()
+end
+
+def required_test_source(path: String): String
+	case native_read_text(path)
+	when Result::Ok(source)
+		return source
+	when Result::Err(error)
+		puts(error.operation + ": " + error.message)
+		return ""
+	end
+end
+
+def scale_test_source(count: Integer): String
+	mut writer := StringBuilder.new()
+	writer.append("def f0(value: Integer): Integer\n\treturn value\nend\n\n")
+	mut index := 1
+	while index < count
+		writer.append("def f" + index.to_s() + "(value: Integer): Integer\n\treturn f")
+		writer.append((index - 1).to_s())
+		writer.append("(value)\nend\n\n")
+		index += 1
+	end
+	writer.append("def main()\n\t_value := f" + (count - 1).to_s() + "(1)\n\treturn\nend\n")
+	return writer.to_s()
+end
+
+def repeat_text(fragment: String, count: Integer): String
+	mut writer := StringBuilder.new()
+	mut index := 0
+	while index < count
+		writer.append(fragment)
+		index += 1
+	end
+	return writer.to_s()
+end
+
+def occurrence_count(value: String, needle: String): Integer
+	mut count := 0
+	mut index := 0
+	while index + needle.size() <= value.size()
+		if string_starts_at(value, index, needle)
+			count += 1
+		end
+		index += 1
+	end
+	return count
+end
+
+def large_scalar_inline_test_source(): String
+	mut writer := StringBuilder.new()
+	writer.append("def scalar(value: Integer): Integer\n\treturn value + 1\nend\n\n")
+	mut index := 1
+	while index < 32
+		writer.append("def filler" + index.to_s() + "(value: Integer): Integer\n\treturn value\nend\n\n")
+		index += 1
+	end
+	writer.append("def main()\n\tmut index := 0\n\twhile index < 1\n\t\tvalue := scalar(index)\n\t\tindex += value\n\tend\n\treturn\nend\n")
+	return writer.to_s()
+end

@@ -1,0 +1,8 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 1,
+  "module": "example/main",
+  "sources": [],
+  "functions": [],
+  "unexpected": true
+}

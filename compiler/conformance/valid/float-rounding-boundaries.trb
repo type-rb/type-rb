@@ -1,0 +1,36 @@
+def smallest(): Float
+	mut value := 1.0
+	mut exponent := 0
+	while exponent < 1074
+		value = value / 2.0
+		exponent += 1
+	end
+	return value
+end
+def largest(): Float
+	mut value := 1.9999999999999998
+	mut exponent := 0
+	while exponent < 1023
+		value = value * 2.0
+		exponent += 1
+	end
+	return value
+end
+def reciprocal(value: Float): Float
+	return 1.0 / value
+end
+def negate(value: Float): Float
+	return -value
+end
+def probe()
+	values := [-9007199254740991.0, -4503599627370495.0, -2.5, -1.5, -0.5000000000000001, -0.5, -0.49999999999999994, -smallest(), 0.0, smallest(), 0.49999999999999994, 0.5, 0.5000000000000001, 1.5, 2.5, 4503599627370495.0, 9007199254740991.0]
+	values.each do |value|
+		puts(value.floor())
+		puts(value.ceil())
+		puts(value.round())
+	end
+end
+
+def main()
+	probe()
+end

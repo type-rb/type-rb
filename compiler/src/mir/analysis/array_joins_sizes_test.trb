@@ -1,0 +1,203 @@
+import { check, emit_qbe } from compiler
+import { MirArrayJoin, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { mir_array_join_size_inline, mir_array_joins_equal } from mir/analysis/array_joins
+import { mir_literal_fragment } from mir/analysis/string_splits
+import { verify_mir } from mir/verify/module
+import { logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def join_size_probe_runtime(): String
+	mut state := logical_checked_source("def measure(first: String, second: String): Integer\nreturn [first, second].join(\"/\").size()\nend\ndef main()\nputs(measure(\"a\", \"b\"))\nend\n")
+	expect(check(state)).to_be_true()
+	return control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $join_unused_main(")
+end
+
+describe("MIR joined String size") do
+	test("requires an adjacent sole consumer and rederives it without source") do
+		mut state := logical_checked_source("def measure(text: String): Integer\nreturn [text, text].join(\"/\").size()\nend\ndef main()\nputs(measure(\"x\"))\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_joins[index][0]
+		expect(plan.size).to_equal(plan.join + 1)
+		output := control_test_output(emit_qbe(state))
+		expect(mir_array_join_size_inline(plan)).to_be_true()
+		expect(state.scalar_mir.root_plans[index].instructions.size()).to_equal(0)
+		expect(output.include?("call $trbn_string_join_size(l %join_fragments")).to_be_false()
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(output)
+		function := state.scalar_mir.functions[index]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			block := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = block
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_array_joins_equal(state.scalar_mir.array_joins[index], [plan])).to_be_true()
+		state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: -1, separator_literal: plan.separator_literal, size_concats: plan.size_concats, appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+	end
+
+	test("retains joined values that escape or cross another instruction") do
+		[
+			"joined := [text, text].join(\"/\")\nsize := joined.size()\nputs(joined)\nreturn size",
+			"joined := [text, text].join(\"/\")\nputs(text)\nreturn joined.size()",
+			"joined := [text, text].join(\"/\")\nsize := joined.size()\nreturn size + joined.size()",
+		].each do |body|
+			mut state := logical_checked_source("def measure(text: String): Integer\n" + body + "\nend\ndef main()\nend\n")
+			expect(check(state)).to_be_true()
+			plan := state.scalar_mir.array_joins[mir_function_index(state.scalar_mir, 0)][0]
+			expect(plan.size).to_equal(-1)
+		end
+	end
+
+	test("requires a verified separator boundary before eliding the safe point") do
+		mut state := logical_checked_source("def measure(text: String, separator: String): Integer\nreturn [text, text].join(separator).size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_joins[index][0]
+		expect(plan.separator_literal).to_equal(-1)
+		expect(mir_array_join_size_inline(plan)).to_be_false()
+		expect(state.scalar_mir.root_plans[index].instructions.size()).to_equal(1)
+		state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: 999999999999, size_concats: plan.size_concats, appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+		# Rebuild every other fact after changing a canonical separator. A stale
+		# plan alone must not make the runtime fallback disappear.
+		mut literal := logical_checked_source("def measure(text: String): Integer\nreturn [text, text].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(literal)).to_be_true()
+		literal_index := mir_function_index(literal.scalar_mir, 0)
+		safe := literal.scalar_mir.array_joins[literal_index][0]
+		literal.scalar_mir.literal_texts[safe.separator_literal] = ""
+		optimize_verified_mir(literal.scalar_mir)
+		expect(verify_mir(literal.scalar_mir, true)).to_equal("")
+		expect(mir_array_join_size_inline(literal.scalar_mir.array_joins[literal_index][0])).to_be_false()
+		literal.scalar_mir.array_joins[literal_index][0] = safe
+		expect(verify_mir(literal.scalar_mir, true)).to_equal("MIR Array join plan differs")
+	end
+
+	test("checks inline item and separator overflow before touching data") do
+		mut state := logical_checked_source("def measure(first: String, second: String): Integer\nreturn [first, second].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(mir_array_join_size_inline(state.scalar_mir.array_joins[index][0])).to_be_true()
+		base := control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $join_unused_main(")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			[0, 1].each do |length|
+				mut output := base
+				output += "data $join_huge = align 8 { l 0, l 9007199254740991, l 9007199254740991, b 0 }\n"
+				output += "data $join_small = align 8 { l 0, l " + length.to_s() + ", l " + length.to_s() + ", b 65, b 0 }\n"
+				output += "export function w $main() {\n@start\n %size =l call $trbnf0(l $join_huge, l $join_small)\n ret 0\n}\n"
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error.include?("panic: allocation failed")).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("preserves Unicode and invalid decoding at both separator edges") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			# Static headers allow arbitrary bytes without depending on the bootstrap
+			# compiler's restricted byte-escape adapter. Ordinary joining is the oracle.
+			mut output := join_size_probe_runtime()
+			corpus: Array<Array<Integer>> := [[], [0], [47], [65, 66], [194], [162], [194, 162], [226], [130, 172], [240, 159, 152, 128], [255], [47, 194, 162, 47]]
+			corpus.each.with_index do |bytes, index|
+				points := mir_literal_fragment(bytes, 0, bytes.size()).points
+				output += "data $join_text" + index.to_s() + " = align 8 { l 0, l " + bytes.size().to_s() + ", l " + points.to_s()
+				bytes.each do |byte|
+					output += ", b " + byte.to_s()
+				end
+				output += ", b 0 }\n"
+			end
+			output += "function $join_probe(l %left, l %right, l %separator) {\n@start\n %storage =l alloc8 16\n storel %left, %storage\n %second =l add %storage, 8\n storel %right, %second\n %expected_string =l call $trbn_string_join(l %storage, l 2, l %separator)\n %points_address =l add %expected_string, 16\n %expected =l loadl %points_address\n %actual =l call $trbn_string_join_size(l %storage, l 2, l %separator)\n %same =w ceql %expected, %actual\n jnz %same, @ok, @bad\n@bad\n call $exit(w 3)\n hlt\n@ok\n ret\n}\n"
+			output += "function $join_inline_probe(l %left, l %right) {\n@start\n %storage =l alloc8 16\n storel %left, %storage\n %second =l add %storage, 8\n storel %right, %second\n %expected_string =l call $trbn_string_join(l %storage, l 2, l $join_text2)\n %points_address =l add %expected_string, 16\n %expected =l loadl %points_address\n %actual =l call $trbnf0(l %left, l %right)\n %same =w ceql %expected, %actual\n jnz %same, @ok, @bad\n@bad\n call $exit(w 4)\n hlt\n@ok\n ret\n}\n"
+			output += "data $join_ok = { b \"ok\", b 0 }\nexport function w $main() {\n@start\n"
+			corpus.each.with_index do |_left, left|
+				corpus.each.with_index do |_right, right|
+					output += " call $join_inline_probe(l $join_text" + left.to_s() + ", l $join_text" + right.to_s() + ")\n"
+					corpus.each.with_index do |_separator, separator|
+						output += " call $join_probe(l $join_text" + left.to_s() + ", l $join_text" + right.to_s() + ", l $join_text" + separator.to_s() + ")\n"
+					end
+				end
+			end
+			output += " call $puts(l $join_ok)\n ret 0\n}\n"
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("ok\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("reads joined size without allocating for clean heap fragments") do
+		mut state := logical_checked_source("def main()\nmut index := 100\nwhile index < 110\nfirst := index.to_s()\nlast := (index + 1).to_s()\nputs([first, first, last].join(\"\").size())\nindex += 1\nend\nend\n")
+		expect(check(state)).to_be_true()
+		output := control_test_output(emit_qbe(state))
+		marker := " %result =l call $trbn_string_alloc(l %payload)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		guarded := parts[0] + "\tcall $exit(w 42)\n" + marker + parts[1]
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, guarded)
+			when Result::Ok(actual)
+				expect(actual).to_equal("9\n9\n9\n9\n9\n9\n9\n9\n9\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("handles empty and singleton inputs without a separator boundary") do
+		mut state := logical_checked_source("def main()\nempty: Array<String> := []\nputs(empty.join(\"/\").size())\nputs([\"abc\"].join(\"\").size())\nend\n")
+		expect(check(state)).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("checks both item and separator byte overflow before reading data") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			[0, 1].each do |length|
+				# A synthetic huge header reaches the two overflow branches
+				# without allocating an impossible buffer or dereferencing it.
+				mut output := join_size_probe_runtime()
+				output += "data $join_huge = align 8 { l 0, l 9007199254740991, l 9007199254740991, b 0 }\n"
+				output += "data $join_small = align 8 { l 0, l " + length.to_s() + ", l " + length.to_s() + ", b 65, b 0 }\n"
+				output += "data $join_separator = align 8 { l 0, l 1, l 1, b 47, b 0 }\n"
+				output += "export function w $main() {\n@start\n %storage =l alloc8 16\n storel $join_huge, %storage\n %second =l add %storage, 8\n storel $join_small, %second\n %size =l call $trbn_string_join_size(l %storage, l 2, l $join_separator)\n ret 0\n}\n"
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error.include?("panic: allocation failed")).to_be_true()
+				end
+			end
+		end
+	end
+end

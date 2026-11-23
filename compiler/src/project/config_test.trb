@@ -1,0 +1,170 @@
+import { parse_project_config } from project/config
+import { describe, expect, test } from trb/std/test
+
+describe("Project configuration") do
+	test("strictly decodes the configured-project projection and comments") do
+		config := parse_project_config(
+			"{\n" +
+			"  // a comment outside a String\n" +
+			"  \"$schema\": \"https://example.com/schema//v1\",\n" +
+			"  \"name\": \"configured /* project */\",\n" +
+			"  \"version\": \"2.0.0\",\n" +
+			"  \"m\\u006fde\": \"go\",\n" +
+			"  \"sourceDir\": \"src/./application/../lib\",\n" +
+			"  \"outDir\": \"artifacts/native\",\n" +
+			"  \"copyFiles\": false,\n" +
+			"  \"packageManagement\": \"external\",\n" +
+			"  /* the bounded portable Go projection */\n" +
+			"  \"go\": {\n" +
+			"    \"module\": \"example.com/configured\",\n" +
+			"    \"version\": \"1.28.1\"\n" +
+			"  }\n" +
+			"}\n",
+		)
+		expect(config.error).to_equal("")
+		expect(config.name).to_equal("configured /* project */")
+		expect(config.version).to_equal("2.0.0")
+		expect(config.mode).to_equal("go")
+		expect(config.source_dir).to_equal("src/lib")
+		expect(config.out_dir).to_equal("artifacts/native")
+		expect(config.copy_files).to_be_false()
+		expect(config.package_management).to_equal("external")
+		expect(config.go_config.module_name).to_equal("example.com/configured")
+		expect(config.go_config.version).to_equal("1.28.1")
+	end
+
+	test("applies the configured-project defaults") do
+		config := parse_project_config(
+			"{\"name\":\"minimal\",\"mode\":\"go\",\"go\":{\"module\":\"example.com/minimal\"}}",
+		)
+		expect(config.error).to_equal("")
+		expect(config.version).to_equal("0.1.0")
+		expect(config.source_dir).to_equal(".")
+		expect(config.out_dir).to_equal("build")
+		expect(config.copy_files).to_be_true()
+		expect(config.package_management).to_equal("managed")
+		expect(config.go_config.version).to_equal("1.27")
+	end
+
+	test("rejects ambiguous and unsupported configured-project input") do
+		duplicate := parse_project_config(
+			"{\"name\":\"first\",\"name\":\"second\",\"mode\":\"go\",\"go\":{\"module\":\"example.com/x\"}}",
+		)
+		expect(duplicate.error).to_equal("duplicate project configuration field name")
+
+		trailing := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"go\":{\"module\":\"example.com/x\",}}",
+		)
+		expect(trailing.error).to_equal("trailing comma in go configuration")
+
+		unsupported := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"unknown\":{},\"go\":{\"module\":\"example.com/x\"}}",
+		)
+		expect(unsupported.error).to_equal("unsupported project configuration field unknown")
+
+		wrong_type := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"copyFiles\":\"false\",\"go\":{\"module\":\"example.com/x\"}}",
+		)
+		expect(wrong_type.error).to_equal("expected JSON Boolean")
+	end
+
+	test("rejects the removed Go root package setting") do
+		config := parse_project_config("{\"mode\":\"go\",\"go\":{\"module\":\"example.com/x\",\"rootPackage\":\"main\"}}")
+		expect(config.error).to_equal("unsupported go configuration field rootPackage")
+	end
+
+	test("accepts native projects without a Go configuration") do
+		explicit := parse_project_config("{\"name\":\"x\",\"mode\":\"trb\"}")
+		expect(explicit.error).to_equal("")
+		expect(explicit.mode).to_equal("trb")
+		implicit := parse_project_config("{\"name\":\"x\"}")
+		expect(implicit.error).to_equal("")
+		expect(implicit.mode).to_equal("")
+	end
+
+	test("validates configured-project modes, versions, and paths") do
+		wrong_mode := parse_project_config("{\"name\":\"x\",\"mode\":\"python\"}")
+		expect(wrong_mode.error).to_equal("mode must be go, ruby, typescript, or trb")
+		expect(parse_project_config("{\"name\":\"x\",\"mode\":\"ruby\"}").error).to_equal("")
+		expect(parse_project_config("{\"name\":\"x\",\"mode\":\"typescript\"}").error).to_equal("")
+
+		missing_module := parse_project_config("{\"name\":\"x\",\"mode\":\"go\",\"go\":{}}")
+		expect(missing_module.error).to_equal("go.module is required for mode go")
+
+		old_go := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"go\":{\"module\":\"example.com/x\",\"version\":\"1.26.9\"}}",
+		)
+		expect(old_go.error).to_equal("go.version must be 1.27 or later")
+
+		overflowing_go := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"go\":{\"module\":\"example.com/x\",\"version\":\"999999999999999999999999999.27\"}}",
+		)
+		expect(overflowing_go.error).to_equal("go.version must be 1.27 or later")
+
+		absolute := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"sourceDir\":\"/tmp/src\",\"go\":{\"module\":\"example.com/x\"}}",
+		)
+		expect(absolute.error).to_equal("sourceDir must be relative to the project root")
+
+		escaping := parse_project_config(
+			"{\"name\":\"x\",\"mode\":\"go\",\"outDir\":\"build/../../outside\",\"go\":{\"module\":\"example.com/x\"}}",
+		)
+		expect(escaping.error).to_equal("outDir cannot escape the project root")
+	end
+
+	test("accepts the complete reference configuration schema") do
+		config := parse_project_config(
+			"{\n" +
+			"  \"name\": \"complete\",\n" +
+			"  \"mode\": \"go\",\n" +
+			"  \"packages\": {\"acme/contracts\": \"v1.2.3\", \"company/auth\": {\"source\": \"gitlab.com/company/auth\", \"version\": \"v2.0.0\"}, \"local/widgets\": {\"path\": \"../widgets\"}},\n" +
+			"  \"dependencies\": {\"example.com/library\": \"v1.2.3\"},\n" +
+			"  \"devDependencies\": {},\n" +
+			"  \"localPackages\": {\"acme/shared\": \"../shared/src\"},\n" +
+			"  \"packageOptions\": {\"trb/orm\": {\"adapter\": \"sqlite\", \"retries\": [1, 2.5e1, -3], \"enabled\": true, \"note\": null}},\n" +
+			"  \"ruby\": {\"source\": \"https://rubygems.org\", \"version\": \"3.4\", \"loader\": \"zeitwerk\"},\n" +
+			"  \"typescript\": {\"runtime\": \"bun\", \"packageManager\": \"bun\", \"moduleType\": \"module\", \"scripts\": {\"dev\": \"bun run\"}},\n" +
+			"  \"db\": {\"adapter\": \" MySQL \", \"database\": {\"environment\": \"DATABASE_URL\"}, \"schema\": \"db/schema.sql\", \"lock\": \"db/schema.lock.json\", \"sqldef\": {\"command\": \"mysqldef\", \"version\": \"3.11\", \"arguments\": [\"--x\"]}},\n" +
+			"  \"jobs\": {\"configuration\": \"config/jobs.trb\"},\n" +
+			"  \"lint\": {\"preset\": \"recommended\", \"rules\": {\"trb/prefer-conditional-transfer\": \" warning \"}},\n" +
+			"  \"go\": {\"module\": \"example.com/complete\", \"indirectDependencies\": {\"a\": \"v1\"}, \"sqldef\": {\"command\": \"mysqldef\", \"database\": \"db/app\", \"schema\": \"db/schema.sql\", \"arguments\": []}}\n" +
+			"}\n",
+		)
+		expect(config.error).to_equal("")
+		expect(config.packages.size()).to_equal(3)
+		expect(config.packages[0].version).to_equal("v1.2.3")
+		expect(config.packages[1].source).to_equal("gitlab.com/company/auth")
+		expect(config.packages[2].path).to_equal("../widgets")
+		expect(config.local_packages.size()).to_equal(1)
+		expect(config.local_packages[0].path).to_equal("../shared/src")
+	end
+
+	test("validates sections like the reference loader") do
+		cases := [
+			["{\"name\":\"x\",\"mode\":\"trb\",\"jobs\":{\"configuration\":\"../outside/jobs\"}}", "jobs.configuration must stay below sourceDir"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"jobs\":{\"configuration\":\" .trb \"}}", "jobs.configuration is required"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"db\":{\"adapter\":\"oracle\"}}", "db.adapter must be sqlite, postgresql, or mysql"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"db\":{\"adapter\":\"sqlite\",\"schema\":\"../schema.sql\"}}", "db.schema must stay below the project root"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"db\":{\"adapter\":\"sqlite\",\"database\":\"\"}}", "db.database must be a non-empty string or environment source"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"db\":{\"adapter\":\"sqlite\",\"database\":{\"value\":\"x\"}}}", "db.database must be a string or an environment source"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"lint\":{\"preset\":\"strict\"}}", "lint.preset must be recommended or none"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"lint\":{\"rules\":{\"trb/a\":\"fatal\"}}}", "lint rule trb/a level must be off, warning, or error"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"ruby\":{\"loader\":\"autoload\"}}", "ruby.loader must be require_relative or zeitwerk"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"typescript\":{\"runtime\":\"deno\"}}", "typescript.runtime must be browser, bun, or node"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"go\":{\"sqldef\":{\"command\":\"x\"}}}", "go.sqldef requires command, database, and schema"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"packages\":{\"local/widgets\":{\"path\":\"../w\",\"version\":\"v1\"}}}", "TypeRB package local/widgets path cannot be combined with source or version"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"packages\":{\"acme/x\":{\"source\":\"gitlab.com/x\"}}}", "TypeRB package acme/x requires a version or path"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"packages\":{\"trb/web\":\"v1\"}}", "invalid TypeRB package name trb/web"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"packages\":{\"acme/x\":null}}", "package requirement cannot be null"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"localPackages\":{\"bad name\":\"../x\"}}", "invalid local package name bad name"],
+			["{\"name\":\"x\",\"mode\":\"typescript\",\"dependencies\":{\"acme/x\":\"1\"},\"packages\":{\"acme/x\":\"v1\"}}", "dependency acme/x is declared as both a TypeRB package and a native TypeScript package"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"packageOptions\":{\"trb/orm\":[1,]}}", "trailing comma in JSON array"],
+			["{\"name\":\"x\",\"mode\":\"trb\",\"lint\":{\"extra\":1}}", "unsupported lint configuration field extra"],
+		]
+		mut index := 0
+		while index < cases.size()
+			expect(parse_project_config(cases[index][0]).error).to_equal(cases[index][1])
+			index += 1
+		end
+	end
+end

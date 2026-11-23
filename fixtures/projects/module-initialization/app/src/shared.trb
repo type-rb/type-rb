@@ -1,0 +1,5 @@
+def mark(value: String): Integer
+	puts(value)
+	return 1
+end
+BASE := mark("shared")

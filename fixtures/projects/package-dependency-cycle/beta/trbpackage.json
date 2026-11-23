@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "name": "example.com/local/beta",
+  "version": "0.1.0",
+  "sourceDir": "src",
+  "modes": ["go", "ruby", "typescript"],
+  "packages": { "local/alpha": { "path": "../alpha" } }
+}

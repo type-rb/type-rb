@@ -1,0 +1,17 @@
+module Contracts
+	record Payload
+		value: String
+	end
+	interface Named
+		read(): Payload
+	end
+end
+class Label implements Contracts::Named
+	def read(): Contracts::Payload
+		return Contracts::Payload.new(value: "sco" + "ped")
+	end
+end
+def main()
+	value: Contracts::Named := Label.new()
+	puts(value.read().value)
+end

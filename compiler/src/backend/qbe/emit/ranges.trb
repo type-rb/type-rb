@@ -1,0 +1,26 @@
+import { mir_op_range_new } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirInstruction } from mir/model/module
+import { mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_address, emit_temporary, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+def emit_mir_range_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	type_name := mir_storage_type_name(state.scalar_mir, mir_operand_type(value_types, instruction.result))
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_range_new()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_range, l 24, l 0)")
+		first := emit_address(context, output, result, 8)
+		last := emit_address(context, output, result, 16)
+		exclusive := emit_address(context, output, result, 24)
+		emit_typed_store(output, "Integer", operands[instruction.first], first)
+		emit_typed_store(output, "Integer", operands[instruction.second], last)
+		emit_typed_store(output, "Integer", integer_string(instruction.payload), exclusive)
+	else
+		# The descriptor precedes three word-sized fields in MIR field order.
+		address := emit_address(context, output, operands[instruction.first], 8 + instruction.payload * 8)
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+	end
+	return emitted_value(result, type_name)
+end

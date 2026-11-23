@@ -1,0 +1,2 @@
+/Users/runner/work/_temp/bootstrap-workspace/b4/compiler:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)

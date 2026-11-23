@@ -1,0 +1,129 @@
+import { object_dispatch_arguments, object_dispatch_method } from mir/model/object_dispatch
+import { object_method_function } from frontend/resolution/object_methods
+import { MirObjectMethod, MirObjectWitness } from frontend/types/object_model
+import { object_assignable, object_instance_type } from frontend/types/object_types
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { standard_source_test } from state/standard_source_kinds
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+def checked_object_method(state: CompilerState, owner: Integer, name: String, class_member: Boolean, function: Integer): MirObjectMethod
+	mut names: Array<String> := []
+	mut named: Array<Integer> := []
+	mut optional: Array<Integer> := []
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut slot := 0
+	while slot < load_integer(state.declarations.function_parameter_counts, function)
+		names.push(load_string(state.declarations.parameter_names, start + slot))
+		named.push(load_integer(state.declarations.parameter_named_only, start + slot))
+		mut present := 0
+		if sparse_integer_at(state.parsed.parameter_defaults, start + slot) > 0
+			present = 1
+		end
+		optional.push(present)
+		slot += 1
+	end
+	return MirObjectMethod.new(owner: owner, name: name, class_member: class_member, function: function, parameter_names: names, parameter_named: named, parameter_optional: optional)
+end
+
+# The discovery pass finishes all concrete targets before MIR signatures freeze.
+# Only new nominal instances are visited, including those found by method bodies.
+def prepare_object_dispatch(mut state: CompilerState, begin: Integer): Integer
+	mut owner := begin
+	while owner < state.nominal.object_instances.size() && !has_diagnostic(state)
+		instance := state.nominal.object_instances[owner]
+		definition := state.nominal.objects[instance.definition]
+		state.module_graph.active_module[0] = definition.source_id
+		# The loader-owned assertion wrapper has direct method calls and no
+		# interface witnesses. Instantiate only the methods actually selected
+		# by checked calls: a nil predicate must not require a value comparator.
+		if sparse_integer_at(state.standard_modules, definition.source_id) == standard_source_test() && definition.name == "Expectation"
+			owner += 1
+			next
+		end
+		mut names: Hash<String, Integer> := {}
+		mut current := owner
+		while current >= 0 && !has_diagnostic(state)
+			parent := state.nominal.object_instances[current]
+			declaration := state.nominal.objects[parent.definition]
+			if current != owner && parent.fields.size() > 0
+				diagnostic(state, "TRBN4004", definition.line, "initialized superclass storage requires a portable constructor contract")
+				return owner
+			end
+			declaration.methods.each do |method|
+				if current != owner && method.name == "initialize"
+					diagnostic(state, "TRBN4004", definition.line, "superclass initialization requires a portable constructor contract")
+					return owner
+				end
+				if names.key?(method.name)
+					diagnostic(state, "TRBN4004", definition.line, "inherited overrides require consistent receiver dispatch")
+					return owner
+				end
+				names[method.name] = 1
+				if state.type_resolution.generic_functions[method.generic_function].type_parameters.size() == declaration.parameters.size()
+					function := object_method_function(state, object_instance_type(state, owner), method.name, method.class_member, [], method.origin)
+					if function >= 0
+						state.scalar_mir.object_methods.push(checked_object_method(state, owner, method.name, method.class_member, function))
+					end
+				end
+			end
+			current = parent.superclass
+		end
+		owner += 1
+	end
+	return owner
+end
+
+def declare_object_witnesses(mut state: CompilerState): Boolean
+	methods := state.scalar_mir.object_methods
+	mut owner := 0
+	while owner < state.nominal.object_instances.size() && !has_diagnostic(state)
+		definition := state.nominal.objects[state.nominal.object_instances[owner].definition]
+		if !definition.interface_type
+			mut contract := 0
+			while contract < state.nominal.object_instances.size() && !has_diagnostic(state)
+				if state.nominal.objects[state.nominal.object_instances[contract].definition].interface_type && object_assignable(state, object_instance_type(state, owner), object_instance_type(state, contract))
+					mut targets: Array<Integer> := []
+					mut arguments: Array<Array<Integer>> := []
+					methods.each do |method|
+						if method.owner == contract
+							selected := object_dispatch_method(methods, owner, method.name)
+							if selected < 0
+								state.module_graph.active_module[0] = definition.source_id
+								diagnostic(state, "TRBN4004", definition.line, "class does not implement interface method " + method.name)
+								return false
+							end
+							implementation := methods[selected]
+							slots := object_dispatch_arguments(method, implementation)
+							mut valid := false
+							if slots.size() == method.parameter_names.size() && load_string(state.declarations.function_result_types, implementation.function) == load_string(state.declarations.function_result_types, method.function)
+								valid = true
+							end
+							if valid
+								mut index := 1
+								while index < slots.size()
+									left := load_integer(state.declarations.function_parameter_starts, method.function) + slots[index]
+									right := load_integer(state.declarations.function_parameter_starts, implementation.function) + index
+									if load_string(state.declarations.parameter_types, left) != load_string(state.declarations.parameter_types, right)
+										valid = false
+									end
+									index += 1
+								end
+							end
+							if !valid
+								state.module_graph.active_module[0] = definition.source_id
+								diagnostic(state, "TRBN4004", definition.line, "interface method signature differs for " + method.name)
+								return false
+							end
+							targets.push(selected)
+							arguments.push(slots)
+						end
+					end
+					state.scalar_mir.object_witnesses.push(MirObjectWitness.new(owner: owner, contract: contract, methods: targets, arguments: arguments))
+				end
+				contract += 1
+			end
+		end
+		owner += 1
+	end
+	return !has_diagnostic(state)
+end

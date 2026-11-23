@@ -1,0 +1,34 @@
+import trb/std/process as Args
+import trb/std/math as Numeric
+
+def main()
+	mut first := Args.argv()
+	original := first.size()
+	first.push("local")
+	second := Args.argv()
+	puts(first.size() == original + 1)
+	puts(second.size() == original)
+	puts(first[-1])
+	puts(Numeric.sqrt(81).to_i())
+	negative := Numeric.sqrt(-1)
+	puts(negative != negative)
+	puts(sqrt(5))
+	puts(argv())
+	puts(leaf())
+	return
+	puts("unreachable main")
+end
+
+def sqrt(value: Integer): Integer
+	return value + 1
+end
+
+def argv(): Integer
+	return 7
+end
+
+def leaf(): Integer
+	return 42
+	puts("unreachable leaf")
+	return 99
+end

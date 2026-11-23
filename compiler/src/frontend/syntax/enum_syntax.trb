@@ -1,0 +1,210 @@
+import { generic_enum } from frontend/types/generic_kinds
+import { attribute_enum_variant } from frontend/types/attribute_kinds
+import { parse_raw_enum_value, validate_raw_enum } from frontend/syntax/raw_enum_syntax
+import { parse_generic_parameters } from frontend/syntax/generic_syntax
+import { GenericDefinition, GenericField, GenericVariant } from frontend/types/generic_model
+import { parse_declaration_attributes } from frontend/syntax/attribute_syntax
+import { namespace_qualify } from frontend/types/namespace_model
+import { advance, expect, expect_identifier, finish_statement, parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { EnumDefinition, EnumField, EnumVariant } from frontend/types/enum_model
+import { enum_uppercase } from frontend/types/enum_types
+import { CompilerState, diagnostic, has_diagnostic, terminal_token } from state/state
+import { load_integer } from support/storage
+
+def parse_generic_enum(mut state: CompilerState, mut position: Array<Integer>, name: String, line: Integer, mut method_owner: Array<Integer>): Boolean
+	parameters := parse_generic_parameters(state, position, line)
+	if has_diagnostic(state)
+		return false
+	end
+	if !finish_statement(state, position)
+		return false
+	end
+	mut variants: Array<GenericVariant> := []
+	while !token_is(state, position[0], "end") && !has_diagnostic(state)
+		if terminal_token(state, position[0])
+			diagnostic(state, "TRBN4002", line, "expected end for generic declaration " + name)
+			return false
+		end
+		if token_is(state, position[0], "def")
+			break
+		end
+		member_line := load_integer(state.source_tokens.token_lines, position[0])
+		member := expect_identifier(state, position)
+		if !enum_uppercase(member)
+			diagnostic(state, "TRBN4002", member_line, "enum variant must start with an uppercase letter")
+			return false
+		end
+		if !expect(state, position, "(")
+			diagnostic(state, "TRBN4002", member_line, "generic enum variants require payload fields")
+			return false
+		end
+		mut fields: Array<GenericField> := []
+		mut named := false
+		mut named_count := 0
+		skip_newlines(state, position)
+		while !token_is(state, position[0], ")") && !has_diagnostic(state)
+			if token_is(state, position[0], "*")
+				if named
+					diagnostic(state, "TRBN4002", member_line, "payload has duplicate named-only boundary")
+					return false
+				end
+				named = true
+				advance(position)
+				if !expect(state, position, ",")
+					return false
+				end
+			else
+				field_line := load_integer(state.source_tokens.token_lines, position[0])
+				field := expect_identifier(state, position)
+				if !expect(state, position, ":")
+					return false
+				end
+				type_name := parse_type(state, position)
+				fields.push(GenericField.new(name: field, type_name: type_name, line: field_line, named_only: named, default_start: -1, default_finish: -1))
+				if named
+					named_count += 1
+				end
+				skip_newlines(state, position)
+				if !token_is(state, position[0], ",")
+					break
+				end
+				advance(position)
+			end
+			skip_newlines(state, position)
+		end
+		if fields.size() == 0 || (named && named_count == 0) || !expect(state, position, ")")
+			diagnostic(state, "TRBN4002", member_line, "generic enum variants require payload fields")
+			return false
+		end
+		if !parse_declaration_attributes(state, position, attribute_enum_variant(), name, member)
+			return false
+		end
+		variants.push(GenericVariant.new(name: member, line: member_line, fields: fields))
+		if !finish_statement(state, position)
+			return false
+		end
+	end
+	if variants.size() == 0
+		diagnostic(state, "TRBN4002", line, "enum requires at least one variant")
+		return false
+	end
+	definition := state.type_resolution.generic_definitions.size()
+	state.type_resolution.generic_definitions.push(GenericDefinition.new(kind: generic_enum(), name: name, source_id: state.module_graph.active_module[0], line: line, parameters: parameters, variants: variants))
+	if token_is(state, position[0], "def")
+		method_owner[1] = definition
+		return true
+	end
+	if !expect(state, position, "end")
+		return false
+	end
+	return finish_statement(state, position)
+end
+
+def parse_enum(mut state: CompilerState, mut position: Array<Integer>, mut method_owner: Array<Integer>): Boolean
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	leaf := expect_identifier(state, position)
+	if !enum_uppercase(leaf)
+		diagnostic(state, "TRBN4002", line, "enum name must start with an uppercase letter")
+		return false
+	end
+	name := namespace_qualify(state.global_bindings.declaration_owner[0], leaf)
+	if token_is(state, position[0], "<")
+		return parse_generic_enum(state, position, name, line, method_owner)
+	end
+	if !finish_statement(state, position)
+		return false
+	end
+	owner := state.nominal.enums.size()
+	start := state.nominal.enum_variants.size()
+	state.nominal.enums.push(EnumDefinition.new(name: name, source_id: state.module_graph.active_module[0], line: line, variant_start: start, variant_count: 0))
+	while !token_is(state, position[0], "end") && !has_diagnostic(state)
+		if terminal_token(state, position[0])
+			diagnostic(state, "TRBN4002", line, "expected end for enum " + name)
+			return false
+		end
+		if token_is(state, position[0], "def")
+			if state.nominal.enum_variants.size() == start
+				diagnostic(state, "TRBN4002", line, "enum requires at least one variant")
+				return false
+			end
+			state.nominal.enums[owner] = EnumDefinition.new(name: name, source_id: state.module_graph.active_module[0], line: line, variant_start: start, variant_count: state.nominal.enum_variants.size() - start)
+			method_owner[0] = owner
+			return validate_raw_enum(state, owner)
+		end
+		variant_line := load_integer(state.source_tokens.token_lines, position[0])
+		variant := expect_identifier(state, position)
+		if !enum_uppercase(variant)
+			diagnostic(state, "TRBN4002", variant_line, "enum variant must start with an uppercase letter")
+			return false
+		end
+		field_start := state.nominal.enum_fields.size()
+		mut named := false
+		mut named_count := 0
+		if token_is(state, position[0], "(")
+			advance(position)
+			skip_newlines(state, position)
+			while !token_is(state, position[0], ")") && !has_diagnostic(state)
+				if token_is(state, position[0], "*")
+					if named
+						diagnostic(state, "TRBN4002", variant_line, "payload has duplicate named-only boundary")
+						return false
+					end
+					named = true
+					advance(position)
+					if !expect(state, position, ",")
+						return false
+					end
+				else
+					field_line := load_integer(state.source_tokens.token_lines, position[0])
+					field := expect_identifier(state, position)
+					if !expect(state, position, ":")
+						return false
+					end
+					type_name := parse_type(state, position)
+					skip_newlines(state, position)
+					state.nominal.enum_fields.push(EnumField.new(name: field, type_name: type_name, line: field_line, named_only: named))
+					if named
+						named_count += 1
+					end
+					if !token_is(state, position[0], ",")
+						break
+					end
+					advance(position)
+				end
+				skip_newlines(state, position)
+			end
+			if state.nominal.enum_fields.size() == field_start || (named && named_count == 0)
+				diagnostic(state, "TRBN4002", variant_line, "payload declaration requires a typed field in each declared region")
+				return false
+			end
+			if !expect(state, position, ")")
+				return false
+			end
+		end
+		if token_is(state, position[0], "=")
+			if !parse_raw_enum_value(state, position, state.nominal.enum_variants.size())
+				return false
+			end
+		end
+		if !parse_declaration_attributes(state, position, attribute_enum_variant(), name, variant)
+			return false
+		end
+		if !finish_statement(state, position)
+			return false
+		end
+		state.nominal.enum_variants.push(EnumVariant.new(owner: owner, name: variant, line: variant_line, field_start: field_start, field_count: state.nominal.enum_fields.size() - field_start))
+	end
+	if state.nominal.enum_variants.size() == start
+		diagnostic(state, "TRBN4002", line, "enum requires at least one variant")
+		return false
+	end
+	if !expect(state, position, "end")
+		return false
+	end
+	state.nominal.enums[owner] = EnumDefinition.new(name: name, source_id: state.module_graph.active_module[0], line: line, variant_start: start, variant_count: state.nominal.enum_variants.size() - start)
+	if !validate_raw_enum(state, owner)
+		return false
+	end
+	return finish_statement(state, position)
+end

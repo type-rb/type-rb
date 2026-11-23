@@ -1,0 +1,515 @@
+import { import_kind_module, import_kind_named } from state/import_kinds
+import { token_kind_attribute, token_kind_identifier, token_kind_newline } from state/token_kinds
+import { ObjectDefinition, ObjectDirective, ObjectField, ObjectMethod } from frontend/types/object_model
+import { object_default_constructor, parse_object_header } from frontend/syntax/object_syntax
+import { NewtypeDefinition } from frontend/types/newtype_model
+import { newtype_type } from frontend/types/newtype_types
+import { parse_newtype_header } from frontend/syntax/newtype_syntax
+import { generic_application } from frontend/types/generic_arguments
+import { NamespaceDeclaration, namespace_qualify } from frontend/types/namespace_model
+import { enum_type, enum_uppercase } from frontend/types/enum_types
+import { parse_type_alias } from frontend/syntax/alias_syntax
+import { advance, expect, expect_identifier, finish_statement, parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { parse_enum } from frontend/syntax/enum_syntax
+import { CompilerState, diagnostic, has_diagnostic, terminal_token } from state/state
+import { load_integer, load_string, sparse_string_at, store_integer, store_string } from support/storage
+import { declaration_start } from frontend/syntax/syntax_forms
+import { parse_expression_syntax } from frontend/syntax/body_syntax
+import { parse_function, parse_global, parse_record } from frontend/syntax/declaration_syntax
+import { parse_test_declaration, test_declaration_name, test_import, test_namespace_import, test_syntax_error, validate_test_imports } from frontend/syntax/test_syntax
+
+def append_import(
+		mut state: CompilerState,
+		path: String,
+		declaration: String,
+		binding: String,
+		kind: Integer,
+		line: Integer,
+	): Integer
+	import_index := state.module_graph.import_count[0]
+	store_integer(state.module_graph.import_modules, import_index, state.module_graph.active_module[0])
+	store_string(state.module_graph.import_paths, import_index, path)
+	store_string(state.module_graph.import_symbols, import_index, binding)
+	store_string(state.module_graph.import_declarations, import_index, declaration)
+	store_integer(state.module_graph.import_kinds, import_index, kind)
+	store_integer(state.module_graph.import_lines, import_index, line)
+	store_integer(state.module_graph.import_targets, import_index, -1)
+	store_integer(state.module_graph.import_used, import_index, 0)
+	state.module_graph.import_count[0] = import_index + 1
+	return import_index
+end
+
+def parse_named_import(mut state: CompilerState, mut position: Array<Integer>, line: Integer): Boolean
+	advance(position)
+	skip_newlines(state, position)
+	import_start := state.module_graph.import_count[0]
+	mut finished := false
+	while !finished
+		if token_is(state, position[0], "}")
+			finished = true
+		else
+			symbol_line := load_integer(state.source_tokens.token_lines, position[0])
+			declaration := expect_identifier(state, position)
+			if has_diagnostic(state)
+				return false
+			end
+			skip_newlines(state, position)
+			mut binding := declaration
+			if token_is(state, position[0], "as")
+				advance(position)
+				skip_newlines(state, position)
+				binding = expect_identifier(state, position)
+				if has_diagnostic(state)
+					return false
+				end
+				skip_newlines(state, position)
+			end
+			append_import(state, "", declaration, binding, import_kind_named(), symbol_line)
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			else
+				finished = true
+			end
+		end
+	end
+	if state.module_graph.import_count[0] == import_start
+		diagnostic(state, "TRBN4002", line, "named import must contain at least one declaration")
+		return false
+	end
+	if !expect(state, position, "}")
+		return false
+	end
+	skip_newlines(state, position)
+	if !expect(state, position, "from")
+		return false
+	end
+	mut path := ""
+	while load_integer(state.source_tokens.token_kinds, position[0]) != token_kind_newline()
+		if terminal_token(state, position[0])
+			if path == ""
+				diagnostic(state, "TRBN4002", line, "import path is required")
+				return false
+			end
+			mut terminal_index := import_start
+			while terminal_index < state.module_graph.import_count[0]
+				store_string(state.module_graph.import_paths, terminal_index, path)
+				terminal_index += 1
+			end
+			return true
+		end
+		path += load_string(state.source_tokens.token_texts, position[0])
+		advance(position)
+	end
+	if path == ""
+		diagnostic(state, "TRBN4002", line, "import path is required")
+		return false
+	end
+	mut import_index := import_start
+	while import_index < state.module_graph.import_count[0]
+		store_string(state.module_graph.import_paths, import_index, path)
+		import_index += 1
+	end
+	return finish_statement(state, position)
+end
+
+def parse_bare_import(mut state: CompilerState, mut position: Array<Integer>, line: Integer): Boolean
+	mut path := ""
+	mut scanning := true
+	while scanning
+		if terminal_token(state, position[0])
+			scanning = false
+		else
+			if load_integer(state.source_tokens.token_kinds, position[0]) == token_kind_newline()
+				scanning = false
+			else
+				if token_is(state, position[0], "as")
+					scanning = false
+				else
+					path += load_string(state.source_tokens.token_texts, position[0])
+					advance(position)
+				end
+			end
+		end
+	end
+	if path == ""
+		diagnostic(state, "TRBN4002", line, "bare import path is required")
+		return false
+	end
+	mut binding := ""
+	if token_is(state, position[0], "as")
+		advance(position)
+		binding = expect_identifier(state, position)
+		if has_diagnostic(state)
+			return false
+		end
+	end
+	append_import(state, path, "", binding, import_kind_module(), line)
+	return finish_statement(state, position)
+end
+
+def register_namespace(mut state: CompilerState, name: String, source: Integer, line: Integer)
+	mut found := false
+	state.global_bindings.namespaces.each do |declaration|
+		if declaration.source_id == source && declaration.name == name
+			found = true
+		end
+	end
+	if !found
+		state.global_bindings.namespaces.push(NamespaceDeclaration.new(name: name, source_id: source, line: line))
+	end
+end
+
+def parse_namespace(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	leaf := expect_identifier(state, position)
+	if !enum_uppercase(leaf)
+		diagnostic(state, "TRBN4002", line, "module name must start with an uppercase letter")
+		return false
+	end
+	parent := state.global_bindings.declaration_owner[0]
+	name := namespace_qualify(parent, leaf)
+	register_namespace(state, name, state.module_graph.active_module[0], line)
+	if !finish_statement(state, position)
+		return false
+	end
+	start := position[0]
+	state.global_bindings.declaration_owner[0] = name
+	while !terminal_token(state, position[0]) && !token_is(state, position[0], "end") && !has_diagnostic(state)
+		parse_declaration(state, position)
+		skip_newlines(state, position)
+	end
+	mut token := start
+	while token < position[0]
+		if sparse_string_at(state.source_tokens.token_namespaces, token) == ""
+			store_string(state.source_tokens.token_namespaces, token, name)
+		end
+		token += 1
+	end
+	state.global_bindings.declaration_owner[0] = parent
+	if has_diagnostic(state) || !expect(state, position, "end")
+		return false
+	end
+	return finish_statement(state, position)
+end
+
+def parse_object_declaration(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	header := parse_object_header(state, position)
+	if has_diagnostic(state)
+		return false
+	end
+	parent := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = header.name
+	mut fields: Array<ObjectField> := []
+	mut methods: Array<ObjectMethod> := []
+	while !token_is(state, position[0], "end") && !has_diagnostic(state)
+		origin := position[0]
+		line := load_integer(state.source_tokens.token_lines, origin)
+		if terminal_token(state, origin)
+			diagnostic(state, "TRBN4002", line, "expected end for " + header.name)
+			break
+		end
+		if token_is(state, origin, "def") || header.interface_type
+			mut name_origin := origin
+			if token_is(state, origin, "def")
+				name_origin += 1
+			end
+			mut class_member := false
+			if token_is(state, name_origin, "self") && token_is(state, name_origin + 1, ".")
+				class_member = true
+			end
+			if class_member
+				name_origin += 2
+			end
+			name := load_string(state.source_tokens.token_texts, name_origin)
+			mut receiver := header.name
+			if header.parameters.size() > 0
+				receiver = generic_application(header.name, header.parameters)
+			end
+			if class_member
+				receiver = ""
+			end
+			function_start := state.declarations.function_count[0]
+			generic_start := state.type_resolution.generic_functions.size()
+			if !parse_function(state, position, receiver, header.parameters, true, header.interface_type)
+				break
+			end
+			mut function := -1
+			mut generic_function := -1
+			if state.declarations.function_count[0] > function_start
+				function = function_start
+			else
+				generic_function = generic_start
+			end
+			methods.push(ObjectMethod.new(name: name, class_member: class_member, origin: origin, function: function, generic_function: generic_function))
+		elsif token_is(state, origin, "readonly") || load_integer(state.source_tokens.token_kinds, origin) == token_kind_attribute()
+			readonly := token_is(state, origin, "readonly")
+			if readonly
+				advance(position)
+			end
+			if load_integer(state.source_tokens.token_kinds, position[0]) != token_kind_attribute()
+				diagnostic(state, "TRBN4002", line, "expected an instance field")
+				break
+			end
+			name := load_string(state.source_tokens.token_texts, position[0])
+			advance(position)
+			if !expect(state, position, ":")
+				break
+			end
+			type_name := parse_type(state, position)
+			mut default_start := -1
+			mut default_finish := -1
+			if token_is(state, position[0], ":=")
+				advance(position)
+				default_start = position[0]
+				if !parse_expression_syntax(state, position, 1)
+					break
+				end
+				default_finish = position[0]
+			end
+			if !finish_statement(state, position)
+				break
+			end
+			fields.push(ObjectField.new(name: name, type_name: type_name, line: line, origin: origin, readonly: readonly, default_start: default_start, default_finish: default_finish))
+		elsif load_integer(state.source_tokens.token_kinds, origin) == token_kind_identifier() && (token_is(state, origin + 1, "(") || token_is(state, origin + 1, "<") || token_is(state, origin + 1, ".") || token_is(state, origin + 1, "::"))
+			if !parse_expression_syntax(state, position, 1)
+				break
+			end
+			finish := position[0]
+			if !finish_statement(state, position)
+				break
+			end
+			state.nominal.object_directives.push(ObjectDirective.new(source_id: header.source_id, owner: header.name, origin: origin, finish: finish))
+		else
+			if !parse_declaration(state, position)
+				break
+			end
+		end
+	end
+	object_default_constructor(state, header, fields, methods, position[0])
+	if !has_diagnostic(state)
+		expect(state, position, "end")
+		finish_statement(state, position)
+	end
+	mut token := header.origin
+	while token < position[0]
+		if sparse_string_at(state.source_tokens.token_namespaces, token) == ""
+			store_string(state.source_tokens.token_namespaces, token, header.name)
+		end
+		token += 1
+	end
+	state.global_bindings.declaration_owner[0] = parent
+	if has_diagnostic(state)
+		return false
+	end
+	state.nominal.objects.push(ObjectDefinition.new(name: header.name, source_id: header.source_id, line: header.line, origin: header.origin, interface_type: header.interface_type, parameters: header.parameters, superclass: header.superclass, interfaces: header.interfaces, fields: fields, methods: methods))
+	return true
+end
+
+def parse_declaration(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	if token_is(state, position[0], "class") || token_is(state, position[0], "interface")
+		return parse_object_declaration(state, position)
+	end
+	if declaration_start(state, position[0])
+		return parse_global(state, position)
+	end
+	if token_is(state, position[0], "module")
+		return parse_namespace(state, position)
+	end
+	if token_is(state, position[0], "newtype")
+		return parse_newtype_declaration(state, position)
+	end
+	if token_is(state, position[0], "alias")
+		return parse_type_alias(state, position)
+	end
+	if token_is(state, position[0], "enum")
+		return parse_enum_declaration(state, position)
+	end
+	if token_is(state, position[0], "record")
+		return parse_record(state, position)
+	end
+	if token_is(state, position[0], "def")
+		return parse_function(state, position, "", [], false, false)
+	end
+	mut scope := ""
+	if state.global_bindings.declaration_owner[0] == ""
+		scope = "top-level "
+	end
+	diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "unsupported " + scope + "declaration " + load_string(state.source_tokens.token_texts, position[0]))
+	return false
+end
+
+def parse_module(mut state: CompilerState, start: Integer, module_index: Integer): Boolean
+	return parse_module_with_tests(state, start, module_index, false)
+end
+
+def parse_module_with_tests(mut state: CompilerState, start: Integer, module_index: Integer, tests: Boolean): Boolean
+	state.module_graph.active_module[0] = module_index
+	state.global_bindings.declaration_owner[0] = ""
+	import_start := state.module_graph.import_count[0]
+	store_integer(state.module_graph.module_import_starts, module_index, import_start)
+	store_integer(state.module_graph.module_import_counts, module_index, 0)
+	mut position := [start]
+	test_start := state.parsed.tests.size()
+	skip_newlines(state, position)
+	while !terminal_token(state, position[0])
+		if token_is(state, position[0], "import")
+			line := load_integer(state.source_tokens.token_lines, position[0])
+			advance(position)
+			skip_newlines(state, position)
+			if token_is(state, position[0], "{")
+				parse_named_import(state, position, line)
+			else
+				parse_bare_import(state, position, line)
+			end
+		elsif tests && test_declaration_name(state, position[0]) != ""
+			parse_test_declaration(state, position, -1, "")
+		elsif tests && test_namespace_import(state) && test_import(state, "describe") < 0 && test_import(state, "test") < 0
+			return test_syntax_error(state, start, "test suites require named imports from trb/std/test")
+		else
+			parse_declaration(state, position)
+		end
+		if has_diagnostic(state)
+			return false
+		end
+		store_integer(
+			state.module_graph.module_import_counts,
+			module_index,
+			state.module_graph.import_count[0] - import_start,
+		)
+		skip_newlines(state, position)
+	end
+	store_integer(
+		state.module_graph.module_import_counts,
+		module_index,
+		state.module_graph.import_count[0] - import_start,
+	)
+	if tests && test_namespace_import(state) && test_import(state, "describe") < 0 && test_import(state, "test") < 0
+		return test_syntax_error(state, start, "test suites require named imports from trb/std/test")
+	end
+	if tests && state.parsed.tests.size() == test_start
+		return test_syntax_error(state, start, "test files must declare at least one top-level describe() suite")
+	end
+	if tests
+		return validate_test_imports(state, test_start)
+	end
+	return true
+end
+
+# Variant syntax is parsed separately; method bodies reuse ordinary functions.
+def parse_enum_declaration(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	mut method_owner := [-1, -1]
+	if !parse_enum(state, position, method_owner)
+		return false
+	end
+	owner := method_owner[0]
+	generic_owner := method_owner[1]
+	if owner < 0 && generic_owner < 0
+		return true
+	end
+	mut name := ""
+	mut receiver_type := ""
+	mut parameters: Array<String> := []
+	if generic_owner >= 0
+		definition := state.type_resolution.generic_definitions[generic_owner]
+		name = definition.name
+		parameters = definition.parameters
+		receiver_type = generic_application(name, parameters)
+	else
+		name = state.nominal.enums[owner].name
+		receiver_type = enum_type(owner)
+	end
+	while token_is(state, position[0], "def") && !has_diagnostic(state)
+		method_name := load_string(state.source_tokens.token_texts, position[0] + 1)
+		if method_name == "raw_value" || method_name == "from_raw"
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "enum method name " + method_name + " is reserved")
+			return false
+		end
+		parent := state.global_bindings.declaration_owner[0]
+		start := position[0]
+		state.global_bindings.declaration_owner[0] = name
+		parsed := parse_function(state, position, receiver_type, parameters, false, false)
+		mut token := start
+		while token < position[0]
+			store_string(state.source_tokens.token_namespaces, token, name)
+			token += 1
+		end
+		state.global_bindings.declaration_owner[0] = parent
+		if !parsed
+			return false
+		end
+	end
+	if !expect(state, position, "end")
+		return false
+	end
+	return finish_statement(state, position)
+end
+
+# Method bodies retain their lexical construction authority in token origins.
+def parse_newtype_declaration(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	owner := parse_newtype_header(state, position)
+	if owner < 0 || has_diagnostic(state)
+		return false
+	end
+	if !token_is(state, position[0], "do")
+		return finish_statement(state, position)
+	end
+	advance(position)
+	if !finish_statement(state, position)
+		return false
+	end
+	mut method_seen := false
+	while !token_is(state, position[0], "end") && !has_diagnostic(state)
+		skip_newlines(state, position)
+		if token_is(state, position[0], "end")
+			break
+		end
+		row := state.nominal.newtypes[owner]
+		if token_is(state, position[0], "private")
+			if method_seen || row.closed
+				diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "private new must occur once before newtype methods")
+				return false
+			end
+			advance(position)
+			if !expect(state, position, "new") || !finish_statement(state, position)
+				return false
+			end
+			state.nominal.newtypes[owner] = NewtypeDefinition.new(name: row.name, source_id: row.source_id, line: row.line, target: row.target, representation: row.representation, closed: true)
+			next
+		end
+		if !token_is(state, position[0], "def")
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "newtype body accepts only methods and private new")
+			return false
+		end
+		method_seen = true
+		mut name_origin := position[0] + 1
+		mut receiver := newtype_type(owner)
+		if token_is(state, name_origin, "self") && token_is(state, name_origin + 1, ".")
+			name_origin += 2
+			receiver = ""
+		end
+		name := load_string(state.source_tokens.token_texts, name_origin)
+		if name == "new" || name == "value" || name == "initialize"
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, name_origin), "newtype method name " + name + " is reserved")
+			return false
+		end
+		parent := state.global_bindings.declaration_owner[0]
+		start := position[0]
+		state.global_bindings.declaration_owner[0] = row.name
+		parsed := parse_function(state, position, receiver, [], false, false)
+		mut token := start
+		while token < position[0]
+			store_string(state.source_tokens.token_namespaces, token, row.name)
+			token += 1
+		end
+		state.global_bindings.declaration_owner[0] = parent
+		if !parsed
+			return false
+		end
+	end
+	if !expect(state, position, "end")
+		return false
+	end
+	return finish_statement(state, position)
+end

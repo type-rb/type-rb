@@ -1,0 +1,7 @@
+def main()
+	values: Hash<String, Integer> := {}
+	if values["missing"] == 0
+		puts("unreachable")
+	end
+	return
+end

@@ -1,0 +1,8 @@
+record Box
+value: Integer
+values: Array<Integer>
+end
+def main()
+mut box := Box.new(value: 1, values: [2])
+box.value += 2
+end

@@ -1,0 +1,49 @@
+import { GlobalDeclaration } from frontend/types/global_model
+import { NamespaceDeclaration } from frontend/types/namespace_model
+import { IntegerStorage, integer_storage } from support/storage
+
+# Authored global declarations retain source order. Template checking shares
+# syntax and order, but owns inferred types, function bindings and scope cell.
+record CompilerGlobalBindings
+	global_scope_orders: IntegerStorage
+	globals: Array<GlobalDeclaration>
+	global_types: Array<String>
+	global_functions: Array<Integer>
+	global_order: Array<Integer>
+	runtime_order: Array<Integer>
+	module_components: Array<Integer>
+	component_modules: Array<Array<Integer>>
+	component_cyclic: Array<Integer>
+	namespaces: Array<NamespaceDeclaration>
+	declaration_owner: Array<String>
+end
+
+def compiler_global_bindings_new(capacity: Integer): CompilerGlobalBindings
+	return CompilerGlobalBindings.new(
+		global_scope_orders: integer_storage(capacity), globals: [],
+		global_types: [], global_functions: [], global_order: [], runtime_order: [], module_components: [], component_modules: [], component_cyclic: [],
+		namespaces: [], declaration_owner: [""],
+	)
+end
+
+def compiler_global_bindings_fork(bindings: CompilerGlobalBindings): CompilerGlobalBindings
+	mut global_types: Array<String> := []
+	bindings.global_types.each do |value|
+		global_types.push(value)
+	end
+	mut global_functions: Array<Integer> := []
+	bindings.global_functions.each do |value|
+		global_functions.push(value)
+	end
+	return CompilerGlobalBindings.new(
+		global_scope_orders: bindings.global_scope_orders,
+		globals: bindings.globals,
+		global_types: global_types,
+		global_functions: global_functions,
+		global_order: bindings.global_order,
+		runtime_order: bindings.runtime_order,
+		module_components: bindings.module_components, component_modules: bindings.component_modules, component_cyclic: bindings.component_cyclic,
+		namespaces: bindings.namespaces,
+		declaration_owner: [bindings.declaration_owner[0]],
+	)
+end

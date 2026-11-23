@@ -1,0 +1,10 @@
+class Base
+	def value(): Integer
+		return 7
+	end
+end
+class Child < Base
+end
+def main()
+	puts(Child.new().value())
+end

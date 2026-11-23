@@ -1,0 +1,15 @@
+# Dynamic array inputs exercise the expanded scalar helper at signed boundaries.
+def sum(left: Integer, right: Integer): Integer
+	return left + right
+end
+
+def main()
+	_marker := { 1 => 1 }
+	lefts := [9007199254740991, -9007199254740991, 9007199254740991, -9007199254740991, -9007199254740991, 9007199254740991, -17, 17, 4503599627370495, -4503599627370495, 1, 0]
+	rights := [0, 0, -9007199254740991, 9007199254740991, 1, -1, 9, -9, 4503599627370495, -4503599627370495, -1, 0]
+	mut index := 0
+	while index < lefts.size()
+		puts(sum(lefts[index], rights[index]))
+		index += 1
+	end
+end

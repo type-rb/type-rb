@@ -1,0 +1,161 @@
+import { mir_adapter_sqrt, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { mir_function_control } from mir/model/control
+import { mir_op_array_load, mir_op_array_position, mir_op_array_size, mir_op_array_store, mir_op_direct_call, mir_op_indirect_call, mir_op_integer_to_float, mir_op_record_field, mir_op_scalar_literal } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { MirFunction, MirModule, mir_block_index, mir_function_index } from mir/model/module
+import { mir_build_flow, mir_flow_blocks } from mir/analysis/flow
+import { mir_loop_members } from mir/analysis/loops
+import { mir_refine_call_effects } from mir/analysis/call_effects
+import { mir_callable_plan_at, mir_callable_plans } from mir/analysis/callables
+import { mir_function_loop_calls } from mir/analysis/loop_calls
+import { mir_function_body_size, mir_inline_call } from mir/passes/inline_calls
+
+# Keep mutation and failure in their original order. Only element stores are
+# admitted for Void helpers. Scalar helpers may instead invoke a proven
+# read-only callback; allocation, resizing and ordinary callees stay out.
+def mir_leaf_loop_body(native_module: MirModule, function: MirFunction): Boolean
+	mut scalar := false
+	if function.result_type == "Integer" || function.result_type == "Float" || function.result_type == "Boolean"
+		scalar = true
+	end
+	if function.kind != mir_function_control() || (!scalar && function.result_type != "Void") || function.block_count > 24 || function.parameter_count > 8 || mir_function_body_size(native_module, function) > 128
+		return false
+	end
+	if native_module.signatures[function.id].kind != mir_signature_ordinary()
+		return false
+	end
+	entry := mir_block_index(native_module, function, function.entry_block)
+	if entry < 0 || native_module.blocks[entry].parameter_count != 0
+		return false
+	end
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[position]
+			kind := instruction.kind
+			if scalar && kind == mir_op_array_store()
+				return false
+			elsif kind == mir_op_indirect_call()
+				plan := mir_callable_plan_at(native_module.callable_plans[0], position)
+				if !scalar || plan.callee < 0 || (plan.effects != mir_effect_none() && plan.effects != mir_effect_failure())
+					return false
+				end
+			elsif kind == mir_op_direct_call()
+				signature := native_module.signatures[native_module.calls[instruction.payload].callee]
+				if signature.kind != mir_signature_standard() || signature.adapter != mir_adapter_sqrt()
+					return false
+				end
+			elsif kind < mir_op_scalar_literal() || kind > mir_op_integer_to_float()
+				if kind != mir_op_array_size() && kind != mir_op_array_position() && kind != mir_op_array_load() && kind != mir_op_array_store() && kind != mir_op_record_field()
+					return false
+				end
+			end
+			position += 1
+		end
+		index += 1
+	end
+	return true
+end
+
+# Rewrites leave historical instruction rows behind. Count only live spans,
+# including unreachable blocks conservatively, so retained rows cannot deny or
+# enable expansion on the next invocation.
+def mir_leaf_call_counts(native_module: MirModule): Array<Integer>
+	mut counts: Array<Integer> := []
+	native_module.signatures.each do |_signature|
+		counts.push(0)
+	end
+	native_module.functions.each do |function|
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := native_module.blocks[index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[position]
+				if instruction.kind == mir_op_direct_call()
+					counts[native_module.calls[instruction.payload].callee] += 1
+				end
+				position += 1
+			end
+			index += 1
+		end
+	end
+	return counts
+end
+
+def mir_inline_leaf_loops(mut native_module: MirModule)
+	if native_module.functions.size() > 96
+		return
+	end
+	native_module.callable_plans[0] = mir_callable_plans(native_module)
+	counts := mir_leaf_call_counts(native_module)
+	mut eligible: Array<Integer> := []
+	mut any := false
+	native_module.functions.each do |function|
+		mut selected := 0
+		# Signature-free verifier fixtures are not callable definitions.
+		if function.kind == mir_function_control() && counts[function.id] == 1 && mir_leaf_loop_body(native_module, function)
+			selected = 1
+			any = true
+		end
+		eligible.push(selected)
+	end
+	if !any
+		return
+	end
+	mut changed := false
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		mut searching := true
+		while searching
+			searching = false
+			function := native_module.functions[function_index]
+			size := mir_function_body_size(native_module, function)
+			if function.kind == mir_function_control() && function.block_count < 48 && size < 256
+				flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+				loops := mir_loop_members(native_module, function, flow)
+				reused := mir_function_loop_calls(native_module, function, native_module.values)
+				mut index := function.block_start
+				while index < function.block_start + function.block_count && !searching
+					block := native_module.blocks[index]
+					if loops[index - function.block_start] != 0
+						mut position := block.instruction_start
+						while position < block.instruction_start + block.instruction_count && !searching
+							instruction := native_module.instructions[position]
+							# An invariant call can execute once and reuse its
+							# scalar result. Expanding it would repeat the work.
+							mut cached := false
+							if instruction.result >= 0
+								reused.each do |plan|
+									if plan.instruction == position
+										cached = true
+									end
+								end
+							end
+							if instruction.kind == mir_op_direct_call() && !cached
+								callee_index := mir_function_index(native_module, native_module.calls[instruction.payload].callee)
+								if callee_index >= 0 && eligible[callee_index] != 0
+									callee := native_module.functions[callee_index]
+									if function.block_count + callee.block_count + 1 <= 48 && size + mir_function_body_size(native_module, callee) - 1 <= 256
+										mir_inline_call(native_module, function_index, index, position, callee)
+										eligible[callee_index] = 0
+										changed = true
+										searching = true
+									end
+								end
+							end
+							position += 1
+						end
+					end
+					index += 1
+				end
+			end
+		end
+		function_index += 1
+	end
+	if changed
+		mir_refine_call_effects(native_module)
+	end
+end

@@ -1,0 +1,548 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { ComparisonOperator, FloatBinaryOperator, IntegerBinaryOperator, RecoveryScalarBlock, RecoveryScalarFunction, RecoveryScalarInstruction, RecoveryScalarModule, RecoveryScalarParameter, RecoveryScalarTerminator, ScalarType, verify_recovery_scalar_mir } from scalar/mir
+import { NativeSource } from snapshot/mir
+import { object, required_array, required_field, required_integer, required_string, strict_object } from snapshot/json_boundary
+import { decode_origin } from snapshot/schema
+import trb/std/json
+import trb/std/result
+
+SCALAR_RECOVERY_MAX_INPUT_BYTES := 4194304
+SCALAR_RECOVERY_MAX_SOURCES := 256
+SCALAR_RECOVERY_MAX_FUNCTIONS := 512
+SCALAR_RECOVERY_MAX_PARAMETERS := 256
+SCALAR_RECOVERY_MAX_BLOCKS := 1024
+SCALAR_RECOVERY_MAX_INSTRUCTIONS := 16384
+SCALAR_RECOVERY_MAX_ARGUMENTS := 256
+SCALAR_RECOVERY_MAX_STATIC_BYTES := 1048576
+SCALAR_RECOVERY_MAX_IDENTIFIER_SIZE := 256
+SCALAR_RECOVERY_MAX_SOURCE_PATH_SIZE := 4096
+
+def decode_recovery_scalar_snapshot(source: String): Result<RecoveryScalarModule, Diagnostic>
+	if source.to_bytes().size() > SCALAR_RECOVERY_MAX_INPUT_BYTES
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "", "snapshot exceeds the Scalar recovery 4 MiB input limit")
+		)
+	end
+	root := case JSON.parse(source)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			Diagnostic.new(
+				code: "TRBN0001",
+				path: error.path,
+				message: error.message,
+				start_line: error.line,
+				start_column: error.column,
+			)
+		)
+	end
+	fields := try strict_object(
+		root,
+		"",
+		["format", "version", "module", "entryFunction", "sources", "functions"],
+	)
+	format := try required_string(fields, "format", "", false)
+	if format != "type-rb-bootstrap-snapshot"
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/format", "unsupported snapshot format")
+		)
+	end
+	version := try required_integer(fields, "version", "")
+	if version != 2
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/version", "unsupported Scalar recovery snapshot version")
+		)
+	end
+	source_values := try required_array(fields, "sources", "")
+	if source_values.size() > SCALAR_RECOVERY_MAX_SOURCES
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/sources", "source count exceeds the Scalar recovery limit")
+		)
+	end
+	mut sources: Array<NativeSource> := []
+	mut source_index := 0
+	while source_index < source_values.size()
+		sources.push(try _recovery_scalar_decode_source(source_values[source_index], "/sources/" + source_index.to_s()))
+		source_index += 1
+	end
+	function_values := try required_array(fields, "functions", "")
+	if function_values.size() > SCALAR_RECOVERY_MAX_FUNCTIONS
+		return Result<RecoveryScalarModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/functions", "function count exceeds the Scalar recovery limit")
+		)
+	end
+	mut functions: Array<RecoveryScalarFunction> := []
+	mut function_index := 0
+	while function_index < function_values.size()
+		functions.push(try _recovery_scalar_decode_function(function_values[function_index], "/functions/" + function_index.to_s()))
+		function_index += 1
+	end
+	native_module := RecoveryScalarModule.new(
+		id: try required_string(fields, "module", "", true),
+		entry_function: try required_string(fields, "entryFunction", "", true),
+		sources: sources,
+		functions: functions,
+	)
+	try verify_recovery_scalar_mir(native_module)
+	return Result<RecoveryScalarModule, Diagnostic>::Ok(native_module)
+end
+
+def _recovery_scalar_decode_source(value: JSON::Value, path: String): Result<NativeSource, Diagnostic>
+	fields := try strict_object(value, path, ["id", "path"])
+	source_path := try required_string(fields, "path", path, false)
+	if source_path.empty?()
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/path", "source path must not be empty")
+		)
+	end
+	if source_path.size() > SCALAR_RECOVERY_MAX_SOURCE_PATH_SIZE
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/path", "source path exceeds the Scalar recovery limit")
+		)
+	end
+	return Result<NativeSource, Diagnostic>::Ok(
+		NativeSource.new(
+			id: try required_string(fields, "id", path, true),
+			path: source_path,
+		)
+	)
+end
+
+def _recovery_scalar_decode_function(value: JSON::Value, path: String): Result<RecoveryScalarFunction, Diagnostic>
+	fields := try strict_object(value, path, ["id", "name", "parameters", "result", "entry", "origin", "blocks"])
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > SCALAR_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryScalarFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "parameter count exceeds the Scalar recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryScalarParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_scalar_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	block_values := try required_array(fields, "blocks", path)
+	if block_values.size() > SCALAR_RECOVERY_MAX_BLOCKS
+		return Result<RecoveryScalarFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/blocks", "block count exceeds the Scalar recovery limit")
+		)
+	end
+	mut blocks: Array<RecoveryScalarBlock> := []
+	mut block_index := 0
+	while block_index < block_values.size()
+		blocks.push(try _recovery_scalar_decode_block(block_values[block_index], path + "/blocks/" + block_index.to_s()))
+		block_index += 1
+	end
+	return Result<RecoveryScalarFunction, Diagnostic>::Ok(
+		RecoveryScalarFunction.new(
+			id: try required_string(fields, "id", path, true),
+			name: try required_string(fields, "name", path, true),
+			parameters: parameters,
+			result_type: try _recovery_scalar_decode_type(try required_string(fields, "result", path, false), path + "/result", true),
+			entry: try required_string(fields, "entry", path, true),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			blocks: blocks,
+		)
+	)
+end
+
+def _recovery_scalar_decode_parameter(value: JSON::Value, path: String): Result<RecoveryScalarParameter, Diagnostic>
+	fields := try strict_object(value, path, ["id", "type", "origin"])
+	return Result<RecoveryScalarParameter, Diagnostic>::Ok(
+		RecoveryScalarParameter.new(
+			id: try required_string(fields, "id", path, true),
+			value_type: try _recovery_scalar_decode_type(try required_string(fields, "type", path, false), path + "/type", false),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+		)
+	)
+end
+
+def _recovery_scalar_decode_type(name: String, path: String, allow_void: Boolean): Result<ScalarType, Diagnostic>
+	if name == "Boolean"
+		return Result<ScalarType, Diagnostic>::Ok(ScalarType::Boolean)
+	end
+	if name == "Integer"
+		return Result<ScalarType, Diagnostic>::Ok(ScalarType::Integer)
+	end
+	if name == "Float"
+		return Result<ScalarType, Diagnostic>::Ok(ScalarType::Float)
+	end
+	if allow_void && name == "Void"
+		return Result<ScalarType, Diagnostic>::Ok(ScalarType::Void)
+	end
+	return Result<ScalarType, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Scalar recovery scalar type")
+	)
+end
+
+def _recovery_scalar_decode_block(value: JSON::Value, path: String): Result<RecoveryScalarBlock, Diagnostic>
+	fields := try strict_object(value, path, ["id", "parameters", "origin", "instructions", "terminator"])
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > SCALAR_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryScalarBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "block parameter count exceeds the Scalar recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryScalarParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_scalar_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	instruction_values := try required_array(fields, "instructions", path)
+	if instruction_values.size() > SCALAR_RECOVERY_MAX_INSTRUCTIONS
+		return Result<RecoveryScalarBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/instructions", "instruction count exceeds the Scalar recovery limit")
+		)
+	end
+	mut instructions: Array<RecoveryScalarInstruction> := []
+	mut instruction_index := 0
+	while instruction_index < instruction_values.size()
+		instructions.push(
+			try _recovery_scalar_decode_instruction(instruction_values[instruction_index], path + "/instructions/" + instruction_index.to_s())
+		)
+		instruction_index += 1
+	end
+	return Result<RecoveryScalarBlock, Diagnostic>::Ok(
+		RecoveryScalarBlock.new(
+			id: try required_string(fields, "id", path, true),
+			parameters: parameters,
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			instructions: instructions,
+			terminator: try _recovery_scalar_decode_terminator(try required_field(fields, "terminator", path), path + "/terminator"),
+		)
+	)
+end
+
+def _recovery_scalar_decode_instruction(value: JSON::Value, path: String): Result<RecoveryScalarInstruction, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "boolean_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::BooleanLiteral(
+				try required_string(fields, "result", path, true),
+				try _recovery_scalar_required_boolean(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "integer_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::IntegerLiteral(
+				try required_string(fields, "result", path, true),
+				try required_integer(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "float_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::FloatLiteral(
+				try required_string(fields, "result", path, true),
+				try _recovery_scalar_required_float(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "integer_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::IntegerBinary(
+				try required_string(fields, "result", path, true),
+				try _recovery_scalar_integer_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+				try required_string(fields, "left", path, true),
+				try required_string(fields, "right", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "float_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::FloatBinary(
+				try required_string(fields, "result", path, true),
+				try _recovery_scalar_float_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+				try required_string(fields, "left", path, true),
+				try required_string(fields, "right", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "integer_compare" || op == "float_compare"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		result := try required_string(fields, "result", path, true)
+		operator := try _recovery_scalar_comparison_operator(try required_string(fields, "operator", path, false), path + "/operator")
+		left := try required_string(fields, "left", path, true)
+		right := try required_string(fields, "right", path, true)
+		origin := try decode_origin(try required_field(fields, "origin", path), path + "/origin")
+		if op == "integer_compare"
+			return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+				RecoveryScalarInstruction::IntegerCompare(result, operator, left, right, origin)
+			)
+		end
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::FloatCompare(result, operator, left, right, origin)
+		)
+	end
+	if op == "boolean_not"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::BooleanNot(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "value", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "call"
+		fields := try strict_object(value, path, ["op", "result", "function", "arguments", "origin"])
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::Call(
+				try _recovery_scalar_required_nullable_string(fields, "result", path),
+				try required_string(fields, "function", path, true),
+				try _recovery_scalar_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "write_static"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		static_value := try required_string(fields, "value", path, false)
+		if static_value.to_bytes().size() > SCALAR_RECOVERY_MAX_STATIC_BYTES
+			return Result<RecoveryScalarInstruction, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/value", "static output exceeds the Scalar recovery limit")
+			)
+		end
+		return Result<RecoveryScalarInstruction, Diagnostic>::Ok(
+			RecoveryScalarInstruction::WriteStatic(
+				static_value,
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	return Result<RecoveryScalarInstruction, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Scalar recovery instruction")
+	)
+end
+
+def _recovery_scalar_decode_terminator(value: JSON::Value, path: String): Result<RecoveryScalarTerminator, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "jump"
+		fields := try strict_object(value, path, ["op", "target", "arguments", "origin"])
+		return Result<RecoveryScalarTerminator, Diagnostic>::Ok(
+			RecoveryScalarTerminator::Jump(
+				try required_string(fields, "target", path, true),
+				try _recovery_scalar_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "branch"
+		fields := try strict_object(
+			value,
+			path,
+			["op", "condition", "whenTrue", "trueArguments", "whenFalse", "falseArguments", "origin"],
+		)
+		return Result<RecoveryScalarTerminator, Diagnostic>::Ok(
+			RecoveryScalarTerminator::Branch(
+				try required_string(fields, "condition", path, true),
+				try required_string(fields, "whenTrue", path, true),
+				try _recovery_scalar_required_string_array(fields, "trueArguments", path),
+				try required_string(fields, "whenFalse", path, true),
+				try _recovery_scalar_required_string_array(fields, "falseArguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "return"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		return Result<RecoveryScalarTerminator, Diagnostic>::Ok(
+			RecoveryScalarTerminator::Return(
+				try _recovery_scalar_required_nullable_string(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	return Result<RecoveryScalarTerminator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Scalar recovery terminator")
+	)
+end
+
+def _recovery_scalar_integer_operator(name: String, path: String): Result<IntegerBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Divide)
+	end
+	if name == "remainder"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Remainder)
+	end
+	if name == "power"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Power)
+	end
+	return Result<IntegerBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Scalar recovery Integer operator")
+	)
+end
+
+def _recovery_scalar_float_operator(name: String, path: String): Result<FloatBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Divide)
+	end
+	return Result<FloatBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Scalar recovery Float operator")
+	)
+end
+
+def _recovery_scalar_comparison_operator(name: String, path: String): Result<ComparisonOperator, Diagnostic>
+	if name == "equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::Equal)
+	end
+	if name == "not_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::NotEqual)
+	end
+	if name == "less_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThan)
+	end
+	if name == "less_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThanOrEqual)
+	end
+	if name == "greater_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThan)
+	end
+	if name == "greater_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThanOrEqual)
+	end
+	return Result<ComparisonOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Scalar recovery comparison operator")
+	)
+end
+
+def _recovery_scalar_required_boolean(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Boolean(result)
+		return Result<Boolean, Diagnostic>::Ok(result)
+	else
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a boolean")
+		)
+	end
+end
+
+def _recovery_scalar_required_float(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Float, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Float(result)
+		return Result<Float, Diagnostic>::Ok(result)
+	when JSON::Value::Integer(result)
+		return Result<Float, Diagnostic>::Ok(result.to_f())
+	else
+		return Result<Float, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a number")
+		)
+	end
+end
+
+def _recovery_scalar_required_nullable_string(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<String?, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Null
+		return Result<String?, Diagnostic>::Ok(nil)
+	when JSON::Value::String(result)
+		if result.empty?()
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/" + name, "identifier must not be empty")
+			)
+		end
+		if result.size() > SCALAR_RECOVERY_MAX_IDENTIFIER_SIZE
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/" + name, "identifier exceeds the Scalar recovery limit")
+			)
+		end
+		return Result<String?, Diagnostic>::Ok(result)
+	else
+		return Result<String?, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a string or null")
+		)
+	end
+end
+
+def _recovery_scalar_required_string_array(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Array<String>, Diagnostic>
+	values := try required_array(fields, name, path)
+	if values.size() > SCALAR_RECOVERY_MAX_ARGUMENTS
+		return Result<Array<String>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/" + name, "argument count exceeds the Scalar recovery limit")
+		)
+	end
+	mut result: Array<String> := []
+	mut index := 0
+	while index < values.size()
+		case values[index]
+		when JSON::Value::String(item)
+			if item.empty?()
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/" + name + "/" + index.to_s(), "identifier must not be empty")
+				)
+			end
+			if item.size() > SCALAR_RECOVERY_MAX_IDENTIFIER_SIZE
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic(
+						"TRBN0005",
+						path + "/" + name + "/" + index.to_s(),
+						"identifier exceeds the Scalar recovery limit",
+					)
+				)
+			end
+			result.push(item)
+		else
+			return Result<Array<String>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0002", path + "/" + name + "/" + index.to_s(), "expected a string")
+			)
+		end
+		index += 1
+	end
+	return Result<Array<String>, Diagnostic>::Ok(result)
+end

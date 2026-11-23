@@ -1,0 +1,28 @@
+def main()
+	mut values: Array<String> := []
+	mut positions: Hash<String, Integer> := {}
+	mut index := 0
+	while index < 100
+		owner := "aZ09_" + index.to_s()
+		value := owner[index % 5]
+		values.push(value)
+		positions[value] = index
+		index += 1
+	end
+	mut pressure := ""
+	index = 0
+	while index < 100000
+		pressure = "replace-" + index.to_s()
+		index += 1
+	end
+	puts(values[0])
+	puts(values[1])
+	puts(values[2])
+	puts(values[3])
+	puts(values[4])
+	puts(values[99])
+	puts(positions.size())
+	puts(positions["_"])
+	puts(pressure)
+	puts(pressure[-1])
+end

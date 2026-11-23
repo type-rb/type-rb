@@ -1,0 +1,49 @@
+import { check } from compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { checked_transform_require } from frontend/checking/collections/iteration
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { MirRootPlan } from mir/model/module
+import { MirTransform } from frontend/types/transform_model
+import { describe, expect, test } from trb/std/test
+
+describe("Key-based Array sorting MIR") do
+	test("evaluates stable keys once and retains visited elements during source growth") do
+		managed_mir_test_fixture("keyed-array-sorting-mir", 20)
+	end
+	test("roots managed values and keys through copies narrowed receivers and closures") do
+		managed_mir_test_fixture("keyed-array-sorting-managed-mir", 20)
+	end
+	test("rejects unsupported sources keys arities and escaping transfers") do
+		bodies := ["values := [1].sort_by { |value| true }", "values := [1].sort_by { |value| [value] }", "values := [1].sort_by { |value| nil }", "values := (1..3).sort_by { |value| value }", "values := [1].sort_by { |value| return value }", "values := [1].sort_by { |value| break }", "values := [1].sort_by { |value| next }"]
+		bodies.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+	test("rejects a forged ordering-key projection") do
+		mut state := logical_checked_source("def main()\nputs([2, 1].sort_by { |value| value }.size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		plan := state.callables.checked[0].transforms[0]
+		expect(plan.key_type).to_equal("Integer")
+		state.callables.checked[0].transforms[0] = MirTransform.new(syntax: plan.syntax, iteration: plan.iteration, type_name: plan.type_name, key_type: "Boolean")
+		invalid := checked_transform_require(state, plan.syntax.iteration.origin)
+		expect(invalid.syntax.iteration.origin).to_equal(-1)
+	end
+	test("requires retained values and evaluated keys at scratch allocation") do
+		mut state := logical_checked_source("def main()\nputs([\"b\", \"a\"].sort_by { |value| value + \"!\" }[0])\nend\n")
+		expect(check(state)).to_be_true()
+		plan := state.scalar_mir.root_plans[0]
+		mut point := 0
+		while state.scalar_mir.instructions[plan.instructions[point]].kind != 47
+			point += 1
+		end
+		expect(plan.roots[point].size() >= 2).to_be_true()
+		mut roots := plan.roots
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+end

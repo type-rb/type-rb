@@ -1,0 +1,2467 @@
+import { verify_recovery_source_transport, verify_recovery_transport_runtime } from compiler/transport
+import { RecoveryCommandControl, collect_recovery_controls, recovery_control_limit, recovery_module_selection, run_recovery_command_controls } from compiler/controls
+import { compiler_recovery_mutations } from compiler/mutations
+import { decode_bootstrap_snapshot, decode_recovery_managed_snapshot } from managed/snapshot
+import { build_compiler_recovery_executable, build_recovery_managed_executable } from managed/toolchain
+import { build_recovery_generation } from driver/generation
+import { build_matched_go_compiler } from driver/matched_go
+import { RecoveryCompilerSources, read_compiler_recovery_sources, recovery_compiler_source, write_compiler_recovery_sources, write_recovery_source_files } from compiler/source
+import { allocate_compiler_recovery_workspace } from compiler/workspace
+import { native_create_directory, native_read_text, native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { Instant } from trb/std/time
+import { describe, expect, test } from trb/std/test
+
+def _recovery_environment(name: String): String
+	value := Process.environment(name)
+	if value == nil
+		return ""
+	end
+	return value
+end
+
+# Optional test-harness evidence, outside all ordinary compiler generations.
+def _recovery_stage(event: String, stage: String)
+	path := _recovery_environment("TYPE_RB_NATIVE_RECOVERY_STAGES")
+	if !path.empty?()
+		root := _recovery_environment("TYPE_RB_NATIVE_ROOT")
+		case Process.run("python3", [root + "/tools/recovery-stage.py", event, path, stage])
+		when Result::Ok(process)
+			if !process.success
+				puts(process.stderr)
+			end
+			expect(process.success).to_be_true()
+		when Result::Err(error)
+			puts(error.operation + ": " + error.message)
+			expect(false).to_be_true()
+		end
+	end
+	return
+end
+
+def _recovery_read(path: String): Result<String, String>
+	case native_read_text(path)
+	when Result::Ok(source)
+		return Result<String, String>::Ok(source)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_replace_once(source: String, before: String, after: String): Result<String, String>
+	if before.empty?()
+		return Result<String, String>::Err("replacement needle is empty")
+	end
+	first := source.index(before)
+	if first == nil
+		return Result<String, String>::Err("replacement needle is missing")
+	end
+	# First/last comparison also rejects overlapping occurrences.
+	last := source.rindex(before)
+	if last == nil
+		return Result<String, String>::Err("replacement needle is missing")
+	end
+	if last != first
+		return Result<String, String>::Err("replacement needle is not unique")
+	end
+	prefix := source.slice(0...first)
+	suffix := source.slice((first + before.size())...source.size())
+	return Result<String, String>::Ok(prefix + after + suffix)
+end
+
+def _recovery_process(command: String, arguments: Array<String>): Result<Process::Output, String>
+	case Process.run(command, arguments)
+	when Result::Ok(process)
+		return Result<Process::Output, String>::Ok(process)
+	when Result::Err(error)
+		return Result<Process::Output, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_reset_directory(path: String): Result<Boolean, String>
+	remove := try _recovery_process("/bin/rm", ["-rf", path])
+	if !remove.success
+		return Result<Boolean, String>::Err("cannot reset " + path + ": " + remove.stderr)
+	end
+	case native_create_directory(path)
+	when Result::Ok(_unit)
+		return Result<Boolean, String>::Ok(true)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_build(
+		executable: String,
+		source_path: String,
+		output_path: String,
+		qbe: String,
+		cc: String,
+	): Result<Process::Output, String>
+	return _recovery_process(
+		executable,
+		["build", source_path, "--output", output_path, "--qbe", qbe, "--cc", cc],
+	)
+end
+
+def _recovery_build_target(
+		executable: String,
+		source_path: String,
+		output_path: String,
+		qbe: String,
+		cc: String,
+		target: String,
+	): Result<Process::Output, String>
+	return _recovery_process(
+		executable,
+		[
+			"build",
+			source_path,
+			"--output",
+			output_path,
+			"--qbe",
+			qbe,
+			"--cc",
+			cc,
+			"--target",
+			target,
+		],
+	)
+end
+
+def _recovery_require_no_intermediates(directory: String): Result<Boolean, String>
+	find := try _recovery_process("/usr/bin/find", [directory, "-name", "*.trbn.*", "-print"])
+	if !find.success
+		return Result<Boolean, String>::Err("cannot inspect build intermediates: " + find.stderr)
+	end
+	if !find.stdout.empty?()
+		return Result<Boolean, String>::Err("build left intermediates: " + find.stdout)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_require_missing(path: String): Result<Boolean, String>
+	probe := try _recovery_process("/bin/test", ["!", "-e", path])
+	if !probe.success
+		return Result<Boolean, String>::Err("unexpected build artifact: " + path)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_require_same(left: String, right: String, context: String): Result<Boolean, String>
+	comparison := try _recovery_process("/usr/bin/cmp", [left, right])
+	if !comparison.success
+		return Result<Boolean, String>::Err(context + " executables differ")
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_built_program(
+		executable: String,
+		source_path: String,
+		output_path: String,
+		qbe: String,
+		expected_runtime: String,
+		context: String,
+	): Result<Boolean, String>
+	build := try _recovery_build(executable, source_path, output_path, qbe, "/usr/bin/cc")
+	if build.status != 0 || !build.stdout.empty?() || !build.stderr.empty?()
+		return Result<Boolean, String>::Err(context + " build failed: " + build.stderr)
+	end
+	runtime := try _recovery_process(output_path, [])
+	if runtime.status != 0 || runtime.stdout != expected_runtime || !runtime.stderr.empty?()
+		return Result<Boolean, String>::Err(context + " runtime differs: " + runtime.stderr)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_build_case(
+		source_path: String,
+		qbe_source: String,
+		expected_runtime: String,
+		qbe: String,
+		workspace: String,
+		case_name: String,
+	): Result<Boolean, String>
+	b1_directory := workspace + "/file-driver-build-" + case_name + "-b1"
+	b2_directory := workspace + "/file-driver-build-" + case_name + "-b2"
+	recipe_directory := workspace + "/file-driver-build-" + case_name + "-recipe"
+	try _recovery_reset_directory(b1_directory)
+	try _recovery_reset_directory(b2_directory)
+	try _recovery_reset_directory(recipe_directory)
+	b1_output := b1_directory + "/program"
+	b2_output := b2_directory + "/program"
+	recipe_output := recipe_directory + "/program"
+	try _recovery_verify_built_program(
+		workspace + "/b1",
+		source_path,
+		b1_output,
+		qbe,
+		expected_runtime,
+		case_name + " B1",
+	)
+	try _recovery_verify_built_program(
+		workspace + "/b2",
+		source_path,
+		b2_output,
+		qbe,
+		expected_runtime,
+		case_name + " B2",
+	)
+	recipe_qbe := recipe_directory + "/program.ssa"
+	recipe_assembly := recipe_directory + "/program.s"
+	case native_write_text(recipe_qbe, qbe_source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	qbe_process := try _recovery_process(
+		qbe,
+		["-t", "arm64_apple", "-o", recipe_assembly, recipe_qbe],
+	)
+	if !qbe_process.success
+		return Result<Boolean, String>::Err(case_name + " external QBE failed: " + qbe_process.stderr)
+	end
+	cc_process := try _recovery_process(
+		"/usr/bin/cc",
+		[recipe_assembly, "-Wl,-dead_strip,-x", "-o", recipe_output],
+	)
+	if !cc_process.success
+		return Result<Boolean, String>::Err(case_name + " external cc failed: " + cc_process.stderr)
+	end
+	try _recovery_require_same(b1_output, b2_output, case_name + " B1/B2")
+	try _recovery_require_same(b1_output, recipe_output, case_name + " Native/external")
+	try _recovery_require_no_intermediates(b1_directory)
+	try _recovery_require_no_intermediates(b2_directory)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_compiler_output(
+		executable: String,
+		source: String,
+		mode: String,
+	): Result<String, String>
+	process := case Process.run(executable, ["--source-content", mode, source])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	if !process.success
+		return Result<String, String>::Err(executable + " exited with " + process.status.to_s())
+	end
+	if !process.stderr.empty?()
+		return Result<String, String>::Err(executable + " wrote stderr: " + process.stderr)
+	end
+	return Result<String, String>::Ok(process.stdout)
+end
+
+def _recovery_execute_qbe(
+		qbe_source: String,
+		qbe: String,
+		workspace: String,
+		case_name: String,
+	): Result<String, String>
+	qbe_path := workspace + "/conformance-" + case_name + ".ssa"
+	assembly_path := workspace + "/conformance-" + case_name + ".s"
+	executable_path := workspace + "/conformance-" + case_name
+	case native_write_text(qbe_path, qbe_source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	qbe_process := case Process.run(qbe, ["-t", "arm64_apple", qbe_path])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	if !qbe_process.success
+		return Result<String, String>::Err("QBE rejected " + case_name + ": " + qbe_process.stderr)
+	end
+	case native_write_text(assembly_path, qbe_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	link_process := case Process.run("/usr/bin/cc", [assembly_path, "-Wl,-dead_strip", "-o", executable_path])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	if !link_process.success
+		return Result<String, String>::Err("link failed for " + case_name + ": " + link_process.stderr)
+	end
+	runtime := case Process.run(executable_path, [])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+	if !runtime.success || !runtime.stderr.empty?()
+		return Result<String, String>::Err("runtime failed for " + case_name + ": " + runtime.stderr)
+	end
+	return Result<String, String>::Ok(runtime.stdout)
+end
+
+def _recovery_verify_valid_case(
+		root: String,
+		category: String,
+		case_name: String,
+		executables: Array<String>,
+		qbe: String,
+		workspace: String,
+		file_start: Integer,
+		file_end: Integer,
+		verify_legacy_build: Boolean,
+	): Result<String, String>
+	base := root + "/compiler/conformance/" + category + "/" + case_name
+	source := try _recovery_read(base + ".trb")
+	expected_runtime := try _recovery_read(base + ".out")
+	mut canonical_qbe := ""
+	mut index := 0
+	while index < executables.size()
+		check := try _recovery_compiler_output(executables[index], source, "check")
+		if check != "ok\n"
+			return Result<String, String>::Err(case_name + " check differs at compiler " + index.to_s())
+		end
+		first := try _recovery_compiler_output(executables[index], source, "emit-qbe")
+		second := try _recovery_compiler_output(executables[index], source, "emit-qbe")
+		if first != second
+			return Result<String, String>::Err(case_name + " QBE is nondeterministic at compiler " + index.to_s())
+		end
+		if index == 0
+			canonical_qbe = first
+		else
+			if first != canonical_qbe
+				return Result<String, String>::Err(case_name + " QBE differs across compiler generations")
+			end
+		end
+		index += 1
+	end
+	index = file_start
+	while index < file_end
+		check_process := case Process.run(executables[index], ["check", base + ".trb"])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<String, String>::Err(error.operation + ": " + error.message)
+		end
+		if check_process.status != 0 || check_process.stdout != "ok\n" || !check_process.stderr.empty?()
+			return Result<String, String>::Err(case_name + " file check differs at compiler " + index.to_s())
+		end
+		emit_process := case Process.run(executables[index], ["emit-qbe", base + ".trb"])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<String, String>::Err(error.operation + ": " + error.message)
+		end
+		if emit_process.status != 0 || !emit_process.stderr.empty?() || emit_process.stdout != canonical_qbe
+			return Result<String, String>::Err(case_name + " file QBE differs at compiler " + index.to_s())
+		end
+		index += 1
+	end
+	actual_runtime := try _recovery_execute_qbe(canonical_qbe, qbe, workspace, category + "-" + case_name)
+	if actual_runtime != expected_runtime
+		return Result<String, String>::Err(case_name + " runtime output differs")
+	end
+	if verify_legacy_build
+		try _recovery_verify_build_case(
+			base + ".trb",
+			canonical_qbe,
+			expected_runtime,
+			qbe,
+			workspace,
+			category + "-" + case_name,
+		)
+	end
+	return Result<String, String>::Ok(canonical_qbe)
+end
+
+def _recovery_verify_invalid_build_case(
+		source_path: String,
+		expected: String,
+		workspace: String,
+		case_name: String,
+	): Result<Boolean, String>
+	mut compiler_index := 1
+	while compiler_index < 3
+		directory := workspace + "/file-driver-build-invalid-" + case_name + "-b" + compiler_index.to_s()
+		try _recovery_reset_directory(directory)
+		output_path := directory + "/program"
+		build := try _recovery_build(
+			workspace + "/b" + compiler_index.to_s(),
+			source_path,
+			output_path,
+			"/usr/bin/false",
+			"/usr/bin/false",
+		)
+		if build.status != 1 || !build.stdout.empty?() || build.stderr != expected
+			return Result<Boolean, String>::Err(
+				case_name + " invalid build differs at compiler " + compiler_index.to_s(),
+			)
+		end
+		try _recovery_require_missing(output_path)
+		try _recovery_require_no_intermediates(directory)
+		compiler_index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_candidate_builds(
+		executables: Array<String>,
+		source_path: String,
+		expected_runtime: String,
+		qbe: String,
+		workspace: String,
+		case_name: String,
+	): Result<Boolean, String>
+	mut outputs: Array<String> := []
+	mut index := 0
+	while index < executables.size()
+		directory := workspace + "/file-root-build-" + case_name + "-" + index.to_s()
+		try _recovery_reset_directory(directory)
+		output := directory + "/program"
+		try _recovery_verify_built_program(
+			executables[index],
+			source_path,
+			output,
+			qbe,
+			expected_runtime,
+			case_name + " candidate " + index.to_s(),
+		)
+		try _recovery_require_no_intermediates(directory)
+		outputs.push(output)
+		index += 1
+	end
+	index = 1
+	while index < outputs.size()
+		try _recovery_require_same(outputs[0], outputs[index], case_name + " candidate build")
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_invalid_case(
+		root: String,
+		case_name: String,
+		executables: Array<String>,
+		workspace: String,
+	): Result<Boolean, String>
+	base := root + "/compiler/conformance/invalid/" + case_name
+	source := try _recovery_read(base + ".source")
+	expected := try _recovery_read(base + ".diag")
+	mut index := 0
+	while index < executables.size()
+		check := try _recovery_compiler_output(executables[index], source, "check")
+		emit := try _recovery_compiler_output(executables[index], source, "emit-qbe")
+		if check != expected || emit != expected || emit.include?("export function")
+			return Result<Boolean, String>::Err(
+				case_name + " diagnostic differs at candidate " + index.to_s()
+			)
+		end
+		file_check := try _recovery_process(executables[index], ["check", base + ".source"])
+		file_emit := try _recovery_process(executables[index], ["emit-qbe", base + ".source"])
+		if file_check.status != 1 || !file_check.stdout.empty?() || file_check.stderr != expected
+			return Result<Boolean, String>::Err(
+				case_name + " file check differs at candidate " + index.to_s(),
+			)
+		end
+		if file_emit.status != 1 || !file_emit.stdout.empty?() || file_emit.stderr != expected
+			return Result<Boolean, String>::Err(
+				case_name + " file emission differs at candidate " + index.to_s(),
+			)
+		end
+		directory := workspace + "/file-root-invalid-" + case_name + "-" + index.to_s()
+		try _recovery_reset_directory(directory)
+		output := directory + "/program"
+		build := try _recovery_build(
+			executables[index],
+			base + ".source",
+			output,
+			"/usr/bin/false",
+			"/usr/bin/false",
+		)
+		if build.status != 1 || !build.stdout.empty?() || build.stderr != expected
+			return Result<Boolean, String>::Err(
+				case_name + " build differs at candidate " + index.to_s(),
+			)
+		end
+		try _recovery_require_missing(output)
+		try _recovery_require_no_intermediates(directory)
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_bounds_failure(
+		root: String,
+		executables: Array<String>,
+		qbe: String,
+		workspace: String,
+		case_name: String,
+	): Result<Boolean, String>
+	source_path := root + "/compiler/conformance/runtime-invalid/" + case_name + ".trb"
+	source := try _recovery_read(source_path)
+	mut canonical_qbe := ""
+	mut outputs: Array<String> := []
+	mut index := 0
+	while index < executables.size()
+		check := try _recovery_compiler_output(executables[index], source, "check")
+		if check != "ok\n"
+			return Result<Boolean, String>::Err(case_name + " source check differs")
+		end
+		emission := try _recovery_compiler_output(executables[index], source, "emit-qbe")
+		if index == 0
+			canonical_qbe = emission
+		else
+			if emission != canonical_qbe
+				return Result<Boolean, String>::Err(case_name + " QBE differs")
+			end
+		end
+		directory := workspace + "/bounds-" + case_name + "-" + index.to_s()
+		try _recovery_reset_directory(directory)
+		output := directory + "/program"
+		build := try _recovery_build(executables[index], source_path, output, qbe, "/usr/bin/cc")
+		if build.status != 0 || !build.stdout.empty?() || !build.stderr.empty?()
+			return Result<Boolean, String>::Err(case_name + " build failed: " + build.stderr)
+		end
+		runtime := try _recovery_process(output, [])
+		if runtime.status != 2 || !runtime.stdout.empty?() || runtime.stderr != "panic: index is out of bounds\n"
+			return Result<Boolean, String>::Err(case_name + " failure differs")
+		end
+		try _recovery_require_no_intermediates(directory)
+		outputs.push(output)
+		index += 1
+	end
+	index = 1
+	while index < outputs.size()
+		try _recovery_require_same(outputs[0], outputs[index], case_name + " candidate build")
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_snapshot_program(
+		root: String,
+		reference_trb: String,
+		qbe: String,
+		workspace: String,
+		case_name: String,
+		fixture_directory: String = "compiler/conformance/valid",
+	): Result<Boolean, String>
+	directory := workspace + "/snapshot-" + case_name
+	try _recovery_reset_directory(directory)
+	base := root + "/" + fixture_directory + "/" + case_name
+	try _recovery_write_source(directory + "/main.trb", try _recovery_read(base + ".trb"))
+	snapshot := try _recovery_process(
+		reference_trb,
+		["compiler", "bootstrap-snapshot", "--snapshot-version", "4", directory + "/main.trb"],
+	)
+	if !snapshot.success || !snapshot.stderr.empty?()
+		return Result<Boolean, String>::Err(case_name + " snapshot failed: " + snapshot.stderr)
+	end
+	native_module := case decode_bootstrap_snapshot(snapshot.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.code + ": " + error.message)
+	end
+	case build_recovery_managed_executable(native_module, qbe, "/usr/bin/cc", directory, directory + "/program")
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.phase + ": " + error.message + " " + error.stderr)
+	end
+	runtime := try _recovery_process(directory + "/program", [])
+	expected := try _recovery_read(base + ".out")
+	if !runtime.success || runtime.stdout != expected || !runtime.stderr.empty?()
+		return Result<Boolean, String>::Err(case_name + " snapshot runtime differs: " + runtime.stdout + runtime.stderr)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_conformance(
+		root: String,
+		qbe: String,
+		workspace: String,
+		matched_go_compiler: String,
+	): Result<Boolean, String>
+	executables := [
+		workspace + "/b0",
+		workspace + "/b1",
+		workspace + "/b2",
+		workspace + "/native-chain-b2/compiler",
+		workspace + "/native-chain-b3/compiler",
+		workspace + "/native-chain-b4/compiler",
+		matched_go_compiler,
+	]
+	valid_names := [
+		"control-flow",
+		"scalar-branches",
+		"scalar-loop-calls",
+		"scalar-short-circuit",
+		"records-arrays",
+		"strings-calls",
+		"managed-roots",
+		"float-scalars",
+		"array-aliases",
+		"next-identifiers",
+		"loop-transfer-control",
+		"loop-transfer-effects",
+		"loop-transfer-managed",
+		"namespace-binding-storage",
+		"builtin-result-values",
+	]
+	mut float_qbe := ""
+	mut index := 0
+	while index < valid_names.size()
+		valid_qbe := try _recovery_verify_valid_case(
+			root,
+			"valid",
+			valid_names[index],
+			executables,
+			qbe,
+			workspace,
+			1,
+			6,
+			true,
+		)
+		if valid_names[index] == "float-scalars"
+			float_qbe = valid_qbe
+		end
+		index += 1
+	end
+	# B0 and the matched Go frontend execute the canonical ASCII byte-access
+	# fallback. B1 onward use the verified Native byte adapter for Unicode.
+	unicode_source := try _recovery_read(root + "/compiler/conformance/valid/unicode-identifier-values.trb")
+	[executables[0], matched_go_compiler].each do |ascii_frontend|
+		["check", "emit-qbe"].each do |mode|
+			output := try _recovery_compiler_output(ascii_frontend, unicode_source, mode)
+			if output != "TRBN4001:1:unsupported source character 箱\n"
+				return Result<Boolean, String>::Err("ASCII recovery frontend boundary differs")
+			end
+		end
+	end
+	native_executables := [executables[1], executables[2], executables[3], executables[4], executables[5]]
+	try _recovery_verify_valid_case(
+		root, "valid", "unicode-identifier-values", native_executables,
+		qbe, workspace, 0, 5, false,
+	)
+	required_float_qbe := [
+		"function d $trbnf0(l %p0)",
+		"function d $trbnf1(d %p0, d %p1)",
+		"=d call $trbnf1(d ",
+		"=d sltof ",
+		"=d loadd ",
+		"stored ",
+		"=d add ",
+		"=d sub ",
+		"=d mulc ",
+		"=d div ",
+		"=l ceqd ",
+		"=l cned ",
+		"=l cltd ",
+		"=l cled ",
+		"=l cgtd ",
+		"=l cged ",
+		"d_-0.0",
+	]
+	index = 0
+	while index < required_float_qbe.size()
+		if !float_qbe.include?(required_float_qbe[index])
+			return Result<Boolean, String>::Err(
+				"Float QBE is missing " + required_float_qbe[index]
+			)
+		end
+		index += 1
+	end
+	if float_qbe.include?("function d $trbnf1(l ") || float_qbe.include?("call $trbnf1(l ")
+		return Result<Boolean, String>::Err("Float call boundary uses the Integer ABI")
+	end
+	candidate_executables := [executables[3], executables[4], executables[5]]
+	conditional_cases := ["elsif-control", "elsif-managed", "elsif-recovery", "array-assignment-targets", "array-assignment-managed", "array-assignment-recovery", "boolean-array-recovery", "record-array-recovery", "array-iteration-live", "array-iteration-control", "array-iteration-managed"]
+	index = 0
+	while index < conditional_cases.size()
+		try _recovery_verify_valid_case(
+			root, "valid", conditional_cases[index], candidate_executables,
+			qbe, workspace, 0, 3, false,
+		)
+		index += 1
+	end
+	float_array_qbe := try _recovery_verify_valid_case(
+		root,
+		"valid",
+		"float-arrays",
+		candidate_executables,
+		qbe,
+		workspace,
+		0,
+		3,
+		false,
+	)
+	required_float_array_qbe := [
+		"function $trbn_array_push_d(l %array, d %value)",
+		"call $trbn_array_push_d(l ",
+		", d ",
+		"=d sltof ",
+		"=d loadd ",
+		"stored ",
+	]
+	index = 0
+	while index < required_float_array_qbe.size()
+		if !float_array_qbe.include?(required_float_array_qbe[index])
+			return Result<Boolean, String>::Err(
+				"Float Array QBE is missing " + required_float_array_qbe[index]
+			)
+		end
+		index += 1
+	end
+	if float_array_qbe.include?("$trbn_array_push_d(l %array, l %value)")
+		return Result<Boolean, String>::Err("Float Array push uses the Integer ABI")
+	end
+	try _recovery_verify_candidate_builds(
+		candidate_executables,
+		root + "/compiler/conformance/valid/float-arrays.trb",
+		"float-arrays-ok\n",
+		qbe,
+		workspace,
+		"float-arrays",
+	)
+	file_root_invalid_names := [
+		"float-array-element",
+		"float-array-invariance",
+		"float-array-immutable",
+		"float-array-method-arity",
+	]
+	index = 0
+	while index < file_root_invalid_names.size()
+		try _recovery_verify_invalid_case(
+			root,
+			file_root_invalid_names[index],
+			candidate_executables,
+			workspace,
+		)
+		index += 1
+	end
+	try _recovery_verify_bounds_failure(root, candidate_executables, qbe, workspace, "float-array-bounds")
+	try _recovery_verify_bounds_failure(root, candidate_executables, qbe, workspace, "array-assignment-initial")
+	mutation_names := ["base", "literal", "control"]
+	mut mutation_qbe: Array<String> := []
+	index = 0
+	while index < mutation_names.size()
+		mutation_qbe.push(
+			try _recovery_verify_valid_case(
+				root,
+				"mutations",
+				mutation_names[index],
+				executables,
+				qbe,
+				workspace,
+				1,
+				6,
+				true,
+			)
+		)
+		index += 1
+	end
+	if mutation_qbe[0] == mutation_qbe[1] || mutation_qbe[0] == mutation_qbe[2] || mutation_qbe[1] == mutation_qbe[2]
+		return Result<Boolean, String>::Err("source mutations did not produce three distinct QBE programs")
+	end
+	invalid_names := [
+		"lexical",
+		"syntax",
+		"next-binding",
+		"next-typed-binding",
+		"loop-transfer-break-outside-loop",
+		"loop-transfer-next-outside-loop",
+		"loop-transfer-break-value",
+		"loop-transfer-next-value",
+		"loop-transfer-break-condition",
+		"duplicate",
+		"unresolved",
+		"arity",
+		"type",
+		"unsupported-type",
+		"integer-range",
+		"float-overflow",
+		"float-narrowing",
+		"float-remainder",
+		"float-method",
+		"float-malformed",
+	]
+	index = 0
+	while index < invalid_names.size()
+		base := root + "/compiler/conformance/invalid/" + invalid_names[index]
+		source := try _recovery_read(base + ".source")
+		expected := try _recovery_read(base + ".diag")
+		if !expected.start_with?("TRBN")
+			return Result<Boolean, String>::Err(invalid_names[index] + " is not classified as a diagnostic")
+		end
+		mut compiler_index := 0
+		while compiler_index < executables.size()
+			check := try _recovery_compiler_output(executables[compiler_index], source, "check")
+			emit := try _recovery_compiler_output(executables[compiler_index], source, "emit-qbe")
+			if check != expected || emit != expected || emit.include?("export function")
+				return Result<Boolean, String>::Err(
+					invalid_names[index] + " diagnostic differs at compiler " + compiler_index.to_s()
+				)
+			end
+			compiler_index += 1
+		end
+		compiler_index = 1
+		while compiler_index < 6
+			file_check := case Process.run(executables[compiler_index], ["check", base + ".source"])
+			when Result::Ok(process)
+				process
+			when Result::Err(error)
+				return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+			end
+			file_emit := case Process.run(executables[compiler_index], ["emit-qbe", base + ".source"])
+			when Result::Ok(process)
+				process
+			when Result::Err(error)
+				return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+			end
+			if file_check.status != 1 || !file_check.stdout.empty?() || file_check.stderr != expected
+				return Result<Boolean, String>::Err(
+					invalid_names[index] + " file check differs at compiler " + compiler_index.to_s(),
+				)
+			end
+			if file_emit.status != 1 || !file_emit.stdout.empty?() || file_emit.stderr != expected
+				return Result<Boolean, String>::Err(
+					invalid_names[index] + " file emission differs at compiler " + compiler_index.to_s(),
+				)
+			end
+			compiler_index += 1
+		end
+		try _recovery_verify_invalid_build_case(
+			base + ".source",
+			expected,
+			workspace,
+			invalid_names[index],
+		)
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_native_bootstrap_cycle(
+		b1_path: String,
+		compiler_path: String,
+		expected_qbe: String,
+		qbe: String,
+		workspace: String,
+	): Result<Boolean, String>
+	directories := [
+		workspace + "/native-chain-b2",
+		workspace + "/native-chain-b3",
+		workspace + "/native-chain-b4",
+	]
+	mut directory_index := 0
+	while directory_index < directories.size()
+		try _recovery_reset_directory(directories[directory_index])
+		directory_index += 1
+	end
+	outputs := [
+		directories[0] + "/compiler",
+		directories[1] + "/compiler",
+		directories[2] + "/compiler",
+	]
+	mut seed := b1_path
+	mut generation := 0
+	while generation < outputs.size()
+		build := try _recovery_build(seed, compiler_path, outputs[generation], qbe, "/usr/bin/cc")
+		if build.status != 0 || !build.stdout.empty?() || !build.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"Native bootstrap generation " + generation.to_s() + " failed: " + build.stderr,
+			)
+		end
+		try _recovery_require_no_intermediates(directories[generation])
+		check := try _recovery_process(outputs[generation], ["check", compiler_path])
+		if check.status != 0 || check.stdout != "ok\n" || !check.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"Native bootstrap generation " + generation.to_s() + " failed source check",
+			)
+		end
+		emission := try _recovery_process(outputs[generation], ["emit-qbe", compiler_path])
+		if emission.status != 0 || emission.stdout != expected_qbe || !emission.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"Native bootstrap generation " + generation.to_s() + " left the QBE fixed point",
+			)
+		end
+		seed = outputs[generation]
+		generation += 1
+	end
+	try _recovery_require_same(outputs[0], outputs[1], "Native bootstrap B2/B3")
+	try _recovery_require_same(outputs[1], outputs[2], "Native bootstrap B3/B4")
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_build_cycle(
+		b0_path: String,
+		recovery_source: String,
+		compiler_path: String,
+		qbe: String,
+		workspace: String,
+	): Boolean
+	b1 := case build_recovery_generation(b0_path, recovery_source, qbe, "/usr/bin/cc", workspace, "b1")
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		puts(error.phase + ": " + error.message + "\n" + error.stderr)
+		return false
+	end
+	b2 := case build_recovery_generation(b1.output_path, recovery_source, qbe, "/usr/bin/cc", workspace, "b2")
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		puts(error.phase + ": " + error.message + "\n" + error.stderr)
+		return false
+	end
+	b3 := case build_recovery_generation(b2.output_path, recovery_source, qbe, "/usr/bin/cc", workspace, "b3")
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		puts(error.phase + ": " + error.message + "\n" + error.stderr)
+		return false
+	end
+	b1_qbe := case native_read_text(b1.qbe_ir_path)
+	when Result::Ok(source)
+		source
+	when Result::Err(error)
+		puts(error.operation + ": " + error.message)
+		return false
+	end
+	b2_qbe := case native_read_text(b2.qbe_ir_path)
+	when Result::Ok(source)
+		source
+	when Result::Err(error)
+		puts(error.operation + ": " + error.message)
+		return false
+	end
+	b3_qbe := case native_read_text(b3.qbe_ir_path)
+	when Result::Ok(source)
+		source
+	when Result::Err(error)
+		puts(error.operation + ": " + error.message)
+		return false
+	end
+	if b1_qbe != b2_qbe || b2_qbe != b3_qbe
+		puts("recovery B1, B2, and B3 QBE outputs differ")
+		return false
+	end
+	_recovery_stage("end", "recovery-generations")
+	_recovery_stage("start", "ordinary-fixed-point")
+	canonical_qbe := case Process.run(b1.output_path, ["emit-qbe", compiler_path])
+	when Result::Ok(process)
+		if !process.success || process.stdout.empty?() || !process.stderr.empty?()
+			puts("B1 could not emit the multi-file compiler closure")
+			return false
+		end
+		process.stdout
+	when Result::Err(error)
+		puts(error.operation + ": " + error.message)
+		return false
+	end
+	case _recovery_verify_native_bootstrap_cycle(
+			b1.output_path,
+			compiler_path,
+			canonical_qbe,
+			qbe,
+			workspace,
+		)
+	when Result::Ok(_value)
+	when Result::Err(error)
+		puts(error)
+		return false
+	end
+	_recovery_stage("end", "ordinary-fixed-point")
+	_recovery_stage("start", "generation-controls")
+	limit := case recovery_control_limit(_recovery_environment("TYPE_RB_NATIVE_RECOVERY_JOBS"))
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error)
+		return false
+	end
+	mut controls: Array<RecoveryCommandControl> := []
+	seeds := [b0_path, b1.output_path, b2.output_path]
+	case verify_recovery_source_transport(seeds, workspace)
+	when Result::Ok(_verified)
+	when Result::Err(error)
+		puts(error)
+		return false
+	end
+	expected_qbe := [b1_qbe, b2_qbe, b3_qbe]
+	seeds.each.with_index do |seed, index|
+		controls.push(RecoveryCommandControl.new(
+				label: "compiler source check at seed " + index.to_s(),
+				executable: seed,
+				arguments: ["--source-file", "check", workspace + "/compiler-recovery.trb"],
+				expected_stdout: "ok\n",
+			))
+		controls.push(RecoveryCommandControl.new(
+				label: "repeated compiler QBE at seed " + index.to_s(),
+				executable: seed,
+				arguments: ["--source-file", "emit-qbe", workspace + "/compiler-recovery.trb"],
+				expected_stdout: expected_qbe[index],
+			))
+	end
+	file_seeds := [b1.output_path, b2.output_path]
+	file_seeds.each.with_index do |seed, index|
+		controls.push(RecoveryCommandControl.new(
+				label: "file-oriented compiler check at seed " + index.to_s(),
+				executable: seed,
+				arguments: ["check", compiler_path],
+				expected_stdout: "ok\n",
+			))
+		controls.push(RecoveryCommandControl.new(
+				label: "file-oriented compiler QBE at seed " + index.to_s(),
+				executable: seed,
+				arguments: ["emit-qbe", compiler_path],
+				expected_stdout: canonical_qbe,
+			))
+	end
+	program := "def main()\n\tputs(\"ok\")\n\treturn\nend\n"
+	executables := [b1.output_path, b2.output_path, b3.output_path]
+	executables.each.with_index do |executable, index|
+		controls.push(RecoveryCommandControl.new(
+				label: "self-hosted compiler check " + index.to_s(),
+				executable: executable,
+				arguments: ["--source-content", "check", program],
+				expected_stdout: "ok\n",
+			))
+	end
+	case run_recovery_command_controls(controls, limit)
+	when Result::Ok(_value)
+	when Result::Err(error)
+		puts(error)
+		return false
+	end
+	return true
+end
+
+def _recovery_verify_file_cli(workspace: String): Result<Boolean, String>
+	valid_source := "def main()\n\tputs(\"ok\")\n\treturn\nend\n"
+	valid_path := workspace + "/file-driver-valid.trb"
+	invalid_path := workspace + "/file-driver-invalid.trb"
+	missing_path := workspace + "/file-driver-missing.trb"
+	large_path := workspace + "/file-driver-large.trb"
+	case native_write_text(valid_path, valid_source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	case native_write_text(invalid_path, "def main()\n\tmissing()\n\treturn\nend\n")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	mut padding := " "
+	while padding.size() < 524288
+		padding += padding
+	end
+	case native_write_text(large_path, "def main()" + padding + "\n\treturn\nend\n")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	usage := "usage: compiler {check|emit-qbe} SOURCE\n       compiler build SOURCE --output OUTPUT --qbe QBE --cc CC\n"
+	executables := [workspace + "/b1", workspace + "/b2"]
+	mut canonical_qbe := ""
+	mut index := 0
+	while index < executables.size()
+		executable := executables[index]
+		check := case Process.run(executable, ["check", valid_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if check.status != 0 || check.stdout != "ok\n" || !check.stderr.empty?()
+			return Result<Boolean, String>::Err("file check failed at compiler " + index.to_s())
+		end
+		emit := case Process.run(executable, ["emit-qbe", valid_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if emit.status != 0 || emit.stdout.empty?() || !emit.stderr.empty?()
+			return Result<Boolean, String>::Err("file QBE emission failed at compiler " + index.to_s())
+		end
+		hidden_qbe := try _recovery_compiler_output(executable, valid_source, "emit-qbe")
+		if emit.stdout != hidden_qbe
+			return Result<Boolean, String>::Err("file and recovery QBE differ at compiler " + index.to_s())
+		end
+		if index == 0
+			canonical_qbe = emit.stdout
+		else
+			if emit.stdout != canonical_qbe
+				return Result<Boolean, String>::Err("file QBE differs across compiler generations")
+			end
+		end
+		diagnostic := case Process.run(executable, ["check", invalid_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if diagnostic.status != 1 || !diagnostic.stdout.empty?()
+			return Result<Boolean, String>::Err("file diagnostic contract failed at compiler " + index.to_s())
+		end
+		if diagnostic.stderr != "TRBN4003:2:unresolved function missing\n"
+			return Result<Boolean, String>::Err("file diagnostic contract failed at compiler " + index.to_s())
+		end
+		missing := case Process.run(executable, ["check", missing_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if missing.status != 66 || !missing.stdout.empty?()
+			return Result<Boolean, String>::Err("missing-file contract failed at compiler " + index.to_s())
+		end
+		if missing.stderr != "compiler: cannot read source file: " + missing_path + "\n"
+			return Result<Boolean, String>::Err("missing-file contract failed at compiler " + index.to_s())
+		end
+		no_arguments := case Process.run(executable, [])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if no_arguments.status != 64 || !no_arguments.stdout.empty?() || no_arguments.stderr != usage
+			return Result<Boolean, String>::Err("no-argument usage contract failed at compiler " + index.to_s())
+		end
+		invalid_mode := case Process.run(executable, ["invalid", valid_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if invalid_mode.status != 64 || !invalid_mode.stdout.empty?() || invalid_mode.stderr != usage
+			return Result<Boolean, String>::Err("invalid-mode usage contract failed at compiler " + index.to_s())
+		end
+		large := case Process.run(executable, ["check", large_path])
+		when Result::Ok(process)
+			process
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+		if large.status != 0 || large.stdout != "ok\n" || !large.stderr.empty?()
+			return Result<Boolean, String>::Err("large file check failed at compiler " + index.to_s())
+		end
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_expect_failed_build(
+		executable: String,
+		source_path: String,
+		output_path: String,
+		qbe: String,
+		cc: String,
+		expected_status: Integer,
+		expected_stderr: String,
+		directory: String,
+		context: String,
+	): Result<Boolean, String>
+	build := try _recovery_build(executable, source_path, output_path, qbe, cc)
+	if build.status != expected_status || !build.stdout.empty?() || build.stderr != expected_stderr
+		return Result<Boolean, String>::Err(context + " failure contract differs")
+	end
+	try _recovery_require_missing(output_path)
+	try _recovery_require_no_intermediates(directory)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_verify_build_cli(workspace: String, qbe: String): Result<Boolean, String>
+	executable := workspace + "/b1"
+	source_directory := workspace + "/file driver source with spaces"
+	output_directory := workspace + "/file driver output with spaces"
+	target_output_directory := workspace + "/file driver target output with spaces"
+	failure_directory := workspace + "/file-driver-build-failures"
+	try _recovery_reset_directory(source_directory)
+	try _recovery_reset_directory(output_directory)
+	try _recovery_reset_directory(target_output_directory)
+	try _recovery_reset_directory(failure_directory)
+	source_path := source_directory + "/input program.trb"
+	output_path := output_directory + "/program"
+	case native_write_text(source_path, "def main()\n\tputs(\"ok\")\n\treturn\nend\n")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	case native_write_text(output_path, "stale output")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	try _recovery_verify_built_program(
+		executable,
+		source_path,
+		output_path,
+		qbe,
+		"ok\n",
+		"space-bearing atomic replacement",
+	)
+	try _recovery_require_no_intermediates(output_directory)
+	target_output_path := target_output_directory + "/program"
+	target_build := try _recovery_build_target(
+		executable,
+		source_path,
+		target_output_path,
+		qbe,
+		"/usr/bin/cc",
+		"darwin-arm64-v0",
+	)
+	if target_build.status != 0 || !target_build.stdout.empty?() || !target_build.stderr.empty?()
+		return Result<Boolean, String>::Err("explicit Darwin target build failed: " + target_build.stderr)
+	end
+	target_runtime := try _recovery_process(target_output_path, [])
+	if target_runtime.status != 0 || target_runtime.stdout != "ok\n" || !target_runtime.stderr.empty?()
+		return Result<Boolean, String>::Err("explicit Darwin target runtime differs")
+	end
+	try _recovery_require_same(output_path, target_output_path, "implicit/explicit Darwin target")
+	try _recovery_require_no_intermediates(target_output_directory)
+
+	unsupported_output := failure_directory + "/unsupported-target"
+	unsupported_target := try _recovery_build_target(
+		executable,
+		source_path,
+		unsupported_output,
+		workspace + "/file-driver-missing-qbe",
+		workspace + "/file-driver-missing-cc",
+		"unknown-v0",
+	)
+	if unsupported_target.status != 64 || !unsupported_target.stdout.empty?()
+		return Result<Boolean, String>::Err("unsupported-target status differs")
+	end
+	if unsupported_target.stderr != "compiler: unsupported target profile\n"
+		return Result<Boolean, String>::Err("unsupported-target diagnostic differs")
+	end
+	try _recovery_require_missing(unsupported_output)
+	try _recovery_require_no_intermediates(failure_directory)
+
+	usage := "usage: compiler {check|emit-qbe} SOURCE\n       compiler build SOURCE --output OUTPUT --qbe QBE --cc CC\n"
+	invalid_shape := try _recovery_process(
+		executable,
+		["build", source_path, "--output", output_path, "--qbe", qbe],
+	)
+	if invalid_shape.status != 64 || !invalid_shape.stdout.empty?() || invalid_shape.stderr != usage
+		return Result<Boolean, String>::Err("build usage contract differs")
+	end
+
+	missing_source := workspace + "/file driver missing source.trb"
+	missing_output := failure_directory + "/missing-source"
+	missing := try _recovery_build(executable, missing_source, missing_output, qbe, "/usr/bin/cc")
+	if missing.status != 66 || !missing.stdout.empty?()
+		return Result<Boolean, String>::Err("build missing-source status differs")
+	end
+	if missing.stderr != "compiler: cannot read source file: " + missing_source + "\n"
+		return Result<Boolean, String>::Err("build missing-source diagnostic differs")
+	end
+	try _recovery_require_missing(missing_output)
+	try _recovery_require_no_intermediates(failure_directory)
+
+	qbe_failure_tool := failure_directory + "/qbe failure tool"
+	cc_failure_tool := failure_directory + "/cc failure tool"
+	case native_write_text(
+			qbe_failure_tool,
+			"#!/bin/sh\nprintf 'qbe child stderr\\n' >&2\nexit 23\n",
+		)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	case native_write_text(
+			cc_failure_tool,
+			"#!/bin/sh\nprintf 'cc child stderr\\n' >&2\nexit 24\n",
+		)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	chmod := try _recovery_process("/bin/chmod", ["+x", qbe_failure_tool, cc_failure_tool])
+	if !chmod.success
+		return Result<Boolean, String>::Err("cannot prepare child failure tools: " + chmod.stderr)
+	end
+	try _recovery_expect_failed_build(
+		executable,
+		source_path,
+		failure_directory + "/qbe-failure",
+		qbe_failure_tool,
+		"/usr/bin/cc",
+		70,
+		"qbe child stderr\ncompiler: qbe failed\n",
+		failure_directory,
+		"QBE",
+	)
+	try _recovery_expect_failed_build(
+		executable,
+		source_path,
+		failure_directory + "/missing-qbe",
+		workspace + "/file-driver-missing-qbe",
+		"/usr/bin/cc",
+		70,
+		"compiler: qbe failed\n",
+		failure_directory,
+		"missing QBE",
+	)
+	try _recovery_expect_failed_build(
+		executable,
+		source_path,
+		failure_directory + "/cc-failure",
+		qbe,
+		cc_failure_tool,
+		70,
+		"cc child stderr\ncompiler: cc failed\n",
+		failure_directory,
+		"cc",
+	)
+	try _recovery_expect_failed_build(
+		executable,
+		source_path,
+		failure_directory + "/missing-cc",
+		qbe,
+		workspace + "/file-driver-missing-cc",
+		70,
+		"compiler: cc failed\n",
+		failure_directory,
+		"missing cc",
+	)
+
+	missing_parent := workspace + "/file-driver-missing-output-parent"
+	remove_parent := try _recovery_process("/bin/rm", ["-rf", missing_parent])
+	if !remove_parent.success
+		return Result<Boolean, String>::Err("cannot reset missing output parent")
+	end
+	intermediate_failure := try _recovery_build(
+		executable,
+		source_path,
+		missing_parent + "/program",
+		qbe,
+		"/usr/bin/cc",
+	)
+	if intermediate_failure.status != 73 || !intermediate_failure.stdout.empty?()
+		return Result<Boolean, String>::Err("intermediate-file status differs")
+	end
+	if intermediate_failure.stderr != "compiler: cannot create intermediate file\n"
+		return Result<Boolean, String>::Err("intermediate-file diagnostic differs")
+	end
+
+	publish_target := workspace + "/file-driver-publish-target"
+	try _recovery_reset_directory(publish_target)
+	publish_failure := try _recovery_build(
+		executable,
+		source_path,
+		publish_target,
+		qbe,
+		"/usr/bin/cc",
+	)
+	if publish_failure.status != 73 || !publish_failure.stdout.empty?()
+		return Result<Boolean, String>::Err("publish status differs")
+	end
+	if publish_failure.stderr != "compiler: cannot publish output\n"
+		return Result<Boolean, String>::Err("publish diagnostic differs")
+	end
+	try _recovery_require_no_intermediates(workspace)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_copy_source(source: String, destination: String): Result<Boolean, String>
+	contents := try _recovery_read(source)
+	case native_write_text(destination, contents)
+	when Result::Ok(_unit)
+		return Result<Boolean, String>::Ok(true)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_write_source(path: String, source: String): Result<Boolean, String>
+	case native_write_text(path, source)
+	when Result::Ok(_unit)
+		return Result<Boolean, String>::Ok(true)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _prepare_compiler_closure(
+		directory: String,
+		names: Array<String>,
+		sources: Array<String>,
+		omitted: String,
+	): Result<Boolean, String>
+	try _recovery_reset_directory(directory)
+	mut selected_names: Array<String> := []
+	mut selected_sources: Array<String> := []
+	names.each.with_index do |name, index|
+		if name != omitted
+			selected_names.push(name)
+			selected_sources.push(sources[index])
+		end
+	end
+	try write_recovery_source_files(selected_names, selected_sources, directory)
+	try _recovery_write_source(directory + "/unrelated.trb", "@\n")
+	return Result<Boolean, String>::Ok(true)
+end
+
+# The omitted module may be the only file in its directory.
+def _recovery_restore_module(directory: String, name: String, source: String): Result<Boolean, String>
+	return write_recovery_source_files([name], [source], directory)
+end
+
+# Check the isolated entry before expensive generation controls as well as on B1.
+# A controlled missing dependency keeps this exact diagnostic independent of
+# canonical import order; the full compiler entry remains the probe's body.
+def _recovery_require_compiler_imports(executable: String, entry: String): Result<Boolean, String>
+	# Keep the unmodified entry as a negative control too: a compiler-source
+	# shortcut must not bypass import checking for the canonical text.
+	original := try _recovery_process(executable, ["--source-content", "check", entry])
+	missing_import := original.stdout.start_with?("TRBN4003:") && original.stdout.include?(":module does not export ")
+	single_diagnostic := original.stdout.split("\n").size() == 2 && original.stdout.end_with?("\n")
+	if original.status != 0 || !original.stderr.empty?() || !missing_import || !single_diagnostic
+		return Result<Boolean, String>::Err("isolated canonical compiler did not reject its missing imports: " + original.stdout)
+	end
+	isolated := "import { recovery_missing_dependency } from recovery_probe_missing\n" + entry
+	hidden := try _recovery_process(executable, ["--source-content", "check", isolated])
+	if hidden.status != 0 || !hidden.stderr.empty?()
+		return Result<Boolean, String>::Err("hidden compiler-source probe process differs")
+	end
+	if hidden.stdout != "TRBN4003:1:module does not export recovery_missing_dependency\n"
+		return Result<Boolean, String>::Err("hidden compiler-source import diagnostic differs: " + hidden.stdout)
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+record RecoveryModuleControl
+	executable: String
+	workspace: String
+	closure: RecoveryCompilerSources
+	mutations: Array<Array<String>>
+	canonical_qbe: String
+	index: Integer
+	check_mutation: Boolean
+end
+
+record RecoveryModuleObservation
+	result: Result<Array<Float>, String>
+	seconds: Float
+end
+
+# Each task owns its mutation and negative-control directories. Missing and
+# malformed modules are checked sequentially in the same isolated closure.
+def _recovery_verify_module_control(control: RecoveryModuleControl): Result<Array<Float>, String>
+	executable := control.executable
+	workspace := control.workspace
+	names := control.closure.names
+	sources := control.closure.contents
+	mutations := control.mutations
+	index := control.index
+	mut timings := [-1.0, -1.0, -1.0, -1.0]
+	if control.check_mutation
+		mut changed: Array<String> := []
+		sources.each do |source|
+			changed.push(source)
+		end
+		mut found := false
+		mutations.each do |mutation|
+			if mutation[0] == names[index]
+				changed[index] = try _recovery_replace_once(sources[index], mutation[1], mutation[2])
+				found = true
+			end
+		end
+		if !found
+			return Result<Array<Float>, String>::Err("missing compiler module mutation: " + names[index])
+		end
+		directory := workspace + "/compiler-source-compiler-" + names[index] + "-mutation"
+		prepared := Instant.now()
+		try _prepare_compiler_closure(directory, names, changed, "")
+		timings[0] = Instant.now().duration_since(prepared).total_seconds()
+		emitting := Instant.now()
+		emission := try _recovery_process(executable, ["emit-qbe", directory + "/compiler.trb"])
+		timings[1] = Instant.now().duration_since(emitting).total_seconds()
+		if emission.status != 0 || emission.stdout.empty?() || !emission.stderr.empty?()
+			return Result<Array<Float>, String>::Err(names[index] + " mutation emission failed: " + emission.stderr)
+		end
+		if emission.stdout == control.canonical_qbe
+			return Result<Array<Float>, String>::Err(names[index] + " mutation did not change compiler QBE")
+		end
+		try _recovery_require_no_intermediates(directory)
+	end
+
+	negative := workspace + "/compiler-source-compiler-invalid-" + names[index]
+	prepared := Instant.now()
+	try _prepare_compiler_closure(negative, names, sources, names[index])
+	if timings[0] < 0.0
+		timings[0] = 0.0
+	end
+	timings[0] += Instant.now().duration_since(prepared).total_seconds()
+	missing_output := negative + "/compiler-missing"
+	missing_started := Instant.now()
+	missing_build := try _recovery_build(executable, negative + "/compiler.trb", missing_output, negative + "/missing-qbe", negative + "/missing-cc")
+	timings[2] = Instant.now().duration_since(missing_started).total_seconds()
+	if missing_build.status != 1 || !missing_build.stdout.empty?()
+		return Result<Array<Float>, String>::Err("missing " + names[index] + " module did not fail before tools")
+	end
+	if !missing_build.stderr.include?("cannot resolve project import " + names[index])
+		return Result<Array<Float>, String>::Err("missing " + names[index] + " module diagnostic differs: " + missing_build.stderr)
+	end
+	try _recovery_require_missing(missing_output)
+	try _recovery_require_no_intermediates(negative)
+
+	# Restore the omitted module with invalid source. The compiler must still
+	# reject it before launching either external tool.
+	try _recovery_restore_module(negative, names[index], sources[index] + "\n`\n")
+	malformed_output := negative + "/compiler-malformed"
+	malformed_started := Instant.now()
+	malformed_build := try _recovery_build(executable, negative + "/compiler.trb", malformed_output, negative + "/missing-qbe", negative + "/missing-cc")
+	timings[3] = Instant.now().duration_since(malformed_started).total_seconds()
+	if malformed_build.status != 1 || !malformed_build.stdout.empty?()
+		return Result<Array<Float>, String>::Err("malformed " + names[index] + " module did not fail before tools")
+	end
+	if !malformed_build.stderr.include?("TRBN4001")
+		return Result<Array<Float>, String>::Err("malformed " + names[index] + " module diagnostic differs: " + malformed_build.stderr)
+	end
+	try _recovery_require_missing(malformed_output)
+	try _recovery_require_no_intermediates(negative)
+	return Result<Array<Float>, String>::Ok(timings)
+end
+
+def _recovery_verify_compiler_source_closure(
+		executable: String,
+		compiler_path: String,
+		closure: RecoveryCompilerSources,
+		workspace: String,
+	): Result<Boolean, String>
+	entry := recovery_compiler_source(closure, "compiler")
+	canonical := try _recovery_process(executable, ["emit-qbe", compiler_path])
+	if canonical.status != 0 || canonical.stdout.empty?() || !canonical.stderr.empty?()
+		return Result<Boolean, String>::Err("cannot emit canonical multi-file compiler QBE")
+	end
+	try _recovery_require_compiler_imports(executable, entry)
+
+	names := closure.names
+	sources := closure.contents
+	mutations := compiler_recovery_mutations()
+	limit := try recovery_control_limit(_recovery_environment("TYPE_RB_NATIVE_RECOVERY_JOBS"))
+	selected := try recovery_module_selection(_recovery_environment("TYPE_RB_NATIVE_RECOVERY_MODULES"), names)
+	mut controls: Array<RecoveryModuleControl> := []
+	names.each.with_index do |name, index|
+		if name != "compiler"
+			controls.push(RecoveryModuleControl.new(
+					executable: executable,
+					workspace: workspace,
+					closure: closure,
+					mutations: mutations,
+					canonical_qbe: canonical.stdout,
+					index: index,
+					check_mutation: selected.include?(name),
+				))
+		end
+	end
+	observations := controls.concurrent_map(limit: limit) do |control|
+		started := Instant.now()
+		result := _recovery_verify_module_control(control)
+		RecoveryModuleObservation.new(result: result, seconds: Instant.now().duration_since(started).total_seconds())
+	end
+	# Input order keeps successful and failed observations deterministic even
+	# though controls finish in parallel. These are diagnostic wall durations.
+	mut results: Array<Result<Boolean, String>> := []
+	observations.each.with_index do |observation, index|
+		control := controls[index]
+		mut timings := [-1.0, -1.0, -1.0, -1.0]
+		outcome := case observation.result
+		when Result::Ok(completed)
+			timings = completed
+			results.push(Result<Boolean, String>::Ok(true))
+			"ok"
+		when Result::Err(error)
+			results.push(Result<Boolean, String>::Err(error))
+			"failed"
+		end
+		puts("Recovery module " + names[control.index] + ": " + outcome +
+			", prepare=" + timings[0].to_s() + ", emit=" + timings[1].to_s() +
+			", missing=" + timings[2].to_s() + ", malformed=" + timings[3].to_s() +
+			", total=" + observation.seconds.to_s())
+	end
+	try collect_recovery_controls(results)
+
+	unrelated := workspace + "/compiler-source-compiler-unrelated"
+	try _prepare_compiler_closure(unrelated, names, sources, "")
+	unrelated_emission := try _recovery_process(executable, ["emit-qbe", unrelated + "/compiler.trb"])
+	if unrelated_emission.status != 0 || unrelated_emission.stdout != canonical.stdout || !unrelated_emission.stderr.empty?()
+		return Result<Boolean, String>::Err("unrelated invalid compiler sibling entered the closure")
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_expect_file_root_failure(
+		executable: String,
+		project: String,
+		expected: String,
+		label: String,
+	): Result<Boolean, String>
+	output := project + "/program"
+	build := try _recovery_build(
+		executable,
+		project + "/main.trb",
+		output,
+		project + "/missing-qbe",
+		project + "/missing-cc",
+	)
+	if build.status != 1 || !build.stdout.empty?()
+		return Result<Boolean, String>::Err(label + " did not fail before external tools")
+	end
+	if !build.stderr.include?(expected)
+		return Result<Boolean, String>::Err(label + " diagnostic differs: " + build.stderr)
+	end
+	try _recovery_require_missing(output)
+	try _recovery_require_no_intermediates(project)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_prepare_file_root_project(root: String, project: String): Result<Boolean, String>
+	try _recovery_reset_directory(project)
+	directories := [project + "/app", project + "/domain", project + "/shared"]
+	mut index := 0
+	while index < directories.size()
+		created := try _recovery_process("/bin/mkdir", ["-p", directories[index]])
+		if !created.success
+			return Result<Boolean, String>::Err("cannot create file-root fixture directory")
+		end
+		index += 1
+	end
+	fixture := root + "/compiler/conformance/file-root"
+	relative := [
+		"main.trb",
+		"app/summary.trb",
+		"app/label.trb",
+		"domain/score.trb",
+		"shared/index.trb",
+		"unrelated.trb",
+	]
+	index = 0
+	while index < relative.size()
+		try _recovery_copy_source(fixture + "/" + relative[index], project + "/" + relative[index])
+		index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_fixed_width_name(prefix: String, index: Integer): String
+	mut digits := index.to_s()
+	while digits.size() < 4
+		digits = "0" + digits
+	end
+	return prefix + digits
+end
+
+def _recovery_prepare_module_chain(project: String, count: Integer): Result<String, String>
+	try _recovery_reset_directory(project)
+	mut index := 0
+	while index < count
+		module_name := _recovery_fixed_width_name("m", index)
+		function_name := _recovery_fixed_width_name("f", index)
+		mut source := ""
+		if index > 0
+			previous_module := _recovery_fixed_width_name("m", index - 1)
+			previous_function := _recovery_fixed_width_name("f", index - 1)
+			source += "import { " + previous_function + " } from " + previous_module + "\n\n"
+			source += "def " + function_name + "(): Integer\n\treturn " + previous_function + "() + 1\nend\n"
+		else
+			source = "def " + function_name + "(): Integer\n\treturn 0\nend\n"
+		end
+		try _recovery_write_source(project + "/" + module_name + ".trb", source)
+		index += 1
+	end
+	last_function := _recovery_fixed_width_name("f", count - 1)
+	last_module := _recovery_fixed_width_name("m", count - 1)
+	entry := project + "/main.trb"
+	try _recovery_write_source(
+		entry,
+		"import { " + last_function + " } from " + last_module + "\n\n" +
+		"def main()\n\tif " + last_function + "() == " + (count - 1).to_s() +
+		"\n\t\tputs(\"module-scale-ok\")\n\tend\n\treturn\nend\n",
+	)
+	return Result<String, String>::Ok(entry)
+end
+
+def _recovery_verify_file_root_modules(
+		root: String,
+		workspace: String,
+		qbe: String,
+		reference_trb: String,
+	): Result<Boolean, String>
+	project := workspace + "/file driver file root project"
+	try _recovery_prepare_file_root_project(root, project)
+	entry := project + "/main.trb"
+	executables := [
+		workspace + "/b1",
+		workspace + "/b2",
+		workspace + "/native-chain-b2/compiler",
+		workspace + "/native-chain-b3/compiler",
+		workspace + "/native-chain-b4/compiler",
+	]
+	mut canonical_qbe := ""
+	mut index := 0
+	while index < executables.size()
+		check := try _recovery_process(executables[index], ["check", entry])
+		if check.status != 0 || check.stdout != "ok\n" || !check.stderr.empty?()
+			return Result<Boolean, String>::Err("file-root check failed at compiler " + index.to_s() + ": " + check.stderr)
+		end
+		emission := try _recovery_process(executables[index], ["emit-qbe", entry])
+		if emission.status != 0 || emission.stdout.empty?() || !emission.stderr.empty?()
+			return Result<Boolean, String>::Err("file-root emission failed at compiler " + index.to_s())
+		end
+		if canonical_qbe == ""
+			canonical_qbe = emission.stdout
+		else
+			if emission.stdout != canonical_qbe
+				return Result<Boolean, String>::Err("file-root QBE differs across compiler generations")
+			end
+		end
+		output_directory := workspace + "/file-driver-file-root-output-" + index.to_s()
+		try _recovery_reset_directory(output_directory)
+		output := output_directory + "/program"
+		try _recovery_verify_built_program(
+			executables[index],
+			entry,
+			output,
+			qbe,
+			"file-root-ok\n",
+			"file-root compiler " + index.to_s(),
+		)
+		try _recovery_require_no_intermediates(output_directory)
+		index += 1
+	end
+
+	repeat_a := workspace + "/file-driver-file-root-repeat-a"
+	repeat_b := workspace + "/file-driver-file-root-repeat-b"
+	try _recovery_reset_directory(repeat_a)
+	try _recovery_reset_directory(repeat_b)
+	try _recovery_verify_built_program(executables[0], entry, repeat_a + "/program", qbe, "file-root-ok\n", "repeat A")
+	try _recovery_verify_built_program(executables[0], entry, repeat_b + "/program", qbe, "file-root-ok\n", "repeat B")
+	try _recovery_require_same(repeat_a + "/program", repeat_b + "/program", "repeated file-root")
+
+	reference_output := workspace + "/file-driver-reference-file-root"
+	reference_check := try _recovery_process(reference_trb, ["check", entry])
+	if reference_check.status != 0
+		return Result<Boolean, String>::Err("reference file-root check failed: " + reference_check.stderr)
+	end
+	reference_build := try _recovery_process(
+		reference_trb,
+		["build", "--compile", "--outfile", reference_output, entry],
+	)
+	if reference_build.status != 0
+		return Result<Boolean, String>::Err("reference file-root build failed: " + reference_build.stderr)
+	end
+	reference_runtime := try _recovery_process(reference_output, [])
+	if reference_runtime.status != 0 || reference_runtime.stdout != "file-root-ok\n" || !reference_runtime.stderr.empty?()
+		return Result<Boolean, String>::Err("reference file-root runtime differs")
+	end
+
+	scale_project := workspace + "/module-scale-module-chain"
+	scale_entry := try _recovery_prepare_module_chain(scale_project, 64)
+	mut scale_qbe := ""
+	index = 0
+	while index < executables.size()
+		scale_check := try _recovery_process(executables[index], ["check", scale_entry])
+		if scale_check.status != 0 || scale_check.stdout != "ok\n" || !scale_check.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"module-chain check failed at compiler " + index.to_s() + ": " + scale_check.stderr,
+			)
+		end
+		scale_emission := try _recovery_process(executables[index], ["emit-qbe", scale_entry])
+		if scale_emission.status != 0 || scale_emission.stdout.empty?() || !scale_emission.stderr.empty?()
+			return Result<Boolean, String>::Err("module-chain emission failed at compiler " + index.to_s())
+		end
+		if scale_qbe == ""
+			scale_qbe = scale_emission.stdout
+		else
+			if scale_emission.stdout != scale_qbe
+				return Result<Boolean, String>::Err("module-chain QBE differs across compiler generations")
+			end
+		end
+		index += 1
+	end
+	scale_output := scale_project + "/native-program"
+	try _recovery_verify_built_program(
+		executables[0],
+		scale_entry,
+		scale_output,
+		qbe,
+		"module-scale-ok\n",
+		"64-module Native chain",
+	)
+	scale_reference_output := scale_project + "/reference-program"
+	scale_reference_build := try _recovery_process(
+		reference_trb,
+		["build", "--compile", "--outfile", scale_reference_output, scale_entry],
+	)
+	if scale_reference_build.status != 0
+		return Result<Boolean, String>::Err("reference module-chain build failed: " + scale_reference_build.stderr)
+	end
+	scale_reference_runtime := try _recovery_process(scale_reference_output, [])
+	if scale_reference_runtime.status != 0
+		return Result<Boolean, String>::Err("reference module-chain execution failed")
+	end
+	if scale_reference_runtime.stdout != "module-scale-ok\n" || !scale_reference_runtime.stderr.empty?()
+		return Result<Boolean, String>::Err("reference module-chain runtime differs")
+	end
+	try _recovery_require_no_intermediates(scale_project)
+
+	precedence := workspace + "/file-driver-file-root-precedence"
+	try _recovery_reset_directory(precedence)
+	created := try _recovery_process("/bin/mkdir", ["-p", precedence + "/choice"])
+	if !created.success
+		return Result<Boolean, String>::Err("cannot create precedence fixture")
+	end
+	case native_write_text(
+			precedence + "/main.trb",
+			"import { choice } from choice.trb\n\ndef main()\n\tputs(choice())\n\treturn\nend\n",
+		)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	case native_write_text(precedence + "/choice.trb", "def choice(): String\n\treturn \"direct\"\nend\n")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	case native_write_text(precedence + "/choice/index.trb", "def choice(): String\n\treturn \"index\"\nend\n")
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+	try _recovery_verify_built_program(
+		executables[0],
+		precedence + "/main.trb",
+		precedence + "/program",
+		qbe,
+		"direct\n",
+		"file/index precedence",
+	)
+
+	declaration_imports := workspace + "/file-driver-file-root-declaration-imports"
+	try _recovery_reset_directory(declaration_imports)
+	declaration_directories := [
+		declaration_imports + "/services",
+		declaration_imports + "/shared/ui/data_table",
+	]
+	index = 0
+	while index < declaration_directories.size()
+		created := try _recovery_process("/bin/mkdir", ["-p", declaration_directories[index]])
+		if !created.success
+			return Result<Boolean, String>::Err("cannot create declaration-import fixture")
+		end
+		index += 1
+	end
+	try _recovery_write_source(
+		declaration_imports + "/main.trb",
+		"import { Response as WebResponse, status_code as read_status } from services/http\n" +
+		"import services/secure_random as Random\n" +
+		"import shared/ui/data_table\n\n" +
+		"def main()\n" +
+		"\tresponse := WebResponse.new(status: read_status())\n" +
+		"\trandom := Random.new(value: response.status)\n" +
+		"\ttable := DataTable.new(rows: random.value)\n" +
+		"\tif table.rows == 42\n\t\tputs(\"declaration-imports-ok\")\n\tend\n" +
+		"\treturn\nend\n",
+	)
+	try _recovery_write_source(
+		declaration_imports + "/services/http.trb",
+		"record Response\n\tstatus: Integer\nend\n\ndef status_code(): Integer\n\treturn 42\nend\n",
+	)
+	try _recovery_write_source(
+		declaration_imports + "/services/secure_random.trb",
+		"record SecureRandom\n\tvalue: Integer\nend\n",
+	)
+	try _recovery_write_source(
+		declaration_imports + "/shared/ui/data_table/index.trb",
+		"record DataTable\n\trows: Integer\nend\n",
+	)
+	mut declaration_qbe := ""
+	index = 0
+	while index < executables.size()
+		declaration_check := try _recovery_process(
+			executables[index],
+			["check", declaration_imports + "/main.trb"],
+		)
+		if declaration_check.status != 0 || declaration_check.stdout != "ok\n" || !declaration_check.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"declaration-import check failed at compiler " + index.to_s() + ": " + declaration_check.stderr,
+			)
+		end
+		declaration_emission := try _recovery_process(
+			executables[index],
+			["emit-qbe", declaration_imports + "/main.trb"],
+		)
+		if declaration_emission.status != 0 || declaration_emission.stdout.empty?() || !declaration_emission.stderr.empty?()
+			return Result<Boolean, String>::Err(
+				"declaration-import emission failed at compiler " + index.to_s(),
+			)
+		end
+		if declaration_qbe == ""
+			declaration_qbe = declaration_emission.stdout
+		else
+			if declaration_emission.stdout != declaration_qbe
+				return Result<Boolean, String>::Err("declaration-import QBE differs across compiler generations")
+			end
+		end
+		index += 1
+	end
+	try _recovery_verify_built_program(
+		executables[0],
+		declaration_imports + "/main.trb",
+		declaration_imports + "/native-program",
+		qbe,
+		"declaration-imports-ok\n",
+		"Native declaration imports",
+	)
+	reference_declaration_output := declaration_imports + "/reference-program"
+	reference_declaration_build := try _recovery_process(
+		reference_trb,
+		[
+			"build",
+			"--compile",
+			"--outfile",
+			reference_declaration_output,
+			declaration_imports + "/main.trb",
+		],
+	)
+	if reference_declaration_build.status != 0
+		return Result<Boolean, String>::Err(
+			"reference declaration-import build failed: " + reference_declaration_build.stderr,
+		)
+	end
+	reference_declaration_runtime := try _recovery_process(reference_declaration_output, [])
+	if reference_declaration_runtime.status != 0
+		return Result<Boolean, String>::Err("reference declaration-import execution failed")
+	end
+	if reference_declaration_runtime.stdout != "declaration-imports-ok\n" || !reference_declaration_runtime.stderr.empty?()
+		return Result<Boolean, String>::Err("reference declaration-import runtime differs")
+	end
+	try _recovery_require_no_intermediates(declaration_imports)
+
+	root_conflict := workspace + "/file-driver-file-root-root-conflict"
+	try _recovery_reset_directory(root_conflict)
+	created_conflict := try _recovery_process("/bin/mkdir", ["-p", root_conflict + "/choice"])
+	if !created_conflict.success
+		return Result<Boolean, String>::Err("cannot create root-conflict fixture")
+	end
+	try _recovery_write_source(
+		root_conflict + "/main.trb",
+		"import { choice as direct_choice } from choice\n" +
+		"import { choice as indexed_choice } from choice/index\n\n" +
+		"def main()\n\tputs(direct_choice() + indexed_choice())\n\treturn\nend\n",
+	)
+	try _recovery_write_source(root_conflict + "/choice.trb", "def choice(): String\n\treturn \"direct\"\nend\n")
+	try _recovery_write_source(
+		root_conflict + "/choice/index.trb",
+		"def choice(): String\n\treturn \"index\"\nend\n",
+	)
+	index = 0
+	while index < executables.size()
+		try _recovery_expect_file_root_failure(
+			executables[index],
+			root_conflict,
+			"define the same import root",
+			"file/index root conflict compiler " + index.to_s(),
+		)
+		index += 1
+	end
+	reference_root_conflict := try _recovery_process(reference_trb, ["check", root_conflict + "/main.trb"])
+	if reference_root_conflict.status == 0
+		return Result<Boolean, String>::Err("reference accepted a direct/index root conflict")
+	end
+	if !reference_root_conflict.stderr.include?("define the same import root")
+		return Result<Boolean, String>::Err("reference root-conflict diagnostic differs")
+	end
+
+	cycle := workspace + "/file-driver-file-root-cycle"
+	try _recovery_reset_directory(cycle)
+	try _recovery_write_source(cycle + "/main.trb", "import { answer } from a\ndef main()\nputs(answer())\nend\n")
+	try _recovery_write_source(cycle + "/a.trb", "import { helper } from b\nVALUE := helper()\ndef answer(): String\nreturn VALUE\nend\n")
+	try _recovery_write_source(cycle + "/b.trb", "import { answer } from a\nBASE := \"cycle\"\ndef helper(): String\nreturn BASE\nend\ndef observe(): String\nreturn answer()\nend\n")
+	executables.each.with_index do |executable, generation|
+		try _recovery_verify_built_program(executable, cycle + "/main.trb", cycle + "/program-" + generation.to_s(), qbe, "cycle\n", "cyclic initialization")
+	end
+	# The same generations must reject unsafe value cycles before invoking tools.
+	try _recovery_write_source(cycle + "/main.trb", "import { A } from a\ndef main()\nputs(A)\nend\n")
+	try _recovery_write_source(cycle + "/a.trb", "import { B } from b\nA: String := B\n")
+	try _recovery_write_source(cycle + "/b.trb", "import { A } from a\nB: String := A\n")
+	executables.each do |executable|
+		cycle_build := try _recovery_build(executable, cycle + "/main.trb", cycle + "/invalid-program", workspace + "/missing-qbe", workspace + "/missing-cc")
+		if cycle_build.status != 1 || !cycle_build.stdout.empty?()
+			return Result<Boolean, String>::Err("value initialization cycle did not fail before tools")
+		end
+		if !cycle_build.stderr.include?("TRBN4004:2:value initialization cycle")
+			return Result<Boolean, String>::Err("value initialization cycle diagnostic differs: " + cycle_build.stderr)
+		end
+		try _recovery_require_missing(cycle + "/invalid-program")
+		try _recovery_require_no_intermediates(cycle)
+	end
+
+	standard_json := workspace + "/file-driver-file-root-standard-json"
+	try _recovery_reset_directory(standard_json)
+	try _recovery_write_source(
+		standard_json + "/main.trb",
+		"import trb/std/json\nimport trb/std/result\n" +
+		"def roundtrip(): Result<String, JSON::Error>\n" +
+		"value := try JSON.parse(\"{\\\"ok\\\":[1,true]}\")\n" +
+		"return JSON.stringify(value)\nend\n" +
+		"def main()\ncase roundtrip()\nwhen Result::Ok(text)\nputs(text)\n" +
+		"when Result::Err(error)\nputs(error.message)\nend\nend\n",
+	)
+	executables.each.with_index do |executable, generation|
+		try _recovery_verify_built_program(
+			executable,
+			standard_json + "/main.trb",
+			standard_json + "/program-" + generation.to_s(),
+			qbe,
+			"{\"ok\":[1,true]}\n",
+			"standard JSON compiler " + generation.to_s(),
+		)
+	end
+
+	failure_names := [
+		"missing-module",
+		"escaping-path",
+		"malformed-import",
+		"missing-export",
+		"duplicate-identity",
+		"binding-collision",
+		"unused-binding",
+		"local-conflict",
+		"zero-root",
+		"ambiguous-root",
+		"bare-function",
+		"missing-entry-main",
+		"invalid-entry-main",
+		"package-import",
+		"package-root-import",
+		"unused-standard-json",
+		"capability-activation",
+	]
+	failure_entries := [
+		"import { value } from missing\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import { value } from ../outside\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import { value } from lib\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import { value } from lib\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import { value as first, value as second } from lib\n\ndef main()\n\treturn\nend\n",
+		"import { value as shared, other as shared } from lib\n\ndef main()\n\treturn\nend\n",
+		"import { value } from lib\n\ndef main()\n\treturn\nend\n",
+		"import { value } from lib\n\ndef value(): String\n\treturn \"local\"\nend\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import lib\n\ndef main()\n\treturn\nend\n",
+		"import lib\n\ndef main()\n\treturn\nend\n",
+		"import lib\n\ndef main()\n\treturn\nend\n",
+		"import { helper } from lib\n\ndef run()\n\tputs(helper())\n\treturn\nend\n",
+		"def main(value: Integer)\n\treturn\nend\n",
+		"import { value } from trb/std/value\n\ndef main()\n\tputs(value())\n\treturn\nend\n",
+		"import trb/std/unknown\n\ndef main()\n\treturn\nend\n",
+		"import trb/std/json\n\ndef main()\n\treturn\nend\n",
+		"activate trb/platform/ruby/native\n\ndef main()\n\treturn\nend\n",
+	]
+	failure_libraries := [
+		"",
+		"",
+		"def value(): String\n\treturn \"broken\"\n",
+		"def other(): String\n\treturn \"other\"\nend\n",
+		"def value(): String\n\treturn \"value\"\nend\n",
+		"def value(): String\n\treturn \"value\"\nend\n\ndef other(): String\n\treturn \"other\"\nend\n",
+		"def value(): String\n\treturn \"value\"\nend\n",
+		"def value(): String\n\treturn \"imported\"\nend\n",
+		"record Other\n\tvalue: Integer\nend\n",
+		"record LIB\n\tvalue: Integer\nend\n\nrecord Lib\n\tvalue: Integer\nend\n",
+		"def lib(): String\n\treturn \"function\"\nend\n",
+		"def helper(): String\n\treturn \"helper\"\nend\n\ndef main()\n\treturn\nend\n",
+		"",
+		"",
+		"",
+		"",
+		"",
+	]
+	failure_diagnostics := [
+		"cannot resolve project import missing",
+		"invalid project import path ../outside",
+		"TRBN4002",
+		"module does not export value",
+		"declaration value from lib is already imported as first",
+		"duplicate import binding shared",
+		"unused import value",
+		"import binding conflicts with local declaration value",
+		"import lib has no record root declaration matching lib",
+		"import lib has multiple record root declarations matching lib",
+		"import lib matches only a top-level function; use an exact named import",
+		"program must declare exactly one main function",
+		"main must take no parameters",
+		"package imports are not supported by this compiler subset",
+		"package imports are not supported by this compiler subset",
+		"unused import JSON",
+		"unsupported top-level declaration activate",
+	]
+	mut failure_index := 0
+	while failure_index < failure_names.size()
+		failure_project := workspace + "/file-driver-file-root-" + failure_names[failure_index]
+		try _recovery_reset_directory(failure_project)
+		try _recovery_write_source(failure_project + "/main.trb", failure_entries[failure_index])
+		if !failure_libraries[failure_index].empty?()
+			try _recovery_write_source(failure_project + "/lib.trb", failure_libraries[failure_index])
+		end
+		mut compiler_index := 0
+		while compiler_index < executables.size()
+			try _recovery_expect_file_root_failure(
+				executables[compiler_index],
+				failure_project,
+				failure_diagnostics[failure_index],
+				failure_names[failure_index] + " compiler " + compiler_index.to_s(),
+			)
+			compiler_index += 1
+		end
+		failure_index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+describe("Native compiler recovery") do
+	test("restores an omitted module in a previously absent directory") do
+		case allocate_compiler_recovery_workspace("")
+		when Result::Err(message)
+			puts(message)
+			expect(false).to_be_true()
+		when Result::Ok(workspace)
+			directory := workspace + "/missing-module"
+			name := "only/nested/value"
+			source := "def value(): Integer\n\treturn 1\nend\n"
+			case _prepare_compiler_closure(directory, ["compiler", name], ["import only/nested/value\n", source], name)
+			when Result::Err(message)
+				puts(message)
+				expect(false).to_be_true()
+			when Result::Ok(_ready)
+				case _recovery_require_missing(directory + "/only/nested")
+				when Result::Ok(_absent)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_restore_module(directory, name, source + "\n`\n")
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				when Result::Ok(_restored)
+					case _recovery_read(directory + "/" + name + ".trb")
+					when Result::Ok(contents)
+						expect(contents).to_equal(source + "\n`\n")
+					when Result::Err(message)
+						puts(message)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			case Process.run("/bin/rm", ["-r", workspace])
+			when Result::Ok(removed)
+				expect(removed.success).to_be_true()
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("builds B0 from the TypeRB compiler source and executes its checked entry") do
+		root := _recovery_environment("TYPE_RB_NATIVE_ROOT")
+		reference_trb := _recovery_environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+		qbe := _recovery_environment("TYPE_RB_NATIVE_QBE")
+		if root.empty?() || reference_trb.empty?() || qbe.empty?()
+			expect(true).to_be_true()
+		else
+			case recovery_control_limit(_recovery_environment("TYPE_RB_NATIVE_RECOVERY_JOBS"))
+			when Result::Ok(limit)
+				puts("Recovery control concurrency: " + limit.to_s())
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+			case allocate_compiler_recovery_workspace(_recovery_environment("TYPE_RB_NATIVE_RECOVERY_RECEIPT"))
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			when Result::Ok(workspace)
+				puts("Recovery workspace retained for inspection: " + workspace)
+				_recovery_stage("start", "source-preparation")
+				sources := case read_compiler_recovery_sources(root + "/compiler/src/compiler.trb")
+				when Result::Ok(value)
+					value
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+					RecoveryCompilerSources.new(names: [], contents: [], flattened: "")
+				end
+				recovery_source := sources.flattened
+				case native_write_text(workspace + "/compiler-recovery.trb", recovery_source)
+				when Result::Ok(_unit)
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+				end
+				compiler_path := workspace + "/compiler.trb"
+				case write_compiler_recovery_sources(sources, workspace)
+				when Result::Ok(_unit)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				_recovery_stage("end", "source-preparation")
+				_recovery_stage("start", "matched-go")
+				matched_go_compiler := case build_matched_go_compiler(
+						reference_trb,
+						recovery_source,
+						workspace,
+					)
+				when Result::Ok(path)
+					path
+				when Result::Err(error)
+					puts(error.phase + ": " + error.message + "\n" + error.stderr)
+					expect(false).to_be_true()
+					""
+				end
+				_recovery_stage("end", "matched-go")
+				_recovery_stage("start", "snapshot")
+				case verify_recovery_transport_runtime(reference_trb, qbe, workspace)
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "elsif-recovery")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "loop-transfer-recovery")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "array-assignment-recovery")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "boolean-array-recovery")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "record-array-recovery")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "record-array-closure", "fixtures/recovery/programs")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+				case _recovery_verify_snapshot_program(root, reference_trb, qbe, workspace, "boolean-array-closure", "fixtures/recovery/programs")
+				when Result::Ok(_verified)
+				when Result::Err(message)
+					puts(message)
+					expect(false).to_be_true()
+				end
+
+				snapshot := case Process.run(
+						reference_trb,
+						["compiler", "bootstrap-snapshot", "--snapshot-version", "4", compiler_path],
+					)
+				when Result::Ok(process)
+					if !process.success
+						puts(process.stderr)
+					end
+					expect(process.success).to_be_true()
+					process.stdout
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+					""
+				end
+				expect(snapshot.to_bytes().size() > 4194304).to_be_true()
+				case decode_recovery_managed_snapshot(snapshot)
+				when Result::Ok(_native_module)
+					expect(false).to_be_true()
+				when Result::Err(diagnostic)
+					expect(diagnostic.code).to_equal("TRBN0005")
+					expect(diagnostic.message).to_equal("snapshot exceeds the Managed recovery 4 MiB input limit")
+				end
+				_recovery_stage("end", "snapshot")
+				_recovery_stage("start", "recovery-b0")
+				case decode_bootstrap_snapshot(snapshot)
+				when Result::Ok(native_module)
+					case build_compiler_recovery_executable(
+							native_module,
+							qbe,
+							"/usr/bin/cc",
+							workspace,
+							workspace + "/b0",
+						)
+					when Result::Ok(report)
+						puts("Recovery B0 seconds: emit=" + report.emit_seconds.to_s() + ", qbe=" + report.qbe_seconds.to_s() + ", link=" + report.link_seconds.to_s())
+						case Process.run(workspace + "/b0", [])
+						when Result::Ok(usage)
+							expect(usage.status).to_equal(64)
+							expect(usage.stdout).to_equal("")
+							expect(usage.stderr).to_equal(
+								"usage: compiler {--source-content MODE SOURCE|--source-file MODE FILE}\n",
+							)
+						when Result::Err(error)
+							puts(error.operation + ": " + error.message)
+							expect(false).to_be_true()
+						end
+						source := "def main()\n\tputs(\"ok\")\n\treturn\nend\n"
+						case Process.run(workspace + "/b0", ["--source-content", "check", source])
+						when Result::Ok(check)
+							expect(check.success).to_be_true()
+							expect(check.stdout).to_equal("ok\n")
+							expect(check.stderr).to_equal("")
+						when Result::Err(error)
+							puts(error.operation + ": " + error.message)
+							expect(false).to_be_true()
+						end
+						case _recovery_require_compiler_imports(workspace + "/b0", recovery_compiler_source(sources, "compiler"))
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "recovery-b0")
+						_recovery_stage("start", "recovery-generations")
+						expect(
+							_recovery_build_cycle(
+								workspace + "/b0",
+								recovery_source,
+								compiler_path,
+								qbe,
+								workspace,
+							),
+						).to_be_true()
+						_recovery_stage("end", "generation-controls")
+						_recovery_stage("start", "module-boundaries")
+						case _recovery_verify_compiler_source_closure(workspace + "/b1", compiler_path, sources, workspace)
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "module-boundaries")
+						_recovery_stage("start", "file-cli")
+						case _recovery_verify_file_cli(workspace)
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "file-cli")
+						_recovery_stage("start", "build-cli")
+						case _recovery_verify_build_cli(workspace, qbe)
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "build-cli")
+						_recovery_stage("start", "project-controls")
+						case _recovery_verify_file_root_modules(root, workspace, qbe, reference_trb)
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "project-controls")
+						_recovery_stage("start", "normalization")
+						case Process.run(
+								"/bin/sh",
+								[
+									root + "/tools/normalize-compiler.sh",
+									"/usr/bin/cc",
+									workspace + "/b1.s",
+									workspace + "/b2.s",
+									workspace + "/normalized",
+								],
+							)
+						when Result::Ok(normalization)
+							if !normalization.success
+								puts(normalization.stderr)
+							end
+							expect(normalization.success).to_be_true()
+							expect(normalization.stdout.include?("normalization-policy,no-uuid-same-basename\n")).to_be_true()
+						when Result::Err(error)
+							puts(error.operation + ": " + error.message)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "normalization")
+						_recovery_stage("start", "conformance")
+						case _recovery_verify_conformance(root, qbe, workspace, matched_go_compiler)
+						when Result::Ok(_value)
+							expect(true).to_be_true()
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+						_recovery_stage("end", "conformance")
+					when Result::Err(error)
+						puts(error.phase + ": " + error.message + "\n" + error.stderr)
+						expect(false).to_be_true()
+					end
+				when Result::Err(diagnostic)
+					puts(diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end
+
+describe("Recovery source mutation") do
+	test("preserves exact Unicode source around one replacement") do
+		sources := ["abc", "abc", "abc", "abc", "A😀éZ", "é", "abc"]
+		needles := ["a", "b", "c", "abc", "😀é", "́", "b"]
+		replacements := ["X", "X", "X", "", "λ", "!", "bb"]
+		expected := ["Xbc", "aXc", "abX", "", "AλZ", "e!", "abbc"]
+		mut index := 0
+		while index < sources.size()
+			expect(_recovery_replace_once(sources[index], needles[index], replacements[index])).to_equal(
+				Result<String, String>::Ok(expected[index]),
+			)
+			index += 1
+		end
+	end
+
+	test("rejects empty missing repeated and overlapping needles") do
+		expect(_recovery_replace_once("", "", "x")).to_equal(Result<String, String>::Err("replacement needle is empty"))
+		expect(_recovery_replace_once("abc", "", "x")).to_equal(Result<String, String>::Err("replacement needle is empty"))
+		expect(_recovery_replace_once("", "a", "x")).to_equal(Result<String, String>::Err("replacement needle is missing"))
+		expect(_recovery_replace_once("abc", "abcd", "x")).to_equal(Result<String, String>::Err("replacement needle is missing"))
+		expect(_recovery_replace_once("ababa", "aba", "x")).to_equal(Result<String, String>::Err("replacement needle is not unique"))
+		expect(_recovery_replace_once("aaa", "aa", "x")).to_equal(Result<String, String>::Err("replacement needle is not unique"))
+		expect(_recovery_replace_once("😀😀😀", "😀😀", "x")).to_equal(Result<String, String>::Err("replacement needle is not unique"))
+		expect(_recovery_replace_once("aba", "a", "x")).to_equal(Result<String, String>::Err("replacement needle is not unique"))
+	end
+end

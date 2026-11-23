@@ -1,0 +1,24 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Checked record arrays") do
+	test("routes record array reads through nominal control MIR") do
+		source := "record Entry\nid: Integer\nend\ndef read(values: Array<Entry>, index: Integer): Integer\nreturn values[index].id\nend\ndef sum(values: Array<Entry>): Integer\nmut index := 0\nmut result := 0\nwhile index < values.size()\nresult += values[index].id\nindex += 1\nend\nreturn result\nend\ndef main()\nreturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 1)].kind).to_equal(3)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+end

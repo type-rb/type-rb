@@ -1,0 +1,9 @@
+def main()
+	mut values := [1]
+	values.push(2)
+	mut index := 0
+	while index < 1
+		values[-3] = 7
+		index += 1
+	end
+end

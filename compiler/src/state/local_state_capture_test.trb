@@ -1,0 +1,95 @@
+import { LambdaCapture } from frontend/types/callable_types
+import { checked_function_locals } from frontend/checking/program/functions
+import { checked_mir_value } from frontend/checking/body/values
+import { check_function } from compiler
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { logical_checked_source } from testing/pipeline
+import { mir_checked_array_literal } from mir/lowering/arrays
+import { mir_binding_capture } from mir/build/bindings
+import { scalar_mir_commit } from mir/build/functions
+import { mir_declare_signatures } from mir/lowering/calls
+import { mir_checked_closure } from mir/lowering/callables
+import { mir_control_return } from mir/build/control
+import { mir_declare_types } from mir/model/types
+import { select_checked_body } from state/state
+import { local_bind, local_identity, local_storage_type } from state/local_state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { captured_storage_run, captured_storage_source } from testing/storage
+
+# An explicit analyzed plan drives ordinary declaration, read, write and edge
+# lowering. Authored fn materialization and retained REPL code are still pending.
+
+describe("Captured binding storage") do
+	test("carries cells through branches and loops while preserving parameter ABI and semantic types") do
+		source := "def calculate(mut value: Integer, step: Integer): Integer\nmut total := 0\nwhile total < 3\nif total == 1\nvalue = value + step\nelse\nvalue += 1\nend\ntotal += 1\nend\nreturn value\nend\ndef main()\nputs(calculate(10, 5))\nend\n"
+		mut state := captured_storage_source(source, "calculate", [0, 2])
+		captured_storage_run(state, "17\n")
+	end
+	test("initializes iteration cells inside each body and clears storage when lexical slots are reused") do
+		source := "def scan(): Integer\nmut sum := 0\n[2, 3].each.with_index do |item, ordinal|\nitem += ordinal\nif item > 0\nsum += item\nend\nend\nmut tail := 8\ntail += 1\nreturn sum + tail\nend\ndef main()\nputs(scan())\nend\n"
+		# sum=0, hidden receiver/cursor=1/2, item=3, ordinal=4, tail=5.
+		mut state := captured_storage_source(source, "scan", [0, 3, 4])
+		captured_storage_run(state, "15\n")
+	end
+	test("retains managed nullable payloads when assignments replace their values") do
+		source := "def replace(): String\nmut value: String? := \"first\" + \"!\"\nmut count := 0\nwhile count < 3\nvalue = nil\nvalue = \"next\" + \"!\"\ncount += 1\nend\nif value != nil\nreturn value\nend\nreturn \"missing\"\nend\ndef main()\nputs(replace())\nend\n"
+		mut state := captured_storage_source(source, "replace", [0])
+		captured_storage_run(state, "next!\n")
+	end
+	test("shares escaped mutable captures and keeps independent factory invocations separate") do
+		source := "alias Callback = () -> String\ndef step(mut cell: Array<String>, suffix: String): String\ncell[0] += suffix\nreturn cell[0]\nend\ndef make(mut seed: String, suffix: String): Array<Callback>\nend\ndef main()\ncallbacks := make(\"a\" + \"b\", \"!\" + \"?\")\nputs(callbacks[0]())\nputs(callbacks[1]())\nother := make(\"x\" + \"y\", \"+\" + \"-\")\nputs(other[0]())\nputs(callbacks[0]())\nend\n"
+		mut state := logical_checked_source(source)
+		factory := find_function_in_module(state, state.module_graph.entry_module[0], "make")
+		select_checked_body(state, factory)
+		state.callables.checked[0].shared_bindings.push(0)
+		mir_declare_types(state)
+		mir_declare_signatures(state)
+		mut function := 0
+		while function < state.declarations.function_count[0]
+			if function == factory
+				mut locals := checked_function_locals(state, function)
+				origin := load_integer(state.declarations.function_body_starts, function)
+				expect(local_storage_type(locals, 0)).to_equal("Array<String>")
+				expect(load_string(locals.types, 0)).to_equal("String")
+				expect(local_storage_type(locals, 1)).to_equal("String")
+				expect(load_integer(locals.mir_values, 1)).to_equal(2)
+				capture := LambdaCapture.new(identity: local_identity(locals, 0), child_identity: 0, name: "seed", type_name: "String", flow_type: "String", mutable: 1)
+				cell := mir_binding_capture(state, locals, capture, origin)
+				target := find_function_in_module(state, state.module_graph.entry_module[0], "step")
+				first := mir_checked_closure(state, locals, target, [cell, 1], origin)
+				second := mir_checked_closure(state, locals, target, [mir_binding_capture(state, locals, capture, origin), 1], origin)
+				pair := mir_checked_array_literal(state, locals, "Array<" + first.type_name + ">", first.type_name, origin, [first, second])
+				mir_control_return(state, locals, checked_mir_value(pair))
+				expect(scalar_mir_commit(state, function, locals)).to_equal("")
+			else
+				expect(check_function(state, function)).to_be_true()
+			end
+			function += 1
+		end
+		captured_storage_run(state, "ab!?\nab!?!?\nxy+-\nab!?!?!?\n")
+	end
+	test("rejects late boxing and stale captured identities after a slot is reused") do
+		mut mode := 0
+		while mode < 2
+			mut state := logical_checked_source("def probe(mut seed: Integer)\nend\ndef main()\nend\n")
+			function := find_function_in_module(state, state.module_graph.entry_module[0], "probe")
+			select_checked_body(state, function)
+			if mode == 1
+				state.callables.checked[0].shared_bindings.push(0)
+			end
+			mir_declare_types(state)
+			mir_declare_signatures(state)
+			mut locals := checked_function_locals(state, function)
+			capture := LambdaCapture.new(identity: local_identity(locals, 0), child_identity: 0, name: "seed", type_name: "Integer", flow_type: "Integer", mutable: 1)
+			if mode == 1
+				locals.count[0] = 0
+				local_bind(locals, "seed", "Integer", 1)
+				expect(local_storage_type(locals, 0)).to_equal("Integer")
+			end
+			expect(mir_binding_capture(state, locals, capture, load_integer(state.declarations.function_body_starts, function))).to_equal(-1)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("capture requires its analyzed lexical binding storage")
+			mode += 1
+		end
+	end
+end

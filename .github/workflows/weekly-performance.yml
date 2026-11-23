@@ -1,0 +1,152 @@
+name: Weekly language comparison
+
+on:
+
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Measure even when performance inputs have not changed
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: weekly-performance
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Restore the last measured state
+        id: restore
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/daily-performance/state.py restore --tier weekly --state "$RUNNER_TEMP/daily/state.json"
+
+      - name: Skip unchanged performance inputs
+        id: plan
+        env:
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          if test "$FORCE" = true; then
+            python3 tools/daily-performance/state.py plan --tier weekly --state "$RUNNER_TEMP/daily/state.json" --output "$GITHUB_OUTPUT" --force
+          else
+            python3 tools/daily-performance/state.py plan --tier weekly --state "$RUNNER_TEMP/daily/state.json" --output "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve the exact reference compiler
+        if: steps.plan.outputs.measure == 'true'
+        id: reference
+        run: echo "revision=$(cat TYPE_RB_REVISION)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        if: steps.plan.outputs.measure == 'true'
+        with:
+          repository: type-rb/type-rb
+          ref: ${{ steps.reference.outputs.revision }}
+          path: .type-rb
+
+      - uses: actions/setup-go@v6
+        if: steps.plan.outputs.measure == 'true'
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+
+      - name: Prepare the registered toolchain and seed
+        if: steps.plan.outputs.measure == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential lld jq strace time rustc openjdk-21-jdk-headless
+          test "$(git -C .type-rb rev-parse HEAD)" = "$(cat TYPE_RB_REVISION)"
+          python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb" --trimpath
+          python3 tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-1.3"
+          /bin/sh tools/bootstrap-seed-download.sh bootstrap-seed-2026-09-29-module-cycles \
+            04993b6bf598356a51143edd9dbde1a024c403cc \
+            type-rb-native-bootstrap-linux-arm64 "$RUNNER_TEMP/release"
+
+      - name: Download the registered comparison sources
+        if: steps.plan.outputs.measure == 'true'
+        run: |
+          curl --fail -L "https://salsa.debian.org/benchmarksgame-team/benchmarksgame/-/raw/40296663ed350d5fe4a6ab5e367bab61cb77c219/public/download/benchmarksgame-sourcecode.zip" -o "$RUNNER_TEMP/upstream.zip"
+          echo "aabcf6726cdc14f0f45b99e5daba48584f94bbb48883fd3711a1d040474d1cb4  $RUNNER_TEMP/upstream.zip" | sha256sum -c -
+
+      - name: Close the current Native compiler chain
+        if: steps.plan.outputs.measure == 'true'
+        env:
+          NATIVE_MIR_COST_MODE: mir-migration
+          PREVIOUS: ${{ steps.plan.outputs.previous }}
+        run: |
+          /bin/sh tools/daily-performance/prepare-compilers.sh \
+            "$RUNNER_TEMP/release/type-rb-native-bootstrap-linux-arm64" \
+            "$RUNNER_TEMP/qbe-1.3/qbe" "$PREVIOUS" "$RUNNER_TEMP/compilers" --current-only
+
+      - name: Measure the small cross-language suite
+        if: steps.plan.outputs.measure == 'true'
+        id: measurement
+        run: |
+          sudo swapoff -a
+          python3 tools/weekly-performance/measure.py --archive "$RUNNER_TEMP/upstream.zip" \
+            --compilers "$RUNNER_TEMP/compilers/compilers.json" --qbe "$RUNNER_TEMP/qbe-1.3/qbe" \
+            --evidence "$RUNNER_TEMP/measurements" --output "$RUNNER_TEMP/snapshot.json"
+
+      - name: Retain exact measurements and compiler evidence
+        id: evidence
+        if: always() && steps.plan.outputs.measure == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-performance-evidence
+          path: |
+            ${{ runner.temp }}/qbe-1.3/build-info.json
+            ${{ runner.temp }}/measurements
+            ${{ runner.temp }}/compilers/*/evidence
+            ${{ runner.temp }}/compilers/*/metadata.json
+            ${{ runner.temp }}/compilers/*/*.trace
+            ${{ runner.temp }}/compilers/*/*.stdout
+            ${{ runner.temp }}/compilers/*/*.stderr
+            ${{ runner.temp }}/compilers/*/seed-input.json
+            ${{ runner.temp }}/snapshot.json
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Record results or preserve the last snapshot after an infrastructure failure
+        if: always() && steps.plan.outputs.measure == 'true'
+        env:
+          MEASUREMENT_STATUS: ${{ steps.measurement.outcome }}
+          EVIDENCE_STATUS: ${{ steps.evidence.outcome }}
+        run: |
+          if test "$EVIDENCE_STATUS" != success; then MEASUREMENT_STATUS=failure; fi
+          python3 tools/daily-performance/state.py finish --tier weekly --state "$RUNNER_TEMP/daily/state.json" \
+            --snapshot "$RUNNER_TEMP/snapshot.json" --status "$MEASUREMENT_STATUS"
+
+      - name: Retain state, including unchanged days
+        if: always() && steps.restore.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: weekly-performance-state
+          path: ${{ runner.temp }}/daily/state.json
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Report the update without gating development
+        if: always() && steps.restore.outcome == 'success'
+        run: |
+          python3 - "$RUNNER_TEMP/daily/state.json" <<'PY'
+          import json, os, sys
+          state = json.load(open(sys.argv[1]))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Weekly comparison is independent of PR acceptance.\n\n')
+              out.write(f"Latest attempt: {(state.get('attempt') or {}).get('status', 'not measured')}\n")
+          PY

@@ -1,0 +1,114 @@
+import { token_kind_string } from state/token_kinds
+import { compiler_new, has_diagnostic } from state/state
+import { compiler_file_exists, compiler_read_source } from compiler
+import { scan_string } from frontend/syntax/lexer
+import { load_integer, load_string } from support/storage
+import { native_cli_save, native_cli_rename, native_cli_remove, native_cli_tempfile } from host
+
+# Use the reference REPL's JSON string-array format, retaining multiline input.
+def repl_history_load(path: String): Array<String>
+	mut history: Array<String> := []
+	if !compiler_file_exists(path)
+		return history
+	end
+	source := compiler_read_source(path)
+	if source == ""
+		return history
+	end
+	if source[0] == "["
+		mut state := compiler_new(source.size() + 1)
+		# History is JSON data; embedded source must never be lexed as code.
+		mut position := [1]
+		while position[0] < source.size()
+			if source[position[0]] == "\""
+				scan_string(state, source, source.size(), position, 1, false)
+			else
+				position[0] += 1
+			end
+		end
+		if has_diagnostic(state)
+			return history
+		end
+		mut index := 0
+		while index < state.source_tokens.token_count[0]
+			if load_integer(state.source_tokens.token_kinds, index) == token_kind_string()
+				entry := load_string(state.source_tokens.token_texts, index)
+				history.push(entry)
+			end
+			index += 1
+		end
+		return history
+	end
+	# The reference reader also accepts legacy newline-delimited history.
+	mut entry := ""
+	mut index := 0
+	while index <= source.size()
+		mut character := "\n"
+		if index < source.size()
+			character = source[index]
+		end
+		if character == "\n"
+			if entry != ""
+				history.push(entry)
+			end
+			entry = ""
+		else
+			entry += character
+		end
+		index += 1
+	end
+	return history
+end
+
+def repl_json_quote(text: String): String
+	mut output := "\""
+	mut index := 0
+	while index < text.size()
+		character := text[index]
+		mut escaped := character
+		if character == "\n"
+			escaped = "\\n"
+		end
+		if character == "\r"
+			escaped = "\\r"
+		end
+		if character == "\t"
+			escaped = "\\t"
+		end
+		if character == "\""
+			escaped = "\\\""
+		end
+		if character == "\\"
+			escaped = "\\\\"
+		end
+		output += escaped
+		index += 1
+	end
+	return output + "\""
+end
+
+def repl_history_save(path: String, history: Array<String>): Boolean
+	mut start := history.size() - 1000
+	if start < 0
+		start = 0
+	end
+	mut output := "["
+	mut index := start
+	while index < history.size()
+		if index > start
+			output += ","
+		end
+		output += repl_json_quote(history[index])
+		index += 1
+	end
+	output += "]\n"
+	temporary := native_cli_tempfile(path)
+	if temporary == ""
+		return false
+	end
+	if native_cli_save(temporary, output, 0) != 0 || native_cli_rename(temporary, path) != 0
+		native_cli_remove(temporary, 0)
+		return false
+	end
+	return true
+end

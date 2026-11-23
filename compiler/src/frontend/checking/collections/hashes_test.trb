@@ -1,0 +1,260 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { checked_hash_plan, checked_hash_valid } from frontend/checking/collections/hashes
+import { MirHashOperation, mir_hash_capacity, mir_hash_operation, mir_hash_valid } from mir/model/hashes
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Native Hash") do
+	test("checks integer insertion and required lookup") do
+		source := "def main()\nmut h := {1 => 2}\nh[1] = 42\nputs(h[1])\nputs(h.size())\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("accepts typed empty and signatures") do
+		source := "def fill(mut h: Hash<String, Integer>)\nh[\"a\"] = 42\nend\ndef main()\nmut h: Hash<String, Integer> := {}\nfill(h)\nputs(h[\"a\"])\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("accepts first write inference") do
+		source := "def main()\nmut h := {}\nh[1] = 2\nputs(h[1])\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("accepts label keys and literal postfix") do
+		source := "def main()\nputs({answer: 42}[\"answer\"])\nputs({1 => 2}.size())\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("accepts nested Hash and managed values") do
+		source := "record Box\nvalue: Integer\nend\ndef main()\nh := {\"x\" => {1 => Box.new(value: 42)}}\nputs(h[\"x\"][1].value)\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("accepts method family") do
+		source := "def main()\nmut h := {1 => 2}\nmut copy := h.dup()\ncopy.update({2 => 3})\nputs(copy.fetch(2))\nputs(h.merge(copy)[2])\nputs(copy.keys()[0])\nputs(copy.values()[0])\nputs(h.empty?())\nputs(h.delete(1))\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+	test("rejects immutable insertion") do
+		source := "def main()\nh := {1 => 2}\nh[1] = 3\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects immutable deletion") do
+		source := "def main()\nh := {1 => 2}\nh.delete(1)\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects immutable update") do
+		source := "def main()\nh := {1 => 2}\nh.update({2 => 3})\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects immutable alias escalation") do
+		source := "def main()\nh := {1 => 2}\nmut alias := h\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects mixed keys") do
+		source := "def main()\nh := {1 => 2, \"a\" => 3}\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects mixed values in an explicit value type") do
+		source := "def main()\nh: Hash<Integer, Integer> := {1 => 2, 2 => \"a\"}\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects wrong key") do
+		source := "def main()\nh := {1 => 2}\nputs(h[\"a\"])\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects wrong value") do
+		source := "def main()\nmut h := {1 => 2}\nh[1] = \"a\"\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects Void value") do
+		source := "def main()\nh := {1 => puts(2)}\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects unsupported key type") do
+		source := "def main()\nh: Hash<Boolean, Integer> := {}\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects unresolved ordinary empty Hash") do
+		source := "def main()\nh := {}\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects compound Hash assignment") do
+		source := "def main()\nmut h := {1 => 2}\nh[1] += 1\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		lex(state, source)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+		resolve(state)
+		if !has_diagnostic(state)
+			check(state)
+		end
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("rejects forged mutation, bounds, representation and capacity plans") do
+		expect(mir_hash_capacity(0)).to_equal(0)
+		expect(mir_hash_capacity(6)).to_equal(8)
+		expect(mir_hash_capacity(7)).to_equal(16)
+		forged := MirHashOperation.new(kind: 1, origin: 1, finish: 4, receiver_origin: 1, type_name: "Hash<Integer,Integer>", key_type: "Integer", value_type: "Integer", mutable: true, entries: 1, capacity: 16)
+		expect(mir_hash_valid(forged, 10, false)).to_be_false()
+		expect(mir_hash_valid(mir_hash_operation(3, 1, 4, 0, "Hash<Integer,Integer>", false, 0), 10, false)).to_be_false()
+		expect(mir_hash_valid(mir_hash_operation(1, 1, 4, 1, "Hash<Integer,Void>", true, 1), 10, false)).to_be_false()
+		expect(mir_hash_valid(mir_hash_operation(1, 1, 4, 1, "Hash<Integer,Unknown>", true, 1), 10, false)).to_be_false()
+		expect(mir_hash_valid(mir_hash_operation(2, 1, 4, 9, "Hash<Integer,Integer>", true, 0), 10, false)).to_be_false()
+		expect(mir_hash_valid(mir_hash_operation(1, 1, 14, 1, "Hash<Integer,Integer>", true, 1), 10, false)).to_be_false()
+		mut state := compiler_new(64)
+		lex(state, "1 + 2")
+		expect(checked_hash_valid(state, mir_hash_operation(1, 0, 2, 0, "Hash<Integer,Integer>", true, 1), false)).to_be_false()
+		expect(checked_hash_plan(state, 0).kind).to_equal(0)
+	end
+	test("accepts a readonly caller Hash through a source-function mutable parameter") do
+		source := "def fill(mut h: Hash<Integer, Integer>)\nh[1] = 2\nend\ndef main()\nh := {1 => 2}\nfill(h)\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects assignment through method results without a mutable binding") do
+		sources := ["def main()\nh := {1 => [2]}\nh.fetch(1)[0] = 3\nend\n", "def main()\nh := {1 => 2}\nh.size() = 3\nend\n", "def main()\n{1 => 2}[1] = 3\nend\n"]
+		mut index := 0
+		while index < sources.size()
+			source := sources[index]
+			mut state := compiler_new(source.size() * 3 + 16)
+			lex(state, source)
+			parse_module(state, 0, state.module_graph.entry_module[0])
+			resolve(state)
+			check(state)
+			expect(has_diagnostic(state)).to_be_true()
+			index += 1
+		end
+	end
+
+end

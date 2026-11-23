@@ -1,0 +1,68 @@
+def grow(mut values: Array<Integer>, count: Integer): Integer
+	mut index := values.size()
+	while index < count
+		values.push(index)
+		index += 1
+	end
+	return 9
+end
+
+def replace(suffix: String, mut rows: Array<Array<String>>): String
+	rows[0] = [(99).to_s()]
+	mut index := 0
+	while index < 100
+		rows[0].push(index.to_s())
+		index += 1
+	end
+	return suffix
+end
+
+def choose(flag: Boolean): Array<String>
+	mut result: Array<String> := []
+	mut index := 0
+	while index < 6
+		index += 1
+		if index == 2
+			next
+		elsif index == 5
+			break
+		end
+		result.push(index.to_s())
+	end
+	if flag
+		return result
+	end
+	return ["other"]
+end
+
+def pair(first: Array<String>, second: Array<String>): String
+	return first[0] + second[0]
+end
+
+def main()
+	mut values := [1, 2]
+	values[-1] = grow(values, 40)
+	puts(values[0])
+	puts(values[1])
+	puts(values.size())
+	mut rows := [[(10).to_s()]]
+	kept := rows[0]
+	rows[0][0] += replace(":kept", rows)
+	puts(kept[0])
+	puts(rows[0][0])
+	puts(pair(choose(true), choose(false)))
+	mut selected := choose(false)
+	if values.size() == 40
+		selected = choose(true)
+	end
+	puts(selected[-1])
+	mut floats := [1, 2.5]
+	floats[0] += 3
+	floats.push(6)
+	puts((floats[0] + floats[-1]).to_i())
+	mut flags := [[[true, false]]]
+	flags[0][0][0] = false
+	flags[0][0].push(true)
+	puts(flags[0][0][0])
+	puts(flags[0][0][-1])
+end

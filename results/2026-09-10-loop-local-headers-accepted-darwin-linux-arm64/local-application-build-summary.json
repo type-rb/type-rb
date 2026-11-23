@@ -1,0 +1,122 @@
+{
+  "rows": 45,
+  "warmups": 18,
+  "retained": 27,
+  "elapsed": 5.809250833000988,
+  "summary": [
+    {
+      "case": "n-body",
+      "medians": {
+        "control": {
+          "wall": 0.136946167,
+          "cpu": 0.127797,
+          "rss": 39534592,
+          "binaryBytes": 50984
+        },
+        "candidate": {
+          "wall": 0.134947375,
+          "cpu": 0.12402099999999999,
+          "rss": 39403520,
+          "binaryBytes": 50984
+        },
+        "cumulative": {
+          "wall": 0.139816709,
+          "cpu": 0.127142,
+          "rss": 39321600,
+          "binaryBytes": 50984
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 0.9854045422096407,
+          "cpu": 0.9704531405275554,
+          "rss": 0.9966846249481973,
+          "binaryBytes": 1.0
+        },
+        "cumulative": {
+          "wall": 0.965173447187918,
+          "cpu": 0.9754526435009673,
+          "rss": 1.0020833333333334,
+          "binaryBytes": 1.0
+        }
+      },
+      "catastrophic": []
+    },
+    {
+      "case": "fannkuch-redux",
+      "medians": {
+        "control": {
+          "wall": 0.123763792,
+          "cpu": 0.117173,
+          "rss": 39649280,
+          "binaryBytes": 50952
+        },
+        "candidate": {
+          "wall": 0.120618291,
+          "cpu": 0.12009099999999999,
+          "rss": 39518208,
+          "binaryBytes": 50952
+        },
+        "cumulative": {
+          "wall": 0.122424542,
+          "cpu": 0.11614799999999999,
+          "rss": 39534592,
+          "binaryBytes": 50952
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 0.9745846426554222,
+          "cpu": 1.0249033480409309,
+          "rss": 0.996694214876033,
+          "binaryBytes": 1.0
+        },
+        "cumulative": {
+          "wall": 0.9852460056579179,
+          "cpu": 1.0339480662602887,
+          "rss": 0.9995855781185247,
+          "binaryBytes": 1.0
+        }
+      },
+      "catastrophic": []
+    },
+    {
+      "case": "spectral-norm",
+      "medians": {
+        "control": {
+          "wall": 0.122306542,
+          "cpu": 0.123468,
+          "rss": 39534592,
+          "binaryBytes": 50984
+        },
+        "candidate": {
+          "wall": 0.124934542,
+          "cpu": 0.11400199999999999,
+          "rss": 39632896,
+          "binaryBytes": 50984
+        },
+        "cumulative": {
+          "wall": 0.123301875,
+          "cpu": 0.118485,
+          "rss": 39600128,
+          "binaryBytes": 50984
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 1.0214869945386895,
+          "cpu": 0.9233323614215829,
+          "rss": 1.002486531288852,
+          "binaryBytes": 1.0
+        },
+        "cumulative": {
+          "wall": 1.0132412179457935,
+          "cpu": 0.9621639870025741,
+          "rss": 1.0008274720728176,
+          "binaryBytes": 1.0
+        }
+      },
+      "catastrophic": []
+    }
+  ]
+}

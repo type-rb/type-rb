@@ -1,0 +1,369 @@
+import { mir_op_deadline_checkpoint, mir_op_file_scope } from mir/model/instructions
+import { emit_mir_file_scope } from backend/qbe/emit/file_scopes
+import { mir_op_object_copy, mir_op_object_identity } from mir/model/instructions
+import { emit_mir_array_join, emit_mir_join_fragment_size } from backend/qbe/emit/array_joins
+import { emit_mir_array_cache_boundaries } from backend/qbe/emit/array_caches
+import { qbe_mir_block_label, qbe_mir_edge_label } from backend/qbe/emit/loop_peels
+import { mir_guard_clamp_bounds, mir_guard_concurrent_limit, mir_guard_enum_variant, mir_guard_slice_size } from mir/model/operation_modes
+import { mir_terminator_branch, mir_terminator_jump, mir_terminator_return } from mir/model/control
+import { mir_op_array_copy, mir_op_array_join, mir_op_array_mutate, mir_op_array_new, mir_op_array_push, mir_op_bytes_valid_utf8, mir_op_callable_new, mir_op_direct_call, mir_op_enum_compare, mir_op_enum_new, mir_op_global_read, mir_op_global_write, mir_op_guard, mir_op_hash_method, mir_op_hash_new, mir_op_indirect_call, mir_op_literal_widen, mir_op_newtype_construct, mir_op_newtype_project, mir_op_nullable_extract, mir_op_nullable_none, mir_op_object_convert, mir_op_object_new, mir_op_object_store, mir_op_puts, mir_op_range_field, mir_op_range_new, mir_op_record_field, mir_op_record_new, mir_op_singleton_literal, mir_op_string_case, mir_op_string_literal, mir_op_string_query, mir_op_string_sequence, mir_op_string_slice, mir_op_string_split, mir_op_string_to_bytes, mir_op_string_trim, mir_op_union_extract, mir_op_union_inject, mir_op_value_copy } from mir/model/instructions
+import { mir_hash_concat_at_producer } from mir/analysis/hash_concats
+import { mir_array_join_elides, mir_join_site_present } from mir/analysis/array_joins
+import { emit_mir_bytes_instruction } from backend/qbe/emit/bytes
+import { emit_object_conversion } from backend/qbe/emit/object_dispatch
+import { emit_mir_object_instruction } from backend/qbe/emit/objects
+import { emit_mir_union_instruction } from backend/qbe/emit/unions
+import { emit_mir_global_read, emit_mir_global_write } from backend/qbe/emit/globals
+import { mir_callable_plan_at } from mir/analysis/callables
+import { emit_mir_callable } from backend/qbe/emit/callables
+import { emit_mir_enum_instruction } from backend/qbe/emit/enums
+import { emit_mir_nullable_instruction } from backend/qbe/emit/nullable
+import { emit_mir_range_instruction } from backend/qbe/emit/ranges
+import { emit_mir_hash_concat, emit_mir_hash_instruction } from backend/qbe/emit/hashes
+import { emit_mir_record_instruction } from backend/qbe/emit/records
+import { emit_integer_array_push, emit_mir_array_headers, emit_mir_array_instruction } from backend/qbe/emit/arrays
+import { mir_storage_type_name } from mir/model/types
+import { integer_string } from support/literals
+import { MirBlock, MirFunction, MirNumericPlan, MirValue, mir_block_index, mir_function_index } from mir/model/module
+import { mir_numeric_find, mir_numeric_guarded, mir_numeric_position } from mir/analysis/numeric
+import { mir_string_concat_index } from mir/analysis/string_concats
+import { QbeEmitContext, emit_label, emit_temporary, emit_typed_store, emitted_value, qbe_type } from backend/qbe/context
+import { emit_guarded_interface_mir, emit_mir_scalar_instruction, emit_scalar_mir } from backend/qbe/emit/mir
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { emit_mir_roots, qbe_root_common_prefix, qbe_root_plan_start } from backend/qbe/emit/roots
+import { emit_mir_string_concat, emit_mir_string_instruction, emit_mir_string_split } from backend/qbe/emit/strings
+import { CompilerState } from state/state
+
+# The adapter consumes block parameters and typed operands. Edge copies are
+# parallel assignments: capture sources that another assignment overwrites
+# before changing any destination. Identity copies need no instruction.
+def emit_control_mir_edge(state: CompilerState, function: MirFunction, target: Integer, label: String, start: Integer, count: Integer, operands: Array<String>, types: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	block := state.scalar_mir.blocks[mir_block_index(state.scalar_mir, function, target)]
+	mut captured: Array<String> := []
+	mut index := 0
+	while index < count
+		value := state.scalar_mir.arguments[start + index]
+		mut source := operands[value]
+		if value != state.scalar_mir.arguments[block.parameter_start + index]
+			mut other := 0
+			while other < count
+				destination := state.scalar_mir.arguments[block.parameter_start + other]
+				if destination == value && state.scalar_mir.arguments[start + other] != destination
+					source = emit_temporary(context)
+					qbe_output_line(output, "\t" + source + " =" + qbe_type(types[value]) + " copy " + operands[value])
+					break
+				end
+				other += 1
+			end
+		end
+		captured.push(source)
+		index += 1
+	end
+	index = 0
+	while index < count
+		value := state.scalar_mir.arguments[block.parameter_start + index]
+		if value != state.scalar_mir.arguments[start + index]
+			qbe_output_line(output, "\t" + operands[value] + " =" + qbe_type(types[value]) + " copy " + captured[index])
+		end
+		index += 1
+	end
+	qbe_output_line(output, "\tjmp " + label)
+end
+
+def emit_control_mir(state: CompilerState, function_index: Integer, result_type: String, values: Array<MirValue>, symbols: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, function_index)]
+	roots := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, function_index)]
+	mut lazy_capacity := 0
+	if context.enum_stack_type[0] != 0
+		lazy_capacity = roots.capacity
+	end
+	numeric := mir_numeric_find(state.scalar_mir.numeric_plans[0], function_index, -1, -1)
+	loop_calls := state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, function_index)]
+	array_loops := state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, function_index)]
+	array_check_reuse := state.scalar_mir.array_check_reuse[mir_function_index(state.scalar_mir, function_index)]
+	concats := state.scalar_mir.string_concats[mir_function_index(state.scalar_mir, function_index)]
+	joins := state.scalar_mir.array_joins[mir_function_index(state.scalar_mir, function_index)]
+	splits := state.scalar_mir.string_splits[mir_function_index(state.scalar_mir, function_index)]
+	array_read_guards := state.scalar_mir.array_read_guards[mir_function_index(state.scalar_mir, function_index)]
+	mut operands: Array<String> := []
+	mut types: Array<String> := []
+	mut value_types: Array<Integer> := []
+	values.each do |value|
+		while operands.size() <= value.id
+			operands.push("")
+			types.push("")
+			value_types.push(0)
+		end
+		operands[value.id] = "%mir_value" + integer_string(value.id)
+		value_types[value.id] = value.type_id
+		types[value.id] = mir_storage_type_name(state.scalar_mir, value.type_id)
+	end
+	mut index := 0
+	while index < function.parameter_count
+		value := state.scalar_mir.arguments[function.parameter_start + index]
+		operands[value] = "%p" + integer_string(index)
+		index += 1
+	end
+	qbe_output_line(output, "\tjmp @mir_" + integer_string(function.entry_block))
+	mut peel_blocks: Array<MirBlock> := []
+	array_loops.each do |plan|
+		if plan.peel_body >= 0
+			peel_blocks.push(state.scalar_mir.blocks[mir_block_index(state.scalar_mir, function, plan.header)])
+			peel_blocks.push(state.scalar_mir.blocks[mir_block_index(state.scalar_mir, function, plan.peel_body)])
+		elsif plan.cached_values.size() > 0
+			peel_blocks.push(state.scalar_mir.blocks[mir_block_index(state.scalar_mir, function, plan.header)])
+		end
+	end
+	mut block_index := 0
+	while block_index < function.block_count + peel_blocks.size()
+		mut block := state.scalar_mir.blocks[function.block_start]
+		peeled := block_index >= function.block_count
+		if peeled
+			block = peel_blocks[block_index - function.block_count]
+		else
+			block = state.scalar_mir.blocks[function.block_start + block_index]
+		end
+		qbe_output_line(output, qbe_mir_block_label(block.id, peeled))
+		index = block.instruction_start
+		mut point := qbe_root_plan_start(roots.instructions, index)
+		mut previous_roots: Array<Integer> := []
+		while index < block.instruction_start + block.instruction_count
+			instruction := state.scalar_mir.instructions[index]
+			mut expanded_push := false
+			if instruction.kind == mir_op_array_push()
+				expanded_push = types[instruction.second] == "Integer"
+			end
+			mut guarded: Array<MirNumericPlan> := []
+			if instruction.kind == mir_op_direct_call()
+				guarded = mir_numeric_guarded(state.scalar_mir.numeric_plans[0], function.id, index)
+			end
+			mut branch_roots := previous_roots
+			mut branch_root_prefix := 0
+			mut selected_join_fragment := -1
+			joins.each.with_index do |plan, slot|
+				if mir_join_site_present(plan.size_concats, index)
+					selected_join_fragment = slot
+				end
+			end
+			concat := mir_string_concat_index(concats, index)
+			if concat >= 0 && concats[concat].fragments.size() == 0 && selected_join_fragment < 0
+				index += 1
+				next
+			end
+			while point < roots.instructions.size()
+				if roots.instructions[point] != index
+					break
+				end
+				current_roots := roots.roots[point]
+				prefix := qbe_root_common_prefix(previous_roots, current_roots)
+				if expanded_push || guarded.size() > 0
+					branch_roots = current_roots
+					branch_root_prefix = prefix
+					# Only one branch publishes these slots. The next safe point
+					# must establish its own prefix on either path.
+					previous_roots = []
+				else
+					emit_mir_roots(current_roots, prefix, lazy_capacity, operands, context, output)
+					previous_roots = current_roots
+				end
+				point += 1
+			end
+			mut cache := ""
+			mut cache_complete := ""
+			loop_calls.each do |plan|
+				if plan.instruction == index
+					cache = "%mir_loop_result" + integer_string(index)
+					cache_complete = emit_label(context)
+					first_call := emit_label(context)
+					qbe_output_branch(output, "%mir_loop_ready" + integer_string(index), cache_complete, first_call)
+					qbe_output_line(output, first_call)
+				end
+			end
+			mut elided := false
+			mut selected_join := -1
+			mut joined_size := false
+			joins.each.with_index do |plan, slot|
+				if mir_array_join_elides(plan, index)
+					elided = true
+				end
+				if index == plan.join
+					selected_join = slot
+				end
+				if index == plan.size
+					joined_size = true
+				end
+			end
+			mut selected_split := -1
+			splits.each.with_index do |plan, slot|
+				if plan.instruction == index
+					selected_split = slot
+				end
+			end
+			hash_concat := mir_hash_concat_at_producer(state.scalar_mir.hash_concat_probes[0], index)
+			mut value := emitted_value("", "Void")
+			if instruction.kind == mir_op_deadline_checkpoint()
+				qbe_output_line(output, "\tcall $trbn_deadline_checkpoint()")
+			elsif elided
+				# No managed Array object or SSA pointer is materialized.
+			elsif selected_join_fragment >= 0
+				value = emit_mir_join_fragment_size(state.scalar_mir, joins[selected_join_fragment], index, operands, context, output)
+			elsif joined_size
+				value = emitted_value(operands[instruction.first], "Integer")
+			elsif expanded_push
+				mut reserved := false
+				array_loops.each do |plan|
+					plan.reserved_pushes.each do |push|
+						if push == index
+							reserved = true
+						end
+					end
+				end
+				emit_integer_array_push(operands[instruction.first], operands[instruction.second], reserved, branch_roots, branch_root_prefix, lazy_capacity, operands, context, output)
+			elsif selected_split >= 0
+				value = emit_mir_string_split(function.id, splits[selected_split], operands[instruction.first], operands[instruction.second], context, output)
+			elsif selected_join >= 0
+				value = emit_mir_array_join(state.scalar_mir, joins[selected_join], operands[instruction.second], operands, context, output)
+			elsif hash_concat >= 0
+				value = emit_mir_hash_concat(state.scalar_mir, state.scalar_mir.hash_concat_probes[0][hash_concat], operands, context, output)
+			elsif concat >= 0
+				value = emit_mir_string_concat(concats[concat], operands, context, output)
+			elsif instruction.kind >= mir_op_string_to_bytes() && instruction.kind <= mir_op_bytes_valid_utf8()
+				value = emit_mir_bytes_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_object_convert()
+				value = emit_object_conversion(state.scalar_mir, instruction, operands, context, output)
+			elsif(instruction.kind >= mir_op_object_new() && instruction.kind <= mir_op_object_store()) || instruction.kind == mir_op_object_copy() || instruction.kind == mir_op_object_identity()
+				value = emit_mir_object_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_newtype_construct() || instruction.kind == mir_op_newtype_project() || instruction.kind == mir_op_literal_widen()
+				value = emitted_value(operands[instruction.first], types[instruction.result])
+			elsif instruction.kind == mir_op_singleton_literal()
+				mut operand := state.scalar_mir.literal_texts[instruction.payload]
+				if types[instruction.result] == "String"
+					operand = symbols[instruction.payload]
+				end
+				value = emitted_value(operand, types[instruction.result])
+			elsif instruction.kind >= mir_op_union_inject() && instruction.kind <= mir_op_union_extract()
+				value = emit_mir_union_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_global_read()
+				value = emit_mir_global_read(state.scalar_mir, instruction, context, output)
+			elsif instruction.kind == mir_op_global_write()
+				emit_mir_global_write(state.scalar_mir, instruction, operands[instruction.first], context, output)
+			elsif instruction.kind == mir_op_file_scope()
+				value = emit_mir_file_scope(state.scalar_mir, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_value_copy()
+				value = emitted_value(operands[instruction.first], types[instruction.result])
+			elsif instruction.kind == mir_op_guard()
+				valid := emit_label(context)
+				failed := emit_label(context)
+				qbe_output_branch(output, operands[instruction.first], valid, failed)
+				qbe_output_line(output, failed)
+				if instruction.payload == mir_guard_clamp_bounds()
+					qbe_output_line(output, "\tcall $trbn_fail(l $trbn_clamp_error, l 37)")
+				elsif instruction.payload == mir_guard_slice_size()
+					qbe_output_line(output, "\tcall $trbn_fail(l $trbn_slice_size_error, l 49)")
+				elsif instruction.payload == mir_guard_concurrent_limit()
+					qbe_output_line(output, "\tcall $trbn_fail(l $trbn_concurrent_limit_error, l 54)")
+				elsif instruction.payload == mir_guard_enum_variant()
+					qbe_output_line(output, "\tcall $trbn_fatal(l $trbn_enum_error, l 34)")
+				else
+					qbe_output_line(output, "\tcall $trbn_fail(l $trbn_array_empty_error, l 22)")
+				end
+				qbe_output_line(output, "\tjmp @mir_" + integer_string(instruction.failure))
+				qbe_output_line(output, valid)
+			elsif instruction.kind == mir_op_callable_new() || instruction.kind == mir_op_indirect_call()
+				value = emit_mir_callable(state, value_types, instruction, mir_callable_plan_at(state.scalar_mir.callable_plans[0], index), mir_numeric_find(state.scalar_mir.numeric_plans[0], -1, function.id, index), operands, context, output)
+			elsif instruction.kind >= mir_op_enum_new() && instruction.kind <= mir_op_enum_compare()
+				value = emit_mir_enum_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind >= mir_op_nullable_none() && instruction.kind <= mir_op_nullable_extract()
+				value = emit_mir_nullable_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_range_new() || instruction.kind == mir_op_range_field()
+				value = emit_mir_range_instruction(state, value_types, instruction, operands, context, output)
+			elsif instruction.kind >= mir_op_hash_new() && instruction.kind <= mir_op_hash_method()
+				value = emit_mir_hash_instruction(state, value_types, index, instruction, operands, context, output)
+			elsif instruction.kind == mir_op_record_new() || instruction.kind == mir_op_record_field()
+				value = emit_mir_record_instruction(state, value_types, instruction, operands, context, output)
+			elsif(instruction.kind >= mir_op_array_new() && instruction.kind <= mir_op_array_push()) || instruction.kind == mir_op_array_copy() || instruction.kind == mir_op_array_mutate()
+				value = emit_mir_array_instruction(state, value_types, instruction, index, array_loops, array_check_reuse, array_read_guards, operands, context, output)
+			elsif(instruction.kind >= mir_op_string_literal() && instruction.kind <= mir_op_puts()) || instruction.kind == mir_op_string_query() || instruction.kind == mir_op_string_sequence() || instruction.kind == mir_op_string_slice() || instruction.kind == mir_op_array_join() || instruction.kind == mir_op_string_trim() || (instruction.kind >= mir_op_string_split() && instruction.kind <= mir_op_string_case())
+				value = emit_mir_string_instruction(state, value_types, instruction, operands, symbols, context, output)
+			elsif instruction.kind == mir_op_direct_call()
+				call_plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], -1, function.id, index)
+				if guarded.size() > 0
+					value = emit_guarded_interface_mir(state, instruction, operands, types, guarded, branch_roots, branch_root_prefix, lazy_capacity, context, output)
+				elsif call_plan.function_id >= 0
+					call := state.scalar_mir.calls[instruction.payload]
+					mut arguments: Array<String> := []
+					mut argument_types: Array<String> := []
+					mut argument := 0
+					while argument < call.argument_count
+						id := state.scalar_mir.arguments[call.argument_start + argument]
+						arguments.push(operands[id])
+						argument_types.push(types[id])
+						argument += 1
+					end
+					value = emit_scalar_mir(state, call_plan.function_id, arguments, argument_types, call_plan, context, output, true)
+				else
+					value = emit_mir_scalar_instruction(state, function_index, instruction, operands, types, numeric, mir_numeric_position(numeric, index), context, output, false)
+				end
+			else
+				value = emit_mir_scalar_instruction(state, function_index, instruction, operands, types, numeric, mir_numeric_position(numeric, index), context, output, false)
+			end
+			if cache != ""
+				qbe_output_line(output, "\t" + cache + " =" + qbe_type(types[instruction.result]) + " copy " + value.operand)
+				qbe_output_line(output, "\t%mir_loop_ready" + integer_string(index) + " =w copy 1")
+				qbe_output_line(output, "\tjmp " + cache_complete)
+				qbe_output_line(output, cache_complete)
+				value = emitted_value(cache, types[instruction.result])
+			end
+			if instruction.result >= 0 && !elided
+				# Stable MIR names allow a dominating definition in any storage order.
+				qbe_output_line(output, "\t" + operands[instruction.result] + " =" + qbe_type(types[instruction.result]) + " copy " + value.operand)
+			end
+			index += 1
+		end
+		loop_calls.each do |plan|
+			if plan.preheader == block.id
+				result := state.scalar_mir.instructions[plan.instruction].result
+				mut zero := "0"
+				if types[result] == "Float"
+					zero = "d_0"
+				end
+				name := integer_string(plan.instruction)
+				qbe_output_line(output, "\t%mir_loop_ready" + name + " =w copy 0")
+				qbe_output_line(output, "\t%mir_loop_result" + name + " =" + qbe_type(types[result]) + " copy " + zero)
+			end
+		end
+		emit_mir_array_headers(array_loops, block.id, operands, context, output)
+		mut first_visit_nonempty := false
+		if peeled
+			array_loops.each do |plan|
+				if plan.header == block.id && plan.peel_nonempty
+					first_visit_nonempty = true
+				end
+			end
+		end
+		if block.terminator == mir_terminator_jump() || first_visit_nonempty
+			label := qbe_mir_edge_label(array_loops, block.id, block.first_target, peeled)
+			emit_control_mir_edge(state, function, block.first_target, label, block.first_argument_start, block.first_argument_count, operands, types, context, output)
+		elsif block.terminator == mir_terminator_branch()
+			first := emit_label(context)
+			second := emit_label(context)
+			qbe_output_branch(output, operands[block.condition], first, second)
+			qbe_output_line(output, first)
+			first_label := qbe_mir_edge_label(array_loops, block.id, block.first_target, peeled)
+			emit_control_mir_edge(state, function, block.first_target, first_label, block.first_argument_start, block.first_argument_count, operands, types, context, output)
+			qbe_output_line(output, second)
+			second_label := qbe_mir_edge_label(array_loops, block.id, block.second_target, peeled)
+			emit_control_mir_edge(state, function, block.second_target, second_label, block.second_argument_start, block.second_argument_count, operands, types, context, output)
+		elsif block.terminator == mir_terminator_return()
+			if result_type != "Void"
+				emit_typed_store(output, result_type, operands[block.return_value], "%return_value")
+			end
+			qbe_output_line(output, "\tjmp @return")
+		else
+			qbe_output_line(output, "\tcall $trbn_fail(l $trbn_integer_range_error, l 45)")
+			qbe_output_line(output, "\thlt")
+		end
+		block_index += 1
+	end
+	emit_mir_array_cache_boundaries(state.scalar_mir, array_loops, operands, context, output)
+end

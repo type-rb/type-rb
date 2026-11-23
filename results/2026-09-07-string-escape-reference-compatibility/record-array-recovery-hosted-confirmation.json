@@ -1,0 +1,873 @@
+{
+  "run": 34250207907,
+  "candidateRevision": "b8133a3df537d3d8af5531fbd235322d87519d3f",
+  "controlRevision": "566d00d67172460df0f57dff6d5fe03db3b67cdc",
+  "registration": "https://github.com/type-rb/type-rb-native/pull/355#issuecomment-5588686720",
+  "ordinaryLimit": 1.05,
+  "firstAttemptStatus": "failed-self-build-wall",
+  "secondAttemptStatus": "passed-all-selected-exact-head-authorities",
+  "cohorts": [
+    {
+      "attempt": 1,
+      "rawCsvSha256": "79a3c346e6aa269e855b99c7a42a9cbe8a7ca032c5a7845c52f152b4e10af797",
+      "observations": [
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.62",
+          "peak_rss_bytes": "40927232",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.68",
+          "peak_rss_bytes": "41418752",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.84",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.74",
+          "peak_rss_bytes": "41336832",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.60",
+          "peak_rss_bytes": "40992768",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "3.10",
+          "peak_rss_bytes": "41353216",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.78",
+          "peak_rss_bytes": "41074688",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.55",
+          "peak_rss_bytes": "41205760",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.94",
+          "peak_rss_bytes": "41435136",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.56",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.49",
+          "peak_rss_bytes": "41271296",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.52",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.24",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.48",
+          "peak_rss_bytes": "41336832",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.38",
+          "peak_rss_bytes": "41172992",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.13",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.29",
+          "peak_rss_bytes": "41091072",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.52",
+          "peak_rss_bytes": "41058304",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.44",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.81",
+          "peak_rss_bytes": "41041920",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.76",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.66",
+          "peak_rss_bytes": "41271296",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.67",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.38",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.20",
+          "peak_rss_bytes": "40910848",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.28",
+          "peak_rss_bytes": "41238528",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.35",
+          "peak_rss_bytes": "41435136",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "3.06",
+          "peak_rss_bytes": "41467904",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.62",
+          "peak_rss_bytes": "40943616",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.40",
+          "peak_rss_bytes": "41500672",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.13",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.35",
+          "peak_rss_bytes": "41353216",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.17",
+          "peak_rss_bytes": "41041920",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.22",
+          "peak_rss_bytes": "40779776",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.15",
+          "peak_rss_bytes": "41205760",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.44",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        }
+      ],
+      "medians": {
+        "baseline": {
+          "elapsed_seconds": 2.365,
+          "peak_rss_bytes": 41287680.0
+        },
+        "candidate": {
+          "elapsed_seconds": 2.52,
+          "peak_rss_bytes": 41222144.0
+        }
+      },
+      "compilerMetadata": {
+        "baseline": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-baseline",
+          "attestationSubjectSha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "e99afb1469250d410e4ffb79b217b888f381bd93c31b3255d892dfef85593640",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "size": 365768
+        },
+        "candidate": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-candidate",
+          "attestationSubjectSha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "e99afb1469250d410e4ffb79b217b888f381bd93c31b3255d892dfef85593640",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "size": 365768
+        }
+      },
+      "environment": {
+        "baseline": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=566d00d67172460df0f57dff6d5fe03db3b67cdc\ntype_rb_revision=202cea85e8ceffd91cfc3ceb69d6f4d8a7acfd7b\nDarwin iad20-gt1021-8b13fedf-e7b8-4a76-ab0a-2471b02147bf-0ECE61BF653F.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+        "candidate": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=1881d4cc7d2a76372fff91fa4e543fe53700c636\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin iad20-gt1021-8b13fedf-e7b8-4a76-ab0a-2471b02147bf-0ECE61BF653F.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n"
+      },
+      "bootstrapIdentities": {
+        "baseline": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365768\ninput_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb1_size=365768\nb1_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb2_size=365768\nb2_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb3_size=365768\nb3_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb4_size=365768\nb4_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nfixed_point_qbe_size=1151452\nfixed_point_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\ncompiler_size_limit=366000\n",
+        "candidate": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365768\ninput_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb1_size=365768\nb1_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb2_size=365768\nb2_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb3_size=365768\nb3_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb4_size=365768\nb4_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nfixed_point_qbe_size=1151452\nfixed_point_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\ncompiler_size_limit=366000\n"
+      },
+      "ordinaryComparison": "metric\tstage\tbaseline\tcandidate\tcandidate_baseline_ratio\tmaximum\tstatus\ncompiler_bytes\tfixed-point\t365768\t365768\t1.000000\t1.05\tpass\nbuild_elapsed\tfixed-point-build\t2.365000\t2.520000\t1.065539\t1.05\tfail\n",
+      "measurementPolicy": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n"
+    },
+    {
+      "attempt": 2,
+      "rawCsvSha256": "505e8026a91cdec9013e2a32b98caf58a4592408652b511c88fa2cf382d34fcf",
+      "observations": [
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.94",
+          "peak_rss_bytes": "41254912",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.02",
+          "peak_rss_bytes": "41123840",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.04",
+          "peak_rss_bytes": "41451520",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.93",
+          "peak_rss_bytes": "40878080",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.83",
+          "peak_rss_bytes": "41058304",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.00",
+          "peak_rss_bytes": "41156608",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.66",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "warmup",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.37",
+          "peak_rss_bytes": "41107456",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.28",
+          "peak_rss_bytes": "41074688",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.12",
+          "peak_rss_bytes": "41418752",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.07",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "1",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.89",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.10",
+          "peak_rss_bytes": "41484288",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.08",
+          "peak_rss_bytes": "41435136",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.90",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "2",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.87",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.91",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.93",
+          "peak_rss_bytes": "41271296",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.07",
+          "peak_rss_bytes": "40894464",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "3",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.90",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.95",
+          "peak_rss_bytes": "41107456",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.00",
+          "peak_rss_bytes": "41320448",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.05",
+          "peak_rss_bytes": "41189376",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "4",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.08",
+          "peak_rss_bytes": "41238528",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.92",
+          "peak_rss_bytes": "41205760",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "1.94",
+          "peak_rss_bytes": "41336832",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.24",
+          "peak_rss_bytes": "41254912",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "5",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.00",
+          "peak_rss_bytes": "41074688",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.50",
+          "peak_rss_bytes": "41336832",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.57",
+          "peak_rss_bytes": "41369600",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "1",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.21",
+          "peak_rss_bytes": "41156608",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "6",
+          "order": "2",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.99",
+          "peak_rss_bytes": "41304064",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.01",
+          "peak_rss_bytes": "41222144",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b2-b3",
+          "elapsed_seconds": "2.09",
+          "peak_rss_bytes": "41107456",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "1",
+          "role": "baseline",
+          "stage": "b3-b4",
+          "elapsed_seconds": "2.01",
+          "peak_rss_bytes": "41484288",
+          "status": "0"
+        },
+        {
+          "phase": "retained",
+          "round": "7",
+          "order": "2",
+          "role": "candidate",
+          "stage": "b3-b4",
+          "elapsed_seconds": "1.99",
+          "peak_rss_bytes": "41238528",
+          "status": "0"
+        }
+      ],
+      "medians": {
+        "baseline": {
+          "elapsed_seconds": 2.04,
+          "peak_rss_bytes": 41279488.0
+        },
+        "candidate": {
+          "elapsed_seconds": 1.995,
+          "peak_rss_bytes": 41295872.0
+        }
+      },
+      "compilerMetadata": {
+        "baseline": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-baseline",
+          "attestationSubjectSha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "d496339df83c7ff74f426a9585c5d08a270403cbeaaa0b02ff1fd76080a4cc6d",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "size": 365768
+        },
+        "candidate": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-candidate",
+          "attestationSubjectSha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "d496339df83c7ff74f426a9585c5d08a270403cbeaaa0b02ff1fd76080a4cc6d",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd",
+          "size": 365768
+        }
+      },
+      "environment": {
+        "baseline": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=566d00d67172460df0f57dff6d5fe03db3b67cdc\ntype_rb_revision=202cea85e8ceffd91cfc3ceb69d6f4d8a7acfd7b\nDarwin sat12-bq153-d1edb516-aecb-45c8-8d92-95a9a443f8d5-2E24D8321C8D.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+        "candidate": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=1881d4cc7d2a76372fff91fa4e543fe53700c636\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin sat12-bq153-d1edb516-aecb-45c8-8d92-95a9a443f8d5-2E24D8321C8D.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n"
+      },
+      "bootstrapIdentities": {
+        "baseline": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365768\ninput_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb1_size=365768\nb1_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb2_size=365768\nb2_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb3_size=365768\nb3_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb4_size=365768\nb4_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nfixed_point_qbe_size=1151452\nfixed_point_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\ncompiler_size_limit=366000\n",
+        "candidate": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365768\ninput_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb1_size=365768\nb1_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb2_size=365768\nb2_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb3_size=365768\nb3_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nb4_size=365768\nb4_sha256=a95b8758af7d45ccbd40100cf00e15f2783a381b66a253a21fe683c06968e9bd\nfixed_point_qbe_size=1151452\nfixed_point_qbe_sha256=22771edfc718c68c3ba77aa6998ef3f7a0a506bd275dc2d1e427d6bd360676ae\ncompiler_size_limit=366000\n"
+      },
+      "ordinaryComparison": "metric\tstage\tbaseline\tcandidate\tcandidate_baseline_ratio\tmaximum\tstatus\ncompiler_bytes\tfixed-point\t365768\t365768\t1.000000\t1.05\tpass\nbuild_elapsed\tfixed-point-build\t2.040000\t1.995000\t0.977941\t1.05\tpass\nbuild_peak_rss\tfixed-point-build\t41279488.000000\t41295872.000000\t1.000397\t1.05\tpass\n",
+      "measurementPolicy": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n"
+    }
+  ],
+  "pooledRetainedPerRole": 28,
+  "pooledMedians": {
+    "baseline": {
+      "elapsed_seconds": 2.185,
+      "peak_rss_bytes": 41287680.0
+    },
+    "candidate": {
+      "elapsed_seconds": 2.215,
+      "peak_rss_bytes": 41230336.0
+    }
+  },
+  "pooledRatios": {
+    "elapsed_seconds": 1.0137299771167048,
+    "peak_rss_bytes": 0.9986111111111111
+  },
+  "additionalPooledCheck": "pass",
+  "cumulativeBaseline": "ac633935a7f248470c59d22666da14c819a131fa",
+  "cumulativeEvidence": "record-array-cost-diagnostic.json",
+  "claims": "Hosted incremental self-build confirmation only; no application speedup, cumulative acceptance or Pure Go comparison.",
+  "artifactIds": {
+    "attempt1Darwin": 10066604414,
+    "attempt2Darwin": 10066950292,
+    "linux": 10066490354,
+    "crossTarget": 10066957939
+  },
+  "inputEquality": "compiler/src and compiler/trbconfig.jsonc are unchanged between the two recorded Git revisions; baseline and candidate compiler SHA-256 agree within both attempts."
+}

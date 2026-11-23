@@ -1,0 +1,35 @@
+# Equal immutable keys retain their bytes and decoded length across a hit.
+def probe(table: Hash<String, Integer>, left: String, right: String): String
+	key := left + right
+	if table.key?(key)
+		return key
+	end
+	return key
+end
+
+def main()
+	mut table := { "" => 1, "雪" => 2, "a\000b" => 3, "\xFFz" => 4, "¢" => 5 }
+	puts(probe(table, "", "") == "")
+	puts(probe(table, "雪", "").size())
+	puts(probe(table, "a\000", "b") == "a\000b")
+	puts(probe(table, "\xFF", "z").size())
+	puts(probe(table, "\xC2", "\xA2").size())
+	puts(probe(table, "missing", "!"))
+	table.delete("¢")
+	absent := probe(table, "\xC2", "\xA2")
+	puts(absent == "¢")
+	puts(absent.size())
+	table[absent] = 7
+	retained := probe(table, "\xC2", "\xA2")
+	table = {}
+	mut index := 0
+	while index < 50000
+		temporary := index.to_s() + "allocation"
+		if temporary.size() == 0
+			puts("unexpected empty String")
+		end
+		index += 1
+	end
+	puts(retained == "¢")
+	puts(retained.size())
+end

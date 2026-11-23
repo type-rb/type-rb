@@ -1,0 +1,97 @@
+import { CompilerProjectSources, check, emit_qbe, load_project_sources } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirGlobal } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { validate_compilation_units } from frontend/resolution/module_components
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, find_module, has_diagnostic } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def cyclic_project(first: String, second: String, entry: String): CompilerState
+	return load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(paths: ["/project/src/a.trb", "/project/src/b.trb", "/project/src/main.trb"], sources: [first, second, entry], error: ""))
+end
+
+describe("Cyclic module initialization") do
+	test("keeps the checked dependency plan executable after source erasure") do
+		mut state := cyclic_project("import { BASE } from b\ndef read(): Integer\nreturn BASE + 1\nend\nVALUE := read()\n", "import { VALUE } from a\nBASE := 7\ndef later(): Integer\nreturn VALUE\nend\n", "import { VALUE } from a\ndef main()\nputs(VALUE)\nend\n")
+		expect(!has_diagnostic(state) && resolve(state) && check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		while !state.global_bindings.global_order.empty?()
+			state.global_bindings.global_order.pop()
+		end
+		while !state.global_bindings.runtime_order.empty?()
+			state.global_bindings.runtime_order.pop()
+		end
+		while !state.global_bindings.component_modules.empty?()
+			state.global_bindings.component_modules.pop()
+		end
+		while !state.global_bindings.module_components.empty?()
+			state.global_bindings.module_components.pop()
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("8\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		first := state.scalar_mir.global_initialization[0]
+		state.scalar_mir.global_initialization[0] = state.scalar_mir.global_initialization[1]
+		state.scalar_mir.global_initialization[1] = first
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR cyclic initializer can read an uninitialized constant")
+	end
+
+	test("rejects reordered independent declarations in one cyclic source") do
+		mut state := cyclic_project("import { B } from b\nFIRST := 1\nLAST := 2\ndef later(): Integer\nreturn B\nend\n", "import { LAST } from a\nB := 3\ndef later(): Integer\nreturn LAST\nend\n", "import { FIRST, LAST } from a\ndef main()\nputs(FIRST + LAST)\nend\n")
+		accepted := resolve(state) && check(state)
+		if !accepted
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(accepted).to_be_true()
+		first := state.scalar_mir.global_initialization[0]
+		state.scalar_mir.global_initialization[0] = state.scalar_mir.global_initialization[1]
+		state.scalar_mir.global_initialization[1] = first
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR cyclic initialization changes source declaration order")
+	end
+
+	test("independently rejects an opaque operation claimed as cyclic-safe") do
+		mut state := logical_checked_source("def invoke(callback: () -> Integer): Integer\nreturn callback()\nend\nVALUE := invoke(fn(): Integer\nreturn 7\nend)\ndef main()\nputs(VALUE)\nend\n")
+		expect(check(state)).to_be_true()
+		row := state.scalar_mir.globals[0]
+		state.scalar_mir.globals[0] = MirGlobal.new(cyclic: true, mutable: row.mutable, runtime: row.runtime, id: row.id, name: row.name, source_id: row.source_id, line: row.line, type_id: row.type_id, initializer: row.initializer, managed: row.managed)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR cyclic initializer reaches an unverified operation")
+	end
+
+	test("rejects a unit cycle even when the source graph is acyclic") do
+		mut state := cyclic_project("import { value } from b\ndef read(): Integer\nreturn value()\nend\n", "import { main } from main\ndef value(): Integer\nreturn 1\nend\n", "def main()\nend\n")
+		expect(has_diagnostic(state)).to_be_false()
+		mut owners := [-1, -1, -1]
+		owners[find_module(state, "b")] = -2
+		expect(validate_compilation_units(state, owners)).to_be_false()
+	end
+
+	test("rejects recursive inline records but accepts explicit indirection") do
+		mut invalid := cyclic_project("import { B } from b\nrecord A\nvalue: B\nend\n", "import { A } from a\nrecord B\nvalue: A\nend\n", "import { A } from a\ndef main()\nitem: A? := nil\nputs(item == nil)\nend\n")
+		expect(resolve(invalid) && !check(invalid)).to_be_true()
+		expect(load_string(invalid.diagnostics.messages, 0).start_with?("infinite value layout involving record ")).to_be_true()
+		mut valid := cyclic_project("import { B } from b\nrecord A\nvalue: B?\nend\n", "import { A } from a\nrecord B\nvalue: A\nend\n", "import { A } from a\ndef main()\nitem: A? := nil\nputs(item == nil)\nend\n")
+		accepted := resolve(valid) && check(valid)
+		if !accepted
+			puts(load_string(valid.diagnostics.messages, 0))
+		end
+		expect(accepted).to_be_true()
+	end
+end

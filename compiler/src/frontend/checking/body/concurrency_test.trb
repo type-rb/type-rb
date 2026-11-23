@@ -1,0 +1,280 @@
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { check } from compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+# Rejected syntax and rejected checked bodies are distinct successful controls.
+def rejected_concurrent_source(source: String): CompilerState
+	mut state := compiler_new(source.size() + 1)
+	if lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state)
+		check(state)
+	end
+	return state
+end
+
+describe("Structured concurrent map checking") do
+	test("non array receiver") do
+		state := rejected_concurrent_source("def transform(values: Range<Integer>): Array<Integer>\n\treturn values.concurrent_map do |value|\n\t\tvalue\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("non positive literal limit") do
+		state := rejected_concurrent_source("def transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map(limit: 0) do |value|\n\t\tvalue\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("positional limit") do
+		state := rejected_concurrent_source("def transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map(2) do |value|\n\t\tvalue\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("outer assignment") do
+		state := rejected_concurrent_source("def transform(values: Array<Integer>): Array<Integer>\n\tmut total := 0\n\treturn values.concurrent_map do |value|\n\t\ttotal += value\n\t\ttotal\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("unsafe capture") do
+		state := rejected_concurrent_source("def transform(values: Array<Integer>): Array<Integer>\n\toffsets := [1]\n\treturn values.concurrent_map do |value|\n\t\tvalue + offsets[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("interface dispatch has no safety contract") do
+		state := rejected_concurrent_source("interface Counter\n\tadd(): Integer\nend\n\ndef transform(values: Array<Counter>): Array<Integer>\n\treturn values.concurrent_map do |counter|\n\t\tcounter.add()\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("function value has no safety contract") do
+		state := rejected_concurrent_source("alias Mapper = (Integer) -> Integer\n\ndef transform(values: Array<Mapper>): Array<Integer>\n\treturn values.concurrent_map do |callable|\n\t\tcallable(1)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("helper reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\ndef mutate(value: Integer): Integer\n\tshared += value\n\treturn shared\nend\n\ndef transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map do |value|\n\t\tmutate(value)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("class method reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\nclass Counter\n\tdef self.add(value: Integer): Integer\n\t\tshared += value\n\t\treturn shared\n\tend\nend\n\ndef transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map do |value|\n\t\tCounter.add(value)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("module method reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\nmodule Counter\n\tdef self.add(value: Integer): Integer\n\t\tshared += value\n\t\treturn shared\n\tend\nend\n\ndef transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map do |value|\n\t\tCounter.add(value)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("instance method reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\nclass Counter\n\tdef add(): Integer\n\t\tshared += 1\n\t\treturn shared\n\tend\nend\n\ndef transform(values: Array<Counter>): Array<Integer>\n\treturn values.concurrent_map do |counter|\n\t\tcounter.add()\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("constructor reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\nclass Counter\n\t@value: Integer\n\n\tdef initialize(value: Integer)\n\t\t@value = value\n\t\tshared += value\n\t\treturn\n\tend\nend\n\ndef transform(values: Array<Integer>): Array<Counter>\n\treturn values.concurrent_map do |value|\n\t\tCounter.new(value)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("class field default reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\ndef bump(): Integer\n\tshared += 1\n\treturn shared\nend\n\nclass Counter\n\t@value: Integer := bump()\n\n\tdef initialize()\n\t\treturn\n\tend\nend\n\ndef transform(values: Array<Integer>): Array<Counter>\n\treturn values.concurrent_map do |_value|\n\t\tCounter.new()\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("constructor parameter default captures unsafe value") do
+		state := rejected_concurrent_source("mut shared := [1]\n\nclass Counter\n\t@values: Array<Integer>\n\n\tdef initialize(values: Array<Integer> = shared)\n\t\t@values = values\n\t\treturn\n\tend\nend\n\ndef transform(values: Array<Integer>): Array<Counter>\n\treturn values.concurrent_map do |_value|\n\t\tCounter.new()\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("implicit constructor field default reaches shared mutation through factory") do
+		state := rejected_concurrent_source("mut shared := 0\n\ndef bump(): Integer\n\tshared += 1\n\treturn shared\nend\n\nclass Counter\n\t@value: Integer := bump()\nend\n\ndef build_counter(): Counter\n\treturn Counter.new()\nend\n\ndef transform(values: Array<Integer>): Array<Counter>\n\treturn values.concurrent_map do |_value|\n\t\tbuild_counter()\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("transitive class method reaches shared mutation") do
+		state := rejected_concurrent_source("mut shared := 0\n\nclass Counter\n\tdef self.add(value: Integer): Integer\n\t\tshared += value\n\t\treturn shared\n\tend\nend\n\ndef relay(value: Integer): Integer\n\treturn Counter.add(value)\nend\n\ndef transform(values: Array<Integer>): Array<Integer>\n\treturn values.concurrent_map do |value|\n\t\trelay(value)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("array through helper") do
+		state := rejected_concurrent_source("def mutate(mut items: Array<Integer>): Integer\n\titems[0] = items[0] + 1\n\treturn items[0]\nend\n\ndef transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmutate(items)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("hash directly") do
+		state := rejected_concurrent_source("def transform(values: Array<Hash<String, Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\titems[\"count\"] = 1\n\t\t1\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("string builder through helper") do
+		state := rejected_concurrent_source("import trb/std/string_builder\n\ndef mutate(mut builder: StringBuilder): String\n\tbuilder.append(\"x\")\n\treturn builder.to_s()\nend\n\ndef transform(values: Array<StringBuilder>): Array<String>\n\treturn values.concurrent_map do |builder|\n\t\tmutate(builder)\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("local alias of array element") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut alias_items := items\n\t\talias_items[0] = alias_items[0] + 1\n\t\talias_items[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("nested iteration element") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Array<Integer>>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\titems.each do |entry|\n\t\t\tentry[0] = entry[0] + 1\n\t\tend\n\t\t0\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("borrowed element wrapped in fresh array") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut aliases := [items]\n\t\taliases[0][0] = aliases[0][0] + 1\n\t\taliases[0][0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("borrowed element selected by conditional") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected := if true\n\t\t\titems\n\t\telse\n\t\t\t[0]\n\t\tend\n\t\tselected[0] = selected[0] + 1\n\t\tselected[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("borrowed branch assignment followed by fresh branch assignment") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected := [0]\n\n\t\tif items[0] >= 0\n\t\t\tselected = items\n\t\telse\n\t\t\tselected = [0]\n\t\tend\n\n\t\tselected[0] = selected[0] + 1\n\t\tselected[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("fresh reassignment does not clear borrowed binding") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected := items\n\t\tselected = [0]\n\t\tselected[0] = selected[0] + 1\n\t\tselected[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("nullable narrowing does not hide borrowed assignment") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected: Array<Integer>? := [0]\n\t\tif selected != nil\n\t\t\tselected = items\n\t\tend\n\t\tif selected != nil\n\t\t\tselected[0] = selected[0] + 1\n\t\tend\n\t\t0\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("case assignment remains borrowed after fresh alternative") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected := [0]\n\t\tcase items[0]\n\t\twhen 0\n\t\t\tselected = items\n\t\telse\n\t\t\tselected = [0]\n\t\tend\n\t\tselected[0] = selected[0] + 1\n\t\tselected[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("loop assignment cannot clear preexisting borrow") do
+		state := rejected_concurrent_source("def transform(values: Array<Array<Integer>>): Array<Integer>\n\treturn values.concurrent_map do |items|\n\t\tmut selected := items\n\t\twhile false\n\t\t\tselected = [0]\n\t\tend\n\t\tselected[0] = selected[0] + 1\n\t\tselected[0]\n\tend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+	test("accepts owned locals, borrowed reads and nested serial groups") do
+		mut state := logical_checked_source("def length(items: Array<Integer>): Integer\nreturn items.size()\nend\ndef local(value: Integer): Integer\nmut owned := [value]\nowned.push(value + 1)\nreturn owned[1]\nend\ndef main()\noffset := 2\nvalues := [[1], [2, 3]].concurrent_map(limit: 2) do |items|\nlength(items) + offset\nend\nnested := [1, 2].concurrent_map do |outer|\n[3, 4].concurrent_map(limit: 1) { |inner| local(inner + outer) }[0]\nend\nputs(values[0])\nputs(nested[1])\nend\n")
+		expect_compiler_phase(state, "concurrent map", check(state))
+	end
+	test("parenthesized literal zero") do
+		state := rejected_concurrent_source("def main()\nvalues := [1].concurrent_map(limit: ((0))) { |v| v }\nputs(values.size())\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+
+	test("borrowed result through catch") do
+		state := rejected_concurrent_source("import trb/std/result\ndef main()\nvalues := [[1]].concurrent_map do |items|\nwrapped := Result<Array<Integer>, String>::Ok(items)\nmut chosen := wrapped catch |_error|\n[0]\nend\nchosen[0] = 2\nchosen[0]\nend\nputs(values[0])\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+
+	test("borrowed class union write") do
+		state := rejected_concurrent_source("class A\n@value: Integer := 1\nend\nclass B\n@value: Integer := 2\nend\ndef transform(values: Array<A | B>): Array<Integer>\nreturn values.concurrent_map do |item|\nitem.value = 3\nitem.value\nend\nend\ndef main()\nend\n")
+		expect(has_diagnostic(state)).to_be_true()
+		if !load_string(state.diagnostics.messages, 0).include?("concurrent_map")
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(load_string(state.diagnostics.messages, 0).include?("concurrent_map")).to_be_true()
+	end
+
+	test("unary signed limits remain runtime contracts") do
+		mut state := logical_checked_source("def main()\nvalues := [1].concurrent_map(limit: -1) { |v| v }\nputs(values.size())\nend\n")
+		expect_compiler_phase(state, "signed concurrent limit", check(state))
+	end
+
+end

@@ -1,0 +1,61 @@
+import { EnumDefinition, EnumField, EnumVariant, RawEnumValue } from frontend/types/enum_model
+import { generic_application } from frontend/types/generic_arguments
+import { integer_string } from support/literals
+import { NewtypeDefinition } from frontend/types/newtype_model
+import { ObjectDefinition, ObjectDirective, ObjectInstance } from frontend/types/object_model
+import { StringStorage, string_storage, string_storage_copy } from support/storage
+
+# Authored nominal declarations and concrete specializations share one owner.
+# Template checks copy mutable instance catalogs but share source definitions.
+record CompilerNominalTypes
+	objects: Array<ObjectDefinition>
+	object_directives: Array<ObjectDirective>
+	object_instances: Array<ObjectInstance>
+	object_instance_lookup: Hash<String, Integer>
+	newtypes: Array<NewtypeDefinition>
+	raw_enum_values: Array<RawEnumValue>
+	raw_enum_results: StringStorage
+	function_receivers: StringStorage
+	projected_type_lines: Array<Integer>
+	enums: Array<EnumDefinition>
+	enum_variants: Array<EnumVariant>
+	enum_fields: Array<EnumField>
+end
+
+def compiler_nominal_types_new(capacity: Integer): CompilerNominalTypes
+	return CompilerNominalTypes.new(
+		objects: [], object_directives: [], object_instances: [], object_instance_lookup: {},
+		newtypes: [], raw_enum_values: [], raw_enum_results: string_storage(capacity),
+		function_receivers: string_storage(capacity), projected_type_lines: [-1, -1],
+		enums: [], enum_variants: [], enum_fields: [],
+	)
+end
+
+def compiler_nominal_types_fork(source: CompilerNominalTypes): CompilerNominalTypes
+	mut instances: Array<ObjectInstance> := []
+	mut lookup: Hash<String, Integer> := {}
+	source.object_instances.each do |value|
+		lookup[generic_application(integer_string(value.definition), value.arguments)] = instances.size()
+		instances.push(value)
+	end
+	mut enums: Array<EnumDefinition> := []
+	source.enums.each do |value|
+		enums.push(value)
+	end
+	mut variants: Array<EnumVariant> := []
+	source.enum_variants.each do |value|
+		variants.push(value)
+	end
+	mut fields: Array<EnumField> := []
+	source.enum_fields.each do |value|
+		fields.push(value)
+	end
+	return CompilerNominalTypes.new(
+		objects: source.objects, object_directives: source.object_directives, object_instances: instances, object_instance_lookup: lookup,
+		newtypes: source.newtypes, raw_enum_values: source.raw_enum_values,
+		raw_enum_results: source.raw_enum_results,
+		function_receivers: string_storage_copy(source.function_receivers),
+		projected_type_lines: source.projected_type_lines,
+		enums: enums, enum_variants: variants, enum_fields: fields,
+	)
+end

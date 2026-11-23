@@ -1,0 +1,88 @@
+import { character_in } from frontend/syntax/lexer
+import { find_function_in_module, find_import_binding, find_record_in_module } from frontend/resolution/declaration_lookup
+import { find_field, find_record_type } from frontend/resolution/type_resolution
+import { CompilerState, add_module, compiler_new, find_module, function_index_key } from state/state
+import { local_find, locals_new } from state/local_state
+import { store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("returns the last matching symbol without changing missing lookup") do
+		expect(character_in("a", "abc")).to_be_true()
+		expect(character_in("c", "abc")).to_be_true()
+		expect(character_in("z", "abc")).to_be_false()
+
+		mut state := compiler_new(128)
+		add_module(state, "shared", "/first.trb")
+		add_module(state, "other", "/other.trb")
+		add_module(state, "shared", "/last.trb")
+		expect(find_module(state, "shared")).to_equal(2)
+		expect(find_module(state, "missing")).to_equal(-1)
+
+		store_string(state.declarations.function_names, 0, "value")
+		store_integer(state.declarations.function_modules, 0, 0)
+		store_string(state.declarations.function_names, 1, "value")
+		store_integer(state.declarations.function_modules, 1, 1)
+		store_string(state.declarations.function_names, 2, "value")
+		store_integer(state.declarations.function_modules, 2, 0)
+		store_string(state.declarations.function_names, 3, "other")
+		store_integer(state.declarations.function_modules, 3, 0)
+		state.declarations.function_count[0] = 4
+		store_string(state.declarations.record_names, 0, "Value")
+		store_integer(state.declarations.record_modules, 0, 0)
+		store_string(state.declarations.record_names, 1, "Value")
+		store_integer(state.declarations.record_modules, 1, 1)
+		store_string(state.declarations.record_names, 2, "Value")
+		store_integer(state.declarations.record_modules, 2, 0)
+		store_string(state.declarations.record_names, 3, "Other")
+		store_integer(state.declarations.record_modules, 3, 0)
+		state.declarations.record_count[0] = 4
+		expect(find_record_type(state, "Record#2")).to_equal(2)
+		expect(find_record_type(state, "Record#4")).to_equal(-1)
+
+		store_string(state.module_graph.import_symbols, 0, "load")
+		store_integer(state.module_graph.import_modules, 0, 0)
+		store_string(state.module_graph.import_symbols, 1, "load")
+		store_integer(state.module_graph.import_modules, 1, 0)
+		store_string(state.module_graph.import_symbols, 2, "save")
+		store_integer(state.module_graph.import_modules, 2, 0)
+		store_string(state.module_graph.import_symbols, 3, "load")
+		store_integer(state.module_graph.import_modules, 3, 1)
+		state.module_graph.import_count[0] = 4
+		store_integer(state.module_graph.module_import_starts, 0, 0)
+		store_integer(state.module_graph.module_import_counts, 0, 3)
+		store_integer(state.module_graph.module_import_starts, 1, 3)
+		store_integer(state.module_graph.module_import_counts, 1, 1)
+		state.declarations.function_lookup[function_index_key(0, "value")] = 2
+		state.declarations.function_lookup[function_index_key(1, "value")] = 1
+		state.declarations.function_lookup[function_index_key(0, "other")] = 3
+		expect(find_function_in_module(state, 0, "value")).to_equal(2)
+		expect(find_function_in_module(state, 0, "other")).to_equal(3)
+		expect(find_function_in_module(state, 1, "value")).to_equal(1)
+		expect(find_function_in_module(state, 0, "missing")).to_equal(-1)
+		expect(find_record_in_module(state, 0, "Value")).to_equal(2)
+		expect(find_record_in_module(state, 0, "Other")).to_equal(3)
+		expect(find_record_in_module(state, 0, "Missing")).to_equal(-1)
+		expect(find_import_binding(state, 0, "load")).to_equal(1)
+		expect(find_import_binding(state, 0, "save")).to_equal(2)
+		expect(find_import_binding(state, 1, "load")).to_equal(3)
+		expect(find_import_binding(state, 0, "missing")).to_equal(-1)
+
+		store_integer(state.declarations.record_field_starts, 0, 0)
+		store_integer(state.declarations.record_field_counts, 0, 3)
+		store_string(state.declarations.field_names, 0, "item")
+		store_string(state.declarations.field_names, 1, "other")
+		store_string(state.declarations.field_names, 2, "item")
+		expect(find_field(state, 0, "item")).to_equal(2)
+		expect(find_field(state, 0, "missing")).to_equal(-1)
+
+		mut locals := locals_new(4)
+		store_string(locals.names, 0, "item")
+		store_string(locals.names, 1, "other")
+		store_string(locals.names, 2, "item")
+		locals.count[0] = 3
+		expect(local_find(locals, "item")).to_equal(2)
+		expect(local_find(locals, "missing")).to_equal(-1)
+
+	end
+end

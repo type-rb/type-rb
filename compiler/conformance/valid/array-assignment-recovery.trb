@@ -1,0 +1,15 @@
+def grow(mut values: Array<Integer>): Integer
+	values.push(3)
+	return 9
+end
+
+def main()
+	mut values := [1, 2]
+	values[-1] = grow(values)
+	if values[1] == 9
+		if values[2] == 3
+			puts("array-assignment-ok")
+		end
+	end
+	return
+end

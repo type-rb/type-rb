@@ -1,0 +1,343 @@
+import { transform_absent, transform_concurrent_map, transform_reduce, transform_select } from frontend/types/transform_kinds
+import { iteration_source_array, iteration_source_hash, iteration_source_invalid } from frontend/types/iteration_kinds
+import { token_kind_identifier, token_kind_newline, token_kind_number } from state/token_kinds
+import { hash_key_type } from frontend/types/hash_types
+import { MirTransform, TransformSyntax, mir_transform_valid, transform_kind, transform_syntax_valid } from frontend/types/transform_model
+import { token_is } from frontend/syntax/syntax_tokens
+import { MirIteration, MirRangeConstruction, mir_iteration_valid, mir_range_valid } from mir/model/iteration
+import { IterationSyntax, iteration_syntax_valid } from frontend/syntax/iteration_syntax
+import { syntax_iteration_suffix } from frontend/syntax/syntax_forms
+import { array_element_type } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+def checked_slice_zero_literal(state: CompilerState, origin: Integer): Boolean
+	if origin < 0 || origin >= state.source_tokens.token_count[0] || load_integer(state.source_tokens.token_kinds, origin) != token_kind_number()
+		return false
+	end
+	text := load_string(state.source_tokens.token_texts, origin)
+	mut index := 0
+	while index < text.size()
+		if text[index] != "0" && text[index] != "_"
+			return false
+		end
+		index += 1
+	end
+	return text.size() > 0
+end
+
+def checked_iteration_shape(state: CompilerState, plan: IterationSyntax, origin: Integer): Boolean
+	if !iteration_syntax_valid(plan, origin, state.source_tokens.token_count[0])
+		return false
+	end
+	# The parser pairs both boundaries. A stale end cannot silently skip
+	# statements or retarget a checked iteration to a different lexical body.
+	if sparse_integer_at(state.parsed.iteration_origins, plan.body_finish) != -sparse_integer_at(state.parsed.iteration_origins, origin)
+		return false
+	end
+	delimiter := syntax_iteration_suffix(state, plan.receiver_finish)
+	if delimiter < 0
+		return false
+	end
+	if plan.element_origin != delimiter + 2 || !token_is(state, delimiter + 1, "|")
+		return false
+	end
+	mut indexed := false
+	mut suffix := plan.receiver_finish + 2
+	if plan.slice_start >= 0
+		if !token_is(state, plan.receiver_finish + 1, "each_slice") || !token_is(state, suffix, "(")
+			return false
+		end
+		suffix += 1
+		while load_integer(state.source_tokens.token_kinds, suffix) == token_kind_newline()
+			suffix += 1
+		end
+		if suffix != plan.slice_start
+			return false
+		end
+		mut depth := 0
+		while suffix < plan.slice_finish
+			if token_is(state, suffix, "(")
+				depth += 1
+			elsif token_is(state, suffix, ")")
+				depth -= 1
+				if depth < 0
+					return false
+				end
+			end
+			suffix += 1
+		end
+		while load_integer(state.source_tokens.token_kinds, suffix) == token_kind_newline()
+			suffix += 1
+		end
+		if token_is(state, suffix, ",")
+			suffix += 1
+			while load_integer(state.source_tokens.token_kinds, suffix) == token_kind_newline()
+				suffix += 1
+			end
+		end
+		if depth != 0 || !token_is(state, suffix, ")")
+			return false
+		end
+		suffix += 1
+	elsif !token_is(state, plan.receiver_finish + 1, "each")
+		return false
+	end
+	while suffix < delimiter
+		if token_is(state, suffix, "with_index")
+			indexed = true
+		end
+		suffix += 1
+	end
+	if (indexed && plan.second_origin < 0) || load_integer(state.source_tokens.token_kinds, plan.element_origin) != token_kind_identifier()
+		return false
+	end
+	mut close := plan.element_origin + 1
+	if plan.second_origin >= 0
+		if plan.second_origin != close + 1 || !token_is(state, close, ",") || load_integer(state.source_tokens.token_kinds, plan.second_origin) != token_kind_identifier()
+			return false
+		end
+		close = plan.second_origin + 1
+	end
+	if !token_is(state, close, "|")
+		return false
+	end
+	if token_is(state, delimiter, "do") && load_integer(state.source_tokens.token_kinds, close + 1) != token_kind_newline()
+		return false
+	end
+	mut cursor := close + 1
+	while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+		cursor += 1
+	end
+	mut terminator := "end"
+	if token_is(state, delimiter, "{")
+		terminator = "}"
+	end
+	if cursor != plan.body_start
+		return false
+	end
+	return token_is(state, plan.body_finish, terminator)
+end
+
+def checked_iteration_indexed(state: CompilerState, shape: IterationSyntax): Boolean
+	mut cursor := shape.receiver_finish + 2
+	if shape.slice_start >= 0
+		cursor = shape.slice_finish + 1
+	end
+	while cursor < shape.element_origin
+		if token_is(state, cursor, "with_index")
+			return true
+		end
+		cursor += 1
+	end
+	return false
+end
+
+def checked_iteration_parameters(state: CompilerState, plan: MirIteration): Boolean
+	indexed := checked_iteration_indexed(state, plan.syntax)
+	if plan.source_kind == iteration_source_hash()
+		if indexed || plan.syntax.slice_start >= 0
+			return false
+		end
+		return plan.syntax.second_origin >= 0
+	end
+	if indexed
+		return plan.syntax.second_origin >= 0
+	end
+	return plan.syntax.second_origin < 0
+end
+
+def checked_iteration_require(mut state: CompilerState, origin: Integer, parent_loop: Integer): MirIteration
+	encoded := sparse_integer_at(state.callables.checked[0].iteration_origins, origin)
+	syntax := IterationSyntax.new(origin: -1, receiver_finish: -1, slice_start: -1, slice_finish: -1, element_origin: -1, second_origin: -1, body_start: -1, body_finish: -1, finish: -1)
+	invalid := MirIteration.new(syntax: syntax, parent_loop: -1, source_kind: iteration_source_array(), type_name: "", element_type: "")
+	if encoded > 0 && encoded <= state.callables.checked[0].iterations.size()
+		plan := state.callables.checked[0].iterations[encoded - 1]
+		if checked_iteration_shape(state, plan.syntax, origin) && plan.parent_loop == parent_loop && checked_iteration_parameters(state, plan)
+			if mir_iteration_valid(plan, origin, state.source_tokens.token_count[0], plan.type_name, iteration_element_type(plan.type_name))
+				return plan
+			end
+		end
+	end
+	mut line := 1
+	if origin >= 0 && origin < state.source_tokens.token_count[0]
+		line = load_integer(state.source_tokens.token_lines, origin)
+	end
+	diagnostic(state, "TRBN4004", line, "invalid checked iteration")
+	return invalid
+end
+
+def iteration_element_type(type_name: String): String
+	if type_name == "Range<Integer>"
+		return "Integer"
+	end
+	if hash_key_type(type_name) != ""
+		return hash_key_type(type_name)
+	end
+	return array_element_type(type_name)
+end
+
+def checked_range_require(mut state: CompilerState, origin: Integer, operator_origin: Integer, end_origin: Integer, finish: Integer): MirRangeConstruction
+	encoded := sparse_integer_at(state.callables.checked[0].range_origins, operator_origin)
+	if encoded > 0 && encoded <= state.callables.checked[0].ranges.size()
+		plan := state.callables.checked[0].ranges[encoded - 1]
+		if mir_range_valid(plan, origin, operator_origin, end_origin, finish, state.source_tokens.token_count[0])
+			mut spelling := ".."
+			if plan.exclusive == 1
+				spelling = "..."
+			end
+			if token_is(state, operator_origin, spelling)
+				mut next_origin := operator_origin + 1
+				while load_integer(state.source_tokens.token_kinds, next_origin) == token_kind_newline()
+					next_origin += 1
+				end
+				if next_origin == end_origin
+					return plan
+				end
+			end
+		end
+	end
+	mut line := 1
+	if operator_origin >= 0 && operator_origin < state.source_tokens.token_count[0]
+		line = load_integer(state.source_tokens.token_lines, operator_origin)
+	end
+	diagnostic(state, "TRBN4004", line, "invalid checked Range construction")
+	return MirRangeConstruction.new(origin: -1, operator_origin: -1, end_origin: -1, finish: -1, exclusive: -1, start_type: "", end_type: "")
+end
+
+def checked_transform_shape(state: CompilerState, plan: TransformSyntax, origin: Integer): Boolean
+	if !transform_syntax_valid(plan, origin, state.source_tokens.token_count[0]) || (!token_is(state, origin, ".") && !token_is(state, origin, "&.")) || transform_kind(load_string(state.source_tokens.token_texts, origin + 1)) != plan.kind
+		return false
+	end
+	shape := plan.iteration
+	if sparse_integer_at(state.parsed.transform_origins, origin) < 1 || sparse_integer_at(state.parsed.transform_origins, shape.body_finish) != -sparse_integer_at(state.parsed.transform_origins, origin)
+		return false
+	end
+	mut cursor := origin + 2
+	if plan.kind == transform_reduce()
+		if !token_is(state, cursor, "(")
+			return false
+		end
+		cursor += 1
+		while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+			cursor += 1
+		end
+		if cursor != plan.initial_start
+			return false
+		end
+		cursor = plan.initial_finish
+		while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+			cursor += 1
+		end
+		if !token_is(state, cursor, ")")
+			return false
+		end
+		cursor += 1
+	elsif plan.kind == transform_concurrent_map() && token_is(state, cursor, "(")
+		cursor += 1
+		while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+			cursor += 1
+		end
+		if plan.initial_start >= 0
+			if !token_is(state, cursor, "limit") || !token_is(state, cursor + 1, ":")
+				return false
+			end
+			cursor += 2
+			while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+				cursor += 1
+			end
+			if cursor != plan.initial_start
+				return false
+			end
+			cursor = plan.initial_finish
+			while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+				cursor += 1
+			end
+			if token_is(state, cursor, ",")
+				cursor += 1
+				while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+					cursor += 1
+				end
+			end
+		end
+		if !token_is(state, cursor, ")")
+			return false
+		end
+		cursor += 1
+	elsif token_is(state, cursor, "(")
+		if !token_is(state, cursor + 1, ")")
+			return false
+		end
+		cursor += 2
+	end
+	if shape.second_origin >= 0
+		if !token_is(state, cursor, ".") || !token_is(state, cursor + 1, "with_index")
+			return false
+		end
+		cursor += 2
+		if token_is(state, cursor, "(")
+			if !token_is(state, cursor + 1, ")")
+				return false
+			end
+			cursor += 2
+		end
+	end
+	brace := token_is(state, cursor, "{")
+	if (!brace && !token_is(state, cursor, "do")) || !token_is(state, cursor + 1, "|")
+		return false
+	end
+	cursor += 2
+	if plan.kind == transform_reduce()
+		if cursor != plan.accumulator_origin || load_integer(state.source_tokens.token_kinds, cursor) != token_kind_identifier() || !token_is(state, cursor + 1, ",")
+			return false
+		end
+		cursor += 2
+	end
+	if cursor != shape.element_origin || load_integer(state.source_tokens.token_kinds, cursor) != token_kind_identifier()
+		return false
+	end
+	cursor += 1
+	if shape.second_origin >= 0
+		if !token_is(state, cursor, ",") || cursor + 1 != shape.second_origin || load_integer(state.source_tokens.token_kinds, cursor + 1) != token_kind_identifier()
+			return false
+		end
+		cursor += 2
+	end
+	if !token_is(state, cursor, "|")
+		return false
+	end
+	cursor += 1
+	if !brace && load_integer(state.source_tokens.token_kinds, cursor) != token_kind_newline()
+		return false
+	end
+	while load_integer(state.source_tokens.token_kinds, cursor) == token_kind_newline()
+		cursor += 1
+	end
+	mut terminator := "end"
+	if brace
+		terminator = "}"
+	end
+	if cursor != shape.body_start
+		return false
+	end
+	return token_is(state, shape.body_finish, terminator)
+end
+
+def checked_transform_require(mut state: CompilerState, origin: Integer): MirTransform
+	encoded := sparse_integer_at(state.callables.checked[0].transform_origins, origin)
+	if encoded > 0 && encoded <= state.callables.checked[0].transforms.size()
+		plan := state.callables.checked[0].transforms[encoded - 1]
+		if checked_transform_shape(state, plan.syntax, origin) && mir_transform_valid(plan, origin, state.source_tokens.token_count[0], iteration_element_type(plan.iteration.type_name))
+			if plan.syntax.kind >= transform_reduce() || array_element_type(plan.type_name) != ""
+				if plan.syntax.kind != transform_select() || array_element_type(plan.type_name) == plan.iteration.element_type
+					return plan
+				end
+			end
+		end
+	end
+	diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "invalid checked collection transform")
+	shape := IterationSyntax.new(origin: -1, receiver_finish: -1, slice_start: -1, slice_finish: -1, element_origin: -1, second_origin: -1, body_start: -1, body_finish: -1, finish: -1)
+	syntax := TransformSyntax.new(iteration: shape, kind: transform_absent(), initial_start: -1, initial_finish: -1, accumulator_origin: -1)
+	iteration := MirIteration.new(syntax: shape, parent_loop: -1, source_kind: iteration_source_invalid(), type_name: "", element_type: "")
+	return MirTransform.new(syntax: syntax, iteration: iteration, type_name: "", key_type: "")
+end

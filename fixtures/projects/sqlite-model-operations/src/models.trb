@@ -1,0 +1,15 @@
+import { Model } from trb/orm
+class Report < Model
+end
+class Tag < Model
+end
+class Metric < Model
+end
+class Event < Model
+end
+class Reading < Model
+end
+class Vote < Model
+end
+class Observation < Model
+end

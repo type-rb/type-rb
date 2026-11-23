@@ -1,0 +1,13 @@
+{
+  "name": "features-string-building",
+  "version": "0.1.0",
+  "mode": "go",
+  "sourceDir": "src",
+  "outDir": "build",
+  "copyFiles": false,
+  "packageManagement": "managed",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/benchmarks/features/string-building",
+    "version": "1.27"
+  }
+}

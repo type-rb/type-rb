@@ -1,0 +1,104 @@
+import { standard_test_inspect, standard_test_scalar_kind } from frontend/resolution/test_intrinsics
+import { MirEnumScalar, MirSignature } from mir/model/module
+import { test_adapter_inspect, test_adapter_scalar_kind } from mir/model/test_contract
+import { verify_mir } from mir/verify/module
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { standard_source_test_host } from state/standard_source_kinds
+import { store_integer } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { expect_compiler_phase } from testing/pipeline
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def inspection_checked_fixture(): CompilerState
+	source := "import trb/std/string_builder\nrecord Point\n x: Integer\n y: Integer\nend\nrecord Box<T>\n value: T\nend\nenum Shape\n Empty\n Circle(value: Integer)\nend\nclass Link\n @value: Integer\n @next: Link?\n def initialize(value: Integer)\n  @value = value\n  @next = nil\n end\n def link(following: Link)\n  @next = following\n end\n def to_s(): String\n  return \"must not run\"\n end\nend\nenum Direction\n North\n South\nend\nenum Status\n Ready = \"READY\"\n Done = \"DONE\"\nend\nenum Priority\n Low = -1\n High = 2\nend\nnewtype Flag = Boolean\ndef scalar_kind<T>(actual: T): Integer\nend\ndef inspect_value<T>(actual: T): String\nend\ndef main()\n puts(inspect_value<Integer>(42))\n puts(inspect_value<Boolean>(true))\n mut quoted := StringBuilder.new()\n quoted.append(\"a\\n\")\n quoted.append_codepoint(0)\n puts(inspect_value<String>(quoted.to_s()))\n puts(inspect_value<Float>(1.0))\n puts(inspect_value<Float>(-0.0))\n puts(inspect_value<Float>(1.0 / 0.0))\n puts(inspect_value<Array<Integer>>([3, 1, 2]))\n puts(inspect_value<Bytes>(\"ab\".to_bytes()))\n puts(inspect_value<Point>(Point.new(x: 1, y: 2)))\n puts(inspect_value<Box<Point>>(Box<Point>.new(value: Point.new(x: 3, y: 4))))\n puts(inspect_value<Shape>(Shape::Empty))\n puts(inspect_value<Shape>(Shape::Circle(2)))\n puts(inspect_value<Hash<Integer, String>>({3 => \"three\", -1 => \"one\", 2 => \"two\"}))\n puts(inspect_value<Hash<String, Integer>>({\"z\" => 2, \"a\" => 1}))\n absent: Integer? := nil\n puts(inspect_value<Integer?>(absent))\n puts(inspect_value<Integer?>(7))\n puts(inspect_value<Range<Integer>>(2...5))\n mut link := Link.new(1)\n link.link(link)\n puts(inspect_value<Link>(link))\n puts(inspect_value<Array<Link>>([link, link]))\n puts(inspect_value<Integer | String>(\"tagged\"))\n puts(inspect_value<Direction>(Direction::North))\n puts(inspect_value<Status>(Status::Ready))\n puts(inspect_value<Priority>(Priority::Low))\n puts(scalar_kind<Boolean>(true))\n puts(scalar_kind<Boolean>(false))\n puts(scalar_kind<Integer>(1))\n optional: Boolean? := true\n puts(scalar_kind<Boolean?>(optional))\n absent_boolean: Boolean? := nil\n puts(scalar_kind<Boolean?>(absent_boolean))\n truth: Any := true\n puts(scalar_kind<Any>(truth))\n falsehood: Any := false\n puts(scalar_kind<Any>(falsehood))\n absent_any: Any := nil\n puts(scalar_kind<Any>(absent_any))\n another: Any := 1\n puts(scalar_kind<Any>(another))\n union: Boolean | String := true\n puts(scalar_kind<Boolean | String>(union))\n puts(scalar_kind<Boolean | String>(\"other\"))\n puts(scalar_kind<Flag>(Flag.new(true)))\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, state.module_graph.entry_module[0], standard_source_test_host())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Portable typed test inspection") do
+	test("renders complete typed graphs after frontend erasure and forced collection") do
+		mut state := inspection_checked_fixture()
+		mut runtime := output_source(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(runtime)
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, runtime, [])
+			when Result::Ok(actual)
+				expect(actual).to_equal("42\ntrue\n\"a\\n\\u0000\"\n1\n-0\nInfinity\n[3, 1, 2]\nBytes[97, 98]\nPoint(x: 1, y: 2)\nBox(value: Point(x: 3, y: 4))\nShape::Empty\nShape::Circle(2)\n{-1 => \"one\", 2 => \"two\", 3 => \"three\"}\n{\"a\" => 1, \"z\" => 2}\nnil\n7\n2...5\nLink(value: 1, next: <cycle>)\n[Link(value: 1, next: <cycle>), Link(value: 1, next: <cycle>)]\n\"tagged\"\n\"North\"\n\"READY\"\n-1\n1\n2\n3\n3\n0\n1\n2\n0\n3\n1\n3\n1\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects malformed scalar metadata independently of the frontend") do
+		["type", "duplicate", "missing", "integer"].each do |damage|
+			mut state := inspection_checked_fixture()
+			row := state.scalar_mir.enum_scalars[0]
+			if damage == "type"
+				state.scalar_mir.enum_scalars[0] = MirEnumScalar.new(variant: row.variant, type_id: 999999, text: row.text)
+			elsif damage == "duplicate"
+				state.scalar_mir.enum_scalars.push(row)
+			elsif damage == "missing"
+				state.scalar_mir.enum_scalars[0] = MirEnumScalar.new(variant: -1, type_id: row.type_id, text: row.text)
+			else
+				last := state.scalar_mir.enum_scalars.size() - 1
+				integer := state.scalar_mir.enum_scalars[last]
+				state.scalar_mir.enum_scalars[last] = MirEnumScalar.new(variant: integer.variant, type_id: integer.type_id, text: "9007199254740992")
+			end
+			intrinsic_mir_erase(state)
+			expect(verify_mir(state.scalar_mir, true) == "").to_be_false()
+		end
+	end
+	test("requires owned provider declarations and exact intrinsic signatures") do
+		mut state := inspection_checked_fixture()
+		store_integer(state.standard_modules, state.module_graph.entry_module[0], 0)
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_test_inspect(state, signature.id)).to_be_false()
+			expect(standard_test_scalar_kind(state, signature.id)).to_be_false()
+		end
+		["result", "mutable", "arity"].each do |damage|
+			mut candidate := inspection_checked_fixture()
+			mut changed := false
+			candidate.scalar_mir.signatures.each.with_index do |row, index|
+				if row.adapter == test_adapter_inspect() || row.adapter == test_adapter_scalar_kind()
+					mut result := row.result_type
+					mut parameters := row.parameter_types
+					mut mutable := row.parameter_mutable
+					if damage == "result"
+						result = "Boolean"
+					elsif damage == "mutable"
+						mutable = [1]
+					else
+						parameters = []
+						mutable = []
+					end
+					candidate.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+					changed = true
+				end
+			end
+			expect(changed).to_be_true()
+			intrinsic_mir_erase(candidate)
+			expect(verify_mir(candidate.scalar_mir, true) == "").to_be_false()
+		end
+	end
+end

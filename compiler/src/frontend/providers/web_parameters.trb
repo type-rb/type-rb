@@ -1,0 +1,218 @@
+import { time_codec_name } from frontend/providers/time_codecs
+import { TypeAlias } from frontend/types/alias_model
+import { find_enum_type } from frontend/types/enum_types
+import { nullable_element } from frontend/types/nullable_types
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { array_element_type, find_record_type, type_display } from frontend/resolution/type_resolution
+import { parse_statement_block } from frontend/syntax/body_syntax
+import { lex_module } from frontend/syntax/lexer
+import { integer_string } from support/literals
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+record WebParameterField
+	name: String
+	value_type: String
+	scalar_type: String
+	raw_type: String
+	time_type: String
+	nullable: Boolean
+	array: Boolean
+	expected: String
+end
+
+def web_parameter_fields(mut state: CompilerState, target: String, query: Boolean, line: Integer): Array<WebParameterField>
+	mut fields: Array<WebParameterField> := []
+	record_index := find_record_type(state, target)
+	if record_index < 0
+		diagnostic(state, "TRBN4003", line, "web parameter binding requires a non-nullable record")
+		return fields
+	end
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	finish := start + load_integer(state.declarations.record_field_counts, record_index)
+	mut index := start
+	mut required_arrays := 0
+	while index < finish && !has_diagnostic(state)
+		name := load_string(state.declarations.field_names, index)
+		type_name := load_string(state.declarations.field_types, index)
+		optional := nullable_element(type_name)
+		mut value_type := type_name
+		if optional != ""
+			value_type = optional
+		end
+		element := array_element_type(value_type)
+		mut scalar := value_type
+		if element != ""
+			if optional == ""
+				required_arrays += 1
+			end
+			if !query
+				diagnostic(state, "TRBN4003", line, "path parameter field " + name + " cannot be an Array")
+				return fields
+			end
+			scalar = element
+		end
+		raw := raw_enum_type(state, find_enum_type(state, scalar))
+		if raw == "Integer"
+			diagnostic(state, "TRBN4003", line, "integer-backed enum parameters are not supported yet")
+			return fields
+		end
+		if scalar != "String" && scalar != "Boolean" && scalar != "Integer" && scalar != "Float" && raw == "" && time_codec_name(state, scalar) == ""
+			diagnostic(state, "TRBN4003", line, "web parameter field " + name + " has unsupported type " + type_display(state, type_name))
+			return fields
+		end
+		fields.push(WebParameterField.new(name: name, value_type: value_type, scalar_type: scalar, raw_type: raw, time_type: time_codec_name(state, scalar), nullable: optional != "", array: element != "", expected: type_display(state, scalar)))
+		index += 1
+	end
+	if required_arrays > 1
+		# The pinned Go build and REPL disagree; issue #1175 owns the decision.
+		diagnostic(state, "TRBN4003", line, "multiple non-nullable Array fields are not yet supported by typed parameter binding")
+	end
+	return fields
+end
+
+def web_parameter_error(kind: String, field: WebParameterField, query: Boolean, raw: String): String
+	mut source := "Path"
+	if query
+		source = "Query"
+	end
+	mut arguments := "source: ParameterSource::" + source + ", name: \"" + field.name + "\""
+	if kind == "Invalid"
+		arguments += ", value: " + raw + ", expected: \"" + field.expected + "\""
+	end
+	return "return Result<Target, ParameterError>::Err(ParameterError::" + kind + "(" + arguments + "))\n"
+end
+
+# Generated operations pass through ordinary checking and verified MIR. The
+# backend owns no package parsing, field ordering or record/error construction.
+def web_parameter_parse(field: WebParameterField, index: Integer, query: Boolean, raw: String, prefix: String, suffix_text: String): String
+	suffix := integer_string(index)
+	invalid := web_parameter_error("Invalid", field, query, raw)
+	mut scalar := field.scalar_type
+	if field.raw_type != ""
+		scalar = field.raw_type
+	end
+	mut body := ""
+	mut parsed := raw
+	if field.time_type != ""
+		mut method := "try_parse"
+		if field.time_type == "TimeZone"
+			method = "try_get"
+		end
+		return "case Scalar" + suffix + "." + method + "(" + raw + ")\nwhen Result::Ok(parsed" + suffix + ")\n" + prefix + "parsed" + suffix + suffix_text + "\nwhen Result::Err(_time_error" + suffix + ")\n" + invalid + "end\n"
+	end
+	if scalar == "Boolean"
+		body += "if " + raw + " != \"true\" && " + raw + " != \"false\"\n" + invalid + "end\n"
+		parsed = "(" + raw + " == \"true\")"
+	elsif scalar == "Integer" || scalar == "Float"
+		mut method := "try_to_i"
+		if scalar == "Float"
+			method = "try_to_f"
+		end
+		body += "case " + raw + "." + method + "()\nwhen Result::Ok(number" + suffix + ")\n"
+		parsed = "number" + suffix
+	end
+	if field.raw_type != ""
+		body += "case Scalar" + suffix + ".from_raw(" + parsed + ")\nwhen Result::Ok(member" + suffix + ")\n"
+		body += prefix + "member" + suffix + suffix_text + "\nwhen Result::Err(_enum_error" + suffix + ")\n" + invalid + "end\n"
+	else
+		body += prefix + parsed + suffix_text + "\n"
+	end
+	if scalar == "Integer" || scalar == "Float"
+		body += "when Result::Err(_number_error" + suffix + ")\n" + invalid + "end\n"
+	end
+	return body
+end
+
+def web_parameter_body(fields: Array<WebParameterField>, query: Boolean): String
+	mut body := "mut parameters: Hash<String, Array<String>> := {}\n"
+	if query
+		body += "case self.query_parameters()\nwhen Result::Ok(entries)\nmut entry_index := 0\nwhile entry_index < entries.size()\nentry := entries[entry_index]\nmut values: Array<String> := []\nif parameters.key?(entry.name)\nvalues = parameters[entry.name]\nend\nvalues.push(entry.value)\nparameters[entry.name] = values\nentry_index += 1\nend\nwhen Result::Err(error)\nreturn Result<Target, ParameterError>::Err(ParameterError::MalformedQuery(error))\nend\n"
+	else
+		fields.each do |field|
+			body += "parameters[\"" + field.name + "\"] = [self.path_value(\"" + field.name + "\")]\n"
+		end
+	end
+	mut arguments := ""
+	mut index := 0
+	fields.each do |field|
+		suffix := integer_string(index)
+		values := "values" + suffix
+		variable := "field" + suffix
+		body += "mut " + values + ": Array<String> := []\nif parameters.key?(\"" + field.name + "\")\n" + values + " = parameters[\"" + field.name + "\"]\nend\n"
+		body += "mut " + variable + ": Value" + suffix + "? := nil\n"
+		if field.array
+			if field.nullable
+				body += "if " + values + ".size() > 0\n"
+			end
+			body += "mut parsed" + suffix + ": Array<Scalar" + suffix + "> := []\nmut index" + suffix + " := 0\nwhile index" + suffix + " < " + values + ".size()\nraw" + suffix + " := " + values + "[index" + suffix + "]\n"
+			body += web_parameter_parse(field, index, query, "raw" + suffix, "parsed" + suffix + ".push(", ")")
+			body += "index" + suffix + " += 1\nend\n" + variable + " = parsed" + suffix + "\n"
+			if field.nullable
+				body += "end\n"
+			end
+		else
+			body += "if " + values + ".size() > 1\n" + web_parameter_error("Duplicate", field, query, "") + "end\n"
+			body += "if " + values + ".size() == 1\nraw" + suffix + " := " + values + "[0]\n"
+			body += web_parameter_parse(field, index, query, "raw" + suffix, variable + " = ", "")
+			body += "end\n"
+		end
+		if !field.nullable && !field.array
+			body += "if " + variable + " == nil\n" + web_parameter_error("Missing", field, query, "") + "end\n"
+		end
+		if index > 0
+			arguments += ", "
+		end
+		arguments += field.name + ": " + variable
+		index += 1
+	end
+	return body + "return Result<Target, ParameterError>::Ok(Target.new(" + arguments + "))\nend\n"
+end
+
+def web_parameter_alias(mut state: CompilerState, owner: Integer, namespace: String, name: String, target: String, line: Integer)
+	state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::" + name, source_id: owner, line: line, parameters: [], target: target))
+end
+
+def specialize_web_binding(mut state: CompilerState, function: Integer, target: String, kind: Integer, call_origin: Integer): Boolean
+	mut line := load_integer(state.declarations.function_lines, function)
+	if call_origin >= 0
+		line = load_integer(state.source_tokens.token_lines, call_origin)
+	end
+	fields := web_parameter_fields(state, target, kind == 1, line)
+	if has_diagnostic(state)
+		return false
+	end
+	# Speculative checking shares immutable source syntax with its parent.
+	# Validate the schema there, but materialize bodies only in ordinary state.
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	namespace := "$web_binding" + integer_string(function)
+	web_parameter_alias(state, owner, namespace, "Target", target, line)
+	mut index := 0
+	fields.each do |field|
+		web_parameter_alias(state, owner, namespace, "Value" + integer_string(index), field.value_type, line)
+		web_parameter_alias(state, owner, namespace, "Scalar" + integer_string(index), field.scalar_type, line)
+		index += 1
+	end
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	start := state.source_tokens.token_count[0]
+	lex_module(state, web_parameter_body(fields, kind == 1), owner)
+	state.global_bindings.declaration_owner[0] = namespace
+	mut token := start
+	while token < state.source_tokens.token_count[0]
+		store_string(state.source_tokens.token_namespaces, token, namespace)
+		token += 1
+	end
+	mut position := [start]
+	if !has_diagnostic(state)
+		parse_statement_block(state, position)
+	end
+	store_integer(state.declarations.function_body_starts, function, start)
+	store_integer(state.declarations.function_body_ends, function, position[0])
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return !has_diagnostic(state)
+end

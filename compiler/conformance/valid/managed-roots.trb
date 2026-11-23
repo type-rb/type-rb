@@ -1,0 +1,31 @@
+record Bundle
+	label: String
+	labels: Array<String>
+end
+
+def select(mut bundle: Bundle, mut current: String): String
+	while current != "done"
+		current = bundle.label
+		bundle = Bundle.new(label: "done", labels: bundle.labels)
+		return bundle.labels[0]
+	end
+	return current
+end
+
+def grow(mut current: String): String
+	mut index := 0
+	while index < 2
+		current += "x"
+		index += 1
+	end
+	return current
+end
+
+def main()
+	mut labels: Array<String> := []
+	labels.push("kept")
+	bundle := Bundle.new(label: "next", labels: labels)
+	result := grow(select(bundle, "start"))
+	puts(result)
+	return
+end

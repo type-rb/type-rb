@@ -1,0 +1,172 @@
+import { ComparisonOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedTypeDefinition, RecoveryManagedValueType } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedTerminator } from managed/mir
+import { build_recovery_managed_executable } from managed/toolchain
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_integer_array_module(): RecoveryManagedModule
+	origin := SourceOrigin.new(
+		source_id: "main",
+		start_line: 1,
+		start_column: 1,
+		end_line: 12,
+		end_column: 4,
+	)
+	return RecoveryManagedModule.new(
+		id: "integer-array",
+		entry_function: "integer-array#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: [
+			RecoveryManagedTypeDefinition::Array(
+				"Array<Integer>",
+				RecoveryManagedValueType::Scalar(ScalarType::Integer),
+			),
+			RecoveryManagedTypeDefinition::Array(
+				"Array<Array<Integer>>",
+				RecoveryManagedValueType::Aggregate("Array<Integer>"),
+			),
+		],
+		functions: [
+			RecoveryManagedFunction.new(
+				id: "integer-array#main",
+				name: "main",
+				parameters: [],
+				result_type: RecoveryManagedResultType::Void,
+				entry: "entry",
+				origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry",
+						parameters: [],
+						origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("zero", 0, origin)),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("ten", 10, origin)),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("twenty", 20, origin)),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("two", 2, origin)),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("last", -1, origin)),
+							RecoveryManagedInstruction::ArrayConstruct("values", "Array<Integer>", ["ten"], origin),
+							RecoveryManagedInstruction::ArrayConstruct(
+								"groups",
+								"Array<Array<Integer>>",
+								["values"],
+								origin,
+							),
+							RecoveryManagedInstruction::ArrayGet(
+								"selected",
+								"Array<Array<Integer>>",
+								"groups",
+								"zero",
+								origin,
+							),
+							RecoveryManagedInstruction::ArrayPush("Array<Integer>", "selected", "twenty", origin),
+							RecoveryManagedInstruction::ArraySet("Array<Integer>", "selected", "last", "ten", origin),
+							RecoveryManagedInstruction::ArrayGet("actual", "Array<Integer>", "selected", "last", origin),
+							RecoveryManagedInstruction::ArraySize("size", "Array<Integer>", "selected", origin),
+							RecoveryManagedInstruction::Scalar(
+								RecoveryScalarInstruction::IntegerCompare(
+									"valueMatches",
+									ComparisonOperator::Equal,
+									"actual",
+									"ten",
+									origin,
+								)
+							),
+							RecoveryManagedInstruction::Scalar(
+								RecoveryScalarInstruction::IntegerCompare(
+									"sizeMatches",
+									ComparisonOperator::Equal,
+									"size",
+									"two",
+									origin,
+								)
+							),
+						],
+						terminator: RecoveryManagedTerminator::Branch(
+							"valueMatches",
+							"checkSize",
+							["sizeMatches"],
+							"failure",
+							[],
+							origin,
+						),
+					),
+					RecoveryManagedBlock.new(
+						id: "checkSize",
+						parameters: [
+							RecoveryManagedParameter.new(
+								id: "matches",
+								value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean),
+								origin: origin,
+							),
+						],
+						origin: origin,
+						instructions: [],
+						terminator: RecoveryManagedTerminator::Branch(
+							"matches",
+							"success",
+							[],
+							"failure",
+							[],
+							origin,
+						),
+					),
+					RecoveryManagedBlock.new(
+						id: "success",
+						parameters: [],
+						origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("integer-array-ok\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "failure",
+						parameters: [],
+						origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("integer-array-fail\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+				],
+			),
+		],
+	)
+end
+
+describe("Managed recovery Integer Array runtime") do
+	test("executes nested construction, growth, mutation, indexing, and size") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-managed-integer-array"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_managed_executable(
+					_recovery_managed_integer_array_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/sample",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("integer-array-ok\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + "\n" + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,159 @@
+import { hash_action_copy, hash_action_delete, hash_action_empty, hash_action_has_key, hash_action_keys, hash_action_size, hash_action_update, hash_action_values } from mir/model/hash_actions
+import { mir_op_hash_get, mir_op_hash_method, mir_op_hash_new, mir_op_hash_set } from mir/model/instructions
+import { mir_hash_concat_at_membership } from mir/analysis/hash_concats
+import { mir_hash_membership_find } from mir/analysis/hash_membership
+import { hash_read_suffix } from backend/qbe/runtime/hash_runtime
+import { mir_hash_integer_key, mir_hash_key_flags, mir_hash_string_key } from mir/lowering/hashes
+import { mir_hash_lookup_find } from mir/analysis/hash_lookup
+import { integer_string } from support/literals
+import { MirHashConcatProbe, MirInstruction, MirModule } from mir/model/module
+import { mir_hash_value_type, mir_managed_type, mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_address, emit_temporary, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_line, qbe_require_hash, qbe_require_hash_concat } from backend/qbe/output
+import { CompilerState } from state/state
+
+# All types, operands, capacity hints and allocating root points are verified.
+# No source lookup or adapter-local managed-root inference participates here.
+def emit_mir_hash_instruction(state: CompilerState, value_types: Array<Integer>, index: Integer, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	native_module := state.scalar_mir
+	result_type := mir_storage_type_name(native_module, mir_operand_type(value_types, instruction.result))
+	qbe_require_hash(output, "generic")
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_hash_new()
+		type_id := mir_operand_type(value_types, instruction.result)
+		mut flags := mir_hash_key_flags(native_module, type_id)
+		if mir_managed_type(native_module, mir_hash_value_type(native_module, type_id))
+			flags += 2
+		end
+		qbe_output_line(output, "\t" + result + " =l call $trbn_hash_new(l " + integer_string(instruction.payload) + ", l " + integer_string(flags) + ")")
+		return emitted_value(result, result_type)
+	end
+	owner := operands[instruction.first]
+	mut argument := ""
+	if instruction.second >= 0
+		argument = operands[instruction.second]
+	end
+	mut key_mode := "generic"
+	if instruction.kind == mir_op_hash_get() || (instruction.kind == mir_op_hash_method() && instruction.payload == hash_action_has_key())
+		owner_type := mir_operand_type(value_types, instruction.first)
+		if mir_hash_integer_key(native_module, owner_type)
+			key_mode = "integer"
+		elsif mir_hash_string_key(native_module, owner_type)
+			key_mode = "string"
+		end
+		qbe_require_hash(output, key_mode)
+	end
+	suffix := hash_read_suffix(key_mode)
+	if instruction.kind == mir_op_hash_set()
+		value_type := mir_storage_type_name(native_module, mir_operand_type(value_types, instruction.payload))
+		bits := emit_hash_bits(context, output, operands[instruction.payload], value_type)
+		producer := mir_hash_lookup_find(native_module.hash_lookup_reuse[0], index, false)
+		if producer >= 0
+			address := emit_hash_slot_address(owner, "%hash_slot_" + integer_string(producer), context, output)
+			qbe_output_line(output, "\tstorel " + bits + ", " + address)
+		else
+			qbe_output_line(output, "\tcall $trbn_hash_set(l " + owner + ", l " + argument + ", l " + bits + ")")
+		end
+		return emitted_value("", "Void")
+	end
+	concat := mir_hash_concat_at_membership(native_module.hash_concat_probes[0], index)
+	if instruction.kind == mir_op_hash_method() && instruction.payload == hash_action_has_key() && (concat >= 0 || mir_hash_membership_find(native_module.hash_membership_reuse[0], index, true) >= 0)
+		slot := "%hash_membership_" + integer_string(index)
+		if concat >= 0
+			producer := native_module.hash_concat_probes[0][concat].concat
+			qbe_output_line(output, "\t" + slot + " =l copy %hash_concat_bucket_" + integer_string(producer))
+		else
+			qbe_output_line(output, "\t" + slot + " =l call $trbn_hash_slot" + suffix + "(l " + owner + ", l " + argument + ")")
+		end
+		qbe_output_line(output, "\t" + result + " =l csgel " + slot + ", 0")
+		return emitted_value(result, result_type)
+	end
+	membership := mir_hash_membership_find(native_module.hash_membership_reuse[0], index, false)
+	if instruction.kind == mir_op_hash_get() && (membership >= 0 || mir_hash_lookup_find(native_module.hash_lookup_reuse[0], index, true) >= 0)
+		slot := "%hash_slot_" + integer_string(index)
+		if membership >= 0
+			qbe_output_line(output, "\t" + slot + " =l copy %hash_membership_" + integer_string(membership))
+		else
+			qbe_output_line(output, "\t" + slot + " =l call $trbn_hash_existing_slot" + suffix + "(l " + owner + ", l " + argument + ")")
+		end
+		address := emit_hash_slot_address(owner, slot, context, output)
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+		if result_type == "Float"
+			value := emit_temporary(context)
+			qbe_output_line(output, "\t" + value + " =d cast " + result)
+			return emitted_value(value, result_type)
+		end
+		return emitted_value(result, result_type)
+	end
+	method := instruction.payload
+	if instruction.kind == mir_op_hash_method() && (method == hash_action_size() || method == hash_action_empty())
+		address := emit_address(context, output, owner, 8)
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+		if method == hash_action_empty()
+			empty := emit_temporary(context)
+			qbe_output_line(output, "\t" + empty + " =l ceql " + result + ", 0")
+			return emitted_value(empty, result_type)
+		end
+	elsif instruction.kind == mir_op_hash_method() && method == hash_action_copy()
+		address := emit_address(context, output, owner, 16)
+		capacity := emit_temporary(context)
+		qbe_output_line(output, "\t" + capacity + " =l loadl " + address)
+		qbe_output_line(output, "\t" + result + " =l call $trbn_hash_copy(l " + owner + ", l " + capacity + ")")
+	elsif instruction.kind == mir_op_hash_method() && method == hash_action_update()
+		qbe_output_line(output, "\tcall $trbn_hash_update(l " + owner + ", l " + argument + ")")
+		return emitted_value("", "Void")
+	elsif instruction.kind == mir_op_hash_method() && (method == hash_action_keys() || method == hash_action_values())
+		qbe_output_line(output, "\t" + result + " =l call $trbn_hash_entries(l " + owner + ", l " + integer_string(method - 10) + ")")
+	else
+		mut operation := "get"
+		if instruction.kind == mir_op_hash_method() && method == hash_action_has_key()
+			operation = "contains"
+		elsif instruction.kind == mir_op_hash_method() && method == hash_action_delete()
+			operation = "delete"
+		end
+		qbe_output_line(output, "\t" + result + " =l call $trbn_hash_" + operation + suffix + "(l " + owner + ", l " + argument + ")")
+		if result_type == "Float"
+			value := emit_temporary(context)
+			qbe_output_line(output, "\t" + value + " =d cast " + result)
+			return emitted_value(value, result_type)
+		end
+	end
+	return emitted_value(result, result_type)
+end
+
+def emit_hash_bits(mut context: QbeEmitContext, mut output: QbeOutput, operand: String, type_name: String): String
+	if type_name != "Float"
+		return operand
+	end
+	bits := emit_temporary(context)
+	qbe_output_line(output, "\t" + bits + " =l cast " + operand)
+	return bits
+end
+
+# Reload storage at each operation. MIR retains only the bucket number across
+# intervening work, so this spelling cannot keep a stale backing-array address.
+def emit_hash_slot_address(owner: String, slot: String, mut context: QbeEmitContext, mut output: QbeOutput): String
+	values_slot := emit_address(context, output, owner, 32)
+	values := emit_temporary(context)
+	qbe_output_line(output, "\t" + values + " =l loadl " + values_slot)
+	data_slot := emit_address(context, output, values, 24)
+	data := emit_temporary(context)
+	qbe_output_line(output, "\t" + data + " =l loadl " + data_slot)
+	offset := emit_temporary(context)
+	address := emit_temporary(context)
+	qbe_output_line(output, "\t" + offset + " =l shl " + slot + ", 3")
+	qbe_output_line(output, "\t" + address + " =l add " + data + ", " + offset)
+	return address
+end
+
+# The verified plan retains the original safe point and managed roots. A found
+# key is an ordinary retained String; a miss uses ordinary concatenation.
+def emit_mir_hash_concat(native_module: MirModule, plan: MirHashConcatProbe, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	qbe_require_hash_concat(output)
+	concat := native_module.instructions[plan.concat]
+	membership := native_module.instructions[plan.membership]
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + result + " =l call $trbn_hash_concat_key(l " + operands[membership.first] + ", l " + operands[concat.first] + ", l " + operands[concat.second] + ", l %hash_concat_slot)")
+	qbe_output_line(output, "\t%hash_concat_bucket_" + integer_string(plan.concat) + " =l loadl %hash_concat_slot")
+	return emitted_value(result, "String")
+end

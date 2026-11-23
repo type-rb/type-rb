@@ -1,0 +1,128 @@
+import { transform_absent, transform_all, transform_any, transform_concurrent_map, transform_find, transform_find_index, transform_map, transform_none, transform_reduce, transform_select, transform_sort_by, transform_sort_by_descending, transform_sorting } from frontend/types/transform_kinds
+import { iteration_source_array, iteration_source_range } from frontend/types/iteration_kinds
+import { IterationSyntax, iteration_syntax_valid } from frontend/syntax/iteration_syntax
+import { MirIteration, mir_iteration_valid } from mir/model/iteration
+import { nullable_type } from frontend/types/nullable_types
+
+# A value-producing block is keyed by its suffix, so chained transforms have
+# distinct regions while retaining their already-evaluated receivers.
+record TransformSyntax
+	iteration: IterationSyntax
+	kind: Integer
+	initial_start: Integer
+	initial_finish: Integer
+	accumulator_origin: Integer
+end
+
+record MirTransform
+	syntax: TransformSyntax
+	iteration: MirIteration
+	type_name: String
+	key_type: String
+end
+
+def transform_kind(name: String): Integer
+	if name == "concurrent_map"
+		return transform_concurrent_map()
+	elsif name == "map"
+		return transform_map()
+	elsif name == "select"
+		return transform_select()
+	elsif name == "reduce"
+		return transform_reduce()
+	elsif name == "any?"
+		return transform_any()
+	elsif name == "all?"
+		return transform_all()
+	elsif name == "none?"
+		return transform_none()
+	elsif name == "find"
+		return transform_find()
+	elsif name == "find_index"
+		return transform_find_index()
+	elsif name == "sort_by"
+		return transform_sort_by()
+	elsif name == "sort_by_descending"
+		return transform_sort_by_descending()
+	end
+	return transform_absent()
+end
+
+def transform_syntax_valid(plan: TransformSyntax, origin: Integer, token_count: Integer): Boolean
+	shape := plan.iteration
+	if !iteration_syntax_valid(shape, origin, token_count) || shape.receiver_finish != origin || shape.slice_start != -1 || shape.slice_finish != -1
+		return false
+	end
+	if plan.kind == transform_reduce()
+		if plan.initial_start <= origin || plan.initial_finish <= plan.initial_start || plan.initial_finish >= plan.accumulator_origin || plan.accumulator_origin >= shape.element_origin
+			return false
+		end
+		return shape.second_origin == -1
+	end
+	if plan.kind == transform_concurrent_map()
+		if plan.accumulator_origin != -1 || shape.second_origin != -1
+			return false
+		end
+		if plan.initial_start == -1
+			return plan.initial_finish == -1
+		end
+		if plan.initial_start <= origin || plan.initial_finish <= plan.initial_start || plan.initial_finish >= shape.element_origin
+			return false
+		end
+		return true
+	end
+	if plan.kind < transform_map() || plan.kind > transform_sort_by_descending() || plan.initial_start != -1 || plan.initial_finish != -1
+		return false
+	end
+	if plan.kind >= transform_any() && shape.second_origin != -1
+		return false
+	end
+	return plan.accumulator_origin == -1
+end
+
+def mir_transform_valid(plan: MirTransform, origin: Integer, token_count: Integer, element_type: String): Boolean
+	if !transform_syntax_valid(plan.syntax, origin, token_count)
+		return false
+	end
+	if plan.iteration.source_kind < iteration_source_array() || plan.iteration.source_kind > iteration_source_range()
+		return false
+	end
+	if !mir_iteration_valid(plan.iteration, origin, token_count, plan.iteration.type_name, element_type)
+		return false
+	end
+	shape := plan.syntax.iteration
+	loop := plan.iteration.syntax
+	if loop.slice_start != -1 || loop.slice_finish != -1
+		return false
+	end
+	if loop.origin != shape.origin || loop.receiver_finish != shape.receiver_finish || loop.element_origin != shape.element_origin || loop.second_origin != shape.second_origin || loop.body_start != shape.body_start || loop.body_finish != shape.body_finish || loop.finish != shape.finish
+		return false
+	end
+	if plan.syntax.kind == transform_concurrent_map() && plan.iteration.source_kind != iteration_source_array()
+		return false
+	end
+	if plan.type_name == "" || plan.type_name == "Void"
+		return false
+	end
+	if transform_sorting(plan.syntax.kind)
+		if plan.iteration.source_kind != iteration_source_array() || plan.type_name != plan.iteration.type_name
+			return false
+		end
+		if plan.key_type == "Integer" || plan.key_type == "Float" || plan.key_type == "String"
+			return true
+		end
+		return false
+	elsif plan.key_type != ""
+		return false
+	end
+	if plan.syntax.kind >= transform_any() && plan.syntax.kind <= transform_none() && plan.type_name != "Boolean"
+		return false
+	end
+	if plan.syntax.kind == transform_find() && plan.type_name != nullable_type(element_type)
+		return false
+	end
+	if plan.syntax.kind == transform_find_index() && plan.type_name != "Integer?"
+		return false
+	end
+	return plan.type_name != "Never"
+end

@@ -1,0 +1,21 @@
+alias Span = Range<Integer>
+def take(text: String, bounds: Span): String
+	return text.slice(bounds)
+end
+
+def probe()
+	text := "A日本😀"
+	bounds: Span := 1...3
+	puts(take(text, bounds))
+	puts(take(text, bounds))
+	mut later: Span := bounds
+	later = 0..0
+	puts(take(text, later))
+	puts(take(text, bounds))
+	puts(text)
+
+end
+
+def main()
+	probe()
+end

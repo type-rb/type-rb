@@ -1,0 +1,336 @@
+{
+  "status": "completed-with-cumulative-regression-alarms",
+  "registration": "https://github.com/type-rb/type-rb-native/pull/352#issuecomment-5586493243",
+  "identities": {
+    "version": 1,
+    "startedAt": "2026-09-08T14:13:02.391925+00:00",
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "machine": "arm64",
+    "qbeSha256": "bd16f2eeef52167f59e9eede726fc924c3564752e2ba9e728fbcfecbf51ffbc0",
+    "ccVersion": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "rounds": {
+      "warmup": 2,
+      "retained": 5,
+      "ordering": "rotating roles each round"
+    },
+    "roles": {
+      "cumulative": {
+        "revision": "ac633935a7f248470c59d22666da14c819a131fa",
+        "compilerSha256": "ed16ad3c638a9aa4dba5bb19fb4ef5b5a15ef129a0422d4421be5792357dfb9c",
+        "compilerBytes": 349240,
+        "sourceBytes": 366199,
+        "sourceSha256": {
+          "checked_program.trb": "0293ac5034515b49dcbbf284476e249de9cbb57ffcf84ba741be1c19048e94af",
+          "compiler.trb": "fccc35c63aac816bdab91d7b95ca0bcd9b7ff04a9b4d1a31d042498fb5a73329",
+          "literals.trb": "e934eb44f9861cb957c6fa3cae7281380b60c100b365ff594d3dd9b67f396408",
+          "mir.trb": "016e65315c0e85e47496ee5be739c264c539d8ef82255009b220de1d1cf6870e",
+          "native_file_system.trb": "3352f1af3f3950ca53ecc664c38d53d89649922fe9f0f3472a68d6a4370dab3e",
+          "parser.trb": "d2e7c06385f48fbe8f86bdf13da86cf9df2f9551fe24608512b1857fbdb59537",
+          "path.trb": "6347003851071b73cb8dbf38622fcc7cf3be6abf81ea253b9aad081fb057510a",
+          "project_config.trb": "fc364fb5387d3eeb1e21293ffcd72fcf165ce50b1a83f48b7a4899bcbf086ee5",
+          "qbe_output.trb": "c6833c090e46481b3980e36a2674bb4ff3d36f92ea4877cf0d4b8e3d19fcc190",
+          "qbe_runtime.trb": "4aff3603db92173906ec2e8b092385b954c49e9a9c1f54161a83c66b5bda8478",
+          "resolution.trb": "407ac0cb606b4a948a29cca785e5208db8523ca26edf91dca789954540e7eaf5",
+          "state.trb": "8990d36b44a9ad9ba2427fa6501ed69d47f30a7df7b8ae7391661cbb71203bde",
+          "storage.trb": "d4c77fec9e5c5e8580cb0b5ee71fbd2c9c714555cbd4fd1457fcd44cc6db1f9d"
+        }
+      },
+      "control": {
+        "revision": "f1d65b96d659f68376c7ec937be98ef95e02a838",
+        "compilerSha256": "d9495f0a02c7459d2157c251f76bfe1f01aa3cc64a84cb25962211fead038f7c",
+        "compilerBytes": 349256,
+        "sourceBytes": 371524,
+        "sourceSha256": {
+          "checked_program.trb": "c77d78720c7d2741129df8cbe817a9c407bc88a7f7176d1e1e8bf9e23de618d9",
+          "compiler.trb": "a80c668a8f7d7d5aff18339f3bb810bc1c9c17deb545ab50b9dd55d1de291db5",
+          "literals.trb": "e934eb44f9861cb957c6fa3cae7281380b60c100b365ff594d3dd9b67f396408",
+          "mir.trb": "4b7de5ac59d7cc30361933637858a6e01730ea1ceaf19cdbb246595a3cacaf8f",
+          "native_file_system.trb": "3352f1af3f3950ca53ecc664c38d53d89649922fe9f0f3472a68d6a4370dab3e",
+          "parser.trb": "d2e7c06385f48fbe8f86bdf13da86cf9df2f9551fe24608512b1857fbdb59537",
+          "path.trb": "6347003851071b73cb8dbf38622fcc7cf3be6abf81ea253b9aad081fb057510a",
+          "project_config.trb": "fc364fb5387d3eeb1e21293ffcd72fcf165ce50b1a83f48b7a4899bcbf086ee5",
+          "qbe_output.trb": "c6833c090e46481b3980e36a2674bb4ff3d36f92ea4877cf0d4b8e3d19fcc190",
+          "qbe_runtime.trb": "4aff3603db92173906ec2e8b092385b954c49e9a9c1f54161a83c66b5bda8478",
+          "resolution.trb": "b3581b94d23687e611cc3494a646bda8beaad9dbd6075a572e0d2f536e2e5d4f",
+          "state.trb": "a7117c8e18d95535f994836a771a9641bc8cae3b297f37cf2ca90727b31a0ad8",
+          "storage.trb": "d4c77fec9e5c5e8580cb0b5ee71fbd2c9c714555cbd4fd1457fcd44cc6db1f9d"
+        }
+      },
+      "candidate": {
+        "revision": "4315d6f375179ca52df56f7401538d236e731974",
+        "compilerSha256": "58afb9f33bcefecf863794d85c5c3126490ee91aa39e7c4bc2f6c5674fa160b6",
+        "compilerBytes": 365768,
+        "sourceBytes": 373378,
+        "sourceSha256": {
+          "checked_program.trb": "c77d78720c7d2741129df8cbe817a9c407bc88a7f7176d1e1e8bf9e23de618d9",
+          "compiler.trb": "a80c668a8f7d7d5aff18339f3bb810bc1c9c17deb545ab50b9dd55d1de291db5",
+          "literals.trb": "e934eb44f9861cb957c6fa3cae7281380b60c100b365ff594d3dd9b67f396408",
+          "mir.trb": "4b7de5ac59d7cc30361933637858a6e01730ea1ceaf19cdbb246595a3cacaf8f",
+          "native_file_system.trb": "3352f1af3f3950ca53ecc664c38d53d89649922fe9f0f3472a68d6a4370dab3e",
+          "parser.trb": "d2e7c06385f48fbe8f86bdf13da86cf9df2f9551fe24608512b1857fbdb59537",
+          "path.trb": "6347003851071b73cb8dbf38622fcc7cf3be6abf81ea253b9aad081fb057510a",
+          "project_config.trb": "fc364fb5387d3eeb1e21293ffcd72fcf165ce50b1a83f48b7a4899bcbf086ee5",
+          "qbe_output.trb": "c6833c090e46481b3980e36a2674bb4ff3d36f92ea4877cf0d4b8e3d19fcc190",
+          "qbe_runtime.trb": "4aff3603db92173906ec2e8b092385b954c49e9a9c1f54161a83c66b5bda8478",
+          "resolution.trb": "8bf9e4e9e52ddb2aaf9f21e04f3f19fdec91fc95592937cc7b9211af14b4b2e5",
+          "state.trb": "a7117c8e18d95535f994836a771a9641bc8cae3b297f37cf2ca90727b31a0ad8",
+          "storage.trb": "d4c77fec9e5c5e8580cb0b5ee71fbd2c9c714555cbd4fd1457fcd44cc6db1f9d"
+        }
+      }
+    },
+    "programs": {
+      "spectral-norm": {
+        "input": "5500",
+        "sourceSha256": "b85e0d8cecf4e7455bdd34a6a02cb3a9a6e7bbe57ec29bb2f1b99afbbb5312f2",
+        "expectedSha256": "f9d5b5e3eb7657cf1bbba4cc856651864df9cd9fd9a6be9b9bc5fcbb67150deb",
+        "roles": {
+          "cumulative": {
+            "qbeSha256": "d2002cbc354f9c30382559860722e03b80c583351080a971eed65aa361f3529c",
+            "programSha256": "f21210399e94e814b129d18e03434f2abbcefa1fd450eed5a09b270c1e296175",
+            "programBytes": 50984
+          },
+          "control": {
+            "qbeSha256": "1787ca11073ae69496a15e693397fc55c1363e0827339e0e04adc7ab8380b096",
+            "programSha256": "713a2aac1769f71881488e8685c11847f7eeda306141d0c017b3feb992fd58ad",
+            "programBytes": 50984
+          },
+          "candidate": {
+            "qbeSha256": "1787ca11073ae69496a15e693397fc55c1363e0827339e0e04adc7ab8380b096",
+            "programSha256": "713a2aac1769f71881488e8685c11847f7eeda306141d0c017b3feb992fd58ad",
+            "programBytes": 50984
+          }
+        }
+      },
+      "n-body": {
+        "input": "1000000",
+        "sourceSha256": "796fc08a4747102e1ca08fc75cb81cb0a69b65666c11e45baeafcae2a1064b20",
+        "expectedSha256": "3fb938822f2b87322baee13eea59620bab076cca553f7e01214dbc674bd09387",
+        "roles": {
+          "cumulative": {
+            "qbeSha256": "7f33397e45878ab95e51801fd29a1393c7283a6f92e053030657a65ec808bfc2",
+            "programSha256": "295391e4a1a0468360a78cf03128f681d1f29fcc6ee4eb62ad9cfd7b6ffeede9",
+            "programBytes": 50984
+          },
+          "control": {
+            "qbeSha256": "b91b9b27eade5103e233622a1eb02cefa59c22998f86f3407a11ef888dd59cd6",
+            "programSha256": "365e5daf3fde0176e2be0fb5abbc8a68299b4ef7c9a548df937ca77ca1383f35",
+            "programBytes": 50984
+          },
+          "candidate": {
+            "qbeSha256": "b91b9b27eade5103e233622a1eb02cefa59c22998f86f3407a11ef888dd59cd6",
+            "programSha256": "365e5daf3fde0176e2be0fb5abbc8a68299b4ef7c9a548df937ca77ca1383f35",
+            "programBytes": 50984
+          }
+        }
+      }
+    },
+    "seedSha256": "1c8fdd630b3e129b9e121abce34c6d6dbd928b844cbfc1cff5f20a53b6ccaec7",
+    "timing": "/usr/bin/time -lp; elapsed wall also measured by monotonic clock; warm caches",
+    "goComparison": null,
+    "hardware": {
+      "hw.model": "Mac14,9",
+      "machdep.cpu.brand_string": "Apple M2 Pro",
+      "hw.memsize": "34359738368"
+    },
+    "environmentCapturedAt": "2026-09-08T14:17:46.205062+00:00",
+    "qbeVersion": "1.3",
+    "sourceInventory": "All non-test compiler/src TypeRB files, including the recovery-only filesystem adapter; individual file hashes are retained."
+  },
+  "measurements": [
+    {
+      "case": "spectral-norm",
+      "stage": "build",
+      "medians": {
+        "cumulative": {
+          "wallSeconds": 0.13275962509214878,
+          "cpuSeconds": 0.1,
+          "peakRssBytes": 39534592.0,
+          "artifactBytes": 50984.0
+        },
+        "control": {
+          "wallSeconds": 0.14075770904310048,
+          "cpuSeconds": 0.11,
+          "peakRssBytes": 39583744.0,
+          "artifactBytes": 50984.0
+        },
+        "candidate": {
+          "wallSeconds": 0.1351695409975946,
+          "cpuSeconds": 0.11,
+          "peakRssBytes": 39632896.0,
+          "artifactBytes": 50984.0
+        }
+      },
+      "ratios": {
+        "cumulative": {
+          "wallSeconds": 1.0181524759788458,
+          "cpuSeconds": 1.0999999999999999,
+          "peakRssBytes": 1.002486531288852,
+          "artifactBytes": 1.0
+        },
+        "control": {
+          "wallSeconds": 0.9602993819415264,
+          "cpuSeconds": 1.0,
+          "peakRssBytes": 1.0012417218543046,
+          "artifactBytes": 1.0
+        }
+      }
+    },
+    {
+      "case": "spectral-norm",
+      "stage": "runtime",
+      "medians": {
+        "cumulative": {
+          "wallSeconds": 2.3734596672002226,
+          "cpuSeconds": 2.1799999999999997,
+          "peakRssBytes": 2441216.0,
+          "artifactBytes": 50984.0
+        },
+        "control": {
+          "wallSeconds": 2.385774000082165,
+          "cpuSeconds": 2.19,
+          "peakRssBytes": 2441216.0,
+          "artifactBytes": 50984.0
+        },
+        "candidate": {
+          "wallSeconds": 2.3673727919813246,
+          "cpuSeconds": 2.19,
+          "peakRssBytes": 2424832.0,
+          "artifactBytes": 50984.0
+        }
+      },
+      "ratios": {
+        "cumulative": {
+          "wallSeconds": 0.9974354418981646,
+          "cpuSeconds": 1.0045871559633028,
+          "peakRssBytes": 0.9932885906040269,
+          "artifactBytes": 1.0
+        },
+        "control": {
+          "wallSeconds": 0.9922871118135218,
+          "cpuSeconds": 1.0,
+          "peakRssBytes": 0.9932885906040269,
+          "artifactBytes": 1.0
+        }
+      }
+    },
+    {
+      "case": "n-body",
+      "stage": "build",
+      "medians": {
+        "cumulative": {
+          "wallSeconds": 0.14898662501946092,
+          "cpuSeconds": 0.13,
+          "peakRssBytes": 39600128.0,
+          "artifactBytes": 50984.0
+        },
+        "control": {
+          "wallSeconds": 0.15256295795552433,
+          "cpuSeconds": 0.12,
+          "peakRssBytes": 39567360.0,
+          "artifactBytes": 50984.0
+        },
+        "candidate": {
+          "wallSeconds": 0.1571546250488609,
+          "cpuSeconds": 0.12,
+          "peakRssBytes": 39419904.0,
+          "artifactBytes": 50984.0
+        }
+      },
+      "ratios": {
+        "cumulative": {
+          "wallSeconds": 1.0548237133926155,
+          "cpuSeconds": 0.923076923076923,
+          "peakRssBytes": 0.9954489035995036,
+          "artifactBytes": 1.0
+        },
+        "control": {
+          "wallSeconds": 1.0300968672531583,
+          "cpuSeconds": 1.0,
+          "peakRssBytes": 0.9962732919254659,
+          "artifactBytes": 1.0
+        }
+      }
+    },
+    {
+      "case": "n-body",
+      "stage": "runtime",
+      "medians": {
+        "cumulative": {
+          "wallSeconds": 0.2733652910683304,
+          "cpuSeconds": 0.1,
+          "peakRssBytes": 1409024.0,
+          "artifactBytes": 50984.0
+        },
+        "control": {
+          "wallSeconds": 0.47279120795428753,
+          "cpuSeconds": 0.3,
+          "peakRssBytes": 1392640.0,
+          "artifactBytes": 50984.0
+        },
+        "candidate": {
+          "wallSeconds": 0.4763196660205722,
+          "cpuSeconds": 0.3,
+          "peakRssBytes": 1392640.0,
+          "artifactBytes": 50984.0
+        }
+      },
+      "ratios": {
+        "cumulative": {
+          "wallSeconds": 1.7424292021824792,
+          "cpuSeconds": 2.9999999999999996,
+          "peakRssBytes": 0.9883720930232558,
+          "artifactBytes": 1.0
+        },
+        "control": {
+          "wallSeconds": 1.0074630365516988,
+          "cpuSeconds": 1.0,
+          "peakRssBytes": 1.0,
+          "artifactBytes": 1.0
+        }
+      }
+    },
+    {
+      "case": "compiler",
+      "stage": "self-build",
+      "medians": {
+        "cumulative": {
+          "wallSeconds": 1.5965155409649014,
+          "cpuSeconds": 1.5699999999999998,
+          "peakRssBytes": 40452096.0,
+          "artifactBytes": 349240.0
+        },
+        "control": {
+          "wallSeconds": 1.6572127500548959,
+          "cpuSeconds": 1.6199999999999999,
+          "peakRssBytes": 40353792.0,
+          "artifactBytes": 349256.0
+        },
+        "candidate": {
+          "wallSeconds": 1.660604374948889,
+          "cpuSeconds": 1.64,
+          "peakRssBytes": 40337408.0,
+          "artifactBytes": 365768.0
+        }
+      },
+      "ratios": {
+        "cumulative": {
+          "wallSeconds": 1.0401429440174779,
+          "cpuSeconds": 1.0445859872611465,
+          "peakRssBytes": 0.9971648440664237,
+          "artifactBytes": 1.0473256213492155
+        },
+        "control": {
+          "wallSeconds": 1.0020465838763797,
+          "cpuSeconds": 1.0123456790123457,
+          "peakRssBytes": 0.9995939910678034,
+          "artifactBytes": 1.0472776416153193
+        }
+      }
+    }
+  ],
+  "interpretation": {
+    "incremental": "Control and candidate application QBE/executables are byte-identical; all measured wall/RSS medians are within 1.05 against the immediate control.",
+    "cumulative": "n-body build wall ratio 1.054824 and runtime wall ratio 1.742429 exceed the 1.05 regression alarm. CPU medians 0.10/0.30 seconds are coarse and must remain visible. The accepted control already has the runtime difference.",
+    "acceptance": "Not accepted. Original hosted size failures and unrun authorities remain. No new Go comparison or Pages claim."
+  }
+}

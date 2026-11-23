@@ -1,0 +1,94 @@
+import { emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { MirArrayHeader, MirArrayLoop, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import { array_loop_mir_check } from testing/mir/array_loops
+import trb/std/process
+import trb/std/result
+
+describe("Array guard owner header reuse") do
+	test("keeps negative indexes and aliased element updates after MIR erasure") do
+		source := "def scan(mut values: Array<Integer>, requested: Integer): Integer\nmut view := values\nmut index := 0\nmut total := 0\nwhile index < values.size()\nview[index] += 10\ntotal += values[requested]\nindex += 1\nend\nreturn total\nend\ndef main()\nmut values := [1, 2, 3]\nputs(scan(values, -1))\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n"
+		mut state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(2)
+		mut selected := -1
+		mut position := 0
+		while position < plan.headers.size()
+			if plan.headers[position].identity == state.scalar_mir.instructions[plan.length].first
+				selected = position
+			end
+			position += 1
+		end
+		expect(selected >= 0).to_be_true()
+		header := plan.headers[selected]
+		expect(header.owner).to_equal(plan.owner)
+		expect(header.accesses.size()).to_equal(1)
+		expect(header.nonnegative_accesses.size()).to_equal(0)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("19\n11\n12\n13\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		# A stable header does not establish a nonnegative requested index.
+		state.scalar_mir.array_loops[function_index][0].headers[selected] = MirArrayHeader.new(identity: header.identity, owner: header.owner, accesses: header.accesses, nonnegative_accesses: header.accesses, bounded_accesses: header.bounded_accesses)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		state.scalar_mir.array_loops[function_index][0] = MirArrayLoop.new(header: plan.header, preheader: plan.preheader, owner: plan.owner, length: plan.length, accesses: plan.accesses, headers: [], reserved_pushes: plan.reserved_pushes, cached_values: plan.cached_values, peel_body: plan.peel_body, peel_nonempty: plan.peel_nonempty)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("keeps the upper bound for a different nonnegative guard-owner index") do
+		source := "def scan(values: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\ntotal += values[index + 1]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3]))\nend\n"
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.accesses.size()).to_equal(0)
+		expect(plan.headers.size()).to_equal(1)
+		expect(plan.headers[0].nonnegative_accesses.size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("index is out of bounds")).to_be_true()
+			end
+		end
+	end
+
+	test("rejects guard-owner header reuse across header changes and opaque calls") do
+		bodies := ["values.push(4)", "values.pop()", "touch(values)"]
+		bodies.each do |body|
+			source := "def touch(mut values: Array<Integer>)\nvalues.push(4)\nend\ndef scan(mut values: Array<Integer>, requested: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\ntotal += values[requested]\n" + body + "\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			function_index := mir_function_index(state.scalar_mir, 1)
+			expect(state.scalar_mir.array_loops[function_index].size()).to_equal(0)
+		end
+	end
+end

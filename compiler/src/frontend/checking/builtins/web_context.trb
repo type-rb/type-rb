@@ -1,0 +1,79 @@
+import { web_context_kind } from frontend/providers/web_context
+import { check_expression } from frontend/checking/body/expressions
+import { CheckedValue, checked_mir_value, checked_value } from frontend/checking/body/values
+import { type_diagnostic } from frontend/checking/body/types
+import { checked_category_value } from frontend/types/value_categories
+import { find_object_type } from frontend/types/object_types
+import { next_generic_depth } from frontend/types/generic_bindings
+import { instantiate_method_signature } from frontend/resolution/generic_functions
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { argument_binding_slot, function_argument_bindings } from frontend/resolution/argument_binding
+import { mir_checked_call, mir_complete_arguments } from mir/lowering/calls
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { official_source_kind } from project/official_catalog
+import { CompilerState, has_diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+# Infer T from the nominal key, never from a competing value or a key's name.
+# The receiver, key and value are each checked and emitted once in source order.
+def check_inferred_web_context(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, definition: Integer): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	kind := web_context_kind(state, definition)
+	if kind < 1 || kind > 2
+		return type_diagnostic(state, line, "context values require a canonical provider declaration")
+	end
+	advance(position)
+	skip_newlines(state, position)
+	if token_is(state, position[0], ")") || parse_argument_label(state, position) != ""
+		return type_diagnostic(state, line, "context values require a positional typed key")
+	end
+	key := check_expression(state, position, locals, 1, "")
+	if has_diagnostic(state)
+		return key
+	end
+	key_owner := find_object_type(state, key.type_name)
+	if key_owner < 0
+		return type_diagnostic(state, line, "context key must be ContextKey<T>")
+	end
+	instance := state.nominal.object_instances[key_owner]
+	declaration := state.nominal.objects[instance.definition]
+	if declaration.name != "ContextKey" || declaration.interface_type || sparse_integer_at(state.standard_modules, declaration.source_id) != official_source_kind("trb/web") || instance.arguments.size() != 1
+		return type_diagnostic(state, line, "context key must be the canonical ContextKey<T>")
+	end
+	function := instantiate_method_signature(state, definition, [instance.arguments[0]], next_generic_depth(state), "", origin)
+	if function < 0 || has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	declare_default_functions(state)
+	store_integer(state.callables.checked[0].generic_calls, origin, function + 1)
+	mut bindings := function_argument_bindings(state, function)
+	bindings.values[0] = checked_mir_value(receiver)
+	bindings.provided[0] = true
+	bindings.position[0] = 1
+	first := argument_binding_slot(bindings, "")
+	bindings.values[first] = checked_mir_value(key)
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	skip_newlines(state, position)
+	while token_is(state, position[0], ",") && !has_diagnostic(state)
+		advance(position)
+		skip_newlines(state, position)
+		if token_is(state, position[0], ")")
+			break
+		end
+		label := parse_argument_label(state, position)
+		slot := argument_binding_slot(bindings, label)
+		if slot < 0
+			return type_diagnostic(state, line, bindings.error[0])
+		end
+		argument := check_expression(state, position, locals, 1, load_string(state.declarations.parameter_types, start + slot))
+		bindings.values[slot] = checked_mir_value(argument)
+		skip_newlines(state, position)
+	end
+	if !expect(state, position, ")") || !mir_complete_arguments(state, locals, bindings, origin)
+		return type_diagnostic(state, line, "invalid context value arguments")
+	end
+	return mir_checked_call(state, locals, function, bindings.values, load_string(state.declarations.function_result_types, function), origin)
+end

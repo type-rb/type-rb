@@ -1,0 +1,51 @@
+import { recover_program_fixture } from testing/fixtures
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def array_recovery_output(name: String, expected: String): Boolean
+	process := case recover_program_fixture(name, true)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error)
+		return false
+	end
+	if process == nil
+		return true
+	end
+	expect(process.status).to_equal(0)
+	expect(process.stdout).to_equal(expected)
+	mut collections := -1
+	mut automatic := -1
+	mut live := -1
+	lines := process.stderr.split("\n")
+	lines.each do |line|
+		fields := line.split(",")
+		if fields.size() == 3
+			if fields[0] == "recovery-managed-gc-stat"
+				if fields[1] == "collections"
+					collections = fields[2].to_i()
+				elsif fields[1] == "automatic-collections"
+					automatic = fields[2].to_i()
+				elsif fields[1] == "live-bytes"
+					live = fields[2].to_i()
+				end
+			end
+		end
+	end
+	expect(collections > 1).to_be_true()
+	expect(live).to_equal(0)
+	if name == "array-iteration-managed"
+		expect(automatic > 0).to_be_true()
+	end
+	return true
+end
+
+describe("Array iteration snapshot recovery") do
+	test("preserves live traversal, receiver evaluation, shadowing and nearest transfers") do
+		expect(array_recovery_output("array-iteration-values", "iteration-values-ok\n")).to_be_true()
+	end
+	test("retains current records, closures and nested Arrays across collection") do
+		expect(array_recovery_output("array-iteration-managed", "original\ncallback\nnested\ntrue\nfalse\nstring\n")).to_be_true()
+	end
+end

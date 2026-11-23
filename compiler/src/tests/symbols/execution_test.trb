@@ -1,0 +1,30 @@
+import { check } from compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Symbol literal MIR") do
+	test("uses String operations after erasing source and reordering blocks") do
+		managed_mir_test_fixture("symbol-values-mir", 4)
+	end
+	test("retains values across storage closures and forced collection") do
+		managed_mir_test_fixture("symbol-managed-mir", 10)
+	end
+	test("normalizes quotes according to expression grammar before checking") do
+		mut state := logical_checked_source("def main()\nlabel := :\"\#{unbound @}\"\nvalues := {key: \"\#{label}\"}\nputs(values[:key])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut index := 0
+		mut seen := false
+		while index < state.source_tokens.token_count[0]
+			expect(load_integer(state.source_tokens.token_kinds, index) == 7).to_be_false()
+			if load_integer(state.source_tokens.token_kinds, index) == 3 && load_string(state.source_tokens.token_texts, index) == "\#{unbound @}"
+				seen = true
+			end
+			index += 1
+		end
+		expect(seen).to_be_true()
+	end
+end

@@ -1,0 +1,563 @@
+import { ComparisonOperator, FloatBinaryOperator, IntegerBinaryOperator, RecoveryScalarBlock, RecoveryScalarFunction, RecoveryScalarInstruction, RecoveryScalarModule, RecoveryScalarParameter, RecoveryScalarTerminator, ScalarType, verify_recovery_scalar_mir } from scalar/mir
+import { build_recovery_scalar_executable } from scalar/toolchain
+import { decode_recovery_scalar_snapshot } from scalar/snapshot
+import { NativeSource } from snapshot/mir
+import { emit_qbe } from scalar/qbe
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory, native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_scalar_origin(line: Integer): SourceOrigin
+	return SourceOrigin.new(
+		source_id: "main",
+		start_line: line,
+		start_column: 1,
+		end_line: line,
+		end_column: 8,
+	)
+end
+
+def _recovery_scalar_sum_function(): RecoveryScalarFunction
+	return RecoveryScalarFunction.new(
+		id: "example/main#sum_to",
+		name: "sum_to",
+		parameters: [RecoveryScalarParameter.new(id: "limit", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(1))],
+		result_type: ScalarType::Integer,
+		entry: "entry",
+		origin: _recovery_scalar_origin(1),
+		blocks: [
+			RecoveryScalarBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: _recovery_scalar_origin(2),
+				instructions: [RecoveryScalarInstruction::IntegerLiteral("zero", 0, _recovery_scalar_origin(2))],
+				terminator: RecoveryScalarTerminator::Jump("loop", ["zero", "zero"], _recovery_scalar_origin(2)),
+			),
+			RecoveryScalarBlock.new(
+				id: "loop",
+				parameters: [
+					RecoveryScalarParameter.new(id: "index", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(3)),
+					RecoveryScalarParameter.new(id: "total", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(3)),
+				],
+				origin: _recovery_scalar_origin(3),
+				instructions: [
+					RecoveryScalarInstruction::IntegerCompare(
+						"continues",
+						ComparisonOperator::LessThan,
+						"index",
+						"limit",
+						_recovery_scalar_origin(3),
+					),
+				],
+				terminator: RecoveryScalarTerminator::Branch(
+					"continues",
+					"body",
+					["index", "total"],
+					"done",
+					["total"],
+					_recovery_scalar_origin(3),
+				),
+			),
+			RecoveryScalarBlock.new(
+				id: "body",
+				parameters: [
+					RecoveryScalarParameter.new(id: "body_index", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(4)),
+					RecoveryScalarParameter.new(id: "body_total", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(4)),
+				],
+				origin: _recovery_scalar_origin(4),
+				instructions: [
+					RecoveryScalarInstruction::IntegerLiteral("one", 1, _recovery_scalar_origin(4)),
+					RecoveryScalarInstruction::IntegerBinary(
+						"next_index",
+						IntegerBinaryOperator::Add,
+						"body_index",
+						"one",
+						_recovery_scalar_origin(4),
+					),
+					RecoveryScalarInstruction::IntegerBinary(
+						"next_total",
+						IntegerBinaryOperator::Add,
+						"body_total",
+						"next_index",
+						_recovery_scalar_origin(4),
+					),
+				],
+				terminator: RecoveryScalarTerminator::Jump("loop", ["next_index", "next_total"], _recovery_scalar_origin(4)),
+			),
+			RecoveryScalarBlock.new(
+				id: "done",
+				parameters: [RecoveryScalarParameter.new(id: "result", value_type: ScalarType::Integer, origin: _recovery_scalar_origin(5))],
+				origin: _recovery_scalar_origin(5),
+				instructions: [],
+				terminator: RecoveryScalarTerminator::Return("result", _recovery_scalar_origin(5)),
+			),
+		],
+	)
+end
+
+def _recovery_scalar_float_function(): RecoveryScalarFunction
+	return RecoveryScalarFunction.new(
+		id: "example/main#float_check",
+		name: "float_check",
+		parameters: [],
+		result_type: ScalarType::Boolean,
+		entry: "entry",
+		origin: _recovery_scalar_origin(7),
+		blocks: [
+			RecoveryScalarBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: _recovery_scalar_origin(7),
+				instructions: [
+					RecoveryScalarInstruction::FloatLiteral("left", 1.5, _recovery_scalar_origin(7)),
+					RecoveryScalarInstruction::FloatLiteral("right", 2.0, _recovery_scalar_origin(7)),
+					RecoveryScalarInstruction::FloatLiteral("expected", 3.0, _recovery_scalar_origin(7)),
+					RecoveryScalarInstruction::FloatBinary(
+						"product",
+						FloatBinaryOperator::Multiply,
+						"left",
+						"right",
+						_recovery_scalar_origin(7),
+					),
+					RecoveryScalarInstruction::FloatCompare(
+						"matches",
+						ComparisonOperator::Equal,
+						"product",
+						"expected",
+						_recovery_scalar_origin(7),
+					),
+				],
+				terminator: RecoveryScalarTerminator::Return("matches", _recovery_scalar_origin(7)),
+			),
+		],
+	)
+end
+
+def _recovery_scalar_entry_function(): RecoveryScalarFunction
+	return RecoveryScalarFunction.new(
+		id: "example/main#main",
+		name: "main",
+		parameters: [],
+		result_type: ScalarType::Void,
+		entry: "entry",
+		origin: _recovery_scalar_origin(9),
+		blocks: [
+			RecoveryScalarBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: _recovery_scalar_origin(9),
+				instructions: [
+					RecoveryScalarInstruction::IntegerLiteral("limit", 5, _recovery_scalar_origin(9)),
+					RecoveryScalarInstruction::Call("sum", "example/main#sum_to", ["limit"], _recovery_scalar_origin(9)),
+					RecoveryScalarInstruction::IntegerLiteral("expected", 15, _recovery_scalar_origin(9)),
+					RecoveryScalarInstruction::IntegerCompare(
+						"sum_matches",
+						ComparisonOperator::Equal,
+						"sum",
+						"expected",
+						_recovery_scalar_origin(9),
+					),
+				],
+				terminator: RecoveryScalarTerminator::Branch(
+					"sum_matches",
+					"check_float",
+					[],
+					"failure",
+					[],
+					_recovery_scalar_origin(9),
+				),
+			),
+			RecoveryScalarBlock.new(
+				id: "check_float",
+				parameters: [],
+				origin: _recovery_scalar_origin(10),
+				instructions: [
+					RecoveryScalarInstruction::Call("float_matches", "example/main#float_check", [], _recovery_scalar_origin(10)),
+					RecoveryScalarInstruction::BooleanNot("inverted", "float_matches", _recovery_scalar_origin(10)),
+					RecoveryScalarInstruction::BooleanNot("restored", "inverted", _recovery_scalar_origin(10)),
+				],
+				terminator: RecoveryScalarTerminator::Branch(
+					"restored",
+					"success",
+					[],
+					"failure",
+					[],
+					_recovery_scalar_origin(10),
+				),
+			),
+			RecoveryScalarBlock.new(
+				id: "success",
+				parameters: [],
+				origin: _recovery_scalar_origin(11),
+				instructions: [RecoveryScalarInstruction::WriteStatic("ok\n", _recovery_scalar_origin(11))],
+				terminator: RecoveryScalarTerminator::Return(nil, _recovery_scalar_origin(11)),
+			),
+			RecoveryScalarBlock.new(
+				id: "failure",
+				parameters: [],
+				origin: _recovery_scalar_origin(12),
+				instructions: [RecoveryScalarInstruction::WriteStatic("bad\n", _recovery_scalar_origin(12))],
+				terminator: RecoveryScalarTerminator::Return(nil, _recovery_scalar_origin(12)),
+			),
+		],
+	)
+end
+
+def _recovery_scalar_sample_module(): RecoveryScalarModule
+	return RecoveryScalarModule.new(
+		id: "example/main",
+		entry_function: "example/main#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		functions: [_recovery_scalar_sum_function(), _recovery_scalar_float_function(), _recovery_scalar_entry_function()],
+	)
+end
+
+def _recovery_scalar_arithmetic_module(overflow: Boolean): RecoveryScalarModule
+	mut instructions: Array<RecoveryScalarInstruction> := []
+	if overflow
+		instructions = [
+			RecoveryScalarInstruction::IntegerLiteral("two", 2, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("fifty_three", 53, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerBinary(
+				"overflow",
+				IntegerBinaryOperator::Power,
+				"two",
+				"fifty_three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::WriteStatic("unreachable\n", _recovery_scalar_origin(20)),
+		]
+	else
+		instructions = [
+			RecoveryScalarInstruction::IntegerLiteral("ten", 10, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("three", 3, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("forty_one", 41, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("negative_seven", -7, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("negative_five", -5, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerLiteral("expected", 104, _recovery_scalar_origin(20)),
+			RecoveryScalarInstruction::IntegerBinary(
+				"difference",
+				IntegerBinaryOperator::Subtract,
+				"ten",
+				"three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"product",
+				IntegerBinaryOperator::Multiply,
+				"difference",
+				"three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"quotient",
+				IntegerBinaryOperator::Divide,
+				"product",
+				"three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"remainder",
+				IntegerBinaryOperator::Remainder,
+				"quotient",
+				"three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"answer",
+				IntegerBinaryOperator::Add,
+				"remainder",
+				"forty_one",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"negative_product",
+				IntegerBinaryOperator::Multiply,
+				"negative_seven",
+				"negative_five",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"combined",
+				IntegerBinaryOperator::Add,
+				"answer",
+				"negative_product",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"power",
+				IntegerBinaryOperator::Power,
+				"three",
+				"three",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerBinary(
+				"complete",
+				IntegerBinaryOperator::Add,
+				"combined",
+				"power",
+				_recovery_scalar_origin(20),
+			),
+			RecoveryScalarInstruction::IntegerCompare(
+				"matches",
+				ComparisonOperator::Equal,
+				"complete",
+				"expected",
+				_recovery_scalar_origin(20),
+			),
+		]
+	end
+	terminator := RecoveryScalarTerminator::Return(nil, _recovery_scalar_origin(20))
+	mut blocks: Array<RecoveryScalarBlock> := []
+	if overflow
+		blocks = [
+			RecoveryScalarBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: _recovery_scalar_origin(20),
+				instructions: instructions,
+				terminator: terminator,
+			),
+		]
+	else
+		blocks = [
+			RecoveryScalarBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: _recovery_scalar_origin(20),
+				instructions: instructions,
+				terminator: RecoveryScalarTerminator::Branch(
+					"matches",
+					"success",
+					[],
+					"failure",
+					[],
+					_recovery_scalar_origin(20),
+				),
+			),
+			RecoveryScalarBlock.new(
+				id: "success",
+				parameters: [],
+				origin: _recovery_scalar_origin(21),
+				instructions: [RecoveryScalarInstruction::WriteStatic("ok\n", _recovery_scalar_origin(21))],
+				terminator: terminator,
+			),
+			RecoveryScalarBlock.new(
+				id: "failure",
+				parameters: [],
+				origin: _recovery_scalar_origin(22),
+				instructions: [RecoveryScalarInstruction::WriteStatic("bad\n", _recovery_scalar_origin(22))],
+				terminator: terminator,
+			),
+		]
+	end
+	if !overflow
+		blocks = [blocks[1], blocks[0], blocks[2]]
+	end
+	entry_function := RecoveryScalarFunction.new(
+		id: "example/arithmetic#main",
+		name: "main",
+		parameters: [],
+		result_type: ScalarType::Void,
+		entry: "entry",
+		origin: _recovery_scalar_origin(20),
+		blocks: blocks,
+	)
+	return RecoveryScalarModule.new(
+		id: "example/arithmetic",
+		entry_function: entry_function.id,
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		functions: [entry_function],
+	)
+end
+
+def _recovery_scalar_fixture_source(): String
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	if root == nil
+		return ""
+	end
+	case native_read_text(root + "/fixtures/recovery-scalar/valid/scalar-call.json")
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+describe("Scalar recovery scalar QBE path") do
+	test("verifies scalar calls and control flow") do
+		case verify_recovery_scalar_mir(_recovery_scalar_sample_module())
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("emits deterministic QBE IL with source origins") do
+		first := emit_qbe(_recovery_scalar_sample_module())
+		second := emit_qbe(_recovery_scalar_sample_module())
+		case first
+		when Result::Ok(source)
+			expect(second).to_equal(first)
+			expect(source.include?("export function w $main()")).to_be_true()
+			expect(source.include?("$trbn_iadd")).to_be_true()
+			expect(source.include?("trb-origin")).to_be_true()
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("strictly decodes the version 2 executable fixture") do
+		source := _recovery_scalar_fixture_source()
+		expect(source.empty?()).to_be_false()
+		case decode_recovery_scalar_snapshot(source)
+		when Result::Ok(native_module)
+			expect(native_module.entry_function).to_equal("example/main#main")
+			expect(native_module.functions.size()).to_equal(2)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects version 2 unknown fields deterministically") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root == nil
+			expect(false).to_be_true()
+		else
+			source := case native_read_text(root + "/fixtures/recovery-scalar/invalid/unknown-field.json")
+			when Result::Ok(value)
+				value
+			when Result::Err(_error)
+				""
+			end
+			case decode_recovery_scalar_snapshot(source)
+			when Result::Ok(_native_module)
+				expect(false).to_be_true()
+			when Result::Err(diagnostic)
+				expect(diagnostic.code).to_equal("TRBN0002")
+				expect(diagnostic.path).to_equal("/unexpected")
+			end
+		end
+	end
+
+	test("builds and runs the Darwin arm64 executable when QBE is configured") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-scalar-integration"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_scalar_executable(
+					_recovery_scalar_sample_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/sample",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process_result)
+					expect(process_result.success).to_be_true()
+					expect(process_result.stdout).to_equal("ok\n")
+					expect(process_result.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("builds the version 2 data fixture when QBE is configured") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			case decode_recovery_scalar_snapshot(_recovery_scalar_fixture_source())
+			when Result::Ok(native_module)
+				workspace := "/tmp/type-rb-native-recovery-scalar-fixture"
+				case native_create_directory(workspace)
+				when Result::Ok(_unit)
+				when Result::Err(_error)
+				end
+				case build_recovery_scalar_executable(
+						native_module,
+						qbe_command,
+						"/usr/bin/cc",
+						workspace,
+						workspace + "/sample",
+					)
+				when Result::Ok(report)
+					case Process.run(report.output_path, [])
+					when Result::Ok(process_result)
+						expect(process_result.success).to_be_true()
+						expect(process_result.stdout).to_equal("ok\n")
+					when Result::Err(_error)
+						expect(false).to_be_true()
+					end
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("executes every checked Integer operator and rejects overflow") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-scalar-arithmetic"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_scalar_executable(
+					_recovery_scalar_arithmetic_module(false),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/success",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process_result)
+					expect(process_result.success).to_be_true()
+					expect(process_result.stdout).to_equal("ok\n")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+			case build_recovery_scalar_executable(
+					_recovery_scalar_arithmetic_module(true),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/overflow",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process_result)
+					expect(process_result.status).to_equal(2)
+					expect(process_result.stdout).to_equal("")
+					expect(process_result.stderr).to_equal("panic: Integer is outside the portable range\n")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

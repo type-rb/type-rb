@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "libdeflate": {
+    "version": "1.26",
+    "commit": "92e6a0db9fa848d742f9eb286c92afc60f2c3dda",
+    "url": "https://github.com/ebiggers/libdeflate/releases/download/v1.26/libdeflate-1.26.tar.gz",
+    "sha256": "125856d4656e0feab660f94842f835923410c9281fedbcee64598c918da42b5a",
+    "root": "libdeflate-1.26",
+    "license": "MIT"
+  }
+}

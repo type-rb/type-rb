@@ -1,0 +1,33 @@
+import { StringStorage, load_string, store_string, string_storage } from support/storage
+
+# Name resolution precedes checked bindings, flow facts and MIR construction.
+# Each body owns its names independently of the later checked-local state.
+record ResolutionLocals
+	names: StringStorage
+	types: StringStorage
+	count: Array<Integer>
+end
+
+def resolution_locals_new(capacity: Integer): ResolutionLocals
+	return ResolutionLocals.new(names: string_storage(capacity), types: string_storage(capacity), count: [0])
+end
+
+def resolution_local_find(locals: ResolutionLocals, name: String): Integer
+	mut index := locals.count[0] - 1
+	while index >= 0
+		if load_string(locals.names, index) == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+# Snapshots append every active slot so the last shadowing declaration wins.
+def resolution_local_bind(mut locals: ResolutionLocals, name: String, type_name: String): Integer
+	index := locals.count[0]
+	store_string(locals.names, index, name)
+	store_string(locals.types, index, type_name)
+	locals.count[0] = index + 1
+	return index
+end

@@ -1,0 +1,14 @@
+def sum(left: Integer, right: Integer): Integer
+	return left + right
+end
+
+def main()
+	lefts := [9007199254740991]
+	rights := [1]
+	mut index := 0
+	while index < lefts.size()
+		puts(sum(lefts[index], rights[index]).to_s())
+		index += 1
+	end
+	return
+end

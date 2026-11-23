@@ -1,0 +1,89 @@
+import { declaration_function, declaration_object } from frontend/types/declaration_kinds
+import { integer_string } from support/literals
+import { find_declaration_in_module } from frontend/resolution/declaration_lookup
+import { generic_field_type_valid } from frontend/resolution/generic_validation
+import { namespace_parent } from frontend/types/namespace_model
+import { find_object_in_module } from frontend/types/object_types
+import { instantiate_object_type } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer } from support/storage
+
+# Declaration checks do not instantiate arbitrary generic arguments. Concrete
+# edge expansion uses the ordinary recursive type resolver only when needed.
+def resolve_object_declarations(mut state: CompilerState): Boolean
+	mut owner := 0
+	while owner < state.nominal.objects.size() && !has_diagnostic(state)
+		row := state.nominal.objects[owner]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		if find_object_in_module(state, row.source_id, row.name) != owner
+			diagnostic(state, "TRBN4003", row.line, "duplicate object declaration " + row.name)
+		end
+		mut kind := declaration_function()
+		while kind < declaration_object()
+			if find_declaration_in_module(state, row.source_id, row.name, kind) >= 0
+				diagnostic(state, "TRBN4003", row.line, "duplicate declaration " + row.name)
+			end
+			kind += 1
+		end
+		mut fields: Hash<String, Integer> := {}
+		row.fields.each do |field|
+			if fields.key?(field.name)
+				diagnostic(state, "TRBN4003", field.line, "duplicate field declaration " + field.name)
+			end
+			fields[field.name] = 1
+			if row.parameters.size() > 0 && !generic_field_type_valid(state, row.source_id, field.type_name, row.parameters)
+				diagnostic(state, "TRBN4003", field.line, "invalid generic field type " + field.type_name)
+			end
+		end
+		mut methods: Hash<String, Integer> := {}
+		row.methods.each do |method|
+			line := load_integer(state.source_tokens.token_lines, method.origin)
+			if methods.key?(method.name)
+				diagnostic(state, "TRBN4003", line, "duplicate object method " + method.name)
+			end
+			methods[method.name] = 1
+			if row.interface_type && method.class_member
+				diagnostic(state, "TRBN4003", line, "interface requires instance methods")
+			end
+			if row.interface_type && method.generic_function >= 0
+				if state.type_resolution.generic_functions[method.generic_function].type_parameters.size() != row.parameters.size()
+					diagnostic(state, "TRBN4003", line, "generic interface methods are unsupported")
+				end
+			end
+		end
+		owner += 1
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	owner = 0
+	while owner < state.nominal.objects.size() && !has_diagnostic(state)
+		if state.nominal.objects[owner].parameters.size() == 0
+			instantiate_object_type(state, owner, [])
+		end
+		owner += 1
+	end
+	return validate_object_inheritance(state)
+end
+
+def validate_object_inheritance(mut state: CompilerState): Boolean
+	mut start := 0
+	while start < state.nominal.object_instances.size() && !has_diagnostic(state)
+		mut seen: Hash<String, Integer> := {}
+		mut owner := start
+		while owner >= 0 && !has_diagnostic(state)
+			instance := state.nominal.object_instances[owner]
+			if seen.key?(integer_string(owner))
+				row := state.nominal.objects[instance.definition]
+				state.module_graph.active_module[0] = row.source_id
+				diagnostic(state, "TRBN4003", row.line, "class inheritance cycle involving " + row.name)
+			else
+				seen[integer_string(owner)] = 1
+				owner = instance.superclass
+			end
+		end
+		start += 1
+	end
+	return !has_diagnostic(state)
+end

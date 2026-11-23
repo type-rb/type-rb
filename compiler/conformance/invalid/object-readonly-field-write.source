@@ -1,0 +1,7 @@
+class Box
+readonly @value: Integer := 1
+end
+def main()
+mut box := Box.new()
+box.value = 2
+end

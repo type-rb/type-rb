@@ -1,0 +1,9 @@
+# Authored attributes identify the declaration member carrying the metadata.
+
+def attribute_record_field(): Integer
+	return 1
+end
+
+def attribute_enum_variant(): Integer
+	return 2
+end

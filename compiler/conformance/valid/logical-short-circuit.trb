@@ -1,0 +1,44 @@
+def visit(mut calls: Array<Integer>, id: Integer, value: Boolean): Boolean
+	calls.push(id)
+	return value
+end
+
+def combine(a: Boolean, b: Boolean, c: Boolean): Boolean
+	return a || b && !c
+end
+
+def main()
+	puts(-1 + 2)
+	puts(-1 * 2 + 3)
+	puts(-(1 + 2))
+	puts(false || false)
+	puts(false || true)
+	puts(true || false)
+	puts(true || true)
+	puts(false && false)
+	puts(false && true)
+	puts(true && false)
+	puts(true && true)
+	puts(combine(true, false, true))
+	puts(combine(false, true, false))
+	puts((true || false) && false)
+	puts(1 + 2 == 3 && 4 > 2 || false)
+	puts(false == 1 < 2 || 3 > 2 == true)
+	mut calls: Array<Integer> := []
+	puts(visit(calls, 1, true) || visit(calls, 2, false))
+	puts(visit(calls, 3, false) && visit(calls, 4, true))
+	puts(visit(calls, 5, false) || visit(calls, 6, true) && visit(calls, 7, true))
+	puts(visit(calls, 8, true) && (visit(calls, 9, false) || visit(calls, 10, true)))
+	mut index := 0
+	while index < calls.size()
+		puts(calls[index])
+		index += 1
+	end
+	# Skipped operands remain type-checked but cannot perform these traps.
+	empty: Array<Integer> := []
+	puts(true || empty[0] == 0)
+	puts(false && 9007199254740991 + 1 == 0)
+	puts(true || 1 / 0 == 0)
+	puts(false && (false || empty[0] == 0))
+	return
+end

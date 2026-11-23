@@ -1,0 +1,4 @@
+def main()
+mut values := [true]
+values[0] = 1
+end

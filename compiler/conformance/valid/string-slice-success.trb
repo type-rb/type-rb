@@ -1,0 +1,15 @@
+def probe()
+	text := "A😀BC"
+	puts(text.slice(1...3))
+	puts(text.slice(1..2))
+	puts(text.slice(0...4))
+	puts(text.slice(4...4).size())
+	puts("".slice(0...0).size())
+	puts(text.slice(1...1).size())
+	puts(text.slice(1..1))
+
+end
+
+def main()
+	probe()
+end

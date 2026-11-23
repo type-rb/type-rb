@@ -1,0 +1,18 @@
+# Authored declaration metadata is retained for later output modes. Attribute
+# argument expressions are checked, but never executed by the Native backend.
+record DeclarationAttributeArgument
+	name: String
+	start: Integer
+	finish: Integer
+end
+
+record DeclarationAttribute
+	kind: Integer
+	owner: String
+	member: String
+	name: String
+	source_id: Integer
+	line: Integer
+	origin: Integer
+	arguments: Array<DeclarationAttributeArgument>
+end

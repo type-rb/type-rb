@@ -1,0 +1,32 @@
+def traced_bound(mut trace: Array<Integer>, value: Integer): Integer
+	trace[0] = trace[0] * 10 + value
+	return value
+end
+
+def main()
+	(-9007199254740991..9007199254740991).each do |value|
+		puts(value)
+		break
+	end
+	(-9007199254740991..9007199254740991).each.with_index do |value, index|
+		puts(value)
+		puts(index)
+		break
+	end
+	mut trace := [0]
+	bounds := traced_bound(trace, 3)..traced_bound(trace, 1)
+	bounds.each do |_|
+		puts(99)
+	end
+	bounds.each do |_|
+		puts(99)
+	end
+	puts(trace[0])
+	(9007199254740990...9007199254740991).each.with_index do |value, index|
+		puts(value)
+		puts(index)
+		next
+	end
+	(3...1).each.with_index { |value, index| puts(value + index) }
+
+end

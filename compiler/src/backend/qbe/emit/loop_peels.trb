@@ -1,0 +1,43 @@
+import { MirArrayLoop } from mir/model/module
+import { qbe_array_cache_boundary_label } from backend/qbe/emit/array_caches
+import { integer_string } from support/literals
+
+def qbe_mir_block_label(block: Integer, peeled: Boolean): String
+	if peeled
+		return "@mir_peel_" + integer_string(block)
+	end
+	return "@mir_" + integer_string(block)
+end
+
+# MIR supplies the complete schedule. A promoted value uses a first header to
+# guard initialization and bypass writeback when empty. A peeled body also
+# uses a fresh label and returns to the original header. All edges retain the
+# ordinary parallel copies and the original checked operand identities.
+def qbe_mir_edge_label(plans: Array<MirArrayLoop>, from: Integer, target: Integer, peeled: Boolean): String
+	plans.each do |plan|
+		if plan.cached_values.size() > 0
+			cache := plan.cached_values[0]
+			if from == plan.preheader && target == plan.header && !peeled
+				return qbe_mir_block_label(target, true)
+			end
+			if from == plan.header
+				if peeled && target == cache.body
+					return qbe_array_cache_boundary_label(plan.header, true)
+				end
+				if !peeled && target == cache.exit
+					return qbe_array_cache_boundary_label(plan.header, false)
+				end
+			end
+		end
+		if plan.peel_body >= 0
+			if peeled
+				if from == plan.header && target == plan.peel_body
+					return qbe_mir_block_label(target, true)
+				end
+			elsif from == plan.preheader && target == plan.header
+				return qbe_mir_block_label(target, true)
+			end
+		end
+	end
+	return qbe_mir_block_label(target, false)
+end

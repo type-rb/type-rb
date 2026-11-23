@@ -1,0 +1,49 @@
+def report(value: Integer?)
+	if value == nil
+		puts("missing")
+	else
+		puts(value)
+	end
+end
+
+def main()
+	empty: Array<Integer> := []
+	first := empty.find { |item| item > 0 }
+	position := empty.find_index { |item| item > 0 }
+	report(first)
+	report(position)
+	mut visits := 0
+	found := [0, 2, 3].find do |item|
+		visits += 1
+		item == 0
+	end
+	report(found)
+	puts(visits)
+	index := [4, 5].find_index { |item| item == 4 }
+	report(index)
+	missing := [4, 5].find { |item| item == 9 }
+	report(missing)
+	false_value := [false, true].find { |item| !item }
+	if false_value != nil
+		puts(false_value)
+	end
+	decimal := [1.5, 2.5].find { |item| item > 2.0 }
+	if decimal != nil
+		puts(decimal == 2.5)
+	end
+	values: Array<Integer?> := [nil, 2]
+	absent := values.find { |item| item == nil }
+	puts(absent == nil)
+	zero := values.find_index { |item| item == nil }
+	report(zero)
+	ranged := (-2..2).find { |item| item == 1 }
+	ranged_index := (-2...2).find_index { |item| item == 1 }
+	report(ranged)
+	report(ranged_index)
+	maximum := (9007199254740991..9007199254740991).find_index { |item| item > 0 }
+	report(maximum)
+	excluded := (9007199254740991...9007199254740991).find { |item| item > 0 }
+	report(excluded)
+	lazy := [1, 0].find { |item| 10 / item > 0 }
+	report(lazy)
+end

@@ -1,0 +1,22 @@
+def kernel(iterations: Integer): Integer
+	mut index := 0
+	mut total := 0
+	while index < iterations
+		total += (index % 97) * 3
+		total -= index % 31
+		if total > 1000000
+			total /= 2
+		end
+		index += 1
+	end
+	return total
+end
+
+def main()
+	if kernel(5000000) > 0
+		puts("recovery-scalar-integer-kernel")
+		return
+	end
+	puts("recovery-scalar-integer-kernel-failed")
+	return
+end

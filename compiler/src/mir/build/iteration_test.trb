@@ -1,0 +1,118 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("iteration value MIR") do
+	test("streams live and exhausted Array batches with lexical transfers through source-independent MIR") do
+		managed_mir_test_fixture("slice-array-mir", 8)
+	end
+	test("streams Range batches without endpoint overflow or whole-range materialization") do
+		managed_mir_test_fixture("slice-range-mir", 8)
+	end
+	test("retains once-only size effects and lazy nullable batch traversal") do
+		managed_mir_test_fixture("slice-effects-mir", 8)
+	end
+	test("roots fresh shallow batches, nullable payloads and independent captured cells") do
+		managed_mir_test_fixture("slice-managed-mir", 18)
+	end
+	test("rejects malformed batch-size guard reason, condition, result and failure edge") do
+		mut mutation := 0
+		while mutation < 6
+			mut state := logical_checked_source("def main()\n[1].each_slice(2) { |batch| puts(batch[0]) }\nend\n")
+			expect(check(state)).to_be_true()
+			mut index := 0
+			while index < state.scalar_mir.instructions.size() && state.scalar_mir.instructions[index].kind != 43
+				index += 1
+			end
+			expect(index < state.scalar_mir.instructions.size()).to_be_true()
+			instruction := state.scalar_mir.instructions[index]
+			expect(instruction.payload).to_equal(3)
+			mut cell := mutation
+			mut value := 999999
+			if mutation == 0
+				cell = 1
+			elsif mutation == 1
+				cell = 2
+				value = 0
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+	test("guards nullable collection iteration with ordinary source-independent MIR edges") do
+		managed_mir_test_fixture("safe-collection-iteration-mir", 8)
+	end
+	test("keeps transform arguments and nullable joins within the present edge") do
+		managed_mir_test_fixture("safe-collection-transforms-mir", 8)
+	end
+	test("roots optional receivers, managed values, keys and shared callbacks") do
+		managed_mir_test_fixture("safe-collection-managed-mir", 18)
+	end
+	test("preserves later lexical captures after MIR-only collection scratch bindings") do
+		managed_mir_test_fixture("collection-capture-identities-mir", 18)
+	end
+	test("executes live Array capture, rebinding, managed elements and transfers without source") do
+		cases := ["collection-search", "collection-search-managed", "array-predicates", "array-predicates-managed", "array-transforms", "array-transforms-live", "array-transforms-managed", "array-iteration-live", "array-iteration-control", "array-iteration-managed", "iteration-brace-blocks"]
+		cases.each do |name|
+			managed_mir_test_fixture(name, 1)
+		end
+	end
+
+	test("streams captured Range bounds, carriers and extrema through verified blocks") do
+		cases := ["range-values", "range-extrema", "range-managed", "range-carriers", "range-effects", "range-streaming", "range-precedence"]
+		cases.each do |name|
+			managed_mir_test_fixture(name, 1)
+		end
+	end
+
+	test("infers empty Hash stores across each backedges and preserves readonly Array parameters") do
+		mut state := logical_checked_source("def visit(values: Array<Integer>): Integer\nmut table := {}\nvalues.each.with_index do |value, index|\nif index == 1\nnext\nend\ntable[value] = index\nend\nreturn table[4]\nend\ndef main()\nputs(visit([4, 5]))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects malformed Range operands, exclusivity and component types in raw MIR") do
+		mut mutation := 0
+		while mutation < 7
+			mut state := logical_checked_source("def main()\n(1..2).each { |value| puts(value) }\nend\n")
+			expect(check(state)).to_be_true()
+			mut kind := 31
+			if mutation >= 3
+				kind = 32
+			end
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != kind
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut field := 4
+			mut value := 999999
+			if mutation == 0 || mutation == 3
+				field = 2
+			elsif mutation == 1 || mutation == 4
+				field = 3
+			elsif mutation == 5
+				# The first component returns Integer; exclusivity returns Boolean.
+				value = 2
+			elsif mutation == 6
+				field = 5
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, field, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("checks invalid unreachable statements after a transfer or returning conditional") do
+		cases := ["[1].each { |_value| break; puts(1 + true) }", "(1..2).each { |_value| next; value := 1 + true }", "if true\nreturn\nelse\nreturn\nend\nputs(1 + true)"]
+		cases.each do |body|
+			mut state := logical_checked_source("def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+end

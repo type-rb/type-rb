@@ -1,0 +1,16 @@
+class Link
+	@value: String
+	@next: Link?
+	def initialize(value: String, following: Link?)
+		@value = value
+		@next = following
+	end
+end
+def main()
+	first := Link.new("first", Link.new("second", nil))
+	puts(first.value)
+	item := first.next
+	if item != nil
+		puts(item.value)
+	end
+end

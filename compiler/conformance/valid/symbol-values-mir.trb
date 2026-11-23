@@ -1,0 +1,26 @@
+record Tag
+	name: String = :default
+end
+
+def identity(value: String = :default): String
+	return value
+end
+
+def same<T>(value: T): T
+	return value
+end
+
+def main()
+	puts(:ready == "ready")
+	puts(:nil)
+	puts(:true)
+	puts(:+)
+	puts(:"#{unbound}")
+	puts("normal #{:inside}")
+	puts(identity())
+	puts(Tag.new().name)
+	puts(same<String>(:generic))
+	values := {:key => :value, quoted: :"a b" }
+	puts(values[:key])
+	puts(values[:quoted])
+end

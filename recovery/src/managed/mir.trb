@@ -1,0 +1,1245 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedFieldLayout, RecoveryManagedLayout, RecoveryManagedLayoutKind, RecoveryManagedTypeDefinition, RecoveryManagedValueType, RecoveryManagedVariantLayout, compute_recovery_managed_layout, recovery_managed_field_layout, recovery_managed_type_definition, recovery_managed_value_types_equal, recovery_managed_variant_field_layout, recovery_managed_variant_layout, verify_recovery_managed_layouts } from managed/layout
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import trb/std/result
+
+record RecoveryManagedParameter
+	id: String
+	value_type: RecoveryManagedValueType
+	origin: SourceOrigin
+end
+
+enum RecoveryManagedResultType
+	Void
+	Value(value_type: RecoveryManagedValueType)
+end
+
+enum RecoveryManagedRuntimeStatistic
+	CollectionCount
+	AutomaticCollectionCount
+	CollectionNanoseconds
+	AllocatedBytes
+	HeapBytes
+	ReclaimedBytes
+end
+
+enum RecoveryManagedInstruction
+	Scalar(instruction: RecoveryScalarInstruction)
+	StringLiteral(result: String, value: String, origin: SourceOrigin)
+	StringConcat(result: String, left: String, right: String, origin: SourceOrigin)
+	StringEqual(result: String, left: String, right: String, origin: SourceOrigin)
+	StringSize(result: String, value: String, origin: SourceOrigin)
+	StringIndex(result: String, value: String, index: String, origin: SourceOrigin)
+	WriteString(value: String, newline: Boolean, origin: SourceOrigin)
+	HashConstruct(result: String, type_id: String, keys: Array<String>, values: Array<String>, origin: SourceOrigin)
+	HashGet(result: String, type_id: String, hash: String, key: String, origin: SourceOrigin)
+	HashContains(result: String, type_id: String, hash: String, key: String, origin: SourceOrigin)
+	HashSet(type_id: String, hash: String, key: String, value: String, origin: SourceOrigin)
+	ArrayConstruct(result: String, type_id: String, arguments: Array<String>, origin: SourceOrigin)
+	ArraySize(result: String, type_id: String, array: String, origin: SourceOrigin)
+	ArrayGet(result: String, type_id: String, array: String, index: String, origin: SourceOrigin)
+	ArraySet(type_id: String, array: String, index: String, value: String, origin: SourceOrigin)
+	ArrayPush(type_id: String, array: String, value: String, origin: SourceOrigin)
+	ClosureConstruct(
+		result: String,
+		type_id: String,
+		function_id: String,
+		captures: Array<String>,
+		origin: SourceOrigin,
+	)
+	ClosureCall(
+		result: String?,
+		type_id: String,
+		closure: String,
+		arguments: Array<String>,
+		origin: SourceOrigin,
+	)
+	RuntimeCollect(origin: SourceOrigin)
+	RuntimeStatistic(result: String, statistic: RecoveryManagedRuntimeStatistic, origin: SourceOrigin)
+	RecordConstruct(
+		result: String,
+		type_id: String,
+		arguments: Array<String>,
+		origin: SourceOrigin,
+	)
+	RecordProject(
+		result: String,
+		type_id: String,
+		record: String,
+			field: String,
+			origin: SourceOrigin,
+		)
+		VariantConstruct(
+			result: String,
+			type_id: String,
+			variant: String,
+			arguments: Array<String>,
+			origin: SourceOrigin,
+		)
+		VariantTest(
+			result: String,
+			type_id: String,
+			value: String,
+			variant: String,
+			origin: SourceOrigin,
+		)
+		VariantProject(
+			result: String,
+			type_id: String,
+			value: String,
+			variant: String,
+			field: String,
+			origin: SourceOrigin,
+		)
+		Call(result: String?, function_id: String, arguments: Array<String>, origin: SourceOrigin)
+	end
+
+	enum RecoveryManagedTerminator
+		Jump(target: String, arguments: Array<String>, origin: SourceOrigin)
+		Branch(
+			condition: String,
+			when_true: String,
+			true_arguments: Array<String>,
+			when_false: String,
+			false_arguments: Array<String>,
+			origin: SourceOrigin,
+		)
+		Return(value: String?, origin: SourceOrigin)
+	end
+
+	record RecoveryManagedBlock
+		id: String
+		parameters: Array<RecoveryManagedParameter>
+		origin: SourceOrigin
+		instructions: Array<RecoveryManagedInstruction>
+		terminator: RecoveryManagedTerminator
+	end
+
+	record RecoveryManagedFunction
+		id: String
+		name: String
+		parameters: Array<RecoveryManagedParameter>
+		result_type: RecoveryManagedResultType
+		entry: String
+		origin: SourceOrigin
+		blocks: Array<RecoveryManagedBlock>
+		captures: Array<RecoveryManagedParameter> = []
+	end
+
+	record RecoveryManagedModule
+		id: String
+		entry_function: String
+		sources: Array<NativeSource>
+		types: Array<RecoveryManagedTypeDefinition>
+		functions: Array<RecoveryManagedFunction>
+	end
+
+	record RecoveryManagedDefinition
+		id: String
+		value_type: RecoveryManagedValueType
+	end
+
+	def recovery_managed_result_types_equal(left: RecoveryManagedResultType, right: RecoveryManagedResultType): Boolean
+		case left
+		when RecoveryManagedResultType::Void
+			case right
+			when RecoveryManagedResultType::Void
+				return true
+			when RecoveryManagedResultType::Value(_right_type)
+				return false
+			end
+		when RecoveryManagedResultType::Value(left_type)
+			case right
+			when RecoveryManagedResultType::Void
+				return false
+			when RecoveryManagedResultType::Value(right_type)
+				return recovery_managed_value_types_equal(left_type, right_type)
+			end
+		end
+	end
+
+	def verify_recovery_managed_mir(native_module: RecoveryManagedModule): Result<Boolean, Diagnostic>
+		if native_module.sources.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/sources", "Managed recovery MIR must declare at least one source")
+			)
+		end
+		if native_module.functions.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/functions", "Managed recovery MIR must contain at least one function")
+			)
+		end
+		try verify_recovery_managed_layouts(native_module.types)
+		mut source_ids: Array<String> := []
+		mut index := 0
+		while index < native_module.sources.size()
+			source := native_module.sources[index]
+			if source_ids.include?(source.id)
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", "/sources/" + index.to_s() + "/id", "Managed recovery MIR source identifier is duplicated")
+				)
+			end
+			source_ids.push(source.id)
+			index += 1
+		end
+		mut function_ids: Hash<String, Boolean> := {}
+		index = 0
+		while index < native_module.functions.size()
+			function := native_module.functions[index]
+			path := "/functions/" + index.to_s()
+			if function.id.empty?() || function_ids.key?(function.id)
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/id", "Managed recovery MIR function identifier is empty or duplicated")
+				)
+			end
+			function_ids[function.id] = true
+			try _recovery_managed_verify_origin(function.origin, source_ids, path + "/origin")
+			index += 1
+		end
+		entry := recovery_managed_function(native_module.functions, native_module.entry_function)
+		if entry == nil
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/entryFunction", "Managed recovery MIR entry function does not exist")
+			)
+		end
+		if !entry.parameters.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/entryFunction", "Managed recovery MIR entry function must take no arguments")
+			)
+		end
+		if !entry.captures.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/entryFunction", "Managed recovery MIR entry function must not capture values")
+			)
+		end
+		case entry.result_type
+		when RecoveryManagedResultType::Void
+		when RecoveryManagedResultType::Value(_value_type)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/entryFunction", "Managed recovery MIR entry function must return Void")
+			)
+		end
+		index = 0
+		while index < native_module.functions.size()
+			try _recovery_managed_verify_function(
+				native_module,
+				native_module.functions[index],
+				source_ids,
+				"/functions/" + index.to_s(),
+			)
+			index += 1
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_function(
+			native_module: RecoveryManagedModule,
+			function: RecoveryManagedFunction,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		if function.blocks.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/blocks", "Managed recovery MIR function has no blocks")
+			)
+		end
+		mut definitions: Hash<String, RecoveryManagedValueType> := {}
+		mut index := 0
+		while index < function.captures.size()
+			capture := function.captures[index]
+			capture_path := path + "/captures/" + index.to_s()
+			try _recovery_managed_verify_origin(capture.origin, source_ids, capture_path + "/origin")
+			try _recovery_managed_verify_value_type(native_module, capture.value_type, capture_path + "/type")
+			try _recovery_managed_define(definitions, capture.id, capture.value_type, capture_path + "/id")
+			index += 1
+		end
+		index = 0
+		while index < function.parameters.size()
+			parameter := function.parameters[index]
+			parameter_path := path + "/parameters/" + index.to_s()
+			try _recovery_managed_verify_origin(parameter.origin, source_ids, parameter_path + "/origin")
+			try _recovery_managed_verify_value_type(native_module, parameter.value_type, parameter_path + "/type")
+			try _recovery_managed_define(definitions, parameter.id, parameter.value_type, parameter_path + "/id")
+			index += 1
+		end
+		mut block_ids: Hash<String, Boolean> := {}
+		mut entry_found := false
+		index = 0
+		while index < function.blocks.size()
+			block := function.blocks[index]
+			block_path := path + "/blocks/" + index.to_s()
+			if block.id.empty?() || block_ids.key?(block.id)
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", block_path + "/id", "Managed recovery MIR block identifier is empty or duplicated")
+				)
+			end
+			block_ids[block.id] = true
+			if block.id == function.entry
+				entry_found = true
+				if !block.parameters.empty?()
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", block_path + "/parameters", "entry block must not have parameters")
+					)
+				end
+			end
+			try _recovery_managed_verify_origin(block.origin, source_ids, block_path + "/origin")
+			mut parameter_index := 0
+			while parameter_index < block.parameters.size()
+				parameter := block.parameters[parameter_index]
+				parameter_path := block_path + "/parameters/" + parameter_index.to_s()
+				try _recovery_managed_verify_origin(parameter.origin, source_ids, parameter_path + "/origin")
+				try _recovery_managed_verify_value_type(native_module, parameter.value_type, parameter_path + "/type")
+				try _recovery_managed_define(definitions, parameter.id, parameter.value_type, parameter_path + "/id")
+				parameter_index += 1
+			end
+			mut instruction_index := 0
+			while instruction_index < block.instructions.size()
+				instruction_path := block_path + "/instructions/" + instruction_index.to_s()
+				definition := try _recovery_managed_instruction_definition(native_module, block.instructions[instruction_index], instruction_path)
+				if definition != nil
+					try _recovery_managed_define(definitions, definition.id, definition.value_type, instruction_path + "/result")
+				end
+				instruction_index += 1
+			end
+			index += 1
+		end
+		if !entry_found
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/entry", "Managed recovery MIR entry block does not exist")
+			)
+		end
+		index = 0
+		while index < function.blocks.size()
+			try _recovery_managed_verify_block(
+				native_module,
+				function,
+				function.blocks[index],
+				definitions,
+				source_ids,
+				path + "/blocks/" + index.to_s(),
+			)
+			index += 1
+		end
+		case function.result_type
+		when RecoveryManagedResultType::Void
+		when RecoveryManagedResultType::Value(value_type)
+			try _recovery_managed_verify_value_type(native_module, value_type, path + "/result")
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_instruction_definition(
+			native_module: RecoveryManagedModule,
+			instruction: RecoveryManagedInstruction,
+			path: String,
+		): Result<RecoveryManagedDefinition?, Diagnostic>
+		case instruction
+		when RecoveryManagedInstruction::Scalar(scalar)
+			case scalar
+			when RecoveryScalarInstruction::BooleanLiteral(result, _value, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+			when RecoveryScalarInstruction::IntegerLiteral(result, _value, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+			when RecoveryScalarInstruction::FloatLiteral(result, _value, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Float))
+			when RecoveryScalarInstruction::IntegerBinary(result, _operator, _left, _right, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+			when RecoveryScalarInstruction::FloatBinary(result, _operator, _left, _right, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Float))
+			when RecoveryScalarInstruction::IntegerCompare(result, _operator, _left, _right, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+			when RecoveryScalarInstruction::FloatCompare(result, _operator, _left, _right, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+			when RecoveryScalarInstruction::BooleanNot(result, _value, _origin)
+				return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+			when RecoveryScalarInstruction::Call(_result, _function_id, _arguments, _origin)
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path, "Scalar recovery call must be normalized to a Managed recovery call")
+				)
+			when RecoveryScalarInstruction::WriteStatic(_value, _origin)
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+			end
+		when RecoveryManagedInstruction::StringLiteral(result, _value, _origin)
+			try _recovery_managed_require_string_type(native_module, path)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate("String"))
+		when RecoveryManagedInstruction::StringConcat(result, _left, _right, _origin)
+			try _recovery_managed_require_string_type(native_module, path)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate("String"))
+		when RecoveryManagedInstruction::StringEqual(result, _left, _right, _origin)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+		when RecoveryManagedInstruction::StringSize(result, _value, _origin)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+		when RecoveryManagedInstruction::StringIndex(result, _value, _index, _origin)
+			try _recovery_managed_require_string_type(native_module, path)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate("String"))
+		when RecoveryManagedInstruction::WriteString(_value, _newline, _origin)
+			return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+		when RecoveryManagedInstruction::HashConstruct(result, type_id, _keys, _values, _origin)
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate(type_id))
+		when RecoveryManagedInstruction::HashGet(result, type_id, _hash, _key, _origin)
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+		when RecoveryManagedInstruction::HashContains(result, type_id, _hash, _key, _origin)
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+		when RecoveryManagedInstruction::HashSet(_type_id, _hash, _key, _value, _origin)
+			return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+		when RecoveryManagedInstruction::ArrayConstruct(result, type_id, _arguments, _origin)
+			try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate(type_id))
+		when RecoveryManagedInstruction::ArraySize(result, type_id, _array, _origin)
+			try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+		when RecoveryManagedInstruction::ArrayGet(result, type_id, _array, _index, _origin)
+			element_type := try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, element_type)
+		when RecoveryManagedInstruction::ArraySet(_type_id, _array, _index, _value, _origin)
+			return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+		when RecoveryManagedInstruction::ArrayPush(_type_id, _array, _value, _origin)
+			return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+		when RecoveryManagedInstruction::ClosureConstruct(result, type_id, _function_id, _captures, _origin)
+			try _recovery_managed_function_type(native_module, type_id, path + "/type")
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate(type_id))
+		when RecoveryManagedInstruction::ClosureCall(result, type_id, _closure, _arguments, _origin)
+			definition := try _recovery_managed_function_type(native_module, type_id, path + "/type")
+			case definition
+			when RecoveryManagedTypeDefinition::Function(_id, _parameters, result_type)
+				if result_type == nil
+					if result != nil
+						return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+							boundary_diagnostic("TRBN0004", path + "/result", "Void closure call must not define a result")
+						)
+					end
+					return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+				end
+				if result == nil
+					return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/result", "non-Void closure call must define a result")
+					)
+				end
+				return _recovery_managed_some_definition(result, result_type)
+			else
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/type", "closure call requires a function type")
+				)
+			end
+		when RecoveryManagedInstruction::RuntimeCollect(_origin)
+			return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+		when RecoveryManagedInstruction::RuntimeStatistic(result, _statistic, _origin)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Integer))
+		when RecoveryManagedInstruction::RecordConstruct(result, type_id, _arguments, _origin)
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			if layout.kind != RecoveryManagedLayoutKind::Record
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/type", "record construction requires a record type")
+				)
+			end
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate(type_id))
+		when RecoveryManagedInstruction::RecordProject(result, type_id, _record, field, _origin)
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			field_layout := recovery_managed_field_layout(layout, field)
+			if layout.kind != RecoveryManagedLayoutKind::Record || field_layout == nil
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/field", "record projection references an unknown field")
+				)
+			end
+			return _recovery_managed_some_definition(result, field_layout.value_type)
+		when RecoveryManagedInstruction::VariantConstruct(result, type_id, variant, _arguments, _origin)
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			if layout.kind != RecoveryManagedLayoutKind::Tagged || recovery_managed_variant_layout(layout, variant) == nil
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant construction references an unknown variant")
+				)
+			end
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Aggregate(type_id))
+		when RecoveryManagedInstruction::VariantTest(result, _type_id, _value, _variant, _origin)
+			return _recovery_managed_some_definition(result, RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+		when RecoveryManagedInstruction::VariantProject(result, type_id, _value, variant, field, _origin)
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			variant_layout := recovery_managed_variant_layout(layout, variant)
+			if layout.kind != RecoveryManagedLayoutKind::Tagged
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant projection requires a tagged type")
+				)
+			end
+			if variant_layout == nil
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant projection references an unknown variant")
+				)
+			end
+			field_layout := recovery_managed_variant_field_layout(variant_layout, field)
+			if field_layout == nil
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/field", "variant projection references an unknown field")
+				)
+			end
+			return _recovery_managed_some_definition(result, field_layout.value_type)
+		when RecoveryManagedInstruction::Call(result, function_id, _arguments, _origin)
+			callee := recovery_managed_function(native_module.functions, function_id)
+			if callee == nil
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/function", "call references an unknown function")
+				)
+			end
+			case callee.result_type
+			when RecoveryManagedResultType::Void
+				if result != nil
+					return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/result", "Void call must not define a result")
+					)
+				end
+				return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(nil)
+			when RecoveryManagedResultType::Value(value_type)
+				if result == nil
+					return Result<RecoveryManagedDefinition?, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/result", "non-Void call must define a result")
+					)
+				end
+				return _recovery_managed_some_definition(result, value_type)
+			end
+		end
+	end
+
+	def _recovery_managed_verify_block(
+			native_module: RecoveryManagedModule,
+			function: RecoveryManagedFunction,
+			block: RecoveryManagedBlock,
+			definitions: Hash<String, RecoveryManagedValueType>,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		mut available: Hash<String, RecoveryManagedValueType> := {}
+		mut index := 0
+		while index < function.captures.size()
+			capture := function.captures[index]
+			available[capture.id] = capture.value_type
+			index += 1
+		end
+		index = 0
+		while index < function.parameters.size()
+			parameter := function.parameters[index]
+			available[parameter.id] = parameter.value_type
+			index += 1
+		end
+		index = 0
+		while index < block.parameters.size()
+			parameter := block.parameters[index]
+			available[parameter.id] = parameter.value_type
+			index += 1
+		end
+		index = 0
+		while index < block.instructions.size()
+			instruction := block.instructions[index]
+			instruction_path := path + "/instructions/" + index.to_s()
+			try _recovery_managed_verify_instruction(native_module, instruction, available, source_ids, instruction_path)
+			definition := try _recovery_managed_instruction_definition(native_module, instruction, instruction_path)
+			if definition != nil
+				available[definition.id] = definitions.fetch(definition.id)
+			end
+			index += 1
+		end
+		try _recovery_managed_verify_terminator(native_module, function, block.terminator, available, source_ids, path + "/terminator")
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_instruction(
+			native_module: RecoveryManagedModule,
+			instruction: RecoveryManagedInstruction,
+			available: Hash<String, RecoveryManagedValueType>,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		case instruction
+		when RecoveryManagedInstruction::Scalar(scalar)
+			return _recovery_managed_verify_scalar(scalar, available, source_ids, path)
+		when RecoveryManagedInstruction::StringLiteral(_result, _value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string_type(native_module, path)
+		when RecoveryManagedInstruction::StringConcat(_result, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string(available, left, path + "/left")
+			try _recovery_managed_require_string(available, right, path + "/right")
+		when RecoveryManagedInstruction::StringEqual(_result, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string(available, left, path + "/left")
+			try _recovery_managed_require_string(available, right, path + "/right")
+		when RecoveryManagedInstruction::StringSize(_result, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string(available, value, path + "/value")
+		when RecoveryManagedInstruction::StringIndex(_result, value, index, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string(available, value, path + "/value")
+			try _recovery_managed_require_scalar(available, index, ScalarType::Integer, path + "/index")
+		when RecoveryManagedInstruction::WriteString(value, _newline, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_string(available, value, path + "/value")
+		when RecoveryManagedInstruction::HashConstruct(_result, type_id, keys, values, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			if keys.size() != values.size()
+				return Result<Boolean, Diagnostic>::Err(boundary_diagnostic("TRBN0004", path, "Hash key/value counts differ"))
+			end
+			mut index := 0
+			while index < keys.size()
+				try _recovery_managed_require_string(available, keys[index], path + "/keys/" + index.to_s())
+				try _recovery_managed_require_scalar(available, values[index], ScalarType::Integer, path + "/values/" + index.to_s())
+				index += 1
+			end
+		when RecoveryManagedInstruction::HashGet(_result, type_id, hash, key, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, hash, RecoveryManagedValueType::Aggregate(type_id), path + "/hash")
+			try _recovery_managed_require_string(available, key, path + "/key")
+		when RecoveryManagedInstruction::HashContains(_result, type_id, hash, key, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, hash, RecoveryManagedValueType::Aggregate(type_id), path + "/hash")
+			try _recovery_managed_require_string(available, key, path + "/key")
+		when RecoveryManagedInstruction::HashSet(type_id, hash, key, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try recovery_hash_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, hash, RecoveryManagedValueType::Aggregate(type_id), path + "/hash")
+			try _recovery_managed_require_string(available, key, path + "/key")
+			try _recovery_managed_require_scalar(available, value, ScalarType::Integer, path + "/value")
+		when RecoveryManagedInstruction::ArrayConstruct(_result, type_id, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			element_type := try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			mut argument_index := 0
+			while argument_index < arguments.size()
+				try _recovery_managed_require(available, arguments[argument_index], element_type, path + "/arguments/" + argument_index.to_s())
+				argument_index += 1
+			end
+		when RecoveryManagedInstruction::ArraySize(_result, type_id, array, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, array, RecoveryManagedValueType::Aggregate(type_id), path + "/array")
+		when RecoveryManagedInstruction::ArrayGet(_result, type_id, array, index, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, array, RecoveryManagedValueType::Aggregate(type_id), path + "/array")
+			try _recovery_managed_require_scalar(available, index, ScalarType::Integer, path + "/index")
+		when RecoveryManagedInstruction::ArraySet(type_id, array, index, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			element_type := try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, array, RecoveryManagedValueType::Aggregate(type_id), path + "/array")
+			try _recovery_managed_require_scalar(available, index, ScalarType::Integer, path + "/index")
+			try _recovery_managed_require(available, value, element_type, path + "/value")
+		when RecoveryManagedInstruction::ArrayPush(type_id, array, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			element_type := try _recovery_managed_array_element_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, array, RecoveryManagedValueType::Aggregate(type_id), path + "/array")
+			try _recovery_managed_require(available, value, element_type, path + "/value")
+		when RecoveryManagedInstruction::ClosureConstruct(_result, type_id, function_id, captures, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			function_type := try _recovery_managed_function_type(native_module, type_id, path + "/type")
+			callee := recovery_managed_function(native_module.functions, function_id)
+			if callee == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/function", "closure construction references an unknown function")
+				)
+			end
+			try _recovery_managed_verify_closure_signature(function_type, callee, path + "/type")
+			if captures.size() != callee.captures.size()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/captures", "closure capture count does not match the function")
+				)
+			end
+			mut capture_index := 0
+			while capture_index < captures.size()
+				try _recovery_managed_require(
+					available,
+					captures[capture_index],
+					callee.captures[capture_index].value_type,
+					path + "/captures/" + capture_index.to_s(),
+				)
+				capture_index += 1
+			end
+		when RecoveryManagedInstruction::ClosureCall(_result, type_id, closure, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			function_type := try _recovery_managed_function_type(native_module, type_id, path + "/type")
+			try _recovery_managed_require(available, closure, RecoveryManagedValueType::Aggregate(type_id), path + "/closure")
+			case function_type
+			when RecoveryManagedTypeDefinition::Function(_id, parameter_types, _result_type)
+				if arguments.size() != parameter_types.size()
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/arguments", "closure call argument count does not match its type")
+					)
+				end
+				mut argument_index := 0
+				while argument_index < arguments.size()
+					try _recovery_managed_require(
+						available,
+						arguments[argument_index],
+						parameter_types[argument_index],
+						path + "/arguments/" + argument_index.to_s(),
+					)
+					argument_index += 1
+				end
+			else
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/type", "closure call requires a function type")
+				)
+			end
+		when RecoveryManagedInstruction::RuntimeCollect(origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+		when RecoveryManagedInstruction::RuntimeStatistic(_result, _statistic, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+		when RecoveryManagedInstruction::RecordConstruct(_result, type_id, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			try _recovery_managed_require_arguments(available, arguments, layout.fields, path + "/arguments")
+		when RecoveryManagedInstruction::RecordProject(_result, type_id, record, field, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require(available, record, RecoveryManagedValueType::Aggregate(type_id), path + "/record")
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			if layout.kind != RecoveryManagedLayoutKind::Record || recovery_managed_field_layout(layout, field) == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/field", "record projection references an unknown field")
+				)
+			end
+		when RecoveryManagedInstruction::VariantConstruct(_result, type_id, variant, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			variant_layout := recovery_managed_variant_layout(layout, variant)
+			if layout.kind != RecoveryManagedLayoutKind::Tagged || variant_layout == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant construction references an unknown variant")
+				)
+			end
+			try _recovery_managed_require_arguments(available, arguments, variant_layout.fields, path + "/arguments")
+		when RecoveryManagedInstruction::VariantTest(_result, type_id, value, variant, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require(available, value, RecoveryManagedValueType::Aggregate(type_id), path + "/value")
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			if layout.kind != RecoveryManagedLayoutKind::Tagged || recovery_managed_variant_layout(layout, variant) == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant test references an unknown variant")
+				)
+			end
+		when RecoveryManagedInstruction::VariantProject(_result, type_id, value, variant, field, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require(available, value, RecoveryManagedValueType::Aggregate(type_id), path + "/value")
+			layout := try compute_recovery_managed_layout(native_module.types, type_id)
+			variant_layout := recovery_managed_variant_layout(layout, variant)
+			if layout.kind != RecoveryManagedLayoutKind::Tagged
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant projection requires a tagged type")
+				)
+			end
+			if variant_layout == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/variant", "variant projection references an unknown variant")
+				)
+			end
+			if recovery_managed_variant_field_layout(variant_layout, field) == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/field", "variant projection references an unknown field")
+				)
+			end
+		when RecoveryManagedInstruction::Call(_result, function_id, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			callee := recovery_managed_function(native_module.functions, function_id)
+			if callee == nil
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/function", "call references an unknown function")
+				)
+			end
+			if !callee.captures.empty?()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/function", "capturing function requires a closure call")
+				)
+			end
+			if arguments.size() != callee.parameters.size()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/arguments", "call argument count does not match the callee")
+				)
+			end
+			mut index := 0
+			while index < arguments.size()
+				try _recovery_managed_require(available, arguments[index], callee.parameters[index].value_type, path + "/arguments/" + index.to_s())
+				index += 1
+			end
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_scalar(
+			instruction: RecoveryScalarInstruction,
+			available: Hash<String, RecoveryManagedValueType>,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		case instruction
+		when RecoveryScalarInstruction::BooleanLiteral(_result, _value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+		when RecoveryScalarInstruction::IntegerLiteral(_result, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			if value < -9007199254740991 || value > 9007199254740991
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/value", "Integer literal is outside the portable range")
+				)
+			end
+		when RecoveryScalarInstruction::FloatLiteral(_result, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			if !value.finite?()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/value", "Float literal must be finite")
+				)
+			end
+		when RecoveryScalarInstruction::IntegerBinary(_result, _operator, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, left, ScalarType::Integer, path + "/left")
+			try _recovery_managed_require_scalar(available, right, ScalarType::Integer, path + "/right")
+		when RecoveryScalarInstruction::FloatBinary(_result, _operator, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, left, ScalarType::Float, path + "/left")
+			try _recovery_managed_require_scalar(available, right, ScalarType::Float, path + "/right")
+		when RecoveryScalarInstruction::IntegerCompare(_result, _operator, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, left, ScalarType::Integer, path + "/left")
+			try _recovery_managed_require_scalar(available, right, ScalarType::Integer, path + "/right")
+		when RecoveryScalarInstruction::FloatCompare(_result, _operator, left, right, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, left, ScalarType::Float, path + "/left")
+			try _recovery_managed_require_scalar(available, right, ScalarType::Float, path + "/right")
+		when RecoveryScalarInstruction::BooleanNot(_result, value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, value, ScalarType::Boolean, path + "/value")
+		when RecoveryScalarInstruction::Call(_result, _function_id, _arguments, _origin)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Scalar recovery call must be normalized to a Managed recovery call")
+			)
+		when RecoveryScalarInstruction::WriteStatic(_value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_terminator(
+			native_module: RecoveryManagedModule,
+			function: RecoveryManagedFunction,
+			terminator: RecoveryManagedTerminator,
+			available: Hash<String, RecoveryManagedValueType>,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		case terminator
+		when RecoveryManagedTerminator::Jump(target, arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_verify_target(function, target, arguments, available, path)
+		when RecoveryManagedTerminator::Branch(condition, when_true, true_arguments, when_false, false_arguments, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			try _recovery_managed_require_scalar(available, condition, ScalarType::Boolean, path + "/condition")
+			try _recovery_managed_verify_target(function, when_true, true_arguments, available, path + "/true")
+			try _recovery_managed_verify_target(function, when_false, false_arguments, available, path + "/false")
+		when RecoveryManagedTerminator::Return(value, origin)
+			try _recovery_managed_verify_origin(origin, source_ids, path + "/origin")
+			case function.result_type
+			when RecoveryManagedResultType::Void
+				if value != nil
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/value", "Void function must not return a value")
+					)
+				end
+			when RecoveryManagedResultType::Value(value_type)
+				if value == nil
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path + "/value", "non-Void function must return a value")
+					)
+				end
+				try _recovery_managed_require(available, value, value_type, path + "/value")
+			end
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_target(
+			function: RecoveryManagedFunction,
+			target: String,
+			arguments: Array<String>,
+			available: Hash<String, RecoveryManagedValueType>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		block := recovery_managed_block(function.blocks, target)
+		if block == nil
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/target", "terminator references an unknown block")
+			)
+		end
+		if arguments.size() != block.parameters.size()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/arguments", "block argument count does not match the target")
+			)
+		end
+		mut index := 0
+		while index < arguments.size()
+			try _recovery_managed_require(available, arguments[index], block.parameters[index].value_type, path + "/arguments/" + index.to_s())
+			index += 1
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_require_arguments(
+			available: Hash<String, RecoveryManagedValueType>,
+			arguments: Array<String>,
+			fields: Array<RecoveryManagedFieldLayout>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		if arguments.size() != fields.size()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "aggregate argument count does not match its layout")
+			)
+		end
+		mut index := 0
+		while index < arguments.size()
+			try _recovery_managed_require(available, arguments[index], fields[index].value_type, path + "/" + index.to_s())
+			index += 1
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_require_string_type(
+			native_module: RecoveryManagedModule,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		layout := try compute_recovery_managed_layout(native_module.types, "String")
+		if layout.kind != RecoveryManagedLayoutKind::String
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/type", "String operation requires the canonical String type")
+			)
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_verify_value_type(
+			native_module: RecoveryManagedModule,
+			value_type: RecoveryManagedValueType,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		case value_type
+		when RecoveryManagedValueType::Scalar(scalar)
+			if scalar == ScalarType::Void
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path, "Void is not a storable Managed recovery value")
+				)
+			end
+		when RecoveryManagedValueType::Aggregate(type_id)
+			try compute_recovery_managed_layout(native_module.types, type_id)
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_require_string(
+			available: Hash<String, RecoveryManagedValueType>,
+			id: String,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		return _recovery_managed_require(available, id, RecoveryManagedValueType::Aggregate("String"), path)
+	end
+
+	def _recovery_managed_array_element_type(
+			native_module: RecoveryManagedModule,
+			type_id: String,
+			path: String,
+		): Result<RecoveryManagedValueType, Diagnostic>
+		definition := recovery_managed_type_definition(native_module.types, type_id)
+		if definition == nil
+			return Result<RecoveryManagedValueType, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Array operation requires an Array type")
+			)
+		end
+		case definition
+		when RecoveryManagedTypeDefinition::Array(_id, element_type)
+			return Result<RecoveryManagedValueType, Diagnostic>::Ok(element_type)
+		else
+			return Result<RecoveryManagedValueType, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Array operation requires an Array type")
+			)
+		end
+	end
+
+	def _recovery_managed_function_type(
+			native_module: RecoveryManagedModule,
+			type_id: String,
+			path: String,
+		): Result<RecoveryManagedTypeDefinition, Diagnostic>
+		definition := recovery_managed_type_definition(native_module.types, type_id)
+		if definition == nil
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "closure operation requires a function type")
+			)
+		end
+		case definition
+		when RecoveryManagedTypeDefinition::Function(_id, _parameter_types, _result_type)
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(definition)
+		else
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "closure operation requires a function type")
+			)
+		end
+	end
+
+	def _recovery_managed_verify_closure_signature(
+			definition: RecoveryManagedTypeDefinition,
+			function: RecoveryManagedFunction,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		case definition
+		when RecoveryManagedTypeDefinition::Function(_id, parameter_types, result_type)
+			if parameter_types.size() != function.parameters.size()
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path, "closure function parameters do not match its type")
+				)
+			end
+			mut index := 0
+			while index < parameter_types.size()
+				if !recovery_managed_value_types_equal(parameter_types[index], function.parameters[index].value_type)
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path, "closure function parameters do not match its type")
+					)
+				end
+				index += 1
+			end
+			if result_type == nil
+				case function.result_type
+				when RecoveryManagedResultType::Void
+					return Result<Boolean, Diagnostic>::Ok(true)
+				when RecoveryManagedResultType::Value(_value_type)
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path, "closure function result does not match its type")
+					)
+				end
+			end
+			case function.result_type
+			when RecoveryManagedResultType::Void
+				return Result<Boolean, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path, "closure function result does not match its type")
+				)
+			when RecoveryManagedResultType::Value(value_type)
+				if !recovery_managed_value_types_equal(result_type, value_type)
+					return Result<Boolean, Diagnostic>::Err(
+						boundary_diagnostic("TRBN0004", path, "closure function result does not match its type")
+					)
+				end
+				return Result<Boolean, Diagnostic>::Ok(true)
+			end
+		else
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "closure operation requires a function type")
+			)
+		end
+	end
+
+	def _recovery_managed_define(
+			mut definitions: Hash<String, RecoveryManagedValueType>,
+			id: String,
+			value_type: RecoveryManagedValueType,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		if id.empty?() || definitions.key?(id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "value identifier is empty or defined more than once")
+			)
+		end
+		definitions[id] = value_type
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_require(
+			available: Hash<String, RecoveryManagedValueType>,
+			id: String,
+			expected: RecoveryManagedValueType,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		actual := try _recovery_managed_require_any(available, id, path)
+		if !recovery_managed_value_types_equal(actual, expected)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "operand type does not match the operation")
+			)
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def _recovery_managed_require_scalar(
+			available: Hash<String, RecoveryManagedValueType>,
+			id: String,
+			scalar: ScalarType,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		return _recovery_managed_require(available, id, RecoveryManagedValueType::Scalar(scalar), path)
+	end
+
+	def _recovery_managed_require_any(
+			available: Hash<String, RecoveryManagedValueType>,
+			id: String,
+			path: String,
+		): Result<RecoveryManagedValueType, Diagnostic>
+		if !available.key?(id)
+			return Result<RecoveryManagedValueType, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "operand is not available in this block")
+			)
+		end
+		return Result<RecoveryManagedValueType, Diagnostic>::Ok(available.fetch(id))
+	end
+
+	def _recovery_managed_aggregate_layout(
+			native_module: RecoveryManagedModule,
+			value_type: RecoveryManagedValueType,
+			path: String,
+		): Result<RecoveryManagedLayout, Diagnostic>
+		case value_type
+		when RecoveryManagedValueType::Scalar(_scalar)
+			return Result<RecoveryManagedLayout, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "operation requires an aggregate value")
+			)
+		when RecoveryManagedValueType::Aggregate(type_id)
+			return compute_recovery_managed_layout(native_module.types, type_id)
+		end
+	end
+
+	def _recovery_managed_some_definition(
+			id: String,
+			value_type: RecoveryManagedValueType,
+		): Result<RecoveryManagedDefinition?, Diagnostic>
+		return Result<RecoveryManagedDefinition?, Diagnostic>::Ok(RecoveryManagedDefinition.new(id: id, value_type: value_type))
+	end
+
+	def recovery_managed_instruction_result(instruction: RecoveryManagedInstruction): String?
+		case instruction
+		when RecoveryManagedInstruction::Scalar(scalar)
+			case scalar
+			when RecoveryScalarInstruction::BooleanLiteral(result, _value, _origin)
+				return result
+			when RecoveryScalarInstruction::IntegerLiteral(result, _value, _origin)
+				return result
+			when RecoveryScalarInstruction::FloatLiteral(result, _value, _origin)
+				return result
+			when RecoveryScalarInstruction::IntegerBinary(result, _operator, _left, _right, _origin)
+				return result
+			when RecoveryScalarInstruction::FloatBinary(result, _operator, _left, _right, _origin)
+				return result
+			when RecoveryScalarInstruction::IntegerCompare(result, _operator, _left, _right, _origin)
+				return result
+			when RecoveryScalarInstruction::FloatCompare(result, _operator, _left, _right, _origin)
+				return result
+			when RecoveryScalarInstruction::BooleanNot(result, _value, _origin)
+				return result
+			when RecoveryScalarInstruction::Call(result, _function_id, _arguments, _origin)
+				return result
+			when RecoveryScalarInstruction::WriteStatic(_value, _origin)
+				return nil
+			end
+		when RecoveryManagedInstruction::StringLiteral(result, _value, _origin)
+			return result
+		when RecoveryManagedInstruction::StringConcat(result, _left, _right, _origin)
+			return result
+		when RecoveryManagedInstruction::StringEqual(result, _left, _right, _origin)
+			return result
+		when RecoveryManagedInstruction::StringSize(result, _value, _origin)
+			return result
+		when RecoveryManagedInstruction::StringIndex(result, _value, _index, _origin)
+			return result
+		when RecoveryManagedInstruction::WriteString(_value, _newline, _origin)
+			return nil
+		when RecoveryManagedInstruction::HashConstruct(result, _type_id, _keys, _values, _origin)
+			return result
+		when RecoveryManagedInstruction::HashGet(result, _type_id, _hash, _key, _origin)
+			return result
+		when RecoveryManagedInstruction::HashContains(result, _type_id, _hash, _key, _origin)
+			return result
+		when RecoveryManagedInstruction::HashSet(_type_id, _hash, _key, _value, _origin)
+			return nil
+		when RecoveryManagedInstruction::ArrayConstruct(result, _type_id, _arguments, _origin)
+			return result
+		when RecoveryManagedInstruction::ArraySize(result, _type_id, _array, _origin)
+			return result
+		when RecoveryManagedInstruction::ArrayGet(result, _type_id, _array, _index, _origin)
+			return result
+		when RecoveryManagedInstruction::ArraySet(_type_id, _array, _index, _value, _origin)
+			return nil
+		when RecoveryManagedInstruction::ArrayPush(_type_id, _array, _value, _origin)
+			return nil
+		when RecoveryManagedInstruction::ClosureConstruct(result, _type_id, _function_id, _captures, _origin)
+			return result
+		when RecoveryManagedInstruction::ClosureCall(result, _type_id, _closure, _arguments, _origin)
+			return result
+		when RecoveryManagedInstruction::RuntimeCollect(_origin)
+			return nil
+		when RecoveryManagedInstruction::RuntimeStatistic(result, _statistic, _origin)
+			return result
+		when RecoveryManagedInstruction::RecordConstruct(result, _type_id, _arguments, _origin)
+			return result
+		when RecoveryManagedInstruction::RecordProject(result, _type_id, _record, _field, _origin)
+			return result
+		when RecoveryManagedInstruction::VariantConstruct(result, _type_id, _variant, _arguments, _origin)
+			return result
+		when RecoveryManagedInstruction::VariantTest(result, _type_id, _value, _variant, _origin)
+			return result
+		when RecoveryManagedInstruction::VariantProject(result, _type_id, _value, _variant, _field, _origin)
+			return result
+		when RecoveryManagedInstruction::Call(result, _function_id, _arguments, _origin)
+			return result
+		end
+	end
+
+	def recovery_managed_function(functions: Array<RecoveryManagedFunction>, id: String): RecoveryManagedFunction?
+		mut index := 0
+		while index < functions.size()
+			if functions[index].id == id
+				return functions[index]
+			end
+			index += 1
+		end
+		return nil
+	end
+
+	def recovery_managed_block(blocks: Array<RecoveryManagedBlock>, id: String): RecoveryManagedBlock?
+		mut index := 0
+		while index < blocks.size()
+			if blocks[index].id == id
+				return blocks[index]
+			end
+			index += 1
+		end
+		return nil
+	end
+
+	def _recovery_managed_verify_origin(
+			origin: SourceOrigin,
+			source_ids: Array<String>,
+			path: String,
+		): Result<Boolean, Diagnostic>
+		if !source_ids.include?(origin.source_id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/source", "origin references an unknown source")
+			)
+		end
+		if origin.start_line < 1 || origin.start_column < 1 || origin.end_line < 1 || origin.end_column < 1
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "origin coordinates must be positive")
+			)
+		end
+		if origin.end_line < origin.start_line || (origin.end_line == origin.start_line && origin.end_column < origin.start_column)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "origin end precedes its start")
+			)
+		end
+		return Result<Boolean, Diagnostic>::Ok(true)
+	end
+
+	def recovery_hash_type(native_module: RecoveryManagedModule, type_id: String, path: String): Result<Boolean, Diagnostic>
+		definition := recovery_managed_type_definition(native_module.types, type_id)
+		if definition != nil
+			case definition
+			when RecoveryManagedTypeDefinition::Hash(_id)
+				if type_id == "Hash<String, Integer>"
+					return Result<Boolean, Diagnostic>::Ok(true)
+				end
+			else
+			end
+		end
+		return Result<Boolean, Diagnostic>::Err(boundary_diagnostic("TRBN0004", path, "expected Hash<String, Integer> type"))
+	end

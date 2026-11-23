@@ -1,0 +1,46 @@
+record Row
+	text: String
+end
+def preserve_record()
+	mut rows := [Row.new(text: "original")]
+	rows.each do |row|
+		saved := fn(): String
+			return row.text
+		end
+		rows[0] = Row.new(text: "replacement")
+		mut index := 0
+		while index < 100000
+			garbage := Row.new(text: "temporary")
+			if garbage.text != "temporary"
+				puts("wrong")
+			end
+			index += 1
+		end
+		puts(saved())
+		break
+	end
+end
+
+def main()
+	preserve_record()
+	callback := fn(): String
+		return "callback"
+	end
+	callbacks := [callback]
+	callbacks.each do |read|
+		puts(read())
+	end
+	[["nested"]].each do |row|
+		puts(row[0])
+	end
+	[true, false].each do |flag|
+		if flag
+			puts("true")
+		else
+			puts("false")
+		end
+	end
+	["string"].each do |text|
+		puts(text)
+	end
+end

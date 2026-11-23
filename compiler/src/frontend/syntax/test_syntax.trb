@@ -1,0 +1,197 @@
+import { TestDeclaration } from state/source_state
+import { integer_string } from support/literals
+import { parse_statement_block_with_test_guard } from frontend/syntax/body_syntax
+import { advance, expect, finish_statement, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { import_kind_module, import_kind_named } from state/import_kinds
+import { token_kind_string } from state/token_kinds
+import { CompilerState, diagnostic_at, has_diagnostic, terminal_token } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+
+# Imports are validated after parsing the entire test file, so their source
+# order does not affect discovery. Resolution still checks declaration identity.
+def test_import(state: CompilerState, name: String): Integer
+	mut index := state.module_graph.import_count[0] - 1
+	while index >= 0
+		if load_integer(state.module_graph.import_modules, index) == state.module_graph.active_module[0]
+			path := load_string(state.module_graph.import_paths, index)
+			if path == "trb/std/test" || path == "trb/std/test/index"
+				if load_integer(state.module_graph.import_kinds, index) == import_kind_named() && load_string(state.module_graph.import_declarations, index) == name && load_string(state.module_graph.import_symbols, index) == name
+					return index
+				end
+			end
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def test_namespace_import(state: CompilerState): Boolean
+	mut index := 0
+	while index < state.module_graph.import_count[0]
+		if load_integer(state.module_graph.import_modules, index) == state.module_graph.active_module[0]
+			path := load_string(state.module_graph.import_paths, index)
+			if (path == "trb/std/test" || path == "trb/std/test/index") && load_integer(state.module_graph.import_kinds, index) == import_kind_module()
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def test_declaration_name(state: CompilerState, origin: Integer): String
+	if !token_is(state, origin + 1, "(")
+		return ""
+	end
+	if token_is(state, origin, "describe")
+		return "describe"
+	end
+	if token_is(state, origin, "test")
+		return "test"
+	end
+	return ""
+end
+
+def validate_test_imports(mut state: CompilerState, start: Integer): Boolean
+	mut index := start
+	while index < state.parsed.tests.size()
+		item := state.parsed.tests[index]
+		mut name := "describe"
+		if item.function_id >= 0
+			name = "test"
+		end
+		binding := test_import(state, name)
+		if binding < 0
+			return test_syntax_error(state, item.origin, name + "() requires a named import from trb/std/test")
+		end
+		store_integer(state.module_graph.import_used, binding, 1)
+		index += 1
+	end
+	return true
+end
+
+def test_syntax_error(mut state: CompilerState, origin: Integer, message: String): Boolean
+	diagnostic_at(state, "TRBN4003", origin, message)
+	return false
+end
+
+def test_case_function(mut state: CompilerState, origin: Integer, body: Integer, finish: Integer): Integer
+	index := state.declarations.function_count[0]
+	# The runner addresses this function by its compiler-owned identity. Its
+	# unspellable name never enters the authored declaration lookup table.
+	name := "$test:" + integer_string(index)
+	module_index := state.module_graph.active_module[0]
+	store_string(state.nominal.function_receivers, index, "")
+	store_string(state.declarations.function_names, index, name)
+	store_integer(state.declarations.function_modules, index, module_index)
+	store_integer(state.declarations.function_parameter_starts, index, state.declarations.parameter_count[0])
+	store_integer(state.declarations.function_parameter_counts, index, 0)
+	store_string(state.declarations.function_result_types, index, "Void")
+	store_integer(state.declarations.function_body_starts, index, body)
+	store_integer(state.declarations.function_body_ends, index, finish)
+	store_integer(state.declarations.function_lines, index, load_integer(state.source_tokens.token_lines, origin))
+	state.declarations.function_count[0] += 1
+	return index
+end
+
+def parse_test_declaration(mut state: CompilerState, mut position: Array<Integer>, parent: Integer, prefix: String): Boolean
+	origin := position[0]
+	kind := test_declaration_name(state, origin)
+	if kind == ""
+		return test_syntax_error(state, origin, "describe() may contain only nested describe() or test() declarations")
+	end
+	if kind == "test" && parent < 0
+		return test_syntax_error(state, origin, "test() must be nested inside describe()")
+	end
+	advance(position)
+	if !expect(state, position, "(")
+		return false
+	end
+	skip_newlines(state, position)
+	label_origin := position[0]
+	if token_is(state, label_origin, ")") || token_is(state, label_origin + 1, ":")
+		return test_syntax_error(state, origin, kind + "() requires exactly one positional String literal")
+	end
+	if load_integer(state.source_tokens.token_kinds, label_origin) != token_kind_string() || sparse_integer_at(state.source_tokens.token_fused_literals, label_origin) != 0
+		return test_syntax_error(state, label_origin, kind + "() name must be a String literal")
+	end
+	name := load_string(state.source_tokens.token_texts, label_origin)
+	if name == ""
+		return test_syntax_error(state, label_origin, kind + "() name cannot be empty")
+	end
+	advance(position)
+	skip_newlines(state, position)
+	if token_is(state, position[0], ",")
+		advance(position)
+		skip_newlines(state, position)
+	end
+	if !token_is(state, position[0], ")")
+		return test_syntax_error(state, origin, kind + "() requires exactly one positional String literal")
+	end
+	advance(position)
+	brace := token_is(state, position[0], "{")
+	if !brace && !token_is(state, position[0], "do")
+		return test_syntax_error(state, origin, kind + "() requires a parameterless block")
+	end
+	advance(position)
+	if token_is(state, position[0], "||")
+		advance(position)
+	elsif token_is(state, position[0], "|")
+		advance(position)
+		if !token_is(state, position[0], "|")
+			return test_syntax_error(state, origin, kind + "() requires a parameterless block")
+		end
+		advance(position)
+	end
+	if !brace && !finish_statement(state, position)
+		return false
+	end
+	skip_newlines(state, position)
+	mut terminator := "end"
+	if brace
+		terminator = "}"
+	end
+	mut full_name := name
+	if prefix != ""
+		full_name = prefix + " / " + name
+	end
+	mut previous := 0
+	while previous < state.parsed.tests.size()
+		item := state.parsed.tests[previous]
+		if item.source_id == state.module_graph.active_module[0] && item.full_name == full_name
+			return test_syntax_error(state, label_origin, "test name \"" + full_name + "\" is already declared")
+		end
+		previous += 1
+	end
+	item_index := state.parsed.tests.size()
+	state.parsed.tests.push(TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, closing_token: -1, parent: parent, name: name, full_name: full_name, function_id: -1))
+	mut function_id := -1
+	if kind == "describe"
+		mut children := 0
+		while !token_is(state, position[0], terminator) && !terminal_token(state, position[0])
+			if !parse_test_declaration(state, position, item_index, full_name)
+				return false
+			end
+			children += 1
+			skip_newlines(state, position)
+		end
+		if children == 0
+			return test_syntax_error(state, origin, "describe() must contain at least one test() or nested describe()")
+		end
+	else
+		body := position[0]
+		if !parse_statement_block_with_test_guard(state, position, true)
+			return false
+		end
+		function_id = test_case_function(state, origin, body, position[0])
+	end
+	closing_token := position[0]
+	if !expect(state, position, terminator)
+		return false
+	end
+	state.parsed.tests[item_index] = TestDeclaration.new(source_id: state.module_graph.active_module[0], origin: origin, closing_token: closing_token, parent: parent, name: name, full_name: full_name, function_id: function_id)
+	if !finish_statement(state, position)
+		return false
+	end
+	return !has_diagnostic(state)
+end

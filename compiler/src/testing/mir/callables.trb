@@ -1,0 +1,99 @@
+import { checked_mir_value } from frontend/checking/body/values
+import { checked_function_locals, finalize_checked_module } from frontend/checking/program/functions
+import { check, check_function } from compiler
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { lex } from frontend/syntax/lexer
+import { mir_declare_signatures } from mir/lowering/calls
+import { mir_checked_closure } from mir/lowering/callables
+import { scalar_mir_commit } from mir/build/functions
+import { mir_control_return } from mir/build/control
+import { mir_declare_types } from mir/model/types
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, compiler_new_with_mode } from state/state
+import { load_integer, load_string } from support/storage
+import { expect } from trb/std/test
+
+def callable_mir_state(): CompilerState
+	source := "alias Callback = (String) -> String\nrecord Holder\ncallback: Callback\nend\ndef transform(value: String): String\nreturn value + \"!\"\nend\ndef keep(callback: Callback): Callback\nreturn callback\nend\ndef report(callback: Callback)\nvalues := [callback]\ntable: Hash<String, Callback> := {\"saved\" => callback}\nitem := Holder.new(callback: callback)\nputs(values[0](\"array\" + \" value\"))\nputs(table[\"saved\"](\"hash\" + \" value\"))\nputs(item.callback(\"field\" + \" value\"))\nend\ndef numeric(value: Float, other: Integer): Float\nreturn value + other\nend\ndef report_numeric(callback: (Float, Integer) -> Float)\nputs(callback(2.5, 3).to_i())\nend\ndef nothing()\nputs(\"void\")\nend\ndef report_void(callback: () -> Void)\ncallback()\nend\ndef main()\ndispatch := report\nidentity := keep\ndispatch(identity(transform))\nreport_numeric(numeric)\nreport_void(nothing)\nend\n"
+	mut state := compiler_new(source.size() * 4 + 64)
+	valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+	if !valid
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(valid).to_be_true()
+	return state
+end
+
+def callable_capture_state(): CompilerState
+	source := "alias Callback = (Integer) -> Integer\nrecord Envelope\ncallback: Callback\nend\ndef step(mut cell: Array<Integer>, label: String, scale: Float, enabled: Boolean, delta: Integer): Integer\nputs(label)\nif enabled\ncell[0] += delta + scale.to_i()\nend\nreturn cell[0]\nend\ndef make(mut cell: Array<Integer>, label: String, scale: Float, enabled: Boolean): Callback\nend\ndef dispatch(inner: Callback, value: Integer): Integer\nreturn inner(value)\nend\ndef wrap(inner: Callback): Callback\nend\ndef cycle_step(callbacks: Array<Callback>, delta: Integer): Integer\nreturn callbacks.size() + delta\nend\ndef make_cycle(callbacks: Array<Callback>): Callback\nend\ndef invoke(first: Callback, second: Callback)\nvalues := [first, second]\ntable: Hash<String, Callback> := {\"saved\" => values[1]}\nholder := Envelope.new(callback: table[\"saved\"])\nputs(values[0](1))\nputs(holder.callback(2))\nputs(values[0](3))\nend\ndef main()\nmut cell := [10]\nfirst := make(cell, \"one\" + \"!\", 1.5, true)\nsecond := make(cell, \"two\" + \"!\", 2.5, true)\ninvoke(wrap(first), second)\nother := make([100], \"other\" + \"!\", 3.5, true)\nputs(other(4))\nmut callbacks: Array<Callback> := []\ncycle := make_cycle(callbacks)\ncallbacks.push(cycle)\nputs(cycle(8))\nend\n"
+	mut state := compiler_new(source.size() * 4 + 64)
+	valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state)
+	expect(valid).to_be_true()
+	if !valid
+		puts(load_string(state.diagnostics.messages, 0))
+		return state
+	end
+	mir_declare_types(state)
+	mir_declare_signatures(state)
+	factory := find_function_in_module(state, state.module_graph.entry_module[0], "make")
+	wrapper := find_function_in_module(state, state.module_graph.entry_module[0], "wrap")
+	cyclic := find_function_in_module(state, state.module_graph.entry_module[0], "make_cycle")
+	mut function := 0
+	while function < state.declarations.function_count[0]
+		if function == factory || function == wrapper || function == cyclic
+			mut locals := checked_function_locals(state, function)
+			origin := load_integer(state.declarations.function_body_starts, function)
+			mut target := find_function_in_module(state, state.module_graph.entry_module[0], "step")
+			mut captures := [0, 1, 2, 3]
+			if function == wrapper
+				target = find_function_in_module(state, state.module_graph.entry_module[0], "dispatch")
+				captures = [0]
+			elsif function == cyclic
+				target = find_function_in_module(state, state.module_graph.entry_module[0], "cycle_step")
+				captures = [0]
+			end
+			value := mir_checked_closure(state, locals, target, captures, origin)
+			mir_control_return(state, locals, checked_mir_value(value))
+			expect(scalar_mir_commit(state, function, locals)).to_equal("")
+		else
+			if !check_function(state, function)
+				puts(load_string(state.diagnostics.messages, 0))
+				expect(false).to_be_true()
+				return state
+			end
+		end
+		function += 1
+	end
+	finished := finalize_checked_module(state)
+	if !finished
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(finished).to_be_true()
+	return state
+end
+
+def callable_forced_collection(text: String): String
+	mut forced := ""
+	mut ordinary := false
+	text.split("\n").each do |line|
+		if line.start_with?("function ")
+			ordinary = line.include?("$trbnf")
+		end
+		if line == "}"
+			ordinary = false
+		end
+		if ordinary && (line.include?("call %") || line.include?("call $trbnf") || line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+			forced += "\tcall $trbn_gc_collect(w 0)\n"
+		end
+		forced += line + "\n"
+	end
+	return forced
+end
+
+def lambda_analysis_state(source: String): CompilerState
+	mut state := compiler_new_with_mode(source.size() * 4 + 64, true)
+	expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state)).to_be_true()
+	check(state)
+	return state
+end

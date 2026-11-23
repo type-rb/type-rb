@@ -1,0 +1,13 @@
+record Entry
+id: Integer
+end
+record Other
+id: Integer
+end
+def change(mut values: Array<Entry>)
+values.push(Entry.new(id: 2))
+end
+def main()
+mut others := [Other.new(id: 1)]
+change(others)
+end

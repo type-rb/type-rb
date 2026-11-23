@@ -1,0 +1,53 @@
+import { token_kind_interpolation, token_kind_number, token_kind_string } from state/token_kinds
+import { literal_integer_type, literal_string_type } from frontend/types/literal_types
+import { expand_quoted_token } from frontend/syntax/literal_syntax
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Only authored literal expressions narrow. Constant folding must not turn an
+# arbitrary scalar expression into a permitted singleton initializer.
+def source_literal_type(state: CompilerState, start: Integer, finish: Integer): String
+	mut first := start
+	mut last := finish
+	while last - first >= 3 && load_string(state.source_tokens.token_texts, first) == "(" && load_string(state.source_tokens.token_texts, last - 1) == ")"
+		first += 1
+		last -= 1
+	end
+	if last - first == 1
+		kind := load_integer(state.source_tokens.token_kinds, first)
+		if kind == token_kind_number()
+			return literal_integer_type(load_string(state.source_tokens.token_texts, first))
+		elsif kind == token_kind_string() && sparse_integer_at(state.source_tokens.token_fused_literals, first) == 0
+			return literal_string_type(load_string(state.source_tokens.token_texts, first))
+		end
+	elsif last - first == 2 && load_string(state.source_tokens.token_texts, first) == "-" && load_integer(state.source_tokens.token_kinds, first + 1) == token_kind_number()
+		return literal_integer_type("-" + load_string(state.source_tokens.token_texts, first + 1))
+	end
+	return ""
+end
+
+def parse_literal_type(mut state: CompilerState, mut position: Array<Integer>): String
+	origin := position[0]
+	kind := load_integer(state.source_tokens.token_kinds, origin)
+	if kind != token_kind_number() && kind != token_kind_string() && kind != token_kind_interpolation() && load_string(state.source_tokens.token_texts, origin) != "-"
+		return ""
+	end
+	if !expand_quoted_token(state, origin, false)
+		return ""
+	end
+	position[0] += 1
+	if load_string(state.source_tokens.token_texts, origin) == "-"
+		position[0] += 1
+	end
+	result := source_literal_type(state, origin, position[0])
+	if result == ""
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "expected an Integer or String literal type")
+		return ""
+	end
+	following := load_string(state.source_tokens.token_texts, position[0])
+	if following == "?" || following == "[" || following == "<"
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "literal types do not support type modifiers")
+		return ""
+	end
+	return result
+end

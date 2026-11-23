@@ -1,0 +1,7 @@
+record Entry
+	id: Integer
+end
+def main()
+	values: Array<Array<Array<Array<Entry>>>> := [[[[Entry.new(id: 7)]]]]
+	puts(values[0][0][0][0].id)
+end

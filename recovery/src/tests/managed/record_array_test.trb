@@ -1,0 +1,187 @@
+import { ComparisonOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedField, RecoveryManagedTypeDefinition, RecoveryManagedValueType } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { build_recovery_managed_executable } from managed/toolchain
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_record_array_module(extra: Array<RecoveryManagedInstruction>): RecoveryManagedModule
+	origin := SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+	mut instructions := [
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("zero", 0, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("last", -1, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("first_id", 42, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("second_id", 9, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("yes", true, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("no", false, origin)),
+		RecoveryManagedInstruction::Call("messages", "records#make_messages", [], origin),
+		RecoveryManagedInstruction::Call("first", "records#make", ["yes", "first_id"], origin),
+		RecoveryManagedInstruction::Call("second", "records#make", ["no", "second_id"], origin),
+		RecoveryManagedInstruction::ArrayConstruct("groups", "Array<Array<Row>>", ["first", "second"], origin),
+		RecoveryManagedInstruction::RuntimeCollect(origin),
+		RecoveryManagedInstruction::ArrayGet("selected", "Array<Array<Row>>", "groups", "zero", origin),
+		RecoveryManagedInstruction::ArrayGet("retained", "Array<Row>", "selected", "zero", origin),
+		RecoveryManagedInstruction::ArrayGet("replacement", "Array<Row>", "second", "zero", origin),
+		RecoveryManagedInstruction::ArrayPush("Array<Row>", "selected", "replacement", origin),
+		RecoveryManagedInstruction::ArraySet("Array<Row>", "selected", "last", "retained", origin),
+		RecoveryManagedInstruction::RuntimeCollect(origin),
+		RecoveryManagedInstruction::ArrayGet("actual", "Array<Row>", "first", "last", origin),
+		RecoveryManagedInstruction::RecordProject("flag", "records#Row", "actual", "valid", origin),
+		RecoveryManagedInstruction::RecordProject("row_id", "records#Row", "actual", "id", origin),
+		RecoveryManagedInstruction::RecordConstruct("other", "records#Other", ["first_id", "yes"], origin),
+		RecoveryManagedInstruction::ArrayGet("message", "Array<Message>", "messages", "zero", origin),
+		RecoveryManagedInstruction::RecordProject("text", "records#Message", "message", "text", origin),
+		RecoveryManagedInstruction::WriteString("text", true, origin),
+		RecoveryManagedInstruction::RecordProject("numbers", "records#Message", "message", "numbers", origin),
+		RecoveryManagedInstruction::ArrayGet("number", "Array<Integer>", "numbers", "zero", origin),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("expected", 42, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerCompare("row_ok", ComparisonOperator::Equal, "row_id", "expected", origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerCompare("number_ok", ComparisonOperator::Equal, "number", "expected", origin)),
+	]
+	mut index := 0
+	while index < extra.size()
+		instructions.push(extra[index])
+		index += 1
+	end
+	return RecoveryManagedModule.new(
+		id: "record-array", entry_function: "records#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: [
+			RecoveryManagedTypeDefinition::String("String"),
+			RecoveryManagedTypeDefinition::Array("Array<Integer>", RecoveryManagedValueType::Scalar(ScalarType::Integer)),
+			RecoveryManagedTypeDefinition::Record("records#Message", [
+					RecoveryManagedField.new(name: "text", value_type: RecoveryManagedValueType::Aggregate("String")),
+					RecoveryManagedField.new(name: "numbers", value_type: RecoveryManagedValueType::Aggregate("Array<Integer>")),
+				]),
+			RecoveryManagedTypeDefinition::Array("Array<Message>", RecoveryManagedValueType::Aggregate("records#Message")),
+			RecoveryManagedTypeDefinition::Record("records#Row", [RecoveryManagedField.new(name: "id", value_type: RecoveryManagedValueType::Scalar(ScalarType::Integer)), RecoveryManagedField.new(name: "valid", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean))]),
+			RecoveryManagedTypeDefinition::Record("records#Other", [RecoveryManagedField.new(name: "id", value_type: RecoveryManagedValueType::Scalar(ScalarType::Integer)), RecoveryManagedField.new(name: "valid", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean))]),
+			RecoveryManagedTypeDefinition::Array("Array<Row>", RecoveryManagedValueType::Aggregate("records#Row")),
+			RecoveryManagedTypeDefinition::Array("Array<Other>", RecoveryManagedValueType::Aggregate("records#Other")),
+			RecoveryManagedTypeDefinition::Array("Array<Array<Row>>", RecoveryManagedValueType::Aggregate("Array<Row>")),
+		],
+		functions: [
+			RecoveryManagedFunction.new(
+				id: "records#make_messages", name: "make_messages", parameters: [],
+				result_type: RecoveryManagedResultType::Value(RecoveryManagedValueType::Aggregate("Array<Message>")), entry: "entry", origin: origin,
+				blocks: [RecoveryManagedBlock.new(
+						id: "entry", parameters: [], origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::StringLiteral("prefix", "managed", origin),
+							RecoveryManagedInstruction::StringLiteral("suffix", "-record", origin),
+							RecoveryManagedInstruction::StringConcat("text", "prefix", "suffix", origin),
+							RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("number", 42, origin)),
+							RecoveryManagedInstruction::ArrayConstruct("numbers", "Array<Integer>", ["number"], origin),
+							RecoveryManagedInstruction::RecordConstruct("message", "records#Message", ["text", "numbers"], origin),
+							RecoveryManagedInstruction::ArrayConstruct("messages", "Array<Message>", ["message"], origin),
+						],
+						terminator: RecoveryManagedTerminator::Return("messages", origin),
+					)],
+			),
+			RecoveryManagedFunction.new(
+				id: "records#make", name: "make",
+				parameters: [RecoveryManagedParameter.new(id: "valid", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean), origin: origin), RecoveryManagedParameter.new(id: "id", value_type: RecoveryManagedValueType::Scalar(ScalarType::Integer), origin: origin)],
+				result_type: RecoveryManagedResultType::Value(RecoveryManagedValueType::Aggregate("Array<Row>")), entry: "entry", origin: origin,
+				blocks: [RecoveryManagedBlock.new(
+						id: "entry", parameters: [], origin: origin,
+						instructions: [
+							RecoveryManagedInstruction::RecordConstruct("row", "records#Row", ["id", "valid"], origin),
+							RecoveryManagedInstruction::ArrayConstruct("rows", "Array<Row>", ["row"], origin),
+							RecoveryManagedInstruction::RuntimeCollect(origin),
+						],
+						terminator: RecoveryManagedTerminator::Return("rows", origin),
+					)],
+			),
+			RecoveryManagedFunction.new(
+				id: "records#main", name: "main", parameters: [],
+				result_type: RecoveryManagedResultType::Void, entry: "entry", origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry", parameters: [], origin: origin, instructions: instructions,
+						terminator: RecoveryManagedTerminator::Branch("flag", "check_row", ["row_ok", "number_ok"], "failure", [], origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "check_row", parameters: [RecoveryManagedParameter.new(id: "row_matches", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean), origin: origin), RecoveryManagedParameter.new(id: "number_matches", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean), origin: origin)], origin: origin, instructions: [],
+						terminator: RecoveryManagedTerminator::Branch("row_matches", "check_number", ["number_matches"], "failure", [], origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "check_number", parameters: [RecoveryManagedParameter.new(id: "matches", value_type: RecoveryManagedValueType::Scalar(ScalarType::Boolean), origin: origin)], origin: origin, instructions: [],
+						terminator: RecoveryManagedTerminator::Branch("matches", "success", [], "failure", [], origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "success", parameters: [], origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("record-array-ok\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "failure", parameters: [], origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("record-array-fail\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+				],
+			),
+		],
+	)
+end
+
+describe("Managed recovery record Array recovery") do
+	test("rejects scalar and nominal element mismatches, wrong indices and receivers") do
+		origin := SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+		invalid := [
+			RecoveryManagedInstruction::ArrayConstruct("wrong", "Array<Row>", ["zero"], origin),
+			RecoveryManagedInstruction::ArrayConstruct("wrong", "Array<Row>", ["other"], origin),
+			RecoveryManagedInstruction::ArrayPush("Array<Row>", "first", "other", origin),
+			RecoveryManagedInstruction::ArraySet("Array<Row>", "first", "zero", "other", origin),
+			RecoveryManagedInstruction::ArrayGet("wrong", "Array<Row>", "first", "yes", origin),
+			RecoveryManagedInstruction::ArrayGet("wrong", "Array<Other>", "first", "zero", origin),
+			RecoveryManagedInstruction::ArrayPush("Array<Other>", "first", "other", origin),
+		]
+		mut index := 0
+		while index < invalid.size()
+			case verify_recovery_managed_mir(_recovery_managed_record_array_module([invalid[index]]))
+			when Result::Ok(_value)
+				expect(false).to_be_true()
+			when Result::Err(diagnostic)
+				expect(diagnostic.code).to_equal("TRBN0004")
+				expect(diagnostic.message).to_equal("operand type does not match the operation")
+			end
+			index += 1
+		end
+	end
+
+	test("retains returned scalar records through calls, nested aliases, mutation and collection") do
+		native_module := _recovery_managed_record_array_module([])
+		case verify_recovery_managed_mir(native_module)
+		when Result::Ok(_value)
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			workspace := "/tmp/type-rb-native-recovery-managed-record-array"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_managed_executable(native_module, qbe, "/usr/bin/cc", workspace, workspace + "/sample")
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("managed-record\nrecord-array-ok\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + " " + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

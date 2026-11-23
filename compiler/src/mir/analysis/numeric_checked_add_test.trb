@@ -1,0 +1,107 @@
+import { emit_qbe } from compiler
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState, has_diagnostic } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { compiler_phase_failure } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# Array reads keep both arguments dynamic at the expanded scalar call site.
+def checked_add_program(left: String, right: String, expression: String): String
+	return "def sum(left: Integer, right: Integer): Integer\nreturn " + expression + "\nend\ndef main()\n_marker := {1 => 1}\nlefts := [" + left + "]\nrights := [" + right + "]\nmut index := 0\nwhile index < 1\nputs(sum(lefts[index], rights[index]))\nindex += 1\nend\nend\n"
+end
+
+def checked_add_emitted(mut state: CompilerState): String
+	mut expanded := false
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		if plan.call_instruction >= 0
+			plan.operations.each do |operation|
+				if operation.mode == 4
+					expanded = true
+				end
+			end
+		end
+	end
+	expect(expanded).to_be_true()
+	text := control_test_output(emit_qbe(state))
+	expect(compiler_phase_failure(state, "emit", !has_diagnostic(state))).to_equal("")
+	expect(text.include?("call $trbn_integer_add(")).to_be_false()
+	return text
+end
+
+describe("Expanded checked scalar addition") do
+	test("preserves both signed endpoints mixed signs and exact cancellation") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			path := root + "/compiler/conformance/valid/inlined-integer-add-boundaries"
+			state := array_loop_mir_check(array_mir_test_read(path + ".trb"))
+			text := checked_add_emitted(state)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, text)
+				when Result::Ok(actual)
+					expect(actual).to_equal(array_mir_test_read(path + ".out"))
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("rejects exact overflows at both ends and large same-sign sums") do
+		pairs := [["9007199254740991", "1"], ["-9007199254740991", "-1"], ["9007199254740991", "9007199254740991"], ["-9007199254740991", "-9007199254740991"]]
+		pairs.each do |pair|
+			state := array_loop_mir_check(checked_add_program(pair[0], pair[1], "left + right"))
+			text := checked_add_emitted(state)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, text, 2)
+				when Result::Err(actual)
+					expect(actual).to_equal("panic: Integer is outside the portable range\n")
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("retains the first arithmetic failure inside an expanded leaf") do
+		mut mode := 0
+		while mode < 2
+			mut expression := "(left + right) / 0"
+			mut expected := "panic: Integer is outside the portable range\n"
+			if mode == 1
+				expression = "(left / 0) + right"
+				expected = "panic: division by zero\n"
+			end
+			state := array_loop_mir_check(checked_add_program("9007199254740991", "1", expression))
+			text := checked_add_emitted(state)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, text, 2)
+				when Result::Err(actual)
+					expect(actual).to_equal(expected)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				end
+			end
+			mode += 1
+		end
+	end
+
+	test("rederives identical checked emission after source erasure") do
+		mut state := array_loop_mir_check(checked_add_program("-9007199254740991", "9007199254740991", "left + right"))
+		before := checked_add_emitted(state)
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(checked_add_emitted(state)).to_equal(before)
+	end
+end

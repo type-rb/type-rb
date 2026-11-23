@@ -1,0 +1,131 @@
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { verify_mir } from mir/verify/module
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR builtin values") do
+	test("preserves portable parsing safe bounds structured errors and managed results after source erasure") do
+		sources := [
+			"import trb/std/result\ndef input(): String\nreturn \"not \" + \"a number\"\nend\ndef main()\ncase input().try_to_f()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.input)\nputs(error.message)\nend\nvalues := [1].try_slice(2..3) catch |error|\nputs(error.size)\n[]\nend\nputs(values.size())\nend\n",
+			"import trb/std/result\nimport { NumberParseErrorKind } from trb/std/errors\ndef main()\n[\"0\", \"-0\", \"+001\", \"9007199254740991\", \"-9007199254740991\", \"9007199254740992\", \"-9007199254740992\", \"999999999999999999999999x\", \"\", \"+\", \"-\", \" 1\", \"1 \", \"1_0\", \"1.0\", \"0x10\", \"1e1\", \"1x\", \"-0009\"].each do |input|\ncase input.try_to_i()\nwhen Result::Ok(value)\nputs(\"ok\")\nputs(value)\nwhen Result::Err(error)\ncase error.kind\nwhen NumberParseErrorKind::InvalidFormat\nputs(\"invalid\")\nwhen NumberParseErrorKind::OutOfRange\nputs(\"range\")\nend\nputs(error.input.size())\nputs(error.message)\nend\nend\nend\n",
+			"import trb/std/result\nimport { NumberParseErrorKind } from trb/std/errors\ndef main()\n[\"0\", \"-0\", \"+001\", \".5\", \"1.\", \"-.5\", \"+1.e+2\", \"5e-324\", \"2.2250738585072014e-308\", \"1e-4000\", \"-1e-4000\", \"1.7976931348623157e308\", \"1.7976931348623159e308\", \"1e309\", \"1e999999x\", \"\", \"+\", \"-\", \".\", \"+.\", \"1e\", \"1e+\", \"1e-\", \"1e1.0\", \" 1\", \"1 \", \"1_0\", \"0x10\", \"NaN\", \"Inf\", \"Infinity\", \"1x\", \".e2\", \"1.2.3\"].each do |input|\ncase input.try_to_f()\nwhen Result::Ok(value)\nputs(\"ok\")\nputs(value)\nif value == 0.0\nputs(1.0 / value)\nend\nwhen Result::Err(error)\ncase error.kind\nwhen NumberParseErrorKind::InvalidFormat\nputs(\"invalid\")\nwhen NumberParseErrorKind::OutOfRange\nputs(\"range\")\nend\nputs(error.input.size())\nputs(error.message)\nend\nend\nend\n",
+			"import trb/std/result\ndef main()\nvalues := [\"first\" + \" value\", \"last\" + \" value\"]\n[- 2, - 1, - 3, 2, 9007199254740991].each do |index|\ncase values.try_fetch(index)\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.index)\nputs(error.size)\nputs(error.message)\nend\nend\nend\n",
+			"import trb/std/result\ndef main()\ntext := \"abcdef\"\ncase text.try_fetch(- 1)\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.message)\nend\ncase text.try_fetch(- 7)\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.index)\nputs(error.size)\nend\nend\n",
+			"import trb/std/result\ndef main()\nvalues := [\"one\", \"two\"]\n[0...2, 2...2, 2..2, - 1...1, 2...1].each do |bounds|\ncase values.try_slice(bounds)\nwhen Result::Ok(copy)\nputs(copy.size())\nwhen Result::Err(error)\nputs(error.start)\nputs(error.finish)\nputs(error.exclusive)\nputs(error.size)\nputs(error.message)\nend\nend\ncase \"abcdef\".try_slice(1..2)\nwhen Result::Ok(text)\nputs(text)\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n",
+			"import trb/std/result\ndef main()\nvalues := {\"key\": [\"kept\" + \" value\"]}\n[\"key\", \"missing\"].each do |key|\ncase values.try_fetch(key)\nwhen Result::Ok(value)\nputs(value[0])\nwhen Result::Err(error)\ncase error.key\nwhen String(text)\nputs(text)\nwhen Integer(number)\nputs(number)\nend\nputs(error.message)\nend\nend\nend\n",
+			"def change(mut values: Array<Integer>): Integer\nvalues.push(3)\nreturn - 1\nend\ndef main()\nmut values := [1, 2]\nselected := values.try_fetch(change(values)) catch |error|\nputs(error.message)\n0\nend\nputs(selected)\nend\n",
+			"import trb/std/result\nimport { IndexLookupError } from trb/std/errors\ndef first<T>(values: Array<T>): Result<T, IndexLookupError>\nreturn values.try_fetch(0)\nend\ndef forward(): Result<String, IndexLookupError>\nvalue := try first<String>([\"shared\"])\nreturn Result<String, IndexLookupError>::Ok(value + \" result\")\nend\ndef main()\ncase forward()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n",
+		]
+		outputs := [
+			"not a number\ninvalid Float\n1\n0\n",
+			"ok\n0\nok\n0\nok\n1\nok\n9007199254740991\nok\n-9007199254740991\nrange\n16\nInteger is outside the portable range\nrange\n17\nInteger is outside the portable range\ninvalid\n25\ninvalid Integer\ninvalid\n0\ninvalid Integer\ninvalid\n1\ninvalid Integer\ninvalid\n1\ninvalid Integer\ninvalid\n2\ninvalid Integer\ninvalid\n2\ninvalid Integer\ninvalid\n3\ninvalid Integer\ninvalid\n3\ninvalid Integer\ninvalid\n4\ninvalid Integer\ninvalid\n3\ninvalid Integer\ninvalid\n2\ninvalid Integer\nok\n-9\n",
+			"ok\n0.0\nInfinity\nok\n0.0\n-Infinity\nok\n1.0\nok\n0.5\nok\n1.0\nok\n-0.5\nok\n100.0\nok\n0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005\nok\n0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000022250738585072014\nok\n0.0\nInfinity\nok\n0.0\n-Infinity\nok\n179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0\nrange\n22\nFloat is outside the portable range\nrange\n5\nFloat is outside the portable range\ninvalid\n9\ninvalid Float\ninvalid\n0\ninvalid Float\ninvalid\n1\ninvalid Float\ninvalid\n1\ninvalid Float\ninvalid\n1\ninvalid Float\ninvalid\n2\ninvalid Float\ninvalid\n2\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n5\ninvalid Float\ninvalid\n2\ninvalid Float\ninvalid\n2\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n4\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n8\ninvalid Float\ninvalid\n2\ninvalid Float\ninvalid\n3\ninvalid Float\ninvalid\n5\ninvalid Float\n",
+			"first value\nlast value\n-3\n2\nArray index is out of bounds\n2\n2\nArray index is out of bounds\n9007199254740991\n2\nArray index is out of bounds\n",
+			"f\n-7\n6\n",
+			"2\n0\n2\n2\nfalse\n2\nArray slice range is out of bounds\n-1\n1\ntrue\n2\nArray slice range is out of bounds\n2\n1\ntrue\n2\nArray slice range is out of bounds\nbc\n",
+			"kept value\nmissing\nHash key is missing\n",
+			"3\n",
+			"shared result\n",
+		]
+		sources.each.with_index do |source, index|
+			mut state := compiler_new(source.size() + 1)
+			mut prepared := lex(state, source)
+			if prepared
+				prepared = parse_module(state, 0, state.module_graph.entry_module[0])
+			end
+			if prepared
+				prepared = resolve(state)
+			end
+			if !prepared
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(prepared).to_be_true()
+			valid := check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				state.callables.checked_bodies.each do |body|
+					body.builtin_result_types.used[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				state.parsed.statement_finishes.used[0] = 0
+				state.scalar_mir.functions.each do |function|
+					mut left := function.block_start
+					mut right := left + function.block_count - 1
+					while left < right
+						saved := state.scalar_mir.blocks[left]
+						state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+						state.scalar_mir.blocks[right] = saved
+						left += 1
+						right -= 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				reordered := control_test_output(emit_qbe(state))
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					reordered.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_copy(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_string_slice("))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(stdout)
+						expect(stdout).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(index)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+		end
+	end
+	test("independently rejects forged parse status and conversion types") do
+		mut state := logical_checked_source("def main()\nputs(\"1.5\".to_f())\ninteger := \"7\".try_to_i() catch |error|\nputs(error.message)\n0\nend\nputs(integer)\nfloating := \"2.5\".try_to_f() catch |error|\nputs(error.message)\n0.0\nend\nputs(floating)\nend\n")
+		expect(check(state)).to_be_true()
+		mut found := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 17 && instruction.payload >= 6
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 9)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 1)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 3, instruction.first)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = instruction
+				found += 1
+			end
+		end
+		expect(found).to_equal(4)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+end

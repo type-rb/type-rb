@@ -1,0 +1,967 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10131904020,
+    "name": "gate6n-linux-amd64-34423530952-1",
+    "size_in_bytes": 423531,
+    "digest": "sha256:456757d6c209c393fae7f2b7bdbbff33a668eb86b6e57b78a963bcd86da30316"
+  },
+  "evidence": {
+    "bootstrap/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=290336\ninput_sha256=9ad113715f9ff31f682c971743b853180229f9685cf111966a290c8c5b7c6c65\nb1_size=290336\nb1_sha256=9ad113715f9ff31f682c971743b853180229f9685cf111966a290c8c5b7c6c65\nb2_size=283392\nb2_sha256=1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19\nb3_size=283392\nb3_sha256=1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19\nb4_size=283392\nb4_sha256=1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19\nfixed_point_qbe_size=1195739\nfixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\ncompiler_size_limit=310000\n",
+    "bootstrap/measurements.csv": [],
+    "bootstrap/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 excluded=external-gate6n-controller\nb3-b4 excluded=external-gate6n-controller\n",
+    "bootstrap/process-inventory.txt": "13912 execve(\"/home/runner/work/_temp/gate6n-linux-amd64-workspace/bootstrap/b4/compiler\", [\"/home/runner/work/_temp/gate6n-l\"..., \"build\", \"/home/runner/work/type-rb-native\"..., \"--output\", \"/home/runner/work/_temp/gate6n-l\"..., \"--qbe\", \"/home/runner/work/_temp/qbe-1.3/\"..., \"--cc\", \"/usr/bin/cc\", \"--target\", \"linux-amd64-v0\"], 0x7ffdb3a99758 /* 138 vars */) = 0\n13913 execve(\"/home/runner/work/_temp/qbe-1.3/qbe\", [\"/home/runner/work/_temp/qbe-1.3/\"..., \"-t\", \"amd64_sysv\", \"-o\", \"/home/runner/work/_temp/gate6n-l\"..., \"/home/runner/work/_temp/gate6n-l\"...], 0x7ffc42c33358 /* 138 vars */) = 0\n13914 execve(\"/usr/bin/cc\", [\"/usr/bin/cc\", \"-xassembler\", \"/home/runner/work/_temp/gate6n-l\"..., \"-fuse-ld=lld\", \"-Wl,--gc-sections,--strip-all,--\"..., \"-lm\", \"-o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x7ffc42c33358 /* 138 vars */) = 0\n13915 execve(\"/home/runner/go/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/opt/hostedtoolcache/go/1.27.1/x64/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/snap/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/home/runner/.local/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/opt/pipx_bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/home/runner/.cargo/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/home/runner/.config/composer/vendor/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/usr/local/.ghcup/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/home/runner/.dotnet/tools/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/usr/local/sbin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/usr/local/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/usr/sbin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */) = -1 ENOENT (No such file or directory)\n13915 execve(\"/usr/bin/as\", [\"as\", \"--64\", \"-o\", \"/tmp/cc71mku7.o\", \"/home/runner/work/_temp/gate6n-l\"...], 0x392aee60 /* 143 vars */ <unfinished ...>\n13915 <... execve resumed>)             = 0\n13916 execve(\"/usr/libexec/gcc/x86_64-linux-gnu/13/collect2\", [\"/usr/libexec/gcc/x86_64-linux-gn\"..., \"-plugin\", \"/usr/libexec/gcc/x86_64-linux-gn\"..., \"-plugin-opt=/usr/libexec/gcc/x86\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"-m\", \"elf_x86_64\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib64/ld-linux-x86-64.so.2\", \"-pie\", \"-z\", \"now\", \"-fuse-ld=lld\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/gate6n-l\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., ...], 0x392af330 /* 145 vars */ <unfinished ...>\n13916 <... execve resumed>)             = 0\n13917 execve(\"/usr/bin/ld.lld\", [\"/usr/bin/ld.lld\", \"-plugin\", \"/usr/libexec/gcc/x86_64-linux-gn\"..., \"-plugin-opt=/usr/libexec/gcc/x86\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"-m\", \"elf_x86_64\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib64/ld-linux-x86-64.so.2\", \"-pie\", \"-z\", \"now\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/gate6n-l\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"/usr/lib/gcc/x86_64-linux-gnu/13\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., \"-L/usr/lib/gcc/x86_64-linux-gnu/\"..., \"-L/lib/x86_64-linux-gnu\", ...], 0x7fffb3137798 /* 145 vars */ <unfinished ...>\n13917 <... execve resumed>)             = 0\n",
+    "bootstrap-metadata.json": {
+      "architecture": "amd64",
+      "asset": "gate6n-candidate-linux-amd64",
+      "attestationSubjectSha256": "1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19",
+      "ccBoundary": "system-cc",
+      "mode": "0755",
+      "os": "linux",
+      "profile": "linux-amd64-v0",
+      "qbeBinarySha256": "2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9",
+      "qbeBinarySize": 679048,
+      "qbeTarget": "amd64_sysv",
+      "runnerImage": "ubuntu-24.04",
+      "sha256": "1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19",
+      "size": 283392
+    },
+    "compiler-size.txt": "platform=linux-amd64\nraw_compiler_bytes=283392\nraw_compiler_limit_bytes=310000\n",
+    "environment.txt": "verifier_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\ncandidate_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\nprofile=linux-amd64-v0\nqbe_target=amd64_sysv\nrunner_image=ubuntu-24.04\nLinux runnervmlun5p 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n0.4.6-dev\ngo version go1.27.1 linux/amd64\n/home/runner/.cache/go-build\n/home/runner/.config/go/env\nlinux\namd64\nPython 3.12.3\n{\"adjustable\": false, \"implementation\": \"clock_gettime(CLOCK_MONOTONIC)\", \"monotonic\": true, \"resolutionSeconds\": 1e-09}\ncc1_command=/usr/libexec/gcc/x86_64-linux-gnu/13/cc1\ncollect2_command=/usr/libexec/gcc/x86_64-linux-gnu/13/collect2\nassembler_command=/usr/bin/as\narchitecture_assembler_command=/usr/bin/x86_64-linux-gnu-as\nld_lld_command=/usr/bin/ld.lld\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv (default), amd64_apple, amd64_win, arm64, arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+    "identities.txt": "pre_implementation_revision=266c996668a4c3e0ad6eb833ca646b73ca7e56e1\ncandidate_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\ntype_rb_version=0.4.6-dev\nroot_qbe_sha256=62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a\nqbe_binary_sha256=2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9\ncandidate_compiler_sha256=1579ccef826b096fd4d956389caa32a21b9bbd7451a077e69bbc64c60b9bda19\nmeasurement_controller_sha256=f2382da12f117fe099b7a6cc86e064ae35fe3d9108238e169b48f32e8afc755f\napplication_build_elapsed_repetitions=8\napplication_runtime_elapsed_repetitions=32\npython_command=/usr/bin/python3\npython_command_sha256=a92f0f95e883390c7256b2e441484aac06b1002dbe1d924141a77c8d82f96223\ncandidate_fixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\nportable_entry_qbe_sha256=3deb18dcfc43842551eda05c5a6eabe9fb38d5822674fc17af3c9d3902feb722\nnative_application_sha256=bf00e810b4721a8354fadd3cec36bdf0802bdf0dcb86c39222a771a43bdddd64\ngo_application_sha256=0c13ed87cfad3ba3c05827bed62d2b54a2165024303aa5f9acbdbfecb8c77ff7\nnative_application_raw_bytes=14624\nnative_application_stripped_bytes=14616\ngo_application_raw_bytes=2876901\ngo_application_stripped_bytes=1900152\n",
+    "measurements.csv": [
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.760918433",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61399040",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.753898978",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61681664",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.750336345",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61661184",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.748405632",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61730816",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.777499407",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61513728",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.744882586",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61489152",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.748970808",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61493248",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.751890276",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61739008",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.873060942",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61607936",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.747601520",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61485056",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.760805682",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61456384",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.760346845",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61562880",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.745227409",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61374464",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.743756449",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61448192",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.743667324",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61304832",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.743322321",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61419520",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.801944790",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61485056",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.742406049",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61444096",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.741171555",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61526016",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.759220970",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61431808",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.753862333",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61509632",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.747564431",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61247488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.740001093",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61407232",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.748265593",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61534208",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.761245828",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61538304",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.752270731",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61550592",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.745357522",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61706240",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.753382473",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61390848",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.749052474",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61652992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.742988424",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61575168",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.746598210",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61472768",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.756654801",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61464576",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.744172554",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61464576",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.744428221",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61407232",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.741541546",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61476864",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.749449939",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61341696",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.025504841",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60862464",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.116532878",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "74928128",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.116143097",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "76972032",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.025623123",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60936192",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.025493194",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60764160",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.116548782",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77447168",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.115706328",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75206656",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.025707100",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60899328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.025570333",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61038592",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.115898868",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77217792",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.116571964",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75075584",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.025786972",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60891136",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.025600262",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60743680",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.115641389",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77164544",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.115539397",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "76959744",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.025775504",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60923904",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.025373264",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60997632",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.115640841",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "85544960",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.116044569",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77172736",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.025688790",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60747776",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.025611628",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60862464",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.116549767",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77099008",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.114707184",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77193216",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.025681638",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60776448",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.025325460",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60878848",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.117838972",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77021184",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.000477155",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1810432",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.000974349",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6234112",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.000973477",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6172672",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.000481156",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.000480427",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1871872",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.000956790",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6217728",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.000952413",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.000469079",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1748992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.000476379",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1740800",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.000984950",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6176768",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.000960716",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6238208",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.000465388",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1863680",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.000484858",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.000986860",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6172672",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.000963348",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.000478488",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1748992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.000488482",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1855488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.000965447",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6184960",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.000963432",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.000470679",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.000468830",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.000958815",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.000951071",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6234112",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.000487526",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.000468740",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1748992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.000979405",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6172672",
+        "rss_status": "0",
+        "observer_status": "0"
+      }
+    ],
+    "medians.csv": [
+      {
+        "metric": "compiler-build-time",
+        "native": "0.744428221",
+        "comparison": "0.749449939",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "compiler-build-rss",
+        "native": "61476864",
+        "comparison": "61464576",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "adjacent-build-time",
+        "native": "0.760346845",
+        "comparison": "0.744882586",
+        "limit_percent": "110"
+      },
+      {
+        "metric": "adjacent-build-rss",
+        "native": "61513728",
+        "comparison": "61456384",
+        "limit_percent": "110"
+      },
+      {
+        "metric": "application-build-time",
+        "native": "0.025611628",
+        "comparison": "0.115898868",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-build-rss",
+        "native": "60878848",
+        "comparison": "77164544",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-runtime-time",
+        "native": "0.000476379",
+        "comparison": "0.000963348",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-runtime-rss",
+        "native": "1863680",
+        "comparison": "6172672",
+        "limit_percent": "125"
+      }
+    ],
+    "workflow/context.txt": "workflow_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\nworkflow_ref=refs/pull/389/merge\nworkflow_event=pull_request\nworkflow_run_id=34423530952\nworkflow_run_attempt=1\nrunner_image=ubuntu-24.04\ncandidate_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nroot_repository=type-rb/type-rb-native\nroot_release_tag=bootstrap-seed-2026-08-30\nroot_asset_id=535828321\nLinux runnervmlun5p 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\nArchitecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           48 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  4\nOn-line CPU(s) list:                     0-3\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 9V45 96-Core Processor\nCPU family:                              26\nModel:                                   2\nThread(s) per core:                      2\nCore(s) per socket:                      2\nSocket(s):                               1\nStepping:                                1\nBogoMIPS:                                5192.24\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid extd_apicid aperfmperf tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy svm cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves user_shstk avx_vnni avx512_bf16 clzero xsaveerptr rdpru arat npt nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold v_vmsave_vmload avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid fsrm avx512_vp2intersect\nVirtualization:                          AMD-V\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               96 KiB (2 instances)\nL1i cache:                               64 KiB (2 instances)\nL2 cache:                                2 MiB (2 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-3\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Vulnerable: Safe RET, no microcode\nVulnerability Spec store bypass:         Vulnerable\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; STIBP disabled; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n"
+  }
+}

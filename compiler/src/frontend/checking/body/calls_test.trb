@@ -1,0 +1,52 @@
+import { check, emit_qbe } from compiler
+import { compiler_new, has_diagnostic } from state/state
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { load_integer, load_string } from support/storage
+import { logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Multiline call closing delimiters") do
+	test("preserves arguments and evaluation order without a trailing comma") do
+		source := "record Item\nfirst: Integer\nsecond: Integer?\nend\ndef item(value: Integer): Integer\nputs(value)\nreturn value\nend\ndef pair(first: Integer, second: Integer): Integer\nreturn first * 10 + second\nend\ndef named_pair(*, first: Integer, second: Integer): Integer\nreturn first * 10 + second\nend\ndef main()\nvalue := Item.new(\nsecond: item(2),\nfirst: item(1)\n)\nputs(value.first)\nputs(pair(\nitem(3),\nitem(4)\n))\nputs(named_pair(\nsecond: item(6),\nfirst: item(5)\n))\nempty := Item.new(\nfirst: 7,\nsecond: nil\n)\nputs(empty.second == nil)\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+			puts(load_integer(state.diagnostics.lines, 0))
+		end
+		expect(valid).to_be_true()
+		expect(has_diagnostic(state)).to_be_false()
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(output)
+				expect(output).to_equal("2\n1\n1\n3\n4\n34\n6\n5\n56\ntrue\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("still requires argument separators") do
+		[
+			"record Item\nfirst: Integer\nsecond: Integer\nend\ndef main()\nvalue := Item.new(\nfirst: 1\nsecond: 2\n)\nputs(value.first)\nend\n",
+			"def pair(first: Integer, second: Integer): Integer\nreturn first + second\nend\ndef main()\nputs(pair(\n1\n2\n))\nend\n",
+		].each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			expect(valid).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+end

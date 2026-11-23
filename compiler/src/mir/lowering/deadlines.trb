@@ -1,0 +1,36 @@
+import { mir_deadline_call_boundary, mir_deadlines_enabled } from mir/model/deadlines
+import { mir_op_deadline_checkpoint } from mir/model/instructions
+import { mir_terminator_trap } from mir/model/control
+import { MirBlock, MirInstruction, MirModule } from mir/model/module
+
+# Canonical checkpoints precede every managed block (including loop headers)
+# and follow call boundaries. Later passes see their I/O and failure effects.
+# Rewrites append fresh live spans, preserving historical instruction identity
+# just as the other MIR rewrites do. Derived plans have not been built yet.
+def mir_lower_deadline_checkpoints(mut native_module: MirModule)
+	if !mir_deadlines_enabled(native_module)
+		return
+	end
+	native_module.functions.each do |function|
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := native_module.blocks[index]
+			start := native_module.instructions.size()
+			# Failure targets are empty typed traps, not managed continuations.
+			if block.terminator != mir_terminator_trap()
+				native_module.instructions.push(MirInstruction.new(kind: mir_op_deadline_checkpoint(), result: -1, first: -1, second: -1, payload: 0, failure: -1, source_id: block.source_id, line: block.line))
+			end
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[position]
+				native_module.instructions.push(instruction)
+				if mir_deadline_call_boundary(instruction.kind)
+					native_module.instructions.push(MirInstruction.new(kind: mir_op_deadline_checkpoint(), result: -1, first: -1, second: -1, payload: 0, failure: -1, source_id: instruction.source_id, line: instruction.line))
+				end
+				position += 1
+			end
+			native_module.blocks[index] = MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: start, instruction_count: native_module.instructions.size() - start, terminator: block.terminator, condition: block.condition, first_target: block.first_target, second_target: block.second_target, first_argument_start: block.first_argument_start, first_argument_count: block.first_argument_count, second_argument_start: block.second_argument_start, second_argument_count: block.second_argument_count, return_value: block.return_value)
+			index += 1
+		end
+	end
+end

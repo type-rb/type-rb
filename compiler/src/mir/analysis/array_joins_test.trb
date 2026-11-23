@@ -1,0 +1,172 @@
+import { check, emit_qbe, print_diagnostic } from compiler
+import { MirArrayJoin, MirRootPlan, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { has_diagnostic } from state/state
+import { mir_array_joins_equal } from mir/analysis/array_joins
+import { verify_mir } from mir/verify/module
+import { logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR single-use String Array join") do
+	test("roots String owners directly and deduplicates repeated fragments") do
+		mut state := logical_checked_source("def pair(text: String, separator: String): String\nreturn [text, text].join(separator)\nend\ndef main()\nputs(pair((12).to_s(), \"/\"))\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_joins[index].size()).to_equal(1)
+		join := state.scalar_mir.array_joins[index][0]
+		plan := state.scalar_mir.root_plans[index]
+		expect(join.elements.size()).to_equal(2)
+		expect(join.elements[0]).to_equal(join.elements[1])
+		expect(plan.instructions).to_equal([join.join])
+		expect(plan.roots).to_equal([[0, 1]])
+		expect(plan.capacity).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbn_string_join(l %join_fragments")).to_be_true()
+		expect(output.include?("%join_fragments =l alloc8 16")).to_be_true()
+		state.scalar_mir.root_plans[index] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: [[join.array]], capacity: 1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("admits empty singleton and four fragments and retains five") do
+		mut count := 0
+		while count <= 5
+			mut literal := ""
+			mut element := 0
+			while element < count
+				if element > 0
+					literal += ", "
+				end
+				literal += "text"
+				element += 1
+			end
+			mut state := logical_checked_source("def joiner(text: String): String\nwords: Array<String> := [" + literal + "]\nreturn words.join(\"/\")\nend\ndef main()\nend\n")
+			expect(check(state)).to_be_true()
+			plans := state.scalar_mir.array_joins[mir_function_index(state.scalar_mir, 0)]
+			if count <= 4
+				expect(plans.size()).to_equal(1)
+				expect(plans[0].elements.size()).to_equal(count)
+			else
+				expect(plans.size()).to_equal(0)
+			end
+			count += 1
+		end
+	end
+
+	test("retains escape mutation repeated uses and allocating separators") do
+		controls := [
+			"def joiner(text: String): String\nwords := [text]\nputs(words.size())\nreturn words.join(\"/\")\nend\n",
+			"def joiner(text: String): String\nmut words := [text]\nwords[0] = \"other\"\nreturn words.join(\"/\")\nend\n",
+			"def joiner(text: String): String\nwords := [text]\nfirst := words.join(\"/\")\nreturn words.join(first)\nend\n",
+			"def joiner(text: String): String\nwords := [text]\nreturn words.join(text + \"/\")\nend\n",
+			"def keep(words: Array<String>): String\nreturn words.join(\"/\")\nend\ndef joiner(text: String): String\nwords := [text]\nreturn keep(words)\nend\n",
+			"def joiner(text: String): String\nwords := [text]\nother := words\nputs(other.size())\nreturn words.join(\"/\")\nend\n",
+			"def joiner(text: String): String\nmut words: Array<String> := []\nwords.push(text + \"x\")\nreturn words.join(\"/\")\nend\n",
+			"def joiner(text: String): String\nwords := [text]\nf := fn(): Integer\nreturn words.size()\nend\nputs(f())\nreturn words.join(\"/\")\nend\n",
+			"def joiner(text: String, flag: Boolean): String\nwords := [text]\nif flag\nreturn words.join(\"/\")\nend\nreturn text\nend\n",
+		]
+		controls.each do |source|
+			mut state := logical_checked_source(source + "def main()\nend\n")
+			expect(check(state)).to_be_true()
+			state.scalar_mir.array_joins.each do |plans|
+				expect(plans.size()).to_equal(0)
+			end
+		end
+	end
+
+	test("rejects missing forged and stale plans without trusting supplied operands") do
+		mut mode := 0
+		while mode < 4
+			mut state := logical_checked_source("def joiner(text: String): String\nreturn [text].join(\"/\")\nend\ndef main()\nend\n")
+			expect(check(state)).to_be_true()
+			index := mir_function_index(state.scalar_mir, 0)
+			plan := state.scalar_mir.array_joins[index][0]
+			if mode == 0
+				state.scalar_mir.array_joins[index] = []
+			elsif mode == 1
+				state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: plan.separator_literal, size_concats: plan.size_concats, appends: plan.appends, elements: [999999999999], element_literals: plan.element_literals)
+			elsif mode == 2
+				state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join + 1, size: plan.size, separator_literal: plan.separator_literal, size_concats: plan.size_concats, appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+			else
+				state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: plan.separator_literal, size_concats: plan.size_concats, appends: [], elements: plan.elements, element_literals: plan.element_literals)
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+			mode += 1
+		end
+	end
+
+	test("is independent of erased source and reordered function storage") do
+		mut state := logical_checked_source("def joiner(text: String): String\nreturn [text, text].join(\"/\")\nend\ndef main()\nputs(joiner(\"x\"))\nend\n")
+		expect(check(state)).to_be_true()
+		ordinary := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(ordinary)
+		first := state.scalar_mir.functions[0]
+		state.scalar_mir.functions[0] = state.scalar_mir.functions[1]
+		state.scalar_mir.functions[1] = first
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(ordinary)
+	end
+
+	test("rederives plans in reordered blocks and rejects missing fragment roots") do
+		mut state := logical_checked_source("def choose(flag: Boolean, text: String): String\nif flag\nreturn [text].join(\"/\")\nend\nreturn [text, text].join(\"|\")\nend\ndef main()\nputs(choose(true, \"x\"))\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		original := state.scalar_mir.array_joins[index]
+		expect(original.size()).to_equal(2)
+		function := state.scalar_mir.functions[index]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			block := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = block
+			left += 1
+			right -= 1
+		end
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_array_joins_equal(original, state.scalar_mir.array_joins[index])).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut root := state.scalar_mir.root_plans[index]
+		root.roots[0] = []
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("keeps fragments alive under forced collection across repeated loop joins") do
+		mut state := logical_checked_source("def main()\nmut index := 0\nwhile index < 20\nfirst := index.to_s()\nlast := (index + 1).to_s()\nputs([first, first, \"kept\", last].join(\"/\"))\nindex += 1\nend\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.array_joins[0].size()).to_equal(1)
+		output := control_test_output(emit_qbe(state))
+		if has_diagnostic(state)
+			print_diagnostic(state, false)
+		end
+		expect(has_diagnostic(state)).to_be_false()
+		marker := " %result =l call $trbn_string_alloc(l %payload)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				mut expected := ""
+				mut index := 0
+				while index < 20
+					expected += index.to_s() + "/" + index.to_s() + "/kept/" + (index + 1).to_s() + "\n"
+					index += 1
+				end
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

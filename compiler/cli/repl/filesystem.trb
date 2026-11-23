@@ -1,0 +1,185 @@
+import { native_cli_file_scope, native_cli_file_read, native_cli_file_write, native_cli_filesystem_kind, native_cli_filesystem_message, native_cli_directory_children, native_cli_directory_stat, native_cli_directory_mkdir } from host
+import { repl_call, repl_expression, repl_block } from repl/eval
+import { ReplStore, ReplEnvironment, repl_value, repl_integer, repl_string, repl_failed, repl_environment, repl_type, repl_variant } from repl/model
+import { repl_bind, repl_find, repl_binding_value, repl_capture_binding, repl_coerce } from repl/values
+import { repl_flow_kind_slot, repl_flow_normal, repl_flow_return, repl_flow_value_slot } from repl/flow_kinds
+import { argument_binding_slot, argument_bindings } from frontend/resolution/argument_binding
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { builtin_result_variant } from frontend/checking/builtins/results
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { CallBlockSyntax, CheckedFileBody } from frontend/types/callable_types
+import { standard_source_filesystem_host } from state/standard_source_kinds
+import { CompilerState, select_checked_body } from state/state
+import { sparse_integer_at } from support/storage
+
+# Interpreter resource payloads are private to a checked lexical invocation.
+# The CLI host owns the descriptor only while its synchronous callback runs;
+# no authored Integer value or retained binding can acquire that payload.
+def repl_filesystem_call(mut store: ReplStore, operation: Integer, arguments: Array<Integer>): Integer
+	if operation < 5
+		file := arguments[0]
+		if store.integers[file] < 0
+			store.error[0] = "File is outside its checked acquisition body"
+			return 0
+		end
+		if operation == 4
+			return repl_string(store, store.texts[file])
+		elsif operation < 2
+			mut output := [""]
+			status := native_cli_file_read(store.integers[file], store.integers[arguments[1]], operation, output)
+			if status == 0
+				mut type_name := "Bytes"
+				if operation == 1
+					type_name = "String"
+				end
+				store.children[arguments[2]][0] = repl_value(store, type_name, 0, 0.0, output[0], [])
+			end
+			return repl_integer(store, status)
+		end
+		return repl_integer(store, native_cli_file_write(store.integers[file], store.texts[arguments[1]]))
+	elsif operation == 5
+		return repl_integer(store, native_cli_filesystem_kind(store.integers[arguments[0]]))
+	elsif operation == 6
+		return repl_string(store, native_cli_filesystem_message(store.integers[arguments[0]]))
+	elsif operation == 7
+		mut names: Array<String> := []
+		mut kinds: Array<Integer> := []
+		mut error_path := [store.texts[arguments[0]]]
+		status := native_cli_directory_children(store.texts[arguments[0]], store.texts[arguments[1]], store.integers[arguments[2]], names, kinds, error_path)
+		store.children[arguments[5]][0] = repl_string(store, error_path[0])
+		mut index := 0
+		while index < names.size()
+			store.children[arguments[3]].push(repl_string(store, names[index]))
+			index += 1
+		end
+		index = 0
+		while index < kinds.size()
+			store.children[arguments[4]].push(repl_integer(store, kinds[index]))
+			index += 1
+		end
+		return repl_integer(store, status)
+	elsif operation == 8
+		mut output := [0]
+		status := native_cli_directory_stat(store.texts[arguments[0]], store.integers[arguments[1]], output)
+		if status == 0
+			store.children[arguments[2]][0] = repl_integer(store, output[0])
+		end
+		return repl_integer(store, status)
+	end
+	return repl_integer(store, native_cli_directory_mkdir(store.texts[arguments[0]]))
+end
+
+def repl_file_environment(body: CheckedFileBody, syntax: CallBlockSyntax, mut store: ReplStore, mut parent: ReplEnvironment, file: Integer): ReplEnvironment
+	mut environment := repl_environment()
+	body.captures.each do |capture|
+		binding := repl_find(parent, capture.name)
+		if binding < 0
+			store.error[0] = "File body capture is outside its lexical environment"
+			return environment
+		end
+		value := repl_binding_value(store, parent, binding)
+		repl_bind(environment, capture.name, value, capture.mutable)
+		if capture.mutable > 0
+			slot := environment.count[0] - 1
+			environment.cells[slot] = repl_capture_binding(store, parent, binding)
+			environment.values[slot] = 0
+		end
+	end
+	repl_bind(environment, syntax.parameters[0].name, file, 0)
+	return environment
+end
+
+def repl_file_body(mut state: CompilerState, body: CheckedFileBody, syntax: CallBlockSyntax, mut store: ReplStore, mut parent: ReplEnvironment, path: String, descriptor: Integer): Integer
+	file := repl_value(store, body.resource_type, descriptor, 0.0, path, [])
+	mut environment := repl_file_environment(body, syntax, store, parent, file)
+	previous := select_checked_body(state, body.function[0])
+	mut position := [syntax.body_start]
+	mut value := repl_block(state, position, store, environment, environment.flow, -1)
+	if !repl_failed(store) && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+		payload := repl_coerce(store, value, body.yield_type)
+		value = repl_value(store, body.result_type, builtin_result_variant(state, body.result_type, true), 0.0, "Ok", [payload])
+	elsif environment.flow[repl_flow_kind_slot()] == repl_flow_return()
+		value = environment.flow[repl_flow_value_slot()]
+	end
+	# Clear the private payload before returning to the host's close operation.
+	store.integers[file] = -1
+	state.callables.checked[0] = previous
+	return value
+end
+
+def repl_file_acquisition(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment): Integer
+	origin := position[0]
+	error_function := sparse_integer_at(state.callables.checked[0].generic_calls, origin) - 1
+	mut source := -1
+	mut index := 0
+	while index < state.module_graph.module_count[0]
+		if sparse_integer_at(state.standard_modules, index) == standard_source_filesystem_host()
+			source = index
+		end
+		index += 1
+	end
+	path_function := find_function_in_module(state, source, "path_value")
+	mode_function := find_function_in_module(state, source, "mode_value")
+	if path_function < 0 || mode_function < 0
+		store.error[0] = "File acquisition has no owned host adapter"
+		return 0
+	end
+	mut bindings := argument_bindings(["path", "mode"], [false, true])
+	mut path := ""
+	mut mode := 0
+	position[0] += 1
+	skip_newlines(state, position)
+	while !token_is(state, position[0], ")") && !repl_failed(store)
+		label := parse_argument_label(state, position)
+		slot := argument_binding_slot(bindings, label)
+		if slot < 0
+			store.error[0] = bindings.error[0]
+			return 0
+		end
+		value := repl_expression(state, position, store, environment, 1, "").value
+		if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return value
+		end
+		if slot == 0
+			path = store.texts[repl_call(state, path_function, [value], store)]
+		else
+			mode = store.integers[repl_call(state, mode_function, [value], store)]
+		end
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ",")
+			break
+		end
+		position[0] += 1
+		skip_newlines(state, position)
+	end
+	position[0] += 1
+	encoded := sparse_integer_at(state.callables.call_block_origins, position[0])
+	if error_function < 0 || encoded <= 0 || encoded > state.callables.call_blocks.size()
+		store.error[0] = "File acquisition has no checked body or error constructor"
+		return 0
+	end
+	syntax := state.callables.call_blocks[encoded - 1]
+	position[0] = syntax.finish
+	state.callables.checked[0].file_bodies.each do |body|
+		if body.origin == syntax.origin
+			mut phase := [0, 0]
+			callback := fn(descriptor: Integer): Integer
+				return repl_file_body(state, body, syntax, store, environment, path, descriptor)
+			end
+			value := native_cli_file_scope(path, mode, callback, phase)
+			if repl_failed(store)
+				return 0
+			end
+			if phase[1] != 0
+				if phase[0] == 1 && repl_type(store, value) == body.result_type && repl_variant(store, value) == builtin_result_variant(state, body.result_type, false)
+					return value
+				end
+				return repl_call(state, error_function, [repl_string(store, path), repl_integer(store, phase[0]), repl_integer(store, phase[1])], store)
+			end
+			return value
+		end
+	end
+	store.error[0] = "File acquisition has no checked result plan"
+	return 0
+end

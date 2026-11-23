@@ -1,0 +1,8 @@
+{
+  "name": "recovery-managed-closure-values",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-managed/closure-values"
+  }
+}

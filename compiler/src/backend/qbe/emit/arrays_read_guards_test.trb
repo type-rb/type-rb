@@ -1,0 +1,8 @@
+import { managed_mir_test_fixture } from testing/mir/managed
+import { describe, test } from trb/std/test
+
+describe("Managed Array read guard control") do
+	test("retains negative positions and managed cells through erased reordered MIR and collection") do
+		managed_mir_test_fixture("managed_array_read_guards", 6)
+	end
+end

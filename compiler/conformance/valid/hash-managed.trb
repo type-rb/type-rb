@@ -1,0 +1,45 @@
+record HashEntry
+	label: String
+	values: Array<Integer>
+end
+
+def hash_grow(mut values: Hash<String, HashEntry>): HashEntry
+	mut index := 0
+	while index < 20000
+		values[index.to_s()] = HashEntry.new(label: "entry" + index.to_s(), values: [index])
+		index += 1
+	end
+	return HashEntry.new(label: "after growth", values: [42])
+end
+
+def main()
+	mut values: Hash<String, HashEntry> := {}
+	mut shared := values
+	# Retain the receiver and computed key across an allocating RHS rehash.
+	values["saved" + 1.to_s()] = hash_grow(shared)
+	puts(values.size())
+	puts(values["saved1"].label)
+	puts(values["saved1"].values[0])
+	mut index := 0
+	while index < 20000
+		removed := shared.delete(index.to_s())
+		if removed.values[0] != index
+			puts("wrong removed value")
+			return
+		end
+		index += 1
+	end
+	puts(values.size())
+	puts(values.delete("saved1").label)
+	puts(shared.empty?())
+	index = 0
+	while index < 2000
+		shared["replacement"] = HashEntry.new(label: index.to_s(), values: [index])
+		index += 1
+	end
+	puts(values["replacement"].values[0])
+	mut nested := { 1 => { "inner" =>[42] } }
+	mut shallow := nested.dup()
+	shallow[1]["inner"][0] = 43
+	puts(nested[1]["inner"][0])
+end

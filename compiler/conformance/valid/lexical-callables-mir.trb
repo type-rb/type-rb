@@ -1,0 +1,36 @@
+enum State
+	Ready
+	def text!(): String
+		return :done!
+	end
+end
+
+def label!(): String
+	return :left!
+end
+
+def label?(): String
+	return :right?
+end
+
+def reader!(): () -> String
+	mut text := label!()
+	read := fn(): String
+		return text
+	end
+	text = label?()
+	return read
+end
+
+def main()
+	first: () -> String := label!
+	second: () -> String := label?
+	puts(first() + "/" + second())
+	puts(State::Ready.text!())
+	puts(reader!()())
+	values := { alias: :<=>, newtype: :**, __trb_saved: :<< }
+	puts(values[:alias] + values[:newtype] + values[:__trb_saved])
+	rows: Array<Array<Integer?>> := [[nil, 3]]
+	puts(rows[0][0] == nil)
+	puts(rows[0].size())
+end

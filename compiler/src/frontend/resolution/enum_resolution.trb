@@ -1,0 +1,45 @@
+import { find_function_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { EnumField } from frontend/types/enum_model
+import { find_enum_in_module, find_enum_variant } from frontend/types/enum_types
+import { namespace_parent } from frontend/types/namespace_model
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { resolve_type_name } from frontend/resolution/type_resolution
+
+def resolve_enum_declarations(mut state: CompilerState): Boolean
+	mut owner := 0
+	while owner < state.nominal.enums.size()
+		definition := state.nominal.enums[owner]
+		state.module_graph.active_module[0] = definition.source_id
+		state.global_bindings.declaration_owner[0] = namespace_parent(definition.name)
+		if find_enum_in_module(state, definition.source_id, definition.name) != owner || find_record_in_module(state, definition.source_id, definition.name) >= 0 || find_function_in_module(state, definition.source_id, definition.name) >= 0
+			diagnostic(state, "TRBN4003", definition.line, "duplicate declaration " + definition.name)
+		end
+		mut variant := definition.variant_start
+		while variant < definition.variant_start + definition.variant_count
+			row := state.nominal.enum_variants[variant]
+			if find_enum_variant(state, owner, row.name) != variant
+				diagnostic(state, "TRBN4003", row.line, "duplicate enum variant " + row.name)
+			end
+			mut field := row.field_start
+			while field < row.field_start + row.field_count
+				item := state.nominal.enum_fields[field]
+				mut previous := row.field_start
+				while previous < field
+					if state.nominal.enum_fields[previous].name == item.name
+						diagnostic(state, "TRBN4003", item.line, "duplicate enum payload field " + item.name)
+					end
+					previous += 1
+				end
+				type_name := resolve_type_name(state, definition.source_id, item.type_name, false)
+				if type_name == ""
+					diagnostic(state, "TRBN4003", item.line, "unknown enum payload type " + item.type_name)
+				end
+				state.nominal.enum_fields[field] = EnumField.new(name: item.name, type_name: type_name, line: item.line, named_only: item.named_only)
+				field += 1
+			end
+			variant += 1
+		end
+		owner += 1
+	end
+	return !has_diagnostic(state)
+end

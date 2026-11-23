@@ -1,0 +1,77 @@
+record Item
+	text: String
+end
+
+def key(mut order: Array<Integer>): String
+	order.push(1)
+	return "se" + "ed"
+end
+
+def replace(mut tables: Hash<Integer, Hash<String, Item>>, mut order: Array<Integer>): Item
+	mut original := tables[0]
+	mut index := 0
+	while index < 64
+		original[index.to_s()] = Item.new(text: index.to_s())
+		index += 1
+	end
+	tables[0] = { "new" => Item.new(text: "replacement") }
+	order.push(2)
+	return Item.new(text: "stored")
+end
+
+def main()
+	mut tables := { 0 => { "seed" => Item.new(text: "before") } }
+	original := tables[0]
+	mut order: Array<Integer> := []
+	tables[0][key(order)] = replace(tables, order)
+	puts(original["seed"].text)
+	puts(tables[0]["new"].text)
+	puts(order[0])
+	puts(order[1])
+
+	mut integers := {}
+	mut words := {}
+	mut index := 0
+	while index < 3
+		integers[index] = index + 10
+		index += 1
+	end
+	if true
+		words["answer"] = Item.new(text: "inferred")
+	end
+	puts(integers[2])
+	puts(words["answer"].text)
+
+	mut copy := original.dup()
+	mut removed := 0
+	while removed < 60
+		item := copy.delete(removed.to_s())
+		if removed == 59
+			puts(item.text)
+		end
+		removed += 1
+	end
+	puts(copy.size())
+	copy.update({ "seed" => Item.new(text: "updated") })
+	merged := copy.merge({ "extra" => Item.new(text: "merged") })
+	puts(merged.fetch("extra").text)
+	puts(copy.key?("extra"))
+	puts(original["seed"].text)
+	puts(copy["seed"].text)
+	puts(merged.keys().size())
+	puts(merged.values().size())
+	puts(merged.empty?())
+
+	mut numbers := { 1 => 1.5, 2 => 2 }
+	numbers[3] = 3
+	puts(numbers[2] == 2.0)
+	puts(numbers.fetch(3) == 3.0)
+	puts(numbers.delete(1) == 1.5)
+
+	mut unreachable := {}
+	[1].each do |_value|
+		break
+		unreachable["key"] = Item.new(text: "not executed")
+	end
+	puts(unreachable.size())
+end

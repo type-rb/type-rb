@@ -1,0 +1,49 @@
+# Valid Integer encodings and managed identities must remain distinct from
+# empty/deleted buckets, including a probe chain after deletion and reinsertion.
+def main()
+	mut integers: Hash<Integer, Integer> := {}
+	keys := [-9007199254740991, -1, 0, 1, 9007199254740991]
+	keys.each.with_index do |key, index|
+		integers[key] = index + 10
+	end
+	integers.delete(-1)
+	puts(integers.key?(-1))
+	puts(integers[0])
+	integers[-1] = 31
+	mut total := 0
+	keys.each do |key|
+		total += integers[key]
+	end
+	puts(total)
+
+	mut words: Hash<String, Integer> := {}
+	mut index := 0
+	while index < 128
+		words["key" + index.to_s()] = index
+		index += 1
+	end
+	index = 0
+	while index < 128
+		words.delete("key" + index.to_s())
+		index += 2
+	end
+	index = 0
+	while index < 128
+		words["key" + index.to_s()] = index * 2
+		index += 2
+	end
+	total = 0
+	index = 0
+	while index < 128
+		# Equal content, distinct String identity from the inserted key.
+		total += words["key" + index.to_s()]
+		index += 1
+	end
+	# Reuse the stored managed identity through the key snapshot as well.
+	words.keys().each do |key|
+		total += words[key]
+	end
+	puts(total)
+	puts(words.key?("missing"))
+	return
+end

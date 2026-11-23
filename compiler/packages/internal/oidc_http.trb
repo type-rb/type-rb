@@ -1,0 +1,476 @@
+module OidcHttp
+end
+
+import trb/std/result
+import trb/std/url
+import trb/internal/auth/oidc_host as Host
+
+def invalid(): Result<String, String>
+	return Result<String, String>::Err("invalid OIDC hostname")
+end
+
+def digits(value: String, alphabet: String): Boolean
+	mut index := 0
+	while index < value.size()
+		if !alphabet.include?(value[index])
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def ipv6(bytes: Array<Integer>): String
+	mut mapped := true
+	mut index := 0
+	while index < 10
+		if bytes[index] != 0
+			mapped = false
+		end
+		index += 1
+	end
+	if mapped && bytes[10] == 255 && bytes[11] == 255
+		return "::ffff:" + bytes[12].to_s() + "." + bytes[13].to_s() + "." + bytes[14].to_s() + "." + bytes[15].to_s()
+	end
+	mut groups: Array<Integer> := []
+	index = 0
+	while index < 16
+		groups.push(bytes[index] * 256 + bytes[index + 1])
+		index += 2
+	end
+	mut best := -1
+	mut count := 1
+	index = 0
+	while index < 8
+		mut end_index := index
+		while end_index < 8 && groups[end_index] == 0
+			end_index += 1
+		end
+		if end_index - index > count
+			best = index
+			count = end_index - index
+		end
+		index = end_index + 1
+	end
+	mut result := ""
+	index = 0
+	while index < 8
+		if index == best
+			result += "::"
+			index += count
+		else
+			if result != "" && !result.end_with?(":")
+				result += ":"
+			end
+			mut value := groups[index]
+			mut text := "0123456789abcdef"[value % 16]
+			value /= 16
+			while value > 0
+				text = "0123456789abcdef"[value % 16] + text
+				value /= 16
+			end
+			result += text
+			index += 1
+		end
+	end
+	return result
+end
+
+def hostname(value: String): Result<String, String>
+	mut host := value
+	mut root := false
+	[".", "\xe3\x80\x82", "\xef\xbc\x8e", "\xef\xbd\xa1"].each do |dot|
+		if !root && host.end_with?(dot)
+			host = host.slice(0...host.size() - 1)
+			root = true
+		end
+	end
+	ascii := Host.ascii_hostname(host)
+	if ascii == ""
+		return invalid()
+	end
+	labels := ascii.split(".")
+	last := labels[labels.size() - 1]
+	numeric := digits(last, "0123456789") || (last.start_with?("0x") && digits(last.slice(2...last.size()), "0123456789abcdef"))
+	if numeric
+		if labels.size() != 4
+			return invalid()
+		end
+		mut index := 0
+		while index < labels.size()
+			label := labels[index]
+			if label == "" || label.size() > 3 || !digits(label, "0123456789") || (label.size() > 1 && label.start_with?("0"))
+				return invalid()
+			end
+			if label.to_i() > 255
+				return invalid()
+			end
+			index += 1
+		end
+	end
+	if root
+		return Result<String, String>::Ok(ascii + ".")
+	end
+	return Result<String, String>::Ok(ascii)
+end
+
+# Normalize only the authority before mechanical URL parsing can rewrite it.
+# Path/query text and the configured issuer's identity are preserved.
+def normalize(uri: String): Result<String, String>
+	mut start := 0
+	mut scheme := ""
+	if uri.size() >= 7 && uri.slice(0...7).downcase() == "http://"
+		start = 7
+		scheme = "http://"
+	elsif uri.size() >= 8 && uri.slice(0...8).downcase() == "https://"
+		start = 8
+		scheme = "https://"
+	else
+		return Result<String, String>::Err("OIDC endpoint must use HTTP or HTTPS")
+	end
+	mut stop := start
+	while stop < uri.size() && uri[stop] != "/" && uri[stop] != "?" && uri[stop] != "#"
+		stop += 1
+	end
+	authority := uri.slice(start...stop)
+	mut host_start := 0
+	mut index := 0
+	while index < authority.size()
+		if authority[index] == "@"
+			host_start = index + 1
+		end
+		index += 1
+	end
+	address := authority.slice(host_start...authority.size())
+	mut host := ""
+	mut suffix := ""
+	if address.start_with?("[")
+		mut close := 1
+		while close < address.size() && address[close] != "]"
+			close += 1
+		end
+		if close == address.size()
+			return invalid()
+		end
+		host = address.slice(1...close)
+		characters := address.to_bytes()
+		index = 0
+		while index < characters.size()
+			character := characters.at(index)
+			if character < 33 || character > 126 || character == 92
+				return invalid()
+			end
+			index += 1
+		end
+		if host.include?("%")
+			return invalid()
+		end
+		mut bytes := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+		if Host.ip_address(host, bytes) != 16
+			return invalid()
+		end
+		host = "[" + ipv6(bytes) + "]"
+		suffix = address.slice(close + 1...address.size())
+	else
+		mut colon := address.size()
+		index = 0
+		while index < address.size()
+			if address[index] == ":"
+				if colon != address.size()
+					return invalid()
+				end
+				colon = index
+			end
+			index += 1
+		end
+		raw := address.slice(0...colon)
+		index = 0
+		while index < raw.size()
+			if raw[index] == "%" && index + 1 < raw.size() && "01234567".include?(raw[index + 1])
+				return invalid()
+			end
+			index += 1
+		end
+		decoded := URL.decode_component(raw) catch |_error|
+			return invalid()
+		end
+		host = try hostname(decoded)
+		suffix = address.slice(colon...address.size())
+	end
+	if suffix != ""
+		if !suffix.start_with?(":") || !digits(suffix.slice(1...suffix.size()), "0123456789")
+			return invalid()
+		end
+	end
+	return Result<String, String>::Ok(scheme + authority.slice(0...host_start) + host + suffix + uri.slice(stop...uri.size()))
+end
+
+record Address
+	bytes: Array<Integer>
+	width: Integer
+end
+
+# Environment proxy configuration is captured at its first use, like the
+# reference's DefaultTransport. ALL_PROXY is intentionally outside that policy.
+CONFIG: Hash<String, String> := {}
+
+def environment(upper: String, lower: String): String
+	value := Host.environment(upper)
+	if value != ""
+		return value
+	end
+	return Host.environment(lower)
+end
+
+def configuration(mut cache: Hash<String, String>): Hash<String, String>
+	if !cache.key?("http")
+		cache["http"] = environment("HTTP_PROXY", "http_proxy")
+		cache["https"] = environment("HTTPS_PROXY", "https_proxy")
+		cache["no"] = environment("NO_PROXY", "no_proxy")
+		cache["cgi"] = Host.environment("REQUEST_METHOD")
+	end
+	return cache
+end
+
+def unbracket(host: String): String
+	if host.start_with?("[") && host.end_with?("]")
+		return host.slice(1...host.size() - 1)
+	end
+	return host
+end
+
+def zero_prefix(bytes: Array<Integer>, count: Integer): Boolean
+	mut index := 0
+	while index < count
+		if bytes[index] != 0
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def same_bytes(left: Array<Integer>, right: Array<Integer>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index] != right[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def address(text: String): Address?
+	mut bytes := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+	width := Host.ip_address(unbracket(text), bytes)
+	if width == 0
+		return nil
+	end
+	if width == 16 && zero_prefix(bytes, 10) && bytes[10] == 255 && bytes[11] == 255
+		return Address.new(bytes: bytes.slice(12...16), width: 4)
+	end
+	return Address.new(bytes: bytes.slice(0...width), width: width)
+end
+
+def loopback(ip: Address): Boolean
+	if ip.width == 4
+		return ip.bytes[0] == 127
+	end
+	return zero_prefix(ip.bytes, 15) && ip.bytes[15] == 1
+end
+
+def network_match(ip: Address, text: String): Boolean
+	parts := text.split("/")
+	if parts.size() != 2
+		return false
+	end
+	network := address(parts[0])
+	if network == nil || network.width != ip.width
+		return false
+	end
+	mut bits := 0
+	case parts[1].try_to_i()
+	when Result::Ok(value)
+		bits = value
+	else
+		return false
+	end
+	if bits < 0 || bits > ip.width * 8
+		return false
+	end
+	mut index := 0
+	while bits > 0
+		mut divisor := 1
+		if bits < 8
+			mut shift := bits
+			while shift < 8
+				divisor *= 2
+				shift += 1
+			end
+		end
+		if ip.bytes[index] / divisor != network.bytes[index] / divisor
+			return false
+		end
+		bits -= 8
+		index += 1
+	end
+	return true
+end
+
+def bypass(host: String, port: String, rules: String): Boolean
+	raw_name := unbracket(host)
+	if raw_name == "localhost"
+		return true
+	end
+	name := raw_name.downcase()
+	ip := address(name)
+	if ip != nil && loopback(ip)
+		return true
+	end
+	entries := rules.split(",")
+	mut index := 0
+	while index < entries.size()
+		mut rule := entries[index].strip().downcase()
+		index += 1
+		if rule == ""
+			next
+		elsif rule == "*"
+			return true
+		end
+		if ip != nil && network_match(ip, rule)
+			return true
+		end
+		mut required_port := ""
+		parts := rule.split(":")
+		if parts.size() == 2 && !rule.start_with?("[")
+			rule = parts[0]
+			required_port = parts[1]
+		elsif rule.start_with?("[")
+			brackets := rule.split("]:")
+			if brackets.size() == 2
+				rule = brackets[0].slice(1...brackets[0].size())
+				required_port = brackets[1]
+			end
+		end
+		if rule == "" || (required_port != "" && required_port != port)
+			next
+		end
+		other := address(rule)
+		if other != nil
+			if ip != nil && same_bytes(other.bytes, ip.bytes)
+				return true
+			end
+			next
+		end
+		if ip != nil
+			next
+		end
+		if rule.start_with?("*.")
+			rule = rule.slice(1...rule.size())
+		end
+		mut prefix := ""
+		if rule.start_with?(".")
+			prefix = "."
+			rule = rule.slice(1...rule.size())
+		end
+		if rule != ""
+			case hostname(rule)
+			when Result::Ok(value)
+				rule = value
+			else
+				next
+			end
+		end
+		rule = prefix + rule
+		if !rule.start_with?(".")
+			if name == rule
+				return true
+			end
+			rule = "." + rule
+		end
+		if name.end_with?(rule)
+			return true
+		end
+	end
+	return false
+end
+
+def proxy(parts: Array<String>, config: Hash<String, String>): Result<String, String>
+	mut value := config.fetch(parts[0])
+	if value == ""
+		return Result<String, String>::Ok("")
+	end
+	if !value.include?("://")
+		value = "http://" + value
+	end
+	mut proxy_parts := ["", "", ""]
+	if !Host.describe_uri(value, proxy_parts)
+		return Result<String, String>::Ok("")
+	end
+	if parts[0] == "http" && config.fetch("cgi") != ""
+		return Result<String, String>::Err("refusing to use HTTP_PROXY value in CGI environment; see golang.org/s/cgihttpproxy")
+	end
+	if bypass(parts[1], parts[2], config.fetch("no"))
+		return Result<String, String>::Ok("")
+	end
+	return Result<String, String>::Ok(value)
+end
+
+def fetch(uri: String, mut output: Array<Bytes>): Integer
+	config := configuration(CONFIG)
+	started := Host.monotonic_millis()
+	if started < 0.0
+		output[1] = "HTTP provider clock is unavailable".to_bytes()
+		return -1
+	end
+	deadline := started + 5000.0
+	mut current := uri
+	mut redirects := 0
+	while true
+		current = normalize(current) catch |error|
+			output[1] = error.to_bytes()
+			return -1
+		end
+		mut parts := ["", "", ""]
+		if !Host.describe_uri(current, parts) || (parts[0] != "http" && parts[0] != "https")
+			output[1] = "unsupported or invalid HTTP provider URL".to_bytes()
+			return -1
+		end
+		selected := proxy(parts, config) catch |error|
+			output[1] = error.to_bytes()
+			return -1
+		end
+		now := Host.monotonic_millis()
+		if now < 0.0
+			output[1] = "HTTP provider clock is unavailable".to_bytes()
+			return -1
+		end
+		remaining := deadline - now
+		if remaining <= 0.0
+			output[1] = "HTTP provider deadline exceeded".to_bytes()
+			return -1
+		end
+		status := Host.fetch(current, selected, remaining.to_i() + 1, output)
+		if status != 301 && status != 302 && status != 303 && status != 307 && status != 308
+			return status
+		end
+		mut location := output[2].to_s()
+		if location.start_with?("//")
+			location = parts[0] + ":" + location
+		end
+		if location == ""
+			return status
+		end
+		redirects += 1
+		if redirects >= 10
+			output[1] = "stopped after 10 redirects".to_bytes()
+			return -1
+		end
+		current = location
+	end
+	return -1
+end

@@ -1,0 +1,17 @@
+# Checked traversal source categories are independent of collection transforms.
+
+def iteration_source_invalid(): Integer
+	return 0
+end
+
+def iteration_source_array(): Integer
+	return 1
+end
+
+def iteration_source_range(): Integer
+	return 2
+end
+
+def iteration_source_hash(): Integer
+	return 3
+end

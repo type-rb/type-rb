@@ -1,0 +1,17 @@
+def main()
+	(9007199254740990..9007199254740991).to_a().each { |value| puts(value) }
+	(-9007199254740991..-9007199254740990).to_a().each { |value| puts(value) }
+	puts((9007199254740991...9007199254740991).to_a().size())
+	puts((2..1).to_a().size())
+	mut first := (1..2).to_a()
+	second := (1..2).to_a()
+	first.push(3)
+	first[0] = 9
+	puts(second[0])
+	puts(second.size())
+	mut total := 0
+	[(1..2), (3...5)].each do |span|
+		span.to_a().each { |value| total += value }
+	end
+	puts(total)
+end

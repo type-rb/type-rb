@@ -1,0 +1,140 @@
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { string_starts_with } from support/path
+import { logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { load_string } from support/storage
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR nullable values") do
+	test("retains payload values and narrows stable bindings") do
+		sources := [
+			"def integer_label(value: Integer?): String\nif value == nil\nreturn \"nil\"\nend\nreturn value.to_s()\nend\ndef boolean_label(value: Boolean?): String\nif nil == value\nreturn \"nil\"\nend\nif value\nreturn \"true\"\nelse\nreturn \"false\"\nend\nend\ndef main()\nputs(integer_label(nil))\nputs(integer_label(0))\nputs(boolean_label(nil))\nputs(boolean_label(false))\nend\n",
+			"def normalize(mut text: String?): String\nif text == nil\nreturn \"none\"\nend\ntext = text + \"!\"\nreturn text\nend\ndef main()\nputs(normalize(nil))\nputs(normalize(\"ok\"))\nend\n",
+			"def label(text: String? = \"default\"): String\nif text == nil\nreturn \"nil\"\nend\nreturn text\nend\ndef main()\nputs(label())\nputs(label(nil))\nputs(label(\"explicit\"))\nend\n",
+			"record Cell\nvalue: String?\nend\ndef label(cell: Cell): String\nif cell.value == nil\nreturn \"none\"\nend\nreturn cell.value + \"!\"\nend\ndef main()\nvalues: Array<String?> := [nil, \"hello\"]\nvalues.each do |value|\nputs(label(Cell.new(value: value)))\nend\nend\n",
+			"def text(flag: Boolean): String?\nputs(\"receiver\")\nif flag\nreturn \"hello\"\nend\nreturn nil\nend\ndef main()\na := text(false)&.size()\nputs(a == nil)\nb := text(true)&.size()\nif b != nil\nputs(b)\nend\nputs(\"ok\"&.size())\nend\n",
+			"def mark(): Integer\nputs(\"argument\")\nreturn 2\nend\ndef update(mut values: Array<Integer>?)\nvalues&.push(mark())\nif values != nil\nputs(values.size())\nend\nend\ndef main()\nupdate(nil)\nmut values := [1]\nupdate(values)\nputs(values[1])\nend\n",
+			"def widen(value: Integer?): Float?\nreturn value\nend\ndef main()\na := widen(nil)\nputs(a == nil)\nb := widen(7)\nif b != nil\nputs(b.to_i())\nend\nend\n",
+			"def main()\nvalues: Array<String?> := [nil, \"hello\"]\nvalues.each do |value|\nif value != nil\nputs(value)\nelse\nputs(\"none\")\nend\nend\nlookup: Hash<String, String?> := {\"a\" => nil, \"b\" => \"hi\"}\nitem := lookup[\"b\"]\nif item != nil\nputs(item)\nend\nend\n",
+			"def main()\nmut text: String? := \"hello\"\nwhile text != nil\nputs(text)\ntext = nil\nend\nputs(text == nil)\nend\n",
+			"def size(text: String?): Integer\nif text != nil && text.size() > 1\nreturn 5\nend\nreturn 0\nend\ndef main()\nputs(size(nil))\nputs(size(\"hello\"))\nend\n",
+			"def label(text: String?): String\nreturn \"nil\" if text == nil\nreturn text\nend\ndef main()\nputs(label(nil))\nputs(label(\"ok\"))\nend\n",
+			"record Cell\nvalue: String?\nend\ndef read(cell: Cell?): String?\nreturn cell&.value\nend\ndef main()\nx := read(nil)\nputs(x == nil)\ny := read(Cell.new(value: \"ok\"))\nif y != nil\nputs(y)\nend\nend\n",
+		]
+		outputs := ["nil\n0\nnil\nfalse\n", "none\nok!\n", "default\nnil\nexplicit\n", "none\nhello!\n", "receiver\ntrue\nreceiver\n5\n2\n", "argument\n2\n2\n", "true\n7\n", "none\nhello\nhi\n", "hello\ntrue\n", "0\n5\n", "nil\nok\n", "true\nok\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					before := control_test_output(emit_qbe(state))
+					intrinsic_mir_erase(state)
+					state.callables.checked_bodies.each do |body|
+						body.nullable_reads.used[0] = 0
+						body.safe_finishes.used[0] = 0
+						body.safe_types.used[0] = 0
+					end
+					state.parsed.loop_finishes.used[0] = 0
+					expect(control_test_output(emit_qbe(state))).to_equal(before)
+					state.scalar_mir.functions.each do |function|
+						mut left := function.block_start
+						mut right := left + function.block_count - 1
+						while left < right
+							saved := state.scalar_mir.blocks[left]
+							state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+							state.scalar_mir.blocks[right] = saved
+							left += 1
+							right -= 1
+						end
+					end
+					expect(verify_mir(state.scalar_mir, true)).to_equal("")
+					mut forced := ""
+					mut ordinary := false
+					control_test_output(emit_qbe(state)).split("\n").each do |line|
+						if string_starts_with(line, "function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects stale facts and unsupported nullable operations") do
+		sources := [
+			"def bad(mut text: String?): String\nif text == nil\nreturn \"none\"\nend\ntext = nil\nreturn text\nend\ndef main()\nend\n",
+			"record Cell\nvalue: String?\nend\ndef bad(mut cell: Cell): String\nif cell.value == nil\nreturn \"none\"\nend\ncell = Cell.new(value: nil)\nreturn cell.value\nend\ndef main()\nend\n",
+			"def main()\nvalue := nil\nend\n",
+			"def main()\nvalue: Nil := nil\nend\n",
+			"def main()\nvalue: String? := \"hello\"\nputs(value.size())\nend\n",
+			"def main()\na: Array<Integer>? := [1]\nmut b := a\nend\n",
+			"def main()\nputs(1 == nil)\nend\n",
+			"def main()\nvalue := if true\nnil\nelse\n\"hello\"\nend\nend\n",
+			"def main()\nmut value: String? := \"hello\"\nif value != nil\nmut i := 0\nwhile i < 2\nputs(value.size())\nvalue = nil\ni += 1\nend\nend\nend\n",
+		]
+		messages := ["expected String", "expected String", "cannot infer", "Nil is an internal flow type", "size is unavailable", "immutable", "nil comparison", "incompatible", "size is unavailable"]
+		mut index := 0
+		sources.each do |source|
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_false()
+			message := load_string(state.diagnostics.messages, 0)
+			if !message.include?(messages[index])
+				puts(index)
+				puts(message)
+			end
+			expect(message.include?(messages[index])).to_be_true()
+			index += 1
+		end
+	end
+
+	test("rejects malformed nullable operation types and payload modes") do
+		[33, 34, 35, 36].each do |kind|
+			mut state := logical_checked_source("def label(value: String?): String\nif value == nil\nreturn \"none\"\nend\nreturn value\nend\ndef main()\nputs(label(nil))\nputs(label(\"hello\"))\nend\n")
+			expect(check(state)).to_be_true()
+			mut changed := false
+			mut index := 0
+			while index < state.scalar_mir.instructions.size()
+				row := state.scalar_mir.instructions[index]
+				if !changed && row.kind == kind
+					state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(row, 4, 2)
+					changed = true
+				end
+				index += 1
+			end
+			expect(changed).to_be_true()
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		end
+	end
+end

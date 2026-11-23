@@ -1,0 +1,5 @@
+import { label as widget_label } from local/widgets
+
+def main()
+	puts(widget_label())
+end

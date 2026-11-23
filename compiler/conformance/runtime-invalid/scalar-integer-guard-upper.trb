@@ -1,0 +1,12 @@
+def triangular(value: Integer): Integer
+	return value * (value + 1) / 2 + 1
+end
+
+def main()
+	values := [94906266]
+	mut index := 0
+	while index < values.size()
+		puts(triangular(values[index]).to_s())
+		index += 1
+	end
+end

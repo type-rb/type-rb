@@ -1,0 +1,79 @@
+def mark(mut visits: Array<Integer>, tag: Integer, value: Boolean): Boolean
+	visits.push(tag)
+	return value
+end
+
+def choose(value: Integer): String
+	if value == 0
+		return "zero"
+	elsif value == 1
+		return "one"
+	elsif value == 2
+		if true
+			return "two"
+		end
+	else
+		return "other"
+	end
+	return "unused"
+end
+
+def terminal_choice(value: Integer): Integer
+	if value == 0
+		return 10
+	elsif value == 1
+		return 11
+	else
+		return 12
+	end
+end
+
+def main()
+	if terminal_choice(0) != 10 || terminal_choice(1) != 11 || terminal_choice(2) != 12
+		puts("wrong return")
+	end
+	mut visits: Array<Integer> := []
+	if mark(visits, 1, false)
+		label := "wrong"
+		puts(label)
+	elsif mark(visits, 2, true) && true
+		label := "chosen"
+		puts(label)
+	elsif mark(visits, 3, true)
+		label := "wrong"
+		puts(label)
+	else
+		label := "wrong"
+		puts(label)
+	end
+	puts(visits.size())
+	puts(visits[0])
+	puts(visits[1])
+	if true
+		puts("skipped trap")
+	elsif 1 / 0 == 0
+		puts("wrong")
+	end
+	if false
+		puts("wrong")
+	elsif false
+		puts("wrong")
+	end
+	if false
+		puts("wrong")
+	elsif false
+		puts("wrong")
+	else
+		if false
+			puts("wrong")
+		elsif true
+			puts("nested")
+		end
+	end
+	mut index := 0
+	while index < 4
+		puts(choose(index))
+		index += 1
+	end
+	puts("elsif")
+end

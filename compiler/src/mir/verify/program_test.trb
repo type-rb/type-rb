@@ -1,0 +1,326 @@
+import { CompilerProjectSources, check, emit_qbe, load_project_sources } from compiler
+import { MirBlock, MirFunction, MirInstruction, MirModule } from mir/model/module
+import { MirProgram } from mir/model/program
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { mir_program_error } from mir/verify/program
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { resolve } from frontend/checking/program/resolution
+import { load_string } from support/storage
+import { logical_checked_source } from testing/pipeline
+import { QbeOutput } from backend/qbe/output
+import { describe, expect, test } from trb/std/test
+import trb/std/string_builder
+
+def program_output(output: QbeOutput): String
+	mut writer := StringBuilder.new()
+	mut index := 0
+	while index < output.lines.used[0]
+		writer.append(load_string(output.lines, index))
+		writer.append("\n")
+		index += 1
+	end
+	return writer.to_s()
+end
+
+def program_empty_frontend(native_module: MirModule, include_program: Boolean): CompilerState
+	mut fresh := compiler_new(1)
+	fresh.scalar_mir.source_count[0] = native_module.source_count[0]
+	fresh.scalar_mir.entry_function[0] = native_module.entry_function[0]
+	native_module.loop_calls.each do |plans|
+		fresh.scalar_mir.loop_calls.push(plans)
+	end
+	native_module.string_splits.each do |plans|
+		fresh.scalar_mir.string_splits.push(plans)
+	end
+	native_module.array_joins.each do |plans|
+		fresh.scalar_mir.array_joins.push(plans)
+	end
+	native_module.string_concats.each do |plans|
+		fresh.scalar_mir.string_concats.push(plans)
+	end
+	fresh.scalar_mir.numeric_plans[0] = native_module.numeric_plans[0]
+	if include_program
+		native_module.program.each do |row|
+			fresh.scalar_mir.program.push(row)
+		end
+	end
+	native_module.object_methods.each do |row|
+		fresh.scalar_mir.object_methods.push(row)
+	end
+	native_module.object_witnesses.each do |row|
+		fresh.scalar_mir.object_witnesses.push(row)
+	end
+	native_module.objects.each do |row|
+		fresh.scalar_mir.objects.push(row)
+	end
+	native_module.newtypes.each do |row|
+		fresh.scalar_mir.newtypes.push(row)
+	end
+	native_module.unions.each do |row|
+		fresh.scalar_mir.unions.push(row)
+	end
+	native_module.globals.each do |row|
+		fresh.scalar_mir.globals.push(row)
+	end
+	native_module.global_initialization.each do |row|
+		fresh.scalar_mir.global_initialization.push(row)
+	end
+	native_module.callables.each do |row|
+		fresh.scalar_mir.callables.push(row)
+	end
+	native_module.enums.each do |row|
+		fresh.scalar_mir.enums.push(row)
+	end
+	native_module.enum_variants.each do |row|
+		fresh.scalar_mir.enum_variants.push(row)
+	end
+	native_module.enum_fields.each do |row|
+		fresh.scalar_mir.enum_fields.push(row)
+	end
+	native_module.types.each do |row|
+		fresh.scalar_mir.types.push(row)
+	end
+	native_module.records.each do |row|
+		fresh.scalar_mir.records.push(row)
+	end
+	native_module.fields.each do |row|
+		fresh.scalar_mir.fields.push(row)
+	end
+	native_module.root_plans.each do |row|
+		fresh.scalar_mir.root_plans.push(row)
+	end
+	native_module.enum_stack_functions.each do |row|
+		fresh.scalar_mir.enum_stack_functions.push(row)
+	end
+	native_module.array_loops.each do |row|
+		fresh.scalar_mir.array_loops.push(row)
+	end
+	native_module.array_check_reuse.each do |row|
+		fresh.scalar_mir.array_check_reuse.push(row)
+	end
+	native_module.array_read_guards.each do |row|
+		fresh.scalar_mir.array_read_guards.push(row)
+	end
+	native_module.signatures.each do |row|
+		fresh.scalar_mir.signatures.push(row)
+	end
+	native_module.calls.each do |row|
+		fresh.scalar_mir.calls.push(row)
+	end
+	native_module.functions.each do |row|
+		fresh.scalar_mir.functions.push(row)
+	end
+	native_module.blocks.each do |row|
+		fresh.scalar_mir.blocks.push(row)
+	end
+	native_module.values.each do |row|
+		fresh.scalar_mir.values.push(row)
+	end
+	native_module.instructions.each do |row|
+		fresh.scalar_mir.instructions.push(row)
+	end
+	native_module.arguments.each do |row|
+		fresh.scalar_mir.arguments.push(row)
+	end
+	native_module.literal_texts.each do |row|
+		fresh.scalar_mir.literal_texts.push(row)
+	end
+	native_module.literal_data.each do |row|
+		fresh.scalar_mir.literal_data.push(row)
+	end
+	return fresh
+end
+
+def program_with_main(program: MirProgram, main_function: Integer): MirProgram
+	return MirProgram.new(entry_source: program.entry_source, main_function: main_function, compiler_function: program.compiler_function, compiler_file_function: program.compiler_file_function, cli_function: program.cli_function, runtime_function: program.runtime_function, runtime_literal: program.runtime_literal, runtime_error: program.runtime_error)
+end
+
+def program_probe(): CompilerState
+	mut state := logical_checked_source("def relay(value: String): String\nreturn value\nend\ndef main()\nmut values := [\"a\", \"second\"]\nmut index := 0\nwhile index < values.size()\nputs(relay(values[index]))\nindex += 1\nend\nend\n")
+	expect(check(state)).to_be_true()
+	return state
+end
+
+def program_cli_state(runtime_body: String): CompilerState
+	mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/host.trb"], sources: ["import { output } from host\ndef compiler_main(source: String, mode: String, file: Boolean): Integer\nreturn 0\nend\ndef native_cli_main(): Integer\noutput()\nreturn 0\nend\ndef main()\nend\n", "def output()\nend\ndef native_cli_runtime_qbe(): String\n" + runtime_body + "\nend\n"], error: ""))
+	expect(resolve(state)).to_be_true()
+	expect(check(state)).to_be_true()
+	return state
+end
+
+def program_with_runtime(program: MirProgram, runtime_function: Integer, runtime_error: Integer): MirProgram
+	return MirProgram.new(entry_source: program.entry_source, main_function: program.main_function, compiler_function: program.compiler_function, compiler_file_function: program.compiler_file_function, cli_function: program.cli_function, runtime_function: runtime_function, runtime_literal: program.runtime_literal, runtime_error: runtime_error)
+end
+
+def program_sparse_id(id: Integer): Integer
+	if id < 0
+		return id
+	end
+	return id * 37 + 101
+end
+
+describe("Canonical MIR whole-program emission") do
+	test("emits the same complete ordinary program with a fresh empty frontend") do
+		mut state := program_probe()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := program_output(emit_qbe(state))
+		mut fresh := program_empty_frontend(state.scalar_mir, true)
+		expect(fresh.source_tokens.token_count[0]).to_equal(0)
+		expect(fresh.declarations.function_count[0]).to_equal(0)
+		expect(verify_mir(fresh.scalar_mir, true)).to_equal("")
+		expect(program_output(emit_qbe(fresh))).to_equal(before)
+		if has_diagnostic(fresh)
+			puts(load_string(fresh.diagnostics.messages, 0))
+		end
+		expect(has_diagnostic(fresh)).to_be_false()
+	end
+
+	test("retains paired physical function plans and sparse blocks through actual reoptimization") do
+		mut state := program_probe()
+		mut native_module := state.scalar_mir
+		mut i := 0
+		while i < native_module.blocks.size()
+			block := native_module.blocks[i]
+			native_module.blocks[i] = MirBlock.new(id: program_sparse_id(block.id), source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: block.terminator, condition: block.condition, first_target: program_sparse_id(block.first_target), second_target: program_sparse_id(block.second_target), first_argument_start: block.first_argument_start, first_argument_count: block.first_argument_count, second_argument_start: block.second_argument_start, second_argument_count: block.second_argument_count, return_value: block.return_value)
+			i += 1
+		end
+		i = 0
+		while i < native_module.instructions.size()
+			instruction := native_module.instructions[i]
+			native_module.instructions[i] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: instruction.first, second: instruction.second, payload: instruction.payload, failure: program_sparse_id(instruction.failure), source_id: instruction.source_id, line: instruction.line)
+			i += 1
+		end
+		i = 0
+		while i < native_module.functions.size()
+			function := native_module.functions[i]
+			native_module.functions[i] = MirFunction.new(kind: function.kind, result_type: function.result_type, integer_guard: function.integer_guard, id: function.id, entry_block: program_sparse_id(function.entry_block), source_id: function.source_id, line: function.line, parameter_start: function.parameter_start, parameter_count: function.parameter_count, block_start: function.block_start, block_count: function.block_count)
+			i += 1
+		end
+		i = 0
+		while i < native_module.functions.size() / 2
+			other := native_module.functions.size() - 1 - i
+			function := native_module.functions[i]
+			root := native_module.root_plans[i]
+			loop_plan := native_module.array_loops[i]
+			read_guards := native_module.array_read_guards[i]
+			check_plan := native_module.array_check_reuse[i]
+			concat_plan := native_module.string_concats[i]
+			join_plan := native_module.array_joins[i]
+			native_module.functions[i] = native_module.functions[other]
+			native_module.root_plans[i] = native_module.root_plans[other]
+			native_module.array_loops[i] = native_module.array_loops[other]
+			native_module.array_read_guards[i] = native_module.array_read_guards[other]
+			native_module.array_check_reuse[i] = native_module.array_check_reuse[other]
+			native_module.string_concats[i] = native_module.string_concats[other]
+			native_module.array_joins[i] = native_module.array_joins[other]
+			native_module.functions[other] = function
+			native_module.root_plans[other] = root
+			native_module.array_loops[other] = loop_plan
+			native_module.array_read_guards[other] = read_guards
+			native_module.array_check_reuse[other] = check_plan
+			native_module.string_concats[other] = concat_plan
+			native_module.array_joins[other] = join_plan
+			i += 1
+		end
+		expect(verify_mir(native_module, true)).to_equal("")
+		mut instructions: Array<MirInstruction> := []
+		native_module.instructions.each do |instruction|
+			instructions.push(instruction)
+		end
+		optimize_verified_mir(native_module)
+		expect(verify_mir(native_module, true)).to_equal("")
+		expect(native_module.instructions).to_equal(instructions)
+		mut fresh := program_empty_frontend(native_module, true)
+		expect(verify_mir(fresh.scalar_mir, true)).to_equal("")
+		expect(program_output(emit_qbe(fresh))).to_equal(program_output(emit_qbe(state)))
+		if has_diagnostic(fresh)
+			puts(load_string(fresh.diagnostics.messages, 0))
+		end
+		expect(has_diagnostic(fresh)).to_be_false()
+	end
+
+	test("rejects missing, duplicated and inconsistent checked program metadata") do
+		mut state := program_probe()
+		program := state.scalar_mir.program[0]
+		state.scalar_mir.program.push(program)
+		expect(mir_program_error(state.scalar_mir)).to_equal("MIR program metadata count differs")
+		mut missing := program_empty_frontend(state.scalar_mir, false)
+		emit_qbe(missing)
+		expect(has_diagnostic(missing)).to_be_true()
+		expect(load_string(missing.diagnostics.messages, 0)).to_equal("MIR program metadata is missing")
+		mut forged := program_probe()
+		forged.scalar_mir.program[0] = program_with_main(forged.scalar_mir.program[0], 0)
+		expect(mir_program_error(forged.scalar_mir)).to_equal("MIR program main binding differs")
+	end
+
+	test("preserves compiler bindings and literal emission after complete frontend erasure") do
+		source := "def compiler_main(source: String, mode: String, file: Boolean): Integer\nputs(\"second\")\nreturn 0\nend\ndef compiler_file_main(source: String, path: String, mode: String, file: Boolean): Integer\nreturn compiler_main(source, mode, file)\nend\ndef main()\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		before := program_output(emit_qbe(state))
+		mut fresh := program_empty_frontend(state.scalar_mir, true)
+		expect(verify_mir(fresh.scalar_mir, true)).to_equal("")
+		expect(program_output(emit_qbe(fresh))).to_equal(before)
+		if has_diagnostic(fresh)
+			puts(load_string(fresh.diagnostics.messages, 0))
+		end
+		expect(has_diagnostic(fresh)).to_be_false()
+	end
+
+	test("preserves the Go-bootstrap unsupported Unicode diagnostic after frontend erasure") do
+		mut state := logical_checked_source("def main()\nputs(\"雪\")\nend\n")
+		expect(check(state)).to_be_true()
+		before := program_output(emit_qbe(state))
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("bootstrap String byte access does not support this literal")
+		mut fresh := program_empty_frontend(state.scalar_mir, true)
+		expect(verify_mir(fresh.scalar_mir, true)).to_equal("")
+		expect(program_output(emit_qbe(fresh))).to_equal(before)
+		expect(has_diagnostic(fresh)).to_be_true()
+		expect(load_string(fresh.diagnostics.messages, 0)).to_equal(load_string(state.diagnostics.messages, 0))
+	end
+
+	test("preserves the missing CLI runtime-template emission diagnostic") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/host.trb"], sources: ["import { output } from host\ndef compiler_main(source: String, mode: String, file: Boolean): Integer\nreturn 0\nend\ndef native_cli_main(): Integer\noutput()\nreturn 0\nend\ndef main()\nend\n", "def output()\nend\n"], error: ""))
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		mut fresh := program_empty_frontend(state.scalar_mir, true)
+		emit_qbe(fresh)
+		expect(has_diagnostic(fresh)).to_be_true()
+		expect(load_string(fresh.diagnostics.messages, 0)).to_equal("Native CLI runtime template is missing")
+	end
+
+	test("preserves literal and nonliteral CLI adapter facts with an empty frontend") do
+		mut state := program_cli_state("return \"# checked adapter\\n\"")
+		expect(state.scalar_mir.program[0].runtime_error).to_equal(0)
+		expect(state.scalar_mir.program[0].runtime_literal).to_equal("# checked adapter\n")
+		before := program_output(emit_qbe(state))
+		expect(has_diagnostic(state)).to_be_false()
+		mut fresh := program_empty_frontend(state.scalar_mir, true)
+		expect(verify_mir(fresh.scalar_mir, true)).to_equal("")
+		expect(program_output(emit_qbe(fresh))).to_equal(before)
+		expect(has_diagnostic(fresh)).to_be_false()
+
+		mut nonliteral := program_cli_state("return (\"# checked adapter\\n\")")
+		expect(nonliteral.scalar_mir.program[0].runtime_error).to_equal(2)
+		mut rejected := program_empty_frontend(nonliteral.scalar_mir, true)
+		expect(verify_mir(rejected.scalar_mir, true)).to_equal("")
+		emit_qbe(rejected)
+		expect(has_diagnostic(rejected)).to_be_true()
+		expect(load_string(rejected.diagnostics.messages, 0)).to_equal("Native CLI runtime template must be a literal String")
+	end
+
+	test("rejects inconsistent canonical CLI runtime bindings before emission") do
+		mut state := program_cli_state("return \"# checked adapter\\n\"")
+		program := state.scalar_mir.program[0]
+		state.scalar_mir.program[0] = program_with_runtime(program, -1, 0)
+		expect(mir_program_error(state.scalar_mir)).to_equal("MIR program missing runtime metadata differs")
+		state.scalar_mir.program[0] = program_with_runtime(program, state.scalar_mir.signatures.size(), 0)
+		expect(mir_program_error(state.scalar_mir)).to_equal("MIR program runtime binding is invalid")
+		state.scalar_mir.program[0] = program_with_runtime(program, program.runtime_function, 3)
+		expect(mir_program_error(state.scalar_mir)).to_equal("MIR program runtime error is invalid")
+		state.scalar_mir.program[0] = program_with_runtime(program, program.runtime_function, 2)
+		expect(mir_program_error(state.scalar_mir)).to_equal("MIR program runtime literal metadata differs")
+	end
+end

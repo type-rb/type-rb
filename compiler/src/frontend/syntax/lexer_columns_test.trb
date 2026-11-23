@@ -1,0 +1,70 @@
+import { lex } from frontend/syntax/lexer
+import { expand_quoted_token } from frontend/syntax/literal_syntax
+import { expand_type_closer } from frontend/syntax/syntax_tokens
+import { CompilerState, compiler_new } from state/state
+import { token_kind_interpolation } from state/token_kinds
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def column_token(state: CompilerState, text: String): Integer
+	mut index := 0
+	while index < state.source_tokens.token_count[0]
+		if load_string(state.source_tokens.token_texts, index) == text
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# Recovery uses the compiler byte adapter's ASCII source body. UTF-8 byte
+# columns and interpolation are qualified through the ordinary compiler in
+# tools/native-test-values-test.py.
+describe("Authored token columns") do
+	test("counts ASCII quoted tokens and tabs as reference columns") do
+		mut state := compiler_new(1024)
+		expect(lex(state, "\t\"a\"; expect(\"a\")\n  test(\"case\")\n")).to_be_true()
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "a"))).to_equal(2)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "expect"))).to_equal(7)
+		expect(load_integer(state.source_tokens.token_lines, column_token(state, "test"))).to_equal(2)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "test"))).to_equal(3)
+	end
+
+	test("keeps later columns after literal fusion and escaped source") do
+		mut state := compiler_new(1024)
+		expect(lex(state, "value := \"a\" + \"b\"; expect(\"\\n\")\n")).to_be_true()
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "ab"))).to_equal(10)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "expect"))).to_equal(21)
+	end
+
+	test("resets columns after multiline interpolations") do
+		mut state := compiler_new(1024)
+		expect(lex(state, "value := \"one\#{\n  1\n}\"; expect(value)\n")).to_be_true()
+		expect(load_integer(state.source_tokens.token_lines, column_token(state, "expect"))).to_equal(3)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "expect"))).to_equal(5)
+	end
+
+	test("retains inner interpolation and following token positions") do
+		mut state := compiler_new(1024)
+		expect(lex(state, "  value := \"prefix \#{ expect(1) }\"; after()\n")).to_be_true()
+		mut index := 0
+		while index < state.source_tokens.token_count[0]
+			if load_integer(state.source_tokens.token_kinds, index) == token_kind_interpolation()
+				expect(expand_quoted_token(state, index, true)).to_be_true()
+			end
+			index += 1
+		end
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "expect"))).to_equal(23)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "after"))).to_equal(37)
+	end
+
+	test("shifts generic closers without relocating the next token") do
+		mut state := compiler_new(1024)
+		expect(lex(state, "Array<Array<Integer>> next\n")).to_be_true()
+		origin := column_token(state, ">>")
+		expand_type_closer(state, origin)
+		expect(load_integer(state.source_tokens.token_columns, origin)).to_equal(20)
+		expect(load_integer(state.source_tokens.token_columns, origin + 1)).to_equal(21)
+		expect(load_integer(state.source_tokens.token_columns, column_token(state, "next"))).to_equal(23)
+	end
+end

@@ -1,0 +1,131 @@
+import { emit_qbe } from compiler
+import { mir_op_array_size } from mir/model/instructions
+import { mir_numeric_plans_equal } from mir/analysis/numeric
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def fixed_array_divisor_selected(state: CompilerState, divisor: Integer): Boolean
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		if plan.function_id == 0 && plan.caller < 0
+			plan.operations.each do |operation|
+				if operation.divisor == divisor
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
+describe("MIR fixed Array length") do
+	test("specializes local lengths while loaded objects remain mutable") do
+		source := "class Counter\n@value: Integer\ndef initialize(value: Integer)\n@value = value\nend\ndef increment(): Integer\n@value += 1\nreturn @value\nend\nend\ndef run(): Integer\nvalues := [Counter.new(1), Counter.new(2), Counter.new(3), Counter.new(4)]\nmut total := 0\nmut index := 0\nwhile index < 8\nvalue := values[index % values.size()]\ntotal += value.increment()\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n"
+		mut state := array_loop_mir_check(source)
+		expect(fixed_array_divisor_selected(state, 4)).to_be_true()
+		plans := state.scalar_mir.numeric_plans[0]
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				block := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = block
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut left := 0
+		mut right := state.scalar_mir.values.size() - 1
+		while left < right
+			value := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = value
+			left += 1
+			right -= 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("32\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects resizing escapes captures and ambiguous forwarded owners") do
+		[
+			"values.push(index)",
+			"touch(values)",
+			"mut view := values\nview.push(index)",
+			"values = [1, 2, 3]",
+			"f := fn(): Integer\nreturn values.size()\nend\nputs(f())",
+		].each do |body|
+			source := "def run(): Integer\nmut values := [1, 2, 3, 4]\nmut index := 0\nmut total := 0\nwhile index < 3\n" + body + "\ntotal += index % values.size()\nindex += 1\nend\nreturn total\nend\ndef touch(mut values: Array<Integer>)\nvalues.push(0)\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			expect(fixed_array_divisor_selected(state, 4)).to_be_false()
+		end
+	end
+
+	test("allows stable alias forwarding and ordinary element overwrites") do
+		source := "def run(): Integer\nmut values := [1, 2, 3, 4]\nmut view := values\nmut index := 0\nmut total := 0\nwhile index < 4\nview[index] = 9\ntotal += index % values.size()\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(fixed_array_divisor_selected(state, 4)).to_be_true()
+	end
+
+	test("counts initialization in order and retains empty division failure") do
+		source := "def run(): Integer\nmut values := [1, 2, 3, 4]\nfirst := 11 % values.size()\nvalues.push(5)\nreturn first + 11 % values.size()\nend\ndef main()\nputs(run())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(fixed_array_divisor_selected(state, 4)).to_be_false()
+		expect(fixed_array_divisor_selected(state, 5)).to_be_true()
+		empty := array_loop_mir_check("def run(): Integer\nvalues: Array<Integer> := []\nreturn 11 % values.size()\nend\ndef main()\nputs(run())\nend\n")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(empty)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("division by zero")).to_be_true()
+			end
+		end
+	end
+
+	test("rejects a stale size owner before trusting the selected divisor") do
+		mut state := array_loop_mir_check("def run(other: Array<Integer>): Integer\nvalues := [1, 2, 3, 4]\nreturn 11 % values.size()\nend\ndef main()\nputs(run([1, 2, 3]))\nend\n")
+		expect(fixed_array_divisor_selected(state, 4)).to_be_true()
+		stale := state.scalar_mir.numeric_plans[0]
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_array_size()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, 0)
+			end
+			index += 1
+		end
+		# Rebuild other affected facts, notably roots, before injecting only
+		# the stale numeric proof into the otherwise consistent module.
+		optimize_verified_mir(state.scalar_mir)
+		state.scalar_mir.numeric_plans[0] = stale
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+end

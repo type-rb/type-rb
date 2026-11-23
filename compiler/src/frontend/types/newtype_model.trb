@@ -1,0 +1,21 @@
+# Authored nominal identity and construction policy. Representation resolution
+# completes before MIR signatures or runtime layouts are published.
+record NewtypeDefinition
+	name: String
+	source_id: Integer
+	line: Integer
+	target: String
+	representation: String
+	closed: Boolean
+end
+
+# The verified MIR retains nominal identity independently of storage erasure.
+record MirNewtype
+	declaration: Integer
+	type_id: Integer
+	name: String
+	source_id: Integer
+	line: Integer
+	representation: Integer
+	closed: Boolean
+end

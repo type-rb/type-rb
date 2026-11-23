@@ -1,0 +1,9 @@
+# Default expressions retain their declaration owner and destination slot.
+
+def default_parameter(): Integer
+	return 0
+end
+
+def default_record_field(): Integer
+	return 1
+end

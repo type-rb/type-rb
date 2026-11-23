@@ -1,0 +1,35 @@
+def show(value: Integer?)
+	if value == nil
+		puts("nil")
+	else
+		puts(value)
+	end
+end
+
+def probe()
+	text := "Aqvzqvz"
+	show(text.index("qv"))
+	show(text.rindex("qv"))
+	show(text.index("z"))
+	show(text.rindex("z"))
+	show(text.index("vz"))
+	show(text.rindex("vz"))
+	show(text.index(""))
+	show(text.rindex(""))
+	show(text.index("missing"))
+	puts(text.include?("qvz"))
+	puts(text.start_with?("Aq"))
+	puts(text.end_with?("vz"))
+	puts(text.start_with?("qv"))
+	puts(text.end_with?("Aq"))
+	show("ababa".index("aba"))
+	show("ababa".rindex("aba"))
+	show("E e~".index("e~"))
+	show("E e~".index("~"))
+	puts("E".include?("e~"))
+	show("w-cxw-c".rindex("c"))
+end
+
+def main()
+	probe()
+end

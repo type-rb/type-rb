@@ -1,0 +1,38 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Integer receiver MIR") do
+	test("preserves values, ordering, optional calls and captures without source or block order") do
+		managed_mir_test_fixture("integer-methods", 0)
+		managed_mir_test_fixture("integer-method-order", 1)
+	end
+
+	test("rejects malformed guard operands, result, failure and reason") do
+		mut mutation := 0
+		while mutation < 6
+			mut state := logical_checked_source("def main()\nputs(3.clamp(1, 5))\nend\n")
+			expect(check(state)).to_be_true()
+			mut index := 0
+			while index < state.scalar_mir.instructions.size() && state.scalar_mir.instructions[index].kind != 43
+				index += 1
+			end
+			expect(index < state.scalar_mir.instructions.size()).to_be_true()
+			instruction := state.scalar_mir.instructions[index]
+			mut cell := mutation
+			mut value := 999999
+			if mutation == 0
+				cell = 1
+			elsif mutation == 1
+				cell = 2
+				value = 0
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+end

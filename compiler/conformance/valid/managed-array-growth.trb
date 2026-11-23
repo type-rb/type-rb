@@ -1,0 +1,144 @@
+import trb/std/process
+
+def dynamic_value(index: Integer): String
+	return "value-" + index.to_s()
+end
+
+def make_values(limit: Integer): Array<String>
+	mut values: Array<String> := []
+	mut index := 0
+	while index < limit
+		values.push(dynamic_value(index))
+		index += 1
+	end
+	return values
+end
+
+def verify_values(values: Array<String>, limit: Integer): Boolean
+	if values.size() != limit
+		return false
+	end
+	mut index := 0
+	while index < limit
+		if values[index] != dynamic_value(index)
+			return false
+		end
+		index += 1
+	end
+	if limit > 0
+		if values[-1] != dynamic_value(limit - 1)
+			return false
+		end
+	end
+	return true
+end
+
+def churn(rounds: Integer)
+	mut index := 0
+	while index < rounds
+		discarded := "garbage-" + index.to_s()
+		if discarded == ""
+			puts("unexpected")
+		end
+		index += 1
+	end
+	return
+end
+
+def exercise_boundary(limit: Integer): Boolean
+	mut values := make_values(limit)
+	if verify_values(values, limit) == false
+		return false
+	end
+	churn(30000)
+	if verify_values(values, limit) == false
+		return false
+	end
+	if limit > 0
+		values[0] = dynamic_value(limit + 1000)
+		if values[0] != dynamic_value(limit + 1000)
+			return false
+		end
+	end
+	values.push(dynamic_value(limit))
+	if values.size() != limit + 1
+		return false
+	end
+	if values[-1] != dynamic_value(limit)
+		return false
+	end
+	return true
+end
+
+def main()
+	arguments := Process.argv()
+	if arguments.size() > 0
+		if exercise_boundary(arguments[0].to_i())
+			puts("managed-array-growth-ok")
+		else
+			puts("managed-array-growth-bad")
+		end
+		return
+	end
+
+	limits := [0, 1, 4, 5, 15, 16, 17, 63, 64, 65, 127, 128, 129, 255, 256, 257]
+	mut groups: Array<Array<String>> := []
+	mut index := 0
+	mut ok := true
+	while index < limits.size()
+		limit := limits[index]
+		values := make_values(limit)
+		if verify_values(values, limit) == false
+			ok = false
+		end
+		groups.push(values)
+		index += 1
+	end
+
+	churn(30000)
+	index = 0
+	while index < limits.size()
+		limit := limits[index]
+		mut values := groups[index]
+		if verify_values(values, limit) == false
+			ok = false
+		end
+		if limit > 0
+			values[0] = dynamic_value(limit + 1000)
+			if values[0] != dynamic_value(limit + 1000)
+				ok = false
+			end
+		end
+		values.push(dynamic_value(limit))
+		if values.size() != limit + 1
+			ok = false
+		end
+		if values[-1] != dynamic_value(limit)
+			ok = false
+		end
+		index += 1
+	end
+
+	mut scalar: Array<Integer> := []
+	index = 0
+	while index < 257
+		scalar.push(index)
+		index += 1
+	end
+	if scalar.size() != 257
+		ok = false
+	end
+	if scalar[0] != 0
+		ok = false
+	end
+	if scalar[-1] != 256
+		ok = false
+	end
+
+	if ok
+		puts("managed-array-growth-ok")
+	else
+		puts("managed-array-growth-bad")
+	end
+	return
+end

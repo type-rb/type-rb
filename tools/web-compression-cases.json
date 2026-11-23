@@ -1,0 +1,328 @@
+{
+  "schema": 1,
+  "reference_revision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "sample_unit": "TypeRB portable gzip response. 😀 ",
+  "sample_repetitions": 48,
+  "cases": [
+    {
+      "id": "gzip",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "gzip",
+        "vary": "Accept-Encoding",
+        "length": "",
+        "etag": "",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "gzip-case",
+      "method": "GET",
+      "accept_encoding": "GZip; q=0.8",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "gzip",
+        "vary": "Accept-Encoding",
+        "length": "",
+        "etag": "",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "wildcard",
+      "method": "GET",
+      "accept_encoding": "*",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "gzip",
+        "vary": "Accept-Encoding",
+        "length": "",
+        "etag": "",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "rejected",
+      "method": "GET",
+      "accept_encoding": "gzip;q=0, identity",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "Accept-Encoding",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "explicit-zero",
+      "method": "GET",
+      "accept_encoding": "*;q=1, gzip;q=0",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "Accept-Encoding",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "invalid-quality",
+      "method": "GET",
+      "accept_encoding": "gzip;q=invalid",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "Accept-Encoding",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "missing",
+      "method": "GET",
+      "accept_encoding": "",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "Accept-Encoding",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "head",
+      "method": "HEAD",
+      "accept_encoding": "gzip",
+      "response": "sample()",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "empty",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"\")",
+      "minimum": 0,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "",
+        "etag": "",
+        "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "body_bytes": 0
+      }
+    },
+    {
+      "id": "below-threshold",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"small\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "",
+        "etag": "",
+        "body_sha256": "81db8ebbbbc69c6c6ad4a6aa92b76e0c08af547da236b9e2c9dbe1d8285a8130",
+        "body_bytes": 5
+      }
+    },
+    {
+      "id": "threshold-edge",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"1234567890\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "gzip",
+        "vary": "Accept-Encoding",
+        "length": "",
+        "etag": "",
+        "body_sha256": "c775e7b757ede630cd0aa1113bd102661ab38829ca52a6422ab782862f268646",
+        "body_bytes": 10
+      }
+    },
+    {
+      "id": "no-transform",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample().with_header(\"cache-control\", \"private, No-Transform\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "already-encoded",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample().with_header(\"content-encoding\", \"br\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "br",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "content-range",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample().with_header(\"content-range\", \"bytes 0-5/20\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "noncompressible",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample().with_header(\"content-type\", \"image/png\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "duplicate-content-type",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "sample().add_header(\"content-type\", \"application/json\")",
+      "minimum": 10,
+      "expected": {
+        "status": "200",
+        "encoding": "",
+        "vary": "",
+        "length": "1680",
+        "etag": "strong",
+        "body_sha256": "e246b00aca6e4129cff6bdb0d168c957f9ed51b430396c1298090bdd456586dd",
+        "body_bytes": 1728
+      }
+    },
+    {
+      "id": "status-204",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"ignored body\", 204)",
+      "minimum": 0,
+      "expected": {
+        "status": "204",
+        "encoding": "",
+        "vary": "",
+        "length": "",
+        "etag": "",
+        "body_sha256": "3db757db9dda03faa78043ee468a58bbd49d48291b684216b1f77e623ebe7366",
+        "body_bytes": 12
+      }
+    },
+    {
+      "id": "status-206",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"partial body\", 206)",
+      "minimum": 0,
+      "expected": {
+        "status": "206",
+        "encoding": "",
+        "vary": "",
+        "length": "",
+        "etag": "",
+        "body_sha256": "0e07f65a79e397f74f10b184950337b55d37f87c1ff7ed2753906c6ab8c3c37b",
+        "body_bytes": 12
+      }
+    },
+    {
+      "id": "status-304",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"cached body\", 304)",
+      "minimum": 0,
+      "expected": {
+        "status": "304",
+        "encoding": "",
+        "vary": "",
+        "length": "",
+        "etag": "",
+        "body_sha256": "b25fb84b4755c55ba657ee56d5a751bf8707801e5324f384f9bf08ee397a13be",
+        "body_bytes": 11
+      }
+    },
+    {
+      "id": "status-500",
+      "method": "GET",
+      "accept_encoding": "gzip",
+      "response": "Response.text(\"error body\", 500)",
+      "minimum": 0,
+      "expected": {
+        "status": "500",
+        "encoding": "gzip",
+        "vary": "Accept-Encoding",
+        "length": "",
+        "etag": "",
+        "body_sha256": "33c2604cd3e2c3058df6aec4a1957e7ba967f88ff528faf8bbf0819307968ba1",
+        "body_bytes": 10
+      }
+    }
+  ]
+}

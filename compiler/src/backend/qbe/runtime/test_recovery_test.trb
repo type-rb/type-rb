@@ -1,0 +1,44 @@
+import { check, emit_qbe } from compiler
+import { qbe_output_new } from backend/qbe/output
+import { emit_test_recovery_runtime } from backend/qbe/runtime/test_recovery
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# Direct runtime proof: public provider/runner acceptance is tested separately.
+def test_recovery_observations(collect: Boolean)
+	mut state := logical_checked_source("def main()\nputs(\"\".to_bytes().valid_utf8?())\nend\n")
+	expect(check(state)).to_be_true()
+	mut output := qbe_output_new(16, [])
+	emit_test_recovery_runtime(output)
+	mut runtime := output_source(emit_qbe(state)).replace_all("export function w $main(", "function w $unused_main(") + output_source(output)
+	if collect
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+	end
+	runtime += "data $test_case_path = { b \"case.trb\", b 0 }\ndata $test_helper_path = { b \"helper.trb\", b 0 }\ndata $test_raw = { b \"panic: synthetic\", b 10 }\ndata $test_managed = { b \"panic: keep\", b 10, b 0 }\ndata $test_assertion = { b \"assertion detail\", b 0 }\ndata $test_desc_closure = align 8 { l 1, l 0, l 8 }\ndata $test_format = { b \"%ld,%ld,%ld,%ld\\n\", b 0 }\ndata $test_fd = align 8 { w -1 }\ndata $test_nested_closure = align 8 { l 0, l $test_raw_failure }\n\nfunction $test_success(l %closure) {\n@start\n call $trbn_gc_collect(w 0)\n ret\n}\nfunction l $test_raw_failure(l %closure) {\n@start\n call $trbn_fail(l $test_raw, l 17)\n hlt\n}\nfunction $test_managed_failure(l %closure) {\n@start\n %message =l call $trbn_string_from_c(l $test_managed)\n call $trbn_runtime_fail(l %message)\n hlt\n}\nfunction $test_assertion_failure(l %closure) {\n@start\n %message =l call $trbn_string_from_c(l $test_assertion)\n %path =l call $trbn_string_from_c(l $test_helper_path)\n call $trbn_test_raise(l %message, l %path, l 23, l 5)\n hlt\n}\nfunction $test_recovered(l %closure) {\n@start\n %value =l call $trbn_runtime_recover_l(l $test_nested_closure, l 77)\n %same =w ceql %value, 77\n jnz %same, @done, @bad\n@done\n ret\n@bad\n call $abort()\n hlt\n}\nfunction $test_nested(l %closure) {\n@start\n %path =l call $trbn_string_from_c(l $test_helper_path)\n %outcome =l call $trbn_test_capture(l $test_nested_closure, l %path, l 91, l 2)\n %slot =l add %outcome, 8\n %failed =l loadl %slot\n jnz %failed, @done, @bad\n@done\n call $trbn_gc_collect(w 0)\n ret\n@bad\n call $abort()\n hlt\n}\nfunction $test_resource_failure(l %closure) {\n@start\n %fds =l alloc8 8\n %status =w call $pipe(l %fds)\n jnz %status, @bad, @opened\n@opened\n %fd =w loadw %fds\n %second =l add %fds, 4\n %write_fd =w loadw %second\n call $close(w %write_fd)\n storew %fd, $test_fd\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w %fd)\n call $trbn_fail(l $test_raw, l 17)\n hlt\n@bad\n call $abort()\n hlt\n}\nfunction $test_observe(l %code, l %resource) {\n@start\n %fds =l alloc8 8\n %status =w call $pipe(l %fds)\n jnz %status, @bad, @opened\n@opened\n %outer_fd =w loadw %fds\n %second =l add %fds, 4\n %write_fd =w loadw %second\n call $close(w %write_fd)\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w %outer_fd)\n %path =l call $trbn_string_from_c(l $test_case_path)\n %action =l call $trbn_gc_alloc(l $test_desc_closure, l 8, l 0)\n %action_code =l add %action, 8\n storel %code, %action_code\n # The capture owns both input roots before its first allocation.\n call $trbn_gc_temp_reset(l 0)\n %outcome =l call $trbn_test_capture(l %action, l %path, l 13, l 7)\n %roots =l loadl $trbn_gc_temp_count\n call $trbn_gc_collect(w 0)\n %head =l loadl $trbn_resource_scope\n %same_scope =w ceql %head, %scope\n %flags =w call $fcntl(w %outer_fd, w 1, ..., w 0)\n %open =w csgew %flags, 0\n %valid =w and %same_scope, %open\n jnz %valid, @inner, @bad\n@inner\n jnz %resource, @closed, @report\n@closed\n %inner_fd =w loadw $test_fd\n %inner_flags =w call $fcntl(w %inner_fd, w 1, ..., w 0)\n %is_closed =w ceqw %inner_flags, -1\n jnz %is_closed, @report, @bad\n@report\n %failed_slot =l add %outcome, 8\n %failed =l loadl %failed_slot\n %message_slot =l add %outcome, 16\n %message =l loadl %message_slot\n %path_slot =l add %outcome, 24\n %origin =l loadl %path_slot\n %line_slot =l add %outcome, 32\n %line =l loadl %line_slot\n %column_slot =l add %outcome, 40\n %column =l loadl %column_slot\n call $printf(l $test_format, ..., l %failed, l %line, l %column, l %roots)\n call $fflush(l 0)\n call $trbn_puts(l %message)\n call $trbn_puts(l %origin)\n %closed =w call $trbn_resource_close(l %scope)\n jnz %closed, @bad, @collected\n@collected\n call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_collect(w 0)\n %live =l loadl $trbn_gc_heap_bytes\n %scope_after =l loadl $trbn_resource_scope\n %recovery_after =l loadl $trbn_recovery_scope\n %remaining =l or %live, %scope_after\n %active =l or %remaining, %recovery_after\n jnz %active, @bad, @done\n@done\n ret\n@bad\n call $abort()\n hlt\n}\nexport function w $main() {\n@start\n call $trbn_gc_trace_initialize()\n call $test_observe(l $test_success, l 0)\n call $test_observe(l $test_raw_failure, l 0)\n call $test_observe(l $test_managed_failure, l 0)\n call $test_observe(l $test_assertion_failure, l 0)\n call $test_observe(l $test_recovered, l 0)\n call $test_observe(l $test_nested, l 0)\n call $test_observe(l $test_resource_failure, l 1)\n call $trbn_gc_finish()\n ret 0\n}\n"
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, runtime)
+		when Result::Ok(actual)
+			expect(actual).to_equal("0,13,7,1\n\ncase.trb\n1,13,7,1\nsynthetic\ncase.trb\n1,13,7,1\npanic: keep\n\ncase.trb\n1,23,5,1\nassertion detail\nhelper.trb\n0,13,7,1\n\ncase.trb\n0,13,7,1\n\ncase.trb\n1,13,7,1\nsynthetic\ncase.trb\n")
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("Test failure capture runtime") do
+	test("isolates failures and origins while preserving outer resource scopes") do
+		test_recovery_observations(false)
+	end
+
+	test("roots callback, outcome, message and origin through forced collection") do
+		test_recovery_observations(true)
+	end
+end

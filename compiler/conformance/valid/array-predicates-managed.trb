@@ -1,0 +1,51 @@
+def matches<T>(values: Array<T>, predicate: (T) -> Boolean): Boolean
+	return values.any? { |item| predicate(item) }
+end
+
+def source(mut events: Array<Integer>, values: Array<Integer>): Array<Integer>
+	events.push(1)
+	return values
+end
+
+def main()
+	mut values := [1, 2]
+	mut retained := values
+	readonly := retained
+	mut events: Array<Integer> := []
+	found := source(events, readonly).any? do |item|
+		events.push(item)
+		if item == 1
+			retained.push(3)
+			retained[1] = 20
+			values = [99]
+		end
+		item == 3
+	end
+	puts(found)
+	puts(events.size())
+	puts(events[2])
+	puts(events[3])
+	puts(values[0])
+	mut captured: Array<() -> String> := []
+	labels := ["first" + 1.to_s(), "target" + 2.to_s(), "unvisited"]
+	selected := labels.any? do |label|
+		callback := fn(): String
+			return label
+		end
+		captured.push(callback)
+		label = label + "!"
+		label == "target2!"
+	end
+	puts(selected)
+	puts(captured.size())
+	puts(captured[0]())
+	puts(captured[1]())
+	predicate := fn(value: String): Boolean
+		return value == "target2"
+	end
+	puts(matches<String>(labels, predicate))
+	checker := fn(values: Array<Integer>): Boolean
+		return values.none? { |item| item == 0 }
+	end
+	puts(checker([1, 2]))
+end

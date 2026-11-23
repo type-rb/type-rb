@@ -1,0 +1,106 @@
+import { allocate_compiler_recovery_workspace } from compiler/workspace
+import { RecoveryManagedBlock, RecoveryManagedInstruction } from managed/mir
+import { decode_recovery_managed_snapshot } from managed/snapshot
+import { build_recovery_managed_executable, build_recovery_managed_instrumented_executable } from managed/toolchain
+import { native_read_text, native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+
+def recover_program_fixture(name: String, collect_arrays: Boolean): Result<Process::Output?, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if root == nil
+		return Result<Process::Output?, String>::Ok(nil)
+	end
+	if reference == nil
+		return Result<Process::Output?, String>::Ok(nil)
+	end
+	if qbe == nil
+		return Result<Process::Output?, String>::Ok(nil)
+	end
+	workspace := try allocate_compiler_recovery_workspace("")
+	puts("Program recovery workspace retained for inspection: " + workspace)
+	source := case native_read_text(root + "/fixtures/recovery/programs/" + name + ".trb")
+	when Result::Ok(text)
+		text
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.message)
+	end
+	source_path := workspace + "/" + name + ".trb"
+	case native_write_text(source_path, source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.message)
+	end
+	snapshot := case Process.run(reference, ["compiler", "bootstrap-snapshot", "--snapshot-version", "4", source_path])
+	when Result::Ok(process)
+		if !process.success
+			return Result<Process::Output?, String>::Err(process.stderr)
+		end
+		process.stdout
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.message)
+	end
+	native_module := case decode_recovery_managed_snapshot(snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.path + ": " + error.message)
+	end
+	# Force collections at collection operations to verify live SSA roots.
+	mut functions := native_module.functions
+	mut function_index := 0
+	while function_index < functions.size()
+		function := functions[function_index]
+		mut blocks := function.blocks
+		mut block_index := 0
+		while block_index < blocks.size()
+			block := blocks[block_index]
+			mut instructions: Array<RecoveryManagedInstruction> := []
+			mut index := 0
+			while index < block.instructions.size()
+				instruction := block.instructions[index]
+				instructions.push(instruction)
+				case instruction
+				when RecoveryManagedInstruction::HashSet(_type, _hash, _key, _value, origin)
+					instructions.push(RecoveryManagedInstruction::RuntimeCollect(origin))
+				when RecoveryManagedInstruction::ArrayGet(_result, _type, _array, _index, origin)
+					if collect_arrays
+						instructions.push(RecoveryManagedInstruction::RuntimeCollect(origin))
+					end
+				when RecoveryManagedInstruction::ArraySet(_type, _array, _index, _value, origin)
+					if collect_arrays
+						instructions.push(RecoveryManagedInstruction::RuntimeCollect(origin))
+					end
+				when RecoveryManagedInstruction::ArrayPush(_type, _array, _value, origin)
+					if collect_arrays
+						instructions.push(RecoveryManagedInstruction::RuntimeCollect(origin))
+					end
+				else
+				end
+				index += 1
+			end
+			blocks[block_index] = RecoveryManagedBlock.new(id: block.id, parameters: block.parameters, origin: block.origin, instructions: instructions, terminator: block.terminator)
+			block_index += 1
+		end
+		function_index += 1
+	end
+	build := if collect_arrays
+		build_recovery_managed_instrumented_executable(native_module, qbe, "/usr/bin/cc", workspace, workspace + "/" + name)
+	else
+		build_recovery_managed_executable(native_module, qbe, "/usr/bin/cc", workspace, workspace + "/" + name)
+	end
+	report := case build
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.phase + ": " + error.message + " " + error.stderr)
+	end
+	case Process.run(report.output_path, [])
+	when Result::Ok(process)
+		return Result<Process::Output?, String>::Ok(process)
+	when Result::Err(error)
+		return Result<Process::Output?, String>::Err(error.message)
+	end
+end

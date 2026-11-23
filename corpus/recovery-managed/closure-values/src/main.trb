@@ -1,0 +1,61 @@
+alias IntegerMapper = (Integer) -> Integer
+alias StringFactory = () -> String
+alias FactoryFactory = (String) -> StringFactory
+
+record Message
+	text: String
+	format: StringFactory
+end
+
+enum Work
+	Text(message: Message)
+	Callback(mapper: IntegerMapper)
+end
+
+def apply(mapper: IntegerMapper, value: Integer): Integer
+	return mapper(value)
+end
+
+def main()
+	identity: IntegerMapper := fn(value: Integer): Integer
+		return value
+	end
+	offset := 7
+	add: IntegerMapper := fn(value: Integer): Integer
+		return value + offset
+	end
+	prefix := "nested"
+	make: FactoryFactory := fn(suffix: String): StringFactory
+		return fn(): String
+			return prefix + suffix
+		end
+	end
+	factory := make("-closure")
+	message := Message.new(text: factory(), format: factory)
+	work := Work::Text(message)
+	mut total := 0
+	mut index := 0
+	while index < 5000000
+		total += apply(add, index % 17)
+		index += 1
+	end
+	if identity(42) == 42
+		if total > 0
+			case work
+			when Work::Text(value)
+				if value.text == "nested-closure"
+					if value.format() == value.text
+						puts("recovery-managed-closure-values")
+						return
+					end
+				end
+			when Work::Callback(mapper)
+				if mapper(0) == 0
+					puts("unexpected")
+				end
+			end
+		end
+	end
+	puts("recovery-managed-closure-values-failed")
+	return
+end

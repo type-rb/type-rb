@@ -1,0 +1,7 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Mutations retain the Array header. Reload data after growth; removals clear
+# the vacated slot and preserve raw scalar bits or managed element identity.
+def emit_array_mutation_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "function $trbn_array_unshift(l %array, l %value) {\n@start\n %length_slot =l add %array, 8\n %length =l loadl %length_slot\n call $trbn_array_push_paced(l %array, l %value)\n %data_slot =l add %array, 24\n %data =l loadl %data_slot\n %next =l add %data, 8\n %bytes =l mul %length, 8\n call $memmove(l %next, l %data, l %bytes)\n storel %value, %data\n ret\n}\n\nfunction l $trbn_array_remove(l %array, w %mode) {\n@start\n %length_slot =l add %array, 8\n %length =l loadl %length_slot\n %empty =w ceql %length, 0\n jnz %empty, @failure, @ready\n@failure\n call $trbn_fail(l $trbn_array_empty_error, l 22)\n hlt\n@ready\n %remaining =l sub %length, 1\n %data_slot =l add %array, 24\n %data =l loadl %data_slot\n %last_offset =l mul %remaining, 8\n %last =l add %data, %last_offset\n %shifting =w ceqw %mode, 2\n jnz %shifting, @shift, @pop\n@pop\n %last_value =l loadl %last\n jmp @finish\n@shift\n %first_value =l loadl %data\n %next =l add %data, 8\n call $memmove(l %data, l %next, l %last_offset)\n jmp @finish\n@finish\n %value =l phi @pop %last_value, @shift %first_value\n storel 0, %last\n storel %remaining, %length_slot\n ret %value\n}\n")
+end

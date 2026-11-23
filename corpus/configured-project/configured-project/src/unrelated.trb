@@ -1,0 +1,3 @@
+def unrelated_value(): Integer
+	return 99
+end

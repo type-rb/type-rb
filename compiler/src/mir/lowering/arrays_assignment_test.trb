@@ -1,0 +1,36 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR Array assignment evaluation") do
+	test("retains capture and current storage across index and right-hand calls") do
+		statements := ["values[choose(values)] = 9", "values[-1] = grow(values)", "values[0] = values[1] + 1"]
+		expected := ["9\n2\n3\n", "1\n9\n3\n", "3\n2\n"]
+		mut index := 0
+		while index < statements.size()
+			source := "def choose(mut values: Array<Integer>): Integer\nvalues.push(3)\nreturn 0\nend\ndef grow(mut values: Array<Integer>): Integer\nvalues.push(3)\nreturn 9\nend\ndef main()\nmut values := [1, 2]\n" + statements[index] + "\nvalues.each do |value|\nputs(value)\nend\nend\n"
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			intrinsic_mir_erase(state)
+			qbe := control_test_output(emit_qbe(state))
+			qbe_path := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe_path != nil
+				case logical_run_qbe(qbe_path, qbe)
+				when Result::Ok(actual)
+					expect(actual).to_equal(expected[index])
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+			index += 1
+		end
+	end
+end

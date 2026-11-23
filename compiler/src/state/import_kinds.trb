@@ -1,0 +1,9 @@
+# Named declarations and whole-module imports retain different binding rules.
+
+def import_kind_named(): Integer
+	return 0
+end
+
+def import_kind_module(): Integer
+	return 1
+end

@@ -1,0 +1,49 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { compiler_test_instruction_with_cell } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("lowers, verifies, and selects complete checked scalar leaf MIR") do
+		source := "def scalar(value: Integer, scale: Float, enabled: Boolean): Float\n\tnext_value := value + 1\n\tconverted: Float := next_value\n\tproduct := converted * scale\n\tselected := enabled == true\n\tinverted := !selected\n\toffset := - value\n\t_if_unused := inverted != false\n\treturn product + offset\nend\n\ndef delegated(value: Integer): Integer\n\treturn scalar(value, 1.0, true).to_i()\nend\n\ndef mutable_leaf(value: Integer): Integer\n\tmut result := value\n\treturn result\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_function_index(state.scalar_mir, 0) >= 0).to_be_true()
+		expect(mir_function_index(state.scalar_mir, 1) >= 0).to_be_true()
+		expect(mir_function_index(state.scalar_mir, 2) >= 0).to_be_true()
+		expect(state.scalar_mir.literal_texts.size()).to_equal(5)
+		mut literal_index := 0
+		while state.scalar_mir.instructions[literal_index].kind != 6
+			literal_index += 1
+		end
+		state.scalar_mir.instructions[literal_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[literal_index], 2, 0)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Integer literal fact differs")
+	end
+
+	test("relocates each committed MIR literal once and preserves its source line") do
+		source := "def first(): Integer\n\treturn 17\nend\n\ndef second(): Integer\n\treturn 29\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.literal_texts.size()).to_equal(2)
+		expect(state.scalar_mir.instructions.size()).to_equal(2)
+		expect(state.scalar_mir.instructions[0].payload).to_equal(0)
+		expect(state.scalar_mir.instructions[1].payload).to_equal(1)
+		expect(state.scalar_mir.literal_texts[0]).to_equal("17")
+		expect(state.scalar_mir.literal_texts[1]).to_equal("29")
+		expect(state.scalar_mir.instructions[0].line).to_equal(2)
+		expect(state.scalar_mir.instructions[1].line).to_equal(6)
+	end
+end

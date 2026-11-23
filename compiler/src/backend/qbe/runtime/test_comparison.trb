@@ -1,0 +1,131 @@
+import { MirTestComparisonNode, mir_test_comparison_plan } from mir/analysis/test_comparison
+import { mir_test_value_id, test_adapter_equal } from mir/model/test_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { mir_storage_name } from mir/model/types
+import { integer_string } from support/literals
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# ABI adaptation consumes the target-independent equality plan. The recursive
+# walk allocates no managed memory and never changes values or their headers.
+def test_equal_symbol(type_id: Integer): String
+	return "$trbn_test_equal_type" + integer_string(type_id)
+end
+
+def emit_test_pair_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "function l $trbn_test_pair_seen(l %head, l %type, l %a, l %b) {\n@start\n jmp @loop\n@loop\n %pair =l phi @start %head, @next %parent\n %pair_present =w cnel %pair, 0\n jnz %pair_present, @check, @absent\n@check\n %type_slot =l add %pair, 8\n %old_type =l loadl %type_slot\n %same_type =w ceql %old_type, %type\n %a_slot =l add %pair, 16\n %old_a =l loadl %a_slot\n %same_a =w ceql %old_a, %a\n %b_slot =l add %pair, 24\n %old_b =l loadl %b_slot\n %same_b =w ceql %old_b, %b\n %same_values =w and %same_a, %same_b\n %same =w and %same_type, %same_values\n jnz %same, @present, @next\n@next\n %parent =l loadl %pair\n jmp @loop\n@present\n ret 1\n@absent\n ret 0\n}\n")
+end
+
+def emit_test_equal_fields(fields: Array<Integer>, offset: Integer, prefix: String, seen: String, mut output: QbeOutput)
+	mut index := 0
+	fields.each do |type_id|
+		id := prefix + integer_string(index)
+		qbe_output_line(output, " %a_slot" + id + " =l add %a, " + integer_string(offset + index * 8) + "\n %b_slot" + id + " =l add %b, " + integer_string(offset + index * 8) + "\n %a_value" + id + " =l loadl %a_slot" + id + "\n %b_value" + id + " =l loadl %b_slot" + id + "\n %equal" + id + " =l call " + test_equal_symbol(type_id) + "(l %a_value" + id + ", l %b_value" + id + ", l " + seen + ")\n %matches" + id + " =w cnel %equal" + id + ", 0\n jnz %matches" + id + ", @field" + id + ", @no\n@field" + id)
+		index += 1
+	end
+	qbe_output_line(output, " jmp @yes")
+end
+
+def emit_test_equal_node(node: MirTestComparisonNode, mut output: QbeOutput)
+	mut parameters := "l %a, l %b, l %seen"
+	if node.kind == "interface"
+		parameters = "l %left, l %right, l %seen"
+	end
+	qbe_output_line(output, "function l " + test_equal_symbol(node.type_id) + "(" + parameters + ") {\n@start")
+	if node.kind == "interface"
+		qbe_output_line(output, " %a_slot =l add %left, 8\n %a =l loadl %a_slot\n %b_slot =l add %right, 8\n %b =l loadl %b_slot")
+	end
+	mut seen := "%seen"
+	if node.identity
+		qbe_output_line(output, " %same =w ceql %a, %b\n jnz %same, @yes, @nulls\n@nulls\n %a_null =w ceql %a, 0\n %b_null =w ceql %b, 0\n %one_null =w or %a_null, %b_null\n jnz %one_null, @no, @visit\n@visit")
+		qbe_output_line(output, " %visited =l call $trbn_test_pair_seen(l %seen, l " + integer_string(node.type_id) + ", l %a, l %b)\n %already_visited =w cnel %visited, 0\n jnz %already_visited, @yes, @pair\n@pair\n %pair =l alloc8 32\n storel %seen, %pair\n %pair_type =l add %pair, 8\n storel " + integer_string(node.type_id) + ", %pair_type\n %pair_a =l add %pair, 16\n storel %a, %pair_a\n %pair_b =l add %pair, 24\n storel %b, %pair_b")
+		seen = "%pair"
+	end
+	if node.kind == "word"
+		qbe_output_line(output, " %equal =w ceql %a, %b\n jnz %equal, @yes, @no")
+	elsif node.kind == "float"
+		qbe_output_line(output, " %left_float =d cast %a\n %right_float =d cast %b\n %equal =w ceqd %left_float, %right_float\n jnz %equal, @yes, @no")
+	elsif node.kind == "string" || node.kind == "bytes"
+		qbe_output_line(output, " %equal =l call $trbn_string_equal(l %a, l %b)\n %matches =w cnel %equal, 0\n jnz %matches, @yes, @no")
+	elsif node.kind == "nil" || node.kind == "empty"
+		qbe_output_line(output, " jmp @yes")
+	elsif node.kind == "callable"
+		qbe_output_line(output, " jmp @no")
+	elsif node.kind == "alias"
+		qbe_output_line(output, " %equal =l call " + test_equal_symbol(node.children[0]) + "(l %a, l %b, l " + seen + ")\n %matches =w cnel %equal, 0\n jnz %matches, @yes, @no")
+	elsif node.kind == "nullable"
+		emit_test_equal_fields(node.children, 8, "nullable", seen, output)
+	elsif node.kind == "fields"
+		emit_test_equal_fields(node.children, 8, "record", seen, output)
+	elsif node.kind == "array"
+		qbe_output_line(output, " %a_size_slot =l add %a, 8\n %b_size_slot =l add %b, 8\n %size =l loadl %a_size_slot\n %other_size =l loadl %b_size_slot\n %same_size =w ceql %size, %other_size\n jnz %same_size, @data, @no\n@data\n %a_data_slot =l add %a, 24\n %b_data_slot =l add %b, 24\n %a_data =l loadl %a_data_slot\n %b_data =l loadl %b_data_slot\n jmp @loop\n@loop\n %index =l phi @data 0, @next %next\n %done =w ceql %index, %size\n jnz %done, @yes, @element\n@element\n %offset =l mul %index, 8\n %a_element =l add %a_data, %offset\n %b_element =l add %b_data, %offset\n %a_value =l loadl %a_element\n %b_value =l loadl %b_element")
+		qbe_output_line(output, " %equal =l call " + test_equal_symbol(node.children[0]) + "(l %a_value, l %b_value, l " + seen + ")\n %matches =w cnel %equal, 0\n jnz %matches, @next, @no\n@next\n %next =l add %index, 1\n jmp @loop")
+	elsif node.kind == "hash"
+		qbe_output_line(output, " %a_size_slot =l add %a, 8\n %b_size_slot =l add %b, 8\n %size =l loadl %a_size_slot\n %other_size =l loadl %b_size_slot\n %same_size =w ceql %size, %other_size\n jnz %same_size, @capacity, @no\n@capacity\n %empty =w ceql %size, 0\n jnz %empty, @yes, @data\n@data\n %capacity_slot =l add %a, 16\n %capacity =l loadl %capacity_slot\n %keys_slot =l add %a, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n jmp @loop\n@loop\n %index =l phi @data 0, @next %next\n %done =w ceql %index, %capacity\n jnz %done, @yes, @key\n@key\n %offset =l mul %index, 8\n %key_slot =l add %data, %offset\n %key =l loadl %key_slot\n %empty_key =w ceql %key, 0\n %integer_tomb =w ceql %key, -1\n %managed_tomb =w ceql %key, $trbn_hash_tombstone\n %unused =w or %empty_key, %integer_tomb\n %skip =w or %unused, %managed_tomb\n jnz %skip, @next, @lookup\n@lookup\n %position =l call $trbn_hash_slot(l %b, l %key)\n %missing =w csltl %position, 0\n jnz %missing, @no, @value\n@value\n %a_value_slot =l call $trbn_hash_value_address(l %a, l %index)\n %b_value_slot =l call $trbn_hash_value_address(l %b, l %position)\n %a_value =l loadl %a_value_slot\n %b_value =l loadl %b_value_slot")
+		qbe_output_line(output, " %equal =l call " + test_equal_symbol(node.children[0]) + "(l %a_value, l %b_value, l " + seen + ")\n %matches =w cnel %equal, 0\n jnz %matches, @next, @no\n@next\n %next =l add %index, 1\n jmp @loop")
+	elsif node.kind == "enum" || node.kind == "tagged"
+		qbe_output_line(output, " %a_tag_slot =l add %a, 8\n %b_tag_slot =l add %b, 8\n %tag =l loadl %a_tag_slot\n %other_tag =l loadl %b_tag_slot\n %same_tag =w ceql %tag, %other_tag\n jnz %same_tag, @dispatch, @no\n@dispatch")
+		mut tags := node.variants
+		if node.kind == "tagged"
+			tags = node.children
+		end
+		mut index := 0
+		tags.each do |tag|
+			id := integer_string(index)
+			qbe_output_line(output, " %tag" + id + " =w ceql %tag, " + integer_string(tag) + "\n jnz %tag" + id + ", @variant" + id + ", @next_variant" + id + "\n@variant" + id)
+			mut fields := [tag]
+			if node.kind == "enum"
+				fields = node.fields[index]
+			end
+			emit_test_equal_fields(fields, 16, "variant" + id + "_", seen, output)
+			qbe_output_line(output, "@next_variant" + id)
+			index += 1
+		end
+		qbe_output_line(output, " jmp @no")
+	elsif node.kind == "object" || node.kind == "interface"
+		qbe_output_line(output, " %a_header =l loadl %a\n %b_header =l loadl %b\n %a_descriptor =l and %a_header, -2\n %b_descriptor =l and %b_header, -2\n %same_descriptor =w ceql %a_descriptor, %b_descriptor\n jnz %same_descriptor, @dispatch, @no\n@dispatch")
+		mut index := 0
+		node.variants.each do |variant|
+			id := integer_string(index)
+			qbe_output_line(output, " %class" + id + " =w ceql %a_descriptor, $trbn_desc_object" + integer_string(variant) + "\n jnz %class" + id + ", @class" + id + ", @next_class" + id + "\n@class" + id)
+			emit_test_equal_fields(node.fields[index], 8, "class" + id + "_", seen, output)
+			qbe_output_line(output, "@next_class" + id)
+			index += 1
+		end
+		qbe_output_line(output, " jmp @no")
+	end
+	qbe_output_line(output, "@yes\n ret 1\n@no\n ret 0\n}\n")
+end
+
+def emit_test_comparison_runtime(native_module: MirModule, mut output: QbeOutput)
+	mut roots: Array<Integer> := []
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_equal()
+			roots.push(mir_test_value_id(native_module, signature.parameter_types[0]))
+		end
+	end
+	if roots.size() == 0
+		return
+	end
+	plan := mir_test_comparison_plan(native_module, roots)
+	# The independent intrinsic verifier has already rejected missing layouts.
+	emit_test_pair_runtime(output)
+	plan.nodes.each do |node|
+		emit_test_equal_node(node, output)
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_equal()
+			mut storage := "l"
+			mut arguments := "%a, l %b"
+			if mir_storage_name(native_module, signature.parameter_types[0]) == "Float"
+				storage = "d"
+				arguments = "%a_bits, l %b_bits"
+			end
+			qbe_output_line(output, "function l $trbn_test_equal_" + integer_string(signature.id) + "(" + storage + " %a, " + storage + " %b) {\n@start")
+			if storage == "d"
+				qbe_output_line(output, " %a_bits =l cast %a\n %b_bits =l cast %b")
+			end
+			qbe_output_line(output, " %result =l call " + test_equal_symbol(mir_test_value_id(native_module, signature.parameter_types[0])) + "(l " + arguments + ", l 0)\n ret %result\n}\n")
+		end
+	end
+end

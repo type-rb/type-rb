@@ -1,0 +1,35 @@
+def sum(input: Array<Integer>, other: Array<Integer>): Integer
+	mut total := 0
+	mut index := 0
+	while index < input.size()
+		total += input[index]
+		index += 1
+	end
+	return total + other.size()
+end
+
+def nested(input: Array<Integer>, other: Array<Integer>): Integer
+	mut total := 0
+	mut row := 0
+	while row < input.size()
+		mut column := 0
+		while column < input.size()
+			total += input[column]
+			column += 1
+		end
+		total += input[row]
+		row += 1
+	end
+	# A new binding can reuse an earlier local slot without inheriting its proof.
+	mut column := -1
+	total += input[column]
+	return total + other.size()
+end
+
+def main()
+	puts(sum([], []).to_s())
+	puts(sum([7], []).to_s())
+	puts(sum([1, 2, 3], []).to_s())
+	puts(nested([1, 2, 3], []).to_s())
+	return
+end

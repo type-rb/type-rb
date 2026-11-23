@@ -1,0 +1,188 @@
+import { check, emit_qbe } from compiler
+import { mir_literal_fragment, mir_literal_meet, mir_literal_split_fragments, mir_string_splits_equal } from mir/analysis/string_splits
+import { MirLiteralData, MirStringSplit, mir_function_index, mir_module_new } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { mir_test_block_with_cell } from testing/mir/model
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR literal String split") do
+	test("proves loop-carried literals while retaining the canonical operation and roots") do
+		mut state := logical_checked_source("def scan(rounds: Integer): Integer\nline := \"left,right,\"\nmut total := 0\nmut index := 0\nwhile index < rounds\nparts := line.split(\",\")\ntotal += parts.size()\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan(3))\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		plans := state.scalar_mir.string_splits[index]
+		expect(plans.size()).to_equal(1)
+		expect(plans[0].fragments.size()).to_equal(3)
+		expect(plans[0].fragments[0].bytes).to_equal([108, 101, 102, 116])
+		expect(plans[0].fragments[2].points).to_equal(0)
+		expect(state.scalar_mir.instructions[plans[0].instruction].kind).to_equal(60)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := output_source(emit_qbe(state))
+		expect(before.include?("call $trbn_literal_split(l $trbn_split_")).to_be_true()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_string_splits_equal(plans, state.scalar_mir.string_splits[index])).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(output_source(emit_qbe(state))).to_equal(before)
+	end
+
+	test("keeps plans function-local across shared physical instruction spans") do
+		mut state := logical_checked_source("def first(): Integer\nreturn \"a,b\".split(\",\").size()\nend\ndef second(): Integer\nreturn \"c,d\".split(\",\").size()\nend\ndef main()\nputs(first())\nputs(second())\nend\n")
+		expect(check(state)).to_be_true()
+		first := state.scalar_mir.functions[0]
+		second := state.scalar_mir.functions[1]
+		expect(first.block_count).to_equal(second.block_count)
+		mut block := 0
+		while block < first.block_count
+			a := state.scalar_mir.blocks[first.block_start + block]
+			b := state.scalar_mir.blocks[second.block_start + block]
+			expect(a.instruction_count).to_equal(b.instruction_count)
+			state.scalar_mir.blocks[second.block_start + block] = mir_test_block_with_cell(b, 5, a.instruction_start)
+			block += 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.string_splits[0][0].instruction).to_equal(state.scalar_mir.string_splits[1][0].instruction)
+		expect(state.scalar_mir.string_splits[1][0].fragments[0].bytes).to_equal([97])
+		output := output_source(emit_qbe(state))
+		expect(output.include?("data $trbn_split_0_")).to_be_true()
+		expect(output.include?("data $trbn_split_1_")).to_be_true()
+	end
+
+	test("retains unknown inputs mixed joins loop rebindings calls and empty separators") do
+		controls := [
+			"def read(text: String): Integer\nreturn text.split(\",\").size()\nend\n",
+			"def read(flag: Boolean): Integer\nmut text := \"a,b\"\nif flag\ntext = \"c,d,e\"\nend\nreturn text.split(\",\").size()\nend\n",
+			"def read(rounds: Integer): Integer\nmut text := \"a,b\"\nmut index := 0\nmut total := 0\nwhile index < rounds\ntotal += text.split(\",\").size()\ntext = \"c,d,e\"\nindex += 1\nend\nreturn total\nend\n",
+			"def read(text: String, rounds: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < rounds\ntotal += text.split(\",\").size()\nindex += 1\nend\nreturn total\nend\n",
+			"def text(): String\nreturn \"a,b\"\nend\ndef read(): Integer\nreturn text().split(\",\").size()\nend\n",
+			"def read(): Integer\nreturn \"a,b\".split(\"\").size()\nend\n",
+		]
+		controls.each do |source|
+			mut state := logical_checked_source(source + "def main()\nend\n")
+			expect(check(state)).to_be_true()
+			state.scalar_mir.string_splits.each do |plans|
+				expect(plans.size()).to_equal(0)
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(output_source(emit_qbe(state)).include?("function l $trbn_literal_split(")).to_be_false()
+		end
+	end
+
+	test("preserves empty adjacent trailing and nonoverlapping byte fragments") do
+		expect(mir_literal_split_fragments("", ",")).to_equal([MirLiteralData.new(bytes: [], points: 0)])
+		expect(mir_literal_split_fragments(",a,,", ",")).to_equal([MirLiteralData.new(bytes: [], points: 0), MirLiteralData.new(bytes: [97], points: 1), MirLiteralData.new(bytes: [], points: 0), MirLiteralData.new(bytes: [], points: 0)])
+		expect(mir_literal_split_fragments("aaaaa", "aa")).to_equal([MirLiteralData.new(bytes: [], points: 0), MirLiteralData.new(bytes: [], points: 0), MirLiteralData.new(bytes: [97], points: 1)])
+		expect(mir_literal_split_fragments("ab", "long")).to_equal([MirLiteralData.new(bytes: [97, 98], points: 2)])
+		expect(mir_literal_split_fragments("a", "").size()).to_equal(0)
+		mut text := ""
+		mut index := 0
+		while index < 63
+			text += ","
+			index += 1
+		end
+		expect(mir_literal_split_fragments(text, ",").size()).to_equal(64)
+		expect(mir_literal_split_fragments(text + ",", ",").size()).to_equal(0)
+	end
+
+	test("bounds per-operation evaluation and total per-function static growth") do
+		mut text := ""
+		mut index := 0
+		while index < 3000
+			text += "x"
+			index += 1
+		end
+		mut source := "def main()\nline := \"" + text + "\"\nmut total := 0\n"
+		index = 0
+		while index < 10
+			source += "total += line.split(\",\").size()\n"
+			index += 1
+		end
+		mut state := logical_checked_source(source + "puts(total)\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.string_splits[0].size()).to_equal(5)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		while text.size() < 4096
+			text += "x"
+		end
+		expect(mir_literal_split_fragments(text, ",").size()).to_equal(1)
+		expect(mir_literal_split_fragments(text + "x", ",").size()).to_equal(0)
+	end
+
+	test("counts bounded UTF-8 and malformed fragments without crossing separators") do
+		bytes := [65, 0, 194, 162, 226, 130, 172, 240, 159, 152, 128, 255]
+		expect(mir_literal_fragment(bytes, 0, bytes.size()).points).to_equal(6)
+		expect(mir_literal_fragment(bytes, 2, 3)).to_equal(MirLiteralData.new(bytes: [194], points: 1))
+		expect(mir_literal_fragment(bytes, 3, 7)).to_equal(MirLiteralData.new(bytes: [162, 226, 130, 172], points: 2))
+		invalid := [[192, 128], [224, 128, 128], [237, 160, 128], [240, 128, 128, 128], [244, 144, 128, 128], [245, 128, 128, 128]]
+		invalid.each do |value|
+			expect(mir_literal_fragment(value, 0, value.size()).points).to_equal(value.size())
+		end
+		expect(mir_literal_meet(-2, -2)).to_equal(-2)
+		expect(mir_literal_meet(-2, 3)).to_equal(3)
+		expect(mir_literal_meet(3, -1)).to_equal(-1)
+		expect(mir_literal_meet(3, 4)).to_equal(-1)
+	end
+
+	test("rejects raw missing forged stale and malformed fragment plans") do
+		mut raw := mir_module_new()
+		raw.string_splits.push([])
+		expect(verify_mir(raw, false)).to_equal("MIR input cannot supply String split plans")
+		mut mode := 0
+		while mode < 5
+			mut state := logical_checked_source("def main()\nputs(\"a,b\".split(\",\").size())\nend\n")
+			expect(check(state)).to_be_true()
+			mut plan := state.scalar_mir.string_splits[0][0]
+			if mode == 0
+				state.scalar_mir.string_splits[0] = []
+			elsif mode == 1
+				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction + 1, fragments: plan.fragments, first_field: -1, last_field: -1)
+			elsif mode == 2
+				state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction, fragments: [], first_field: -1, last_field: -1)
+			elsif mode == 3
+				plan.fragments[0] = MirLiteralData.new(bytes: [98], points: 1)
+			else
+				plan.fragments[0] = MirLiteralData.new(bytes: [97], points: 2)
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR String split plan differs")
+			mode += 1
+		end
+	end
+
+	test("creates independent mutable Arrays and preserves escaped pieces under collection") do
+		mut state := logical_checked_source("def main()\nline := \"a,b,c,d,e,f,g,h,i,j,\"\nmut previous := line.split(\",\")\nmut round := 0\nwhile round < 12\nmut current := line.split(\",\")\ncurrent[0] = round.to_s()\ncurrent.push(\"tail\")\nputs(previous[0])\nputs(current.size())\nprevious = current\nround += 1\nend\nputs(previous[0])\nputs(previous[10].size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.string_splits[0].size()).to_equal(2)
+		output := output_source(emit_qbe(state))
+		marker := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		mut forced := parts[0] + marker + "\n call $trbn_gc_collect(w 0)" + parts[1]
+		copy := " call $memcpy(l %data, l %fragments, l %copy_bytes)"
+		expect(forced.split(copy).size()).to_equal(2)
+		forced = forced.split(copy).join(" call $trbn_gc_collect(w 0)\n" + copy + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				mut expected := "a\n12\n"
+				mut index := 0
+				while index < 11
+					expected += index.to_s() + "\n12\n"
+					index += 1
+				end
+				expect(actual).to_equal(expected + "11\n0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,65 @@
+import { check } from compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { checked_iteration_require } from frontend/checking/collections/iteration
+import { MirIteration } from mir/model/iteration
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Hash and Range collection MIR") do
+	test("preserves entry snapshots and transfers after erasing source and reordering blocks") do
+		managed_mir_test_fixture("hash-iteration-mir", 8)
+	end
+	test("roots keys and shallow managed values while the original Hash is emptied") do
+		managed_mir_test_fixture("hash-iteration-managed-mir", 18)
+	end
+	test("materializes fresh Range arrays without stepping past portable extrema") do
+		managed_mir_test_fixture("range-materialization-mir", 8)
+	end
+	test("checks Hash receiver and key identities in retained iteration plans") do
+		mut mode := 0
+		while mode < 3
+			mut state := logical_checked_source("def main()\n{a: 1}.each { |_key, value| puts(value) }\nend\n")
+			expect(check(state)).to_be_true()
+			plan := state.callables.checked[0].iterations[0]
+			mut kind := plan.source_kind
+			mut element := plan.element_type
+			mut receiver := plan.type_name
+			if mode == 0
+				kind = 1
+			elsif mode == 1
+				element = "Integer"
+			else
+				receiver = "Array<String>"
+			end
+			state.callables.checked[0].iterations[0] = MirIteration.new(syntax: plan.syntax, parent_loop: plan.parent_loop, source_kind: kind, type_name: receiver, element_type: element)
+			checked_iteration_require(state, plan.syntax.origin, -1)
+			expect(has_diagnostic(state)).to_be_true()
+			mode += 1
+		end
+	end
+	test("requires live roots for both entry snapshots before the body starts") do
+		mut state := logical_checked_source("def main()\nvalues := {a: [1], b: [2]}\nvalues.each { |_key, value| puts(value[0]) }\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		plan := state.scalar_mir.root_plans[0]
+		mut point := 0
+		mut found := false
+		while point < plan.instructions.size()
+			instruction := state.scalar_mir.instructions[plan.instructions[point]]
+			if instruction.kind == 30 && instruction.payload == 11
+				found = true
+				break
+			end
+			point += 1
+		end
+		expect(found).to_be_true()
+		expect(plan.roots[point].size() >= 2).to_be_true()
+		mut roots := plan.roots
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

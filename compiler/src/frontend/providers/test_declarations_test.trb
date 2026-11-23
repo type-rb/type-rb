@@ -1,0 +1,42 @@
+import { declare_test_signatures, test_provider_kind } from frontend/providers/test_declarations
+import { GenericFunction, GenericParameter } from frontend/types/generic_model
+import { compiler_new } from state/state
+import { standard_source_test, standard_source_test_host } from state/standard_source_kinds
+import { store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Owned test provider signatures") do
+	test("keeps nominal public wrappers separate from private assertions") do
+		mut state := compiler_new(256)
+		store_integer(state.standard_modules, 0, standard_source_test())
+		store_integer(state.standard_modules, 1, standard_source_test_host())
+		declare_test_signatures(state, 0)
+		declare_test_signatures(state, 1)
+		expect(state.type_resolution.generic_functions.size()).to_equal(14)
+		expect(test_provider_kind(state, 0)).to_equal(1)
+		expect(test_provider_kind(state, 1)).to_equal(2)
+		expect(test_provider_kind(state, 2)).to_equal(3)
+		expect(test_provider_kind(state, 3)).to_equal(10)
+		expect(test_provider_kind(state, 9)).to_equal(16)
+		expect(test_provider_kind(state, -1)).to_equal(0)
+		expect(test_provider_kind(state, 10)).to_equal(17)
+		expect(test_provider_kind(state, 11)).to_equal(18)
+		expect(test_provider_kind(state, 12)).to_equal(19)
+		expect(test_provider_kind(state, 13)).to_equal(20)
+		expect(test_provider_kind(state, 14)).to_equal(0)
+	end
+
+	test("rejects authored lookalikes and changed assertion parameter contracts") do
+		mut state := compiler_new(256)
+		store_integer(state.standard_modules, 0, standard_source_test_host())
+		declare_test_signatures(state, 0)
+		store_integer(state.standard_modules, 0, 0)
+		expect(test_provider_kind(state, 0)).to_equal(0)
+		store_integer(state.standard_modules, 0, standard_source_test_host())
+		row := state.type_resolution.generic_functions[0]
+		mut parameters := row.parameters
+		parameters[1] = GenericParameter.new(name: "expected", type_name: "String", line: 1, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+		state.type_resolution.generic_functions[0] = GenericFunction.new(receiver_type: row.receiver_type, name: row.name, source_id: row.source_id, line: row.line, type_parameters: row.type_parameters, parameters: parameters, result_type: row.result_type, body_start: row.body_start, body_finish: row.body_finish)
+		expect(test_provider_kind(state, 0)).to_equal(0)
+	end
+end

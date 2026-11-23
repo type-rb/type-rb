@@ -1,0 +1,129 @@
+import { native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { Instant } from trb/std/time
+
+record RecoveryGenerationError
+	phase: String
+	message: String
+	status: Integer? = nil
+	stdout: String = ""
+	stderr: String = ""
+end
+
+record RecoveryGenerationReport
+	qbe_ir_path: String
+	assembly_path: String
+	output_path: String
+	compiler_seconds: Float
+	qbe_seconds: Float
+	link_seconds: Float
+end
+
+def build_recovery_generation(
+		seed_path: String,
+		compiler_source: String,
+		qbe_command: String,
+		cc_command: String,
+		workspace: String,
+		generation: String,
+	): Result<RecoveryGenerationReport, RecoveryGenerationError>
+	source_path := workspace + "/" + generation + ".source.trb"
+	case native_write_text(source_path, compiler_source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-write-source", message: error.operation + ": " + error.message)
+		)
+	end
+	compiler_started := Instant.now()
+	compiler_process := case Process.run(seed_path, ["--source-file", "emit-qbe", source_path])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-compiler", message: error.operation + ": " + error.message)
+		)
+	end
+	compiler_seconds := Instant.now().duration_since(compiler_started).total_seconds()
+	if !compiler_process.success
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(
+				phase: generation + "-compiler",
+				message: "the seed compiler did not emit QBE",
+				status: compiler_process.status,
+				stdout: compiler_process.stdout,
+				stderr: compiler_process.stderr,
+			)
+		)
+	end
+	qbe_ir_path := workspace + "/" + generation + ".ssa"
+	assembly_path := workspace + "/" + generation + ".s"
+	output_path := workspace + "/" + generation
+	case native_write_text(qbe_ir_path, compiler_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-write-qbe", message: error.operation + ": " + error.message)
+		)
+	end
+	qbe_started := Instant.now()
+	qbe_process := case Process.run(qbe_command, ["-t", "arm64_apple", qbe_ir_path])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-qbe", message: error.operation + ": " + error.message)
+		)
+	end
+	qbe_seconds := Instant.now().duration_since(qbe_started).total_seconds()
+	if !qbe_process.success
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(
+				phase: generation + "-qbe",
+				message: "QBE rejected the compiler output",
+				status: qbe_process.status,
+				stdout: qbe_process.stdout,
+				stderr: qbe_process.stderr,
+			)
+		)
+	end
+	case native_write_text(assembly_path, qbe_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-write-assembly", message: error.operation + ": " + error.message)
+		)
+	end
+	link_started := Instant.now()
+	link_process := case Process.run(cc_command, [assembly_path, "-Wl,-dead_strip", "-o", output_path])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(phase: generation + "-link", message: error.operation + ": " + error.message)
+		)
+	end
+	link_seconds := Instant.now().duration_since(link_started).total_seconds()
+	if !link_process.success
+		return Result<RecoveryGenerationReport, RecoveryGenerationError>::Err(
+			RecoveryGenerationError.new(
+				phase: generation + "-link",
+				message: "the system linker rejected the compiler assembly",
+				status: link_process.status,
+				stdout: link_process.stdout,
+				stderr: link_process.stderr,
+			)
+		)
+	end
+	return Result<RecoveryGenerationReport, RecoveryGenerationError>::Ok(
+		RecoveryGenerationReport.new(
+			qbe_ir_path: qbe_ir_path,
+			assembly_path: assembly_path,
+			output_path: output_path,
+			compiler_seconds: compiler_seconds,
+			qbe_seconds: qbe_seconds,
+			link_seconds: link_seconds,
+		)
+	)
+end

@@ -1,0 +1,103 @@
+# Checked operator plans combine an operand family with a source operator.
+# Power uses the last arithmetic slot; logical plans preserve short-circuit RHS.
+# Offsets and ordered ranges are part of this encoding, not MIR opcodes.
+
+def checked_operator_invalid(): Integer
+	return 0
+end
+
+def checked_integer_operator_offset(): Integer
+	return 16
+end
+
+def checked_integer_add(): Integer
+	return 17
+end
+
+def checked_integer_subtract(): Integer
+	return 18
+end
+
+def checked_integer_multiply(): Integer
+	return 19
+end
+
+def checked_integer_divide(): Integer
+	return 20
+end
+
+def checked_integer_remainder(): Integer
+	return 21
+end
+
+def checked_integer_power(): Integer
+	return 22
+end
+
+def checked_float_operator_offset(): Integer
+	return 32
+end
+
+def checked_float_add(): Integer
+	return 33
+end
+
+def checked_float_subtract(): Integer
+	return 34
+end
+
+def checked_float_multiply(): Integer
+	return 35
+end
+
+def checked_float_divide(): Integer
+	return 36
+end
+
+def checked_float_power(): Integer
+	return 37
+end
+
+def checked_comparison_operator_offset(): Integer
+	return 48
+end
+
+def checked_compare_equal(): Integer
+	return 54
+end
+
+def checked_compare_not_equal(): Integer
+	return 55
+end
+
+def checked_compare_less(): Integer
+	return 56
+end
+
+def checked_compare_less_equal(): Integer
+	return 57
+end
+
+def checked_compare_greater(): Integer
+	return 58
+end
+
+def checked_compare_greater_equal(): Integer
+	return 59
+end
+
+def checked_logical_operator_offset(): Integer
+	return 64
+end
+
+def checked_string_concat(): Integer
+	return 65
+end
+
+def checked_logical_or(): Integer
+	return 76
+end
+
+def checked_logical_and(): Integer
+	return 77
+end

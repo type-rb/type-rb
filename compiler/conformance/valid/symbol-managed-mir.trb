@@ -1,0 +1,22 @@
+record Stored
+	text: String
+end
+
+def make(): String
+	return :before + "/" + :after
+end
+
+def main()
+	mut values := [make(), :"#{literal}"]
+	saved := Stored.new(text: values.join(:"/"))
+	callback := fn(): String
+		values[0] = :changed
+		return :"[" + saved.text + :"]"
+	end
+	puts(callback())
+	puts(values[0])
+	mut lookup := {:saved => saved }
+	lookup[:next] = Stored.new(text: callback())
+	puts(lookup[:saved].text)
+	puts(lookup[:next].text)
+end

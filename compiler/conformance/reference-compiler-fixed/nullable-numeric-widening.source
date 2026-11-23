@@ -1,0 +1,11 @@
+def widen(value: Integer?): Float?
+return value
+end
+def main()
+a := widen(nil)
+puts(a == nil)
+b := widen(7)
+if b != nil
+puts(b.to_i())
+end
+end

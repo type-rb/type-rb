@@ -1,0 +1,165 @@
+import { declare_web_context, web_context_kind } from frontend/providers/web_context
+import { web_context_primitive, web_context_primitive_definition } from frontend/resolution/web_context_intrinsics
+import { standard_source_web_context } from state/standard_source_kinds
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { GenericFunction } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { append_import, parse_module } from frontend/syntax/parser
+import { official_source_kind } from project/official_catalog
+import { import_kind_module } from state/import_kinds
+import { CompilerState, compiler_new } from state/state
+import { load_integer, sparse_integer_at, store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { MirCall, MirInstruction } from mir/model/module
+import { mir_op_object_copy, mir_op_object_identity } from mir/model/instructions
+import { describe, expect, test } from trb/std/test
+
+def web_context_test_state(): CompilerState
+	source := "import trb/std/result\nrecord ContextValueError\nkey: String\nend\nclass Request\nend\nclass ContextKey<T>\nreadonly @name: String\ndef initialize(name: String)\n@name = name\nend\nend\nclass Context\nreadonly @request: Request\nreadonly @_path_parameters: Hash<String, String>\nreadonly @_trb_context_state: Any? := nil\ndef initialize(*, request: Request, path_parameters: Hash<String, String>)\n@request = request\n@_path_parameters = path_parameters\nend\ndef with_request(request: Request): Context\nreturn Context.new(request: request, path_parameters: @_path_parameters)\nend\nend\ndef main()\nkey := ContextKey<Integer>.new(\"number\")\ncontext := Context.new(request: Request.new(), path_parameters: {})\nupdated := context.with(key, 42).with_request(Request.new())\ncase updated.fetch(key)\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.key)\nend\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, official_source_kind("trb/web"))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	append_import(state, "trb/internal/context_storage", "", "", import_kind_module(), 1)
+	store_integer(state.module_graph.module_import_counts, 0, load_integer(state.module_graph.module_import_counts, 0) + 1)
+	declare_web_context(state, 0)
+	expect_compiler_phase(state, "resolve", resolve(state))
+	return state
+end
+
+describe("Checked Web context storage") do
+	test("does not grant provider or primitive authority to unowned declarations") do
+		mut state := web_context_test_state()
+		store_integer(state.standard_modules, 0, 0)
+		mut source := 0
+		while source < state.module_graph.module_count[0]
+			if sparse_integer_at(state.standard_modules, source) == standard_source_web_context()
+				store_integer(state.standard_modules, source, 0)
+			end
+			source += 1
+		end
+		mut definition := 0
+		while definition < state.type_resolution.generic_functions.size()
+			expect(web_context_kind(state, definition)).to_equal(0)
+			expect(web_context_primitive_definition(state, definition)).to_equal(0)
+			definition += 1
+		end
+	end
+
+	test("independently rejects understated immutable-copy allocation effects") do
+		mut state := web_context_test_state()
+		expect_compiler_phase(state, "check", check(state))
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.calls.size()
+			row := state.scalar_mir.calls[index]
+			if !changed && web_context_primitive(state, row.callee) >= 5
+				state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("owns typed bodies and emits from source-erased verified MIR") do
+		mut state := web_context_test_state()
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut copies := 0
+		mut identities := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == mir_op_object_copy()
+				copies += 1
+			elsif instruction.kind == mir_op_object_identity()
+				identities += 1
+			end
+		end
+		expect(copies > 0).to_be_true()
+		expect(identities > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("refuses mismatched clone fields after source erasure") do
+		mut state := web_context_test_state()
+		expect_compiler_phase(state, "check", check(state))
+		intrinsic_mir_erase(state)
+		mut index := 0
+		mut changed := false
+		while index < state.scalar_mir.instructions.size()
+			row := state.scalar_mir.instructions[index]
+			if !changed && row.kind == mir_op_object_copy()
+				state.scalar_mir.instructions[index] = MirInstruction.new(kind: row.kind, result: row.result, first: row.first, second: row.second, payload: 1, failure: row.failure, source_id: row.source_id, line: row.line)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("refuses changed identity operand and result shape") do
+		mut state := web_context_test_state()
+		expect_compiler_phase(state, "check", check(state))
+		mut index := 0
+		mut changed := false
+		while index < state.scalar_mir.instructions.size()
+			row := state.scalar_mir.instructions[index]
+			if !changed && row.kind == mir_op_object_identity()
+				state.scalar_mir.instructions[index] = MirInstruction.new(kind: row.kind, result: row.result, first: row.first, second: row.second, payload: 1, failure: row.failure, source_id: row.source_id, line: row.line)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("rejects malformed provider and primitive signatures") do
+		mut state := web_context_test_state()
+		mut index := 0
+		mut changed := 0
+		while index < state.type_resolution.generic_functions.size()
+			if web_context_kind(state, index) > 0 || web_context_primitive_definition(state, index) > 0
+				row := state.type_resolution.generic_functions[index]
+				state.type_resolution.generic_functions[index] = GenericFunction.new(receiver_type: row.receiver_type, name: row.name, source_id: row.source_id, line: row.line, type_parameters: row.type_parameters, parameters: row.parameters, result_type: "Integer", body_start: row.body_start, body_finish: row.body_finish)
+				expect(web_context_kind(state, index)).to_equal(0)
+				expect(web_context_primitive_definition(state, index)).to_equal(0)
+				changed += 1
+			end
+			index += 1
+		end
+		expect(changed).to_equal(9)
+	end
+
+	test("does not alter shared tokens during speculative specialization") do
+		parent := web_context_test_state()
+		tokens := parent.source_tokens.token_count[0]
+		aliases := parent.type_resolution.type_aliases.size()
+		controls := parent.parsed.controls.size()
+		mut fork := generic_program_fork(parent)
+		mut index := 0
+		mut checked := 0
+		while index < fork.type_resolution.generic_functions.size()
+			if web_context_kind(fork, index) > 0 && web_context_kind(fork, index) < 3
+				expect(instantiate_generic_function(fork, index, ["Integer"], 0) >= 0).to_be_true()
+				checked += 1
+			end
+			index += 1
+		end
+		expect(checked).to_equal(2)
+		expect(parent.source_tokens.token_count[0]).to_equal(tokens)
+		expect(parent.type_resolution.type_aliases.size()).to_equal(aliases)
+		expect(parent.parsed.controls.size()).to_equal(controls)
+	end
+end

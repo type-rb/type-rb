@@ -1,0 +1,60 @@
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { compiler_new, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler diagnostic ownership") do
+	test("keeps first-error publication visible through state aliases") do
+		mut state := compiler_new(0)
+		mut shared := state
+		expect(has_diagnostic(state)).to_be_false()
+		expect(has_diagnostic(shared)).to_be_false()
+		shared.module_graph.active_module[0] = 7
+		diagnostic(shared, "TRBN4001", 12, "first error")
+		expect(has_diagnostic(state)).to_be_true()
+		expect(has_diagnostic(shared)).to_be_true()
+		state.module_graph.active_module[0] = 9
+		diagnostic(state, "TRBN4002", 99, "later error")
+		expect(load_string(shared.diagnostics.codes, 0)).to_equal("TRBN4001")
+		expect(load_integer(shared.diagnostics.lines, 0)).to_equal(12)
+		expect(load_string(shared.diagnostics.messages, 0)).to_equal("first error")
+		expect(load_integer(shared.diagnostics.modules, 0)).to_equal(7)
+	end
+
+	test("keeps independent state diagnostics empty until their own publication") do
+		mut first := compiler_new(1)
+		mut second := compiler_new(1)
+		diagnostic(first, "TRBN4001", 2, "first state")
+		expect(has_diagnostic(first)).to_be_true()
+		expect(has_diagnostic(second)).to_be_false()
+		diagnostic(second, "TRBN4002", 3, "second state")
+		expect(has_diagnostic(second)).to_be_true()
+		expect(load_string(first.diagnostics.messages, 0)).to_equal("first state")
+		expect(load_string(second.diagnostics.messages, 0)).to_equal("second state")
+	end
+
+	test("starts a template fork with independent diagnostics after a parent error") do
+		mut state := compiler_new(1)
+		diagnostic(state, "TRBN4001", 2, "parent error")
+		mut fork := generic_program_fork(state)
+		expect(has_diagnostic(state)).to_be_true()
+		expect(has_diagnostic(fork)).to_be_false()
+		fork.module_graph.active_module[0] = 5
+		diagnostic(fork, "TRBN4002", 3, "fork error")
+		expect(has_diagnostic(fork)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("parent error")
+		expect(load_integer(state.diagnostics.modules, 0)).to_equal(0)
+		expect(load_string(fork.diagnostics.messages, 0)).to_equal("fork error")
+		expect(load_integer(fork.diagnostics.modules, 0)).to_equal(5)
+	end
+
+	test("does not publish a fork error into its clean parent or sibling") do
+		mut state := compiler_new(1)
+		mut first := generic_program_fork(state)
+		second := generic_program_fork(state)
+		diagnostic(first, "TRBN4001", 2, "fork error")
+		expect(has_diagnostic(first)).to_be_true()
+		expect(has_diagnostic(state)).to_be_false()
+		expect(has_diagnostic(second)).to_be_false()
+	end
+end

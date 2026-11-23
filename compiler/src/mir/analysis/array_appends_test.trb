@@ -1,0 +1,165 @@
+import { emit_qbe } from compiler
+import { mir_op_array_new } from mir/model/instructions
+import { mir_terminator_jump } from mir/model/control
+import { mir_function_index, mir_instruction_with_payload } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def reserved_map_source(): String
+	return "def mapped(values: Array<Integer>): Array<Integer>\nreturn values.map { |value| value * 3 }\nend\ndef main()\nempty: Array<Integer> := []\nputs(mapped(empty).size())\nresult := mapped([1, 2, 3])\nputs(result.size())\nputs(result[0])\nputs(result[-1])\nend\n"
+end
+
+def reserved_push_count(state: CompilerState, function_id: Integer): Integer
+	mut count := 0
+	state.scalar_mir.array_loops[mir_function_index(state.scalar_mir, function_id)].each do |plan|
+		count += plan.reserved_pushes.size()
+	end
+	return count
+end
+
+describe("Reserved Array append proof") do
+	test("removes the unreachable growth edge from a full reserved Integer map") do
+		state := array_loop_mir_check(reserved_map_source())
+		expect(reserved_push_count(state, 0)).to_equal(1)
+		caller := control_test_output(emit_qbe(state)).split("function l $trbnf0")[1].split("\n}\n")[0]
+		expect(caller.include?("call $trbn_array_new_reserved(")).to_be_true()
+		expect(caller.include?("call $trbn_array_grow_paced(")).to_be_false()
+	end
+
+	test("rederives the proof after source erasure reoptimization and block reordering") do
+		mut state := array_loop_mir_check(reserved_map_source())
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(reserved_push_count(state, 0)).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n3\n3\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects a stale append proof after changing the reservation to a valid cap") do
+		mut state := array_loop_mir_check(reserved_map_source())
+		expect(reserved_push_count(state, 0)).to_equal(1)
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_array_new() && instruction.first >= 0
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, 256)
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(reserved_push_count(state, 0)).to_equal(0)
+	end
+
+	test("retains growth for capped selection unreserved outputs and live receiver mutation") do
+		sources := [
+			"def scan(values: Array<Integer>): Array<Integer>\nreturn values.select { |value| value > 0 }\nend\ndef main()\nend\n",
+			"def scan(values: Array<Integer>): Array<Integer>\nmut output: Array<Integer> := []\nmut index := 0\nwhile index < values.size()\noutput.push(values[index])\nindex += 1\nend\nreturn output\nend\ndef main()\nend\n",
+			"def scan(mut values: Array<Integer>): Array<Integer>\nreturn values.map do |value|\nvalues.push(4)\nvalue + 1\nend\nend\ndef main()\nend\n",
+			"def scan(values: Array<Float>): Array<Float>\nreturn values.map { |value| value + 0.5 }\nend\ndef main()\nend\n",
+		]
+		sources.each do |source|
+			state := array_loop_mir_check(source)
+			expect(reserved_push_count(state, 0)).to_equal(0)
+		end
+	end
+
+	test("does not count aliased output bindings as separate reserved arrays") do
+		source := "def scan(values: Array<Integer>): Array<Integer>\nmut output: Array<Integer> := []\nmut view := output\nmut index := 0\nwhile index < values.size()\noutput.push(values[index])\nview.push(values[index])\nindex += 1\nend\nreturn output\nend\ndef main()\nend\n"
+		mut state := array_loop_mir_check(source)
+		function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)]
+		input := state.scalar_mir.arguments[function.parameter_start]
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_array_new()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, input)
+			end
+			index += 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(reserved_push_count(state, 0)).to_equal(0)
+	end
+
+	test("requires an advancing backedge after every reserved append") do
+		mut state := array_loop_mir_check(reserved_map_source())
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		mut induction := -1
+		mut slot := -1
+		function := state.scalar_mir.functions[function_index]
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[block_index]
+			if block.id == plan.header
+				mut index := block.instruction_start
+				while index < block.instruction_start + block.instruction_count
+					instruction := state.scalar_mir.instructions[index]
+					if instruction.result == block.condition
+						induction = instruction.first
+					end
+					index += 1
+				end
+				index = 0
+				while index < block.parameter_count
+					if state.scalar_mir.arguments[block.parameter_start + index] == induction
+						slot = index
+					end
+					index += 1
+				end
+			end
+			block_index += 1
+		end
+		expect(slot >= 0).to_be_true()
+		block_index = function.block_start
+		while block_index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[block_index]
+			if block.id != plan.preheader && block.terminator == mir_terminator_jump() && block.first_target == plan.header
+				state.scalar_mir.arguments[block.first_argument_start + slot] = induction
+			end
+			block_index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(reserved_push_count(state, 0)).to_equal(0)
+	end
+
+	test("keeps live transform behavior and managed captures under collection pressure") do
+		managed_mir_test_fixture("array-transforms-live", 4)
+		managed_mir_test_fixture("array-transforms-managed", 4)
+	end
+end

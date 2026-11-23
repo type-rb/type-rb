@@ -1,0 +1,13 @@
+def endpoint(): Integer
+	return 1 / 0
+end
+
+def later(): Integer
+	puts("unexpected RHS")
+	return 2
+end
+
+def main()
+	span := 1..endpoint()
+	span.each { |value| puts(value) }
+end

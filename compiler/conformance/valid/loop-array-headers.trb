@@ -1,0 +1,97 @@
+def condition(mut values: Array<Integer>, index: Integer): Boolean
+	values.push(index + 10)
+	return index < 3
+end
+
+def sum(values: Array<Integer>): Integer
+	mut total := 0
+	mut index := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 40
+		values.push(index)
+		index += 1
+	end
+	mut other := values
+	index = 0
+	while index < values.size()
+		other[index] += 1
+		index += 1
+	end
+	puts(sum(values).to_s())
+
+	# Each inner loop enters after growth and must load the current header.
+	mut round := 0
+	mut total := 0
+	while round < 40
+		values.push(round)
+		index = 0
+		while index < values.size()
+			total += values[-1]
+			index += 1
+		end
+		round += 1
+	end
+	puts(total.to_s())
+
+	# Adjacent loops must not retain a header across rebinding or other growth.
+	values = [5, 6]
+	other = values
+	index = 0
+	while index < values.size()
+		values[index] += 2
+		index += 1
+	end
+	other.push(20)
+	index = 0
+	while index < values.size()
+		values[index] += 1
+		index += 1
+	end
+	puts(sum(values).to_s())
+
+	# The condition itself can change a header on every evaluation.
+	index = 0
+	while condition(values, index)
+		puts(values[-1].to_s())
+		index += 1
+	end
+	puts(values[-1].to_s())
+
+	# A selected header is safe to load even when no element is accessed.
+	mut empty: Array<Integer> := []
+	index = 0
+	while index < empty.size()
+		empty[index] = 1
+		index += 1
+	end
+	puts(empty.size().to_s())
+
+	# Lexically recycled slots belong to different Arrays.
+	if total > 0
+		mut local := [2]
+		index = 0
+		while index < local.size()
+			local[index] += 3
+			index += 1
+		end
+		puts(local[0].to_s())
+	end
+	if total > 0
+		mut local := [7]
+		index = 0
+		while index < local.size()
+			local[index] += 4
+			index += 1
+		end
+		puts(local[0].to_s())
+	end
+end

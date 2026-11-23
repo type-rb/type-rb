@@ -1,44 +1,34 @@
 # Getting started
 
-TypeRB is an alpha, statically typed programming language that compiles the
-same portable source to Go, Ruby, and TypeScript.
+TypeRB is a statically typed programming language. The v0.5 alpha series
+introduces the Native compiler as the default `trb` and retains the Go
+implementation as `trbg`.
 
-## Try in the browser
+## Install
 
-Use [A Tour of TypeRB](https://type-rb.github.io/tour/) for guided executable
-lessons, or open the [TypeRB Playground](https://type-rb.github.io/play/) to
-evaluate, format, and transpile isolated scratch source in the browser.
-
-## Install the compiler
-
-Install the current stable release with Homebrew:
+On Arm64 macOS or Linux:
 
 ```sh
 brew install type-rb/tap/trb
-trb version
+trb --version
 ```
 
-To compile the current stable release from source, use Go 1.27:
+If you already installed `trb` with Homebrew, run
+`brew upgrade type-rb/tap/trb`. Native executable builds use the system C
+toolchain. See the [Native command guide](native-cli.md) for the available
+commands and modes in this alpha.
+
+The Go compiler provides the Go, Ruby, and TypeScript workflows used in the
+rest of this guide. Install it on Arm64 or x86-64 macOS or Linux, then use
+`trbg` wherever the examples invoke the Go compiler:
 
 ```sh
-go install github.com/type-rb/type-rb/cmd/trb@latest
-trb version
+brew install type-rb/tap/trbg
+trbg --version
 ```
 
-Container builds can copy the compiler from the matching release image:
-
-Replace `X.Y.Z` with the TypeRB release to install:
-
-```dockerfile
-ARG TYPERB_VERSION=X.Y.Z
-FROM ghcr.io/type-rb/trb:${TYPERB_VERSION} AS typerb
-
-FROM golang:1.27-bookworm
-COPY --from=typerb /usr/local/bin/trb /usr/local/bin/trb
-```
-
-See [TypeRB in containers](containers.md) for complete build and runtime
-layouts for each target.
+Both commands can be installed together. See the [alpha release](https://github.com/type-rb/type-rb/releases/tag/v0.5.0-alpha.1)
+for platform archives and known feature gaps.
 
 ## Run a standalone program
 

@@ -1,0 +1,296 @@
+import { mir_op_deadline_checkpoint } from mir/model/instructions
+import { emit_mir_roots } from backend/qbe/emit/roots
+import { mir_numeric_default_mode, mir_numeric_nonnegative_power_division_mode, mir_numeric_nonnegative_power_remainder_mode, mir_numeric_power_division_mode, mir_numeric_power_remainder_mode, mir_numeric_reciprocal_remainder_mode, mir_numeric_remainder_test_mode } from mir/model/numeric_modes
+import { mir_scalar_inline_add, mir_scalar_inline_multiply } from mir/model/scalar_operators
+import { binary_add, binary_divide, binary_multiply, binary_not_equal, unary_negate, unary_not } from frontend/types/operators
+import { mir_op_direct_call, mir_op_object_field, mir_op_object_store, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_scalar_unary } from mir/model/instructions
+import { emit_mir_object_instruction } from backend/qbe/emit/objects
+import { emit_mir_call } from backend/qbe/emit/calls
+import { mir_storage_type_name } from mir/model/types
+import { integer_string, number_without_underscores } from support/literals
+import { MirInstruction, MirNumericPlan, mir_block_index, mir_function_index } from mir/model/module
+import { mir_numeric_position } from mir/analysis/numeric
+import { QbeEmitContext, QbeValue, emit_address, emit_label, emit_temporary, emitted_value, qbe_type } from backend/qbe/context
+import { emit_checked_integer_operation, emit_constant_integer_remainder, emit_power_integer_division, emit_power_integer_remainder, lower_binary_operand } from backend/qbe/emit/numeric
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+def emit_mir_scalar_instruction(
+		state: CompilerState,
+		function_index: Integer,
+		instruction: MirInstruction,
+		operands: Array<String>,
+		types: Array<String>,
+		plan: MirNumericPlan,
+		position: Integer,
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		safe: Boolean,
+	): QbeValue
+	if instruction.kind == mir_op_deadline_checkpoint()
+		qbe_output_line(output, "\tcall $trbn_deadline_checkpoint()")
+		return emitted_value("", "Void")
+	end
+	if instruction.kind == mir_op_direct_call()
+		return emit_mir_call(state, instruction, operands, context, output)
+	end
+	mut mode := mir_numeric_default_mode()
+	mut divisor := 0
+	mut reciprocal := 0
+	mut shift := 0
+	if position >= 0
+		selection := plan.operations[position]
+		mode = selection.mode
+		divisor = selection.divisor
+		reciprocal = selection.reciprocal
+		shift = selection.shift
+	end
+	result_type := types[instruction.result]
+	mut result := emitted_value("", result_type)
+	if instruction.kind == mir_op_scalar_literal()
+		literal := number_without_underscores(state.scalar_mir.literal_texts[instruction.payload])
+		mut operand := literal
+		if result_type == "Boolean"
+			operand = "0"
+			if literal == "true"
+				operand = "1"
+			end
+		end
+		if result_type == "Float"
+			operand = "d_" + literal
+		end
+		result = emitted_value(operand, result_type)
+	else
+		if instruction.kind == mir_op_scalar_binary()
+			left_id := instruction.first
+			right_id := instruction.second
+			mut operator_id := instruction.payload
+			if operator_id == mir_scalar_inline_multiply()
+				operator_id = binary_multiply()
+			end
+			if operator_id == mir_scalar_inline_add()
+				operator_id = binary_add()
+			end
+			mut operand := ""
+			if mode == mir_numeric_reciprocal_remainder_mode()
+				operand = emit_constant_integer_remainder(context, output, operands[left_id], divisor, reciprocal, shift)
+			elsif mode == mir_numeric_power_remainder_mode() || mode == mir_numeric_nonnegative_power_remainder_mode()
+				operand = emit_power_integer_remainder(context, output, operands[left_id], divisor, mode == mir_numeric_nonnegative_power_remainder_mode())
+			elsif mode == mir_numeric_power_division_mode() || mode == mir_numeric_nonnegative_power_division_mode()
+				mut nonnegative := safe
+				if mode == mir_numeric_nonnegative_power_division_mode()
+					nonnegative = true
+				end
+				operand = emit_power_integer_division(context, output, operands[left_id], divisor, shift, nonnegative)
+			elsif mode == mir_numeric_remainder_test_mode()
+				masked := emit_temporary(context)
+				operand = emit_temporary(context)
+				mut comparison := "ceql"
+				if operator_id == binary_not_equal()
+					comparison = "cnel"
+				end
+				qbe_output_line(output, "\t" + masked + " =l and " + operands[plan.operations[position].tested_value] + ", " + integer_string(divisor - 1))
+				qbe_output_line(output, "\t" + operand + " =l " + comparison + " " + masked + ", 0")
+			elsif safe && result_type == "Integer"
+				operand = emit_temporary(context)
+				mut operation := "add"
+				if operator_id == binary_multiply()
+					operation = "mul"
+				elsif operator_id == binary_divide()
+					operation = "udiv"
+				end
+				qbe_output_line(output, "\t" + operand + " =l " + operation + " " + operands[left_id] + ", " + operands[right_id])
+			else
+				operand = lower_binary_operand(
+					context,
+					output,
+					operator_id,
+					emitted_value(operands[left_id], types[left_id]),
+					emitted_value(operands[right_id], types[right_id]),
+					result_type,
+					mode,
+				)
+			end
+			result = emitted_value(operand, result_type)
+		else
+			if instruction.kind == mir_op_scalar_unary()
+				value_id := instruction.first
+				if instruction.payload == unary_not()
+					operand := emit_temporary(context)
+					qbe_output_line(output, "\t" + operand + " =l ceql " + operands[value_id] + ", 0")
+					result = emitted_value(operand, "Boolean")
+				else
+					if instruction.payload == unary_negate()
+						operand := emit_temporary(context)
+						if result_type == "Float"
+							qbe_output_line(output, "\t" + operand + " =d sub d_-0.0, " + operands[value_id])
+						else
+							emit_checked_integer_operation(context, output, operand, "0", operands[value_id], "sub", false)
+						end
+						result = emitted_value(operand, result_type)
+					else
+						result = emitted_value(operands[value_id], result_type)
+					end
+				end
+			else
+				value_id := instruction.first
+				operand := emit_temporary(context)
+				qbe_output_line(output, "\t" + operand + " =d sltof " + operands[value_id])
+				result = emitted_value(operand, "Float")
+			end
+		end
+	end
+	return result
+end
+
+def emit_scalar_mir_body(
+		state: CompilerState,
+		function_index: Integer,
+		argument_operands: Array<String>,
+		argument_types: Array<String>,
+		plan: MirNumericPlan,
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		safe: Boolean,
+	): QbeValue
+	function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, function_index)]
+	mut operands: Array<String> := []
+	mut types: Array<String> := []
+	mut value_types: Array<Integer> := []
+	state.scalar_mir.values.each do |value|
+		if value.function_id == function_index
+			while operands.size() <= value.id
+				operands.push("")
+				types.push("")
+				value_types.push(0)
+			end
+			types[value.id] = mir_storage_type_name(state.scalar_mir, value.type_id)
+			value_types[value.id] = value.type_id
+		end
+	end
+	mut index := 0
+	while index < argument_operands.size()
+		id := state.scalar_mir.arguments[function.parameter_start + index]
+		operands[id] = argument_operands[index]
+		types[id] = argument_types[index]
+		index += 1
+	end
+	block := state.scalar_mir.blocks[mir_block_index(state.scalar_mir, function, function.entry_block)]
+	index = block.instruction_start
+	finish := index + block.instruction_count
+	while index < finish
+		instruction := state.scalar_mir.instructions[index]
+		mut result := emitted_value("", "Void")
+		if instruction.kind == mir_op_object_field() || instruction.kind == mir_op_object_store()
+			result = emit_mir_object_instruction(state, value_types, instruction, operands, context, output)
+		else
+			result = emit_mir_scalar_instruction(state, function_index, instruction, operands, types, plan, mir_numeric_position(plan, index), context, output, safe)
+		end
+		if instruction.result >= 0
+			operands[instruction.result] = result.operand
+		end
+		index += 1
+	end
+	return emitted_value(operands[block.return_value], types[block.return_value])
+end
+
+def emit_scalar_mir(
+		state: CompilerState,
+		function_index: Integer,
+		argument_operands: Array<String>,
+		argument_types: Array<String>,
+		plan: MirNumericPlan,
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		inline: Boolean,
+	): QbeValue
+	function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, function_index)]
+	if !inline || function.integer_guard == 0
+		return emit_scalar_mir_body(state, function_index, argument_operands, argument_types, plan, context, output, false)
+	end
+	mut combined := argument_operands[0]
+	mut index := 1
+	while index < argument_operands.size()
+		merged := emit_temporary(context)
+		qbe_output_line(output, "\t" + merged + " =l or " + combined + ", " + argument_operands[index])
+		combined = merged
+		index += 1
+	end
+	valid := emit_temporary(context)
+	fast := emit_label(context)
+	slow := emit_label(context)
+	complete := emit_label(context)
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + valid + " =w cultl " + combined + ", " + integer_string(function.integer_guard))
+	qbe_output_branch(output, valid, fast, slow)
+	qbe_output_line(output, slow)
+	checked := emit_scalar_mir_body(state, function_index, argument_operands, argument_types, plan, context, output, false)
+	mut width := "l"
+	if checked.type_name == "Float"
+		width = "d"
+	end
+	qbe_output_line(output, "\t" + result + " =" + width + " copy " + checked.operand)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, fast)
+	unchecked := emit_scalar_mir_body(state, function_index, argument_operands, argument_types, plan, context, output, true)
+	qbe_output_line(output, "\t" + result + " =" + width + " copy " + unchecked.operand)
+	qbe_output_line(output, complete)
+	return emitted_value(result, checked.type_name)
+end
+
+# Selection and receiver ownership have already been independently verified in
+# MIR. These guards test exact witness tables and preserve the original call.
+def emit_guarded_interface_mir(
+		state: CompilerState,
+		instruction: MirInstruction,
+		operands: Array<String>,
+		types: Array<String>,
+		plans: Array<MirNumericPlan>,
+		roots: Array<Integer>,
+		root_prefix: Integer,
+		root_capacity: Integer,
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+	): QbeValue
+	call := state.scalar_mir.calls[instruction.payload]
+	mut arguments: Array<String> := []
+	mut argument_types: Array<String> := []
+	mut argument := 0
+	while argument < call.argument_count
+		id := state.scalar_mir.arguments[call.argument_start + argument]
+		arguments.push(operands[id])
+		argument_types.push(types[id])
+		argument += 1
+	end
+	table_slot := emit_address(context, output, arguments[0], 16)
+	table := emit_temporary(context)
+	qbe_output_line(output, "\t" + table + " =l loadl " + table_slot)
+	receiver_slot := emit_address(context, output, arguments[0], 8)
+	receiver := emit_temporary(context)
+	qbe_output_line(output, "\t" + receiver + " =l loadl " + receiver_slot)
+	arguments[0] = receiver
+	argument_types[0] = "Address"
+	result := emit_temporary(context)
+	complete := emit_label(context)
+	width := qbe_type(types[instruction.result])
+	plans.each do |plan|
+		valid := emit_temporary(context)
+		matched := emit_label(context)
+		next_guard := emit_label(context)
+		qbe_output_line(output, "\t" + valid + " =w ceql " + table + ", $trbn_interface_table_" + integer_string(plan.witness))
+		qbe_output_branch(output, valid, matched, next_guard)
+		qbe_output_line(output, matched)
+		value := emit_scalar_mir_body(state, plan.function_id, arguments, argument_types, plan, context, output, false)
+		qbe_output_line(output, "\t" + result + " =" + width + " copy " + value.operand)
+		qbe_output_line(output, "\tjmp " + complete)
+		qbe_output_line(output, next_guard)
+	end
+	# Every selected MIR alternative has a verified scalar no-allocation body.
+	# Only the unchanged interface fallback needs the original live-before roots.
+	emit_mir_roots(roots, root_prefix, root_capacity, operands, context, output)
+	fallback := emit_mir_call(state, instruction, operands, context, output)
+	qbe_output_line(output, "\t" + result + " =" + width + " copy " + fallback.operand)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, complete)
+	return emitted_value(result, types[instruction.result])
+end

@@ -1,0 +1,338 @@
+import { decode_recovery_scalar_snapshot } from scalar/snapshot
+import { build_recovery_scalar_executable } from scalar/toolchain
+import { decode_recovery_aggregate_snapshot } from aggregate/snapshot
+import { build_recovery_aggregate_executable } from aggregate/toolchain
+import { decode_bootstrap_snapshot, decode_recovery_managed_snapshot } from managed/snapshot
+import { build_compiler_recovery_executable, build_recovery_managed_executable, build_recovery_managed_instrumented_executable } from managed/toolchain
+import { build_recovery_generation } from driver/generation
+import { build_matched_go_compiler } from driver/matched_go
+import { RecoveryCompilerSources, read_compiler_recovery_sources, write_compiler_recovery_sources } from compiler/source
+import { native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { Instant } from trb/std/time
+
+def _recovery_scalar_driver_usage(): String
+	return "usage: type-rb-native REFERENCE_TRB CONFIG QBE CC WORKSPACE OUTPUT\n       type-rb-native aggregate REFERENCE_TRB CONFIG QBE CC WORKSPACE OUTPUT\n       type-rb-native managed REFERENCE_TRB CONFIG QBE CC WORKSPACE OUTPUT\n       type-rb-native managed-stats REFERENCE_TRB CONFIG QBE CC WORKSPACE OUTPUT\n       type-rb-native recovery-seed REFERENCE_TRB COMPILER_ENTRY QBE CC WORKSPACE OUTPUT\n       type-rb-native compiler-generation SEED COMPILER_ENTRY QBE CC WORKSPACE GENERATION\n       type-rb-native matched-go-compiler REFERENCE_TRB COMPILER_ENTRY WORKSPACE"
+end
+
+def _read_recovery_driver_sources(path: String): RecoveryCompilerSources?
+	case read_compiler_recovery_sources(path)
+	when Result::Ok(sources)
+		return sources
+	when Result::Err(message)
+		puts("compiler-source: " + message)
+		return nil
+	end
+end
+
+def _run_recovery_seed_driver(arguments: Array<String>)
+	sources := _read_recovery_driver_sources(arguments[2])
+	if sources == nil
+		return
+	end
+	standalone_path := arguments[5] + "/compiler.trb"
+	case write_compiler_recovery_sources(sources, arguments[5])
+	when Result::Ok(_unit)
+	when Result::Err(message)
+		puts("compiler-source: " + message)
+		return
+	end
+	snapshot_started := Instant.now()
+	snapshot_process := case Process.run(
+			arguments[1],
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "4", standalone_path],
+		)
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	snapshot_seconds := Instant.now().duration_since(snapshot_started).total_seconds()
+	if !snapshot_process.success
+		puts("snapshot: reference compiler rejected the source")
+		puts(snapshot_process.stderr)
+		return
+	end
+	case native_write_text(arguments[5] + "/snapshot.json", snapshot_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	decode_started := Instant.now()
+	native_module := case decode_bootstrap_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		puts("decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message)
+		return
+	end
+	decode_seconds := Instant.now().duration_since(decode_started).total_seconds()
+	case build_compiler_recovery_executable(
+			native_module,
+			arguments[3],
+			arguments[4],
+			arguments[5],
+			arguments[6],
+		)
+	when Result::Ok(report)
+		puts("compiler-phase,snapshot," + snapshot_seconds.to_s())
+		puts("compiler-phase,decode," + decode_seconds.to_s())
+		puts("compiler-phase,emit," + report.emit_seconds.to_s())
+		puts("compiler-phase,qbe," + report.qbe_seconds.to_s())
+		puts("compiler-phase,link," + report.link_seconds.to_s())
+	when Result::Err(error)
+		puts("build: " + error.phase + ": " + error.message)
+	end
+	return
+end
+
+def _run_recovery_generation_driver(arguments: Array<String>)
+	sources := _read_recovery_driver_sources(arguments[2])
+	if sources == nil
+		return
+	end
+	case build_recovery_generation(
+			arguments[1],
+			sources.flattened,
+			arguments[3],
+			arguments[4],
+			arguments[5],
+			arguments[6],
+		)
+	when Result::Ok(report)
+		puts("compiler-phase,compiler," + report.compiler_seconds.to_s())
+		puts("compiler-phase,qbe," + report.qbe_seconds.to_s())
+		puts("compiler-phase,link," + report.link_seconds.to_s())
+	when Result::Err(error)
+		puts("build: " + error.phase + ": " + error.message)
+		puts(error.stderr)
+	end
+	return
+end
+
+def _run_matched_go_driver(arguments: Array<String>)
+	sources := _read_recovery_driver_sources(arguments[2])
+	if sources == nil
+		return
+	end
+	case build_matched_go_compiler(arguments[1], sources.flattened, arguments[3])
+	when Result::Ok(path)
+		puts("matched-go-compiler," + path)
+	when Result::Err(error)
+		puts("matched-go: " + error.phase + ": " + error.message)
+		if !error.stderr.empty?()
+			puts(error.stderr)
+		end
+	end
+	return
+end
+
+def _run_recovery_managed_driver(arguments: Array<String>, report_runtime: Boolean)
+	snapshot_started := Instant.now()
+	snapshot_process := case Process.run(
+			arguments[1],
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "4", "--config", arguments[2]],
+		)
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	snapshot_seconds := Instant.now().duration_since(snapshot_started).total_seconds()
+	if !snapshot_process.success
+		puts("snapshot: reference compiler rejected the source")
+		puts(snapshot_process.stderr)
+		return
+	end
+	snapshot_path := arguments[5] + "/snapshot.json"
+	case native_write_text(snapshot_path, snapshot_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	decode_started := Instant.now()
+	native_module := case decode_recovery_managed_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		puts("decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message)
+		return
+	end
+	decode_seconds := Instant.now().duration_since(decode_started).total_seconds()
+	mut build_result := build_recovery_managed_executable(
+		native_module,
+		arguments[3],
+		arguments[4],
+		arguments[5],
+		arguments[6],
+	)
+	if report_runtime
+		build_result = build_recovery_managed_instrumented_executable(
+			native_module,
+			arguments[3],
+			arguments[4],
+			arguments[5],
+			arguments[6],
+		)
+	end
+	case build_result
+	when Result::Ok(report)
+		puts("managed-phase,snapshot," + snapshot_seconds.to_s())
+		puts("managed-phase,decode," + decode_seconds.to_s())
+		puts("managed-phase,emit," + report.emit_seconds.to_s())
+		puts("managed-phase,qbe," + report.qbe_seconds.to_s())
+		puts("managed-phase,link," + report.link_seconds.to_s())
+	when Result::Err(error)
+		puts("build: " + error.phase + ": " + error.message)
+	end
+	return
+end
+
+def _run_recovery_scalar_driver(arguments: Array<String>)
+	snapshot_started := Instant.now()
+	snapshot_process := case Process.run(
+			arguments[0],
+			["compiler", "bootstrap-snapshot", "--config", arguments[1]],
+		)
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	snapshot_seconds := Instant.now().duration_since(snapshot_started).total_seconds()
+	if !snapshot_process.success
+		puts("snapshot: reference compiler rejected the source")
+		puts(snapshot_process.stderr)
+		return
+	end
+	snapshot_path := arguments[4] + "/snapshot.json"
+	case native_write_text(snapshot_path, snapshot_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	decode_started := Instant.now()
+	native_module := case decode_recovery_scalar_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		puts("decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message)
+		return
+	end
+	decode_seconds := Instant.now().duration_since(decode_started).total_seconds()
+	case build_recovery_scalar_executable(
+			native_module,
+			arguments[2],
+			arguments[3],
+			arguments[4],
+			arguments[5],
+		)
+	when Result::Ok(report)
+		puts("scalar-phase,snapshot," + snapshot_seconds.to_s())
+		puts("scalar-phase,decode," + decode_seconds.to_s())
+		puts("scalar-phase,emit," + report.emit_seconds.to_s())
+		puts("scalar-phase,qbe," + report.qbe_seconds.to_s())
+		puts("scalar-phase,link," + report.link_seconds.to_s())
+	when Result::Err(error)
+		puts("build: " + error.phase + ": " + error.message)
+	end
+	return
+end
+
+def _run_recovery_aggregate_driver(arguments: Array<String>)
+	snapshot_started := Instant.now()
+	snapshot_process := case Process.run(
+			arguments[1],
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "3", "--config", arguments[2]],
+		)
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	snapshot_seconds := Instant.now().duration_since(snapshot_started).total_seconds()
+	if !snapshot_process.success
+		puts("snapshot: reference compiler rejected the source")
+		puts(snapshot_process.stderr)
+		return
+	end
+	snapshot_path := arguments[5] + "/snapshot.json"
+	case native_write_text(snapshot_path, snapshot_process.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		puts("snapshot: " + error.operation + ": " + error.message)
+		return
+	end
+	decode_started := Instant.now()
+	native_module := case decode_recovery_aggregate_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		puts("decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message)
+		return
+	end
+	decode_seconds := Instant.now().duration_since(decode_started).total_seconds()
+	case build_recovery_aggregate_executable(
+			native_module,
+			arguments[3],
+			arguments[4],
+			arguments[5],
+			arguments[6],
+		)
+	when Result::Ok(report)
+		puts("aggregate-phase,snapshot," + snapshot_seconds.to_s())
+		puts("aggregate-phase,decode," + decode_seconds.to_s())
+		puts("aggregate-phase,emit," + report.emit_seconds.to_s())
+		puts("aggregate-phase,qbe," + report.qbe_seconds.to_s())
+		puts("aggregate-phase,link," + report.link_seconds.to_s())
+	when Result::Err(error)
+		puts("build: " + error.phase + ": " + error.message)
+	end
+	return
+end
+
+def main()
+	arguments := Process.argv()
+	if arguments.size() == 4
+		if arguments[0] == "matched-go-compiler"
+			_run_matched_go_driver(arguments)
+			return
+		end
+	end
+	if arguments.size() == 6
+		_run_recovery_scalar_driver(arguments)
+		return
+	end
+	if arguments.size() == 7
+		if arguments[0] == "aggregate"
+			_run_recovery_aggregate_driver(arguments)
+			return
+		end
+		if arguments[0] == "managed"
+			_run_recovery_managed_driver(arguments, false)
+			return
+		end
+		if arguments[0] == "managed-stats"
+			_run_recovery_managed_driver(arguments, true)
+			return
+		end
+		if arguments[0] == "recovery-seed"
+			_run_recovery_seed_driver(arguments)
+			return
+		end
+		if arguments[0] == "compiler-generation"
+			_run_recovery_generation_driver(arguments)
+			return
+		end
+	end
+	puts(_recovery_scalar_driver_usage())
+	return
+end

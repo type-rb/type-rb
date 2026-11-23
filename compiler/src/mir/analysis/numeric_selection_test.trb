@@ -1,0 +1,135 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { compiler_test_instruction_with_cell, occurrence_count, output_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("selects a verified guarded Integer multiply for scalar MIR in a managed loop") do
+		source := "def product(left: Integer, right: Integer): Integer\n\treturn left * right\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tmut index := 0\n\twhile index < 1\n\t\tvalue := product(index, index - 1)\n\t\tindex += value + 1\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(function_index >= 0).to_be_true()
+		function := state.scalar_mir.functions[function_index]
+		block := state.scalar_mir.blocks[function.block_start]
+		instruction_index := block.instruction_start
+		expect(state.scalar_mir.instructions[instruction_index].kind).to_equal(7)
+		expect(state.scalar_mir.instructions[instruction_index].payload).to_equal(12)
+		qbe := output_source(emit_qbe(state))
+		expect(occurrence_count(qbe, " =w cultl ")).to_equal(1)
+		expect(qbe.include?(", 67108864")).to_be_true()
+		expect(occurrence_count(qbe, "call $trbn_integer_mul")).to_equal(2)
+
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 4, 15)
+		expect(verify_mir(state.scalar_mir, true)).to_equal(
+			"MIR scalar binary type differs",
+		)
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 4, 12)
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 5, -1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR failure target does not exist")
+	end
+
+	test("checks expanded Integer addition without a returning runtime call") do
+		source := "def sum(left: Integer, right: Integer): Integer\n\treturn left + right\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tlefts := [1]\n\trights := [2]\n\tmut index := 0\n\twhile index < 1\n\t\tvalue := sum(lefts[index], rights[index])\n\t\tindex += value\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(function_index >= 0).to_be_true()
+		function := state.scalar_mir.functions[function_index]
+		block := state.scalar_mir.blocks[function.block_start]
+		instruction_index := block.instruction_start
+		expect(state.scalar_mir.instructions[instruction_index].kind).to_equal(7)
+		expect(state.scalar_mir.instructions[instruction_index].payload).to_equal(13)
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?(", -9007199254740991")).to_be_true()
+		expect(qbe.include?("call $trbn_integer_add(l ")).to_be_false()
+
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 4, 15)
+		expect(verify_mir(state.scalar_mir, true)).to_equal(
+			"MIR scalar binary type differs",
+		)
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 4, 13)
+		state.scalar_mir.instructions[instruction_index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[instruction_index], 5, -1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR failure target does not exist")
+	end
+
+	test("shares checked Integer addition and subtraction failure in one function") do
+		source := "def combined(left: Integer, right: Integer): Integer\n\tfirst := left + right\n\treturn first - right\nend\n\ndef main()\n\tputs(combined(3, 2).to_s())\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("call $trbn_integer_add(l ")).to_be_false()
+		expect(qbe.include?("call $trbn_integer_subtract(l ")).to_be_false()
+		expect(occurrence_count(qbe, "@integer_range_failure\n")).to_equal(1)
+	end
+
+	test("routes dynamic Integer multiplication through the bounded checked entry") do
+		source := "def multiply(left: Integer, right: Integer): Integer\n\treturn left * right\nend\n\ndef main()\n\t_value := multiply(2, 3)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("call $trbn_integer_mul(l ")).to_be_true()
+		expect(qbe.include?("%c =l or %left, %right")).to_be_true()
+		expect(qbe.include?("%u =l shr %c, 26")).to_be_true()
+		expect(qbe.include?("%u_nonzero =w cnel %u, 0\n\tjnz %u_nonzero, @left_sign, @multiply")).to_be_true()
+		expect(occurrence_count(qbe, "%right_zero =w ceql %right, 0")).to_equal(1)
+	end
+
+	test("omits only the impossible lower check for bounded nonnegative literal addition") do
+		source := "def add_right(value: Integer): Integer\n\treturn value + 1\nend\n\ndef add_left(value: Integer): Integer\n\treturn 1 + value\nend\n\ndef add_limit(value: Integer): Integer\n\treturn value + 1024\nend\n\ndef add_large(value: Integer): Integer\n\treturn value + 1025\nend\n\ndef add_dynamic(left: Integer, right: Integer): Integer\n\treturn left + right\nend\n\ndef main()\n\tfirst := add_right(1)\n\tsecond := add_left(first)\n\tthird := add_limit(second)\n\tfourth := add_large(third)\n\t_value := add_dynamic(fourth, 1)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(
+			occurrence_count(
+				qbe,
+				"%t0 =l add %p0, 1\n" +
+				"\t%t1 =w csgtl %t0, 9007199254740991\n" +
+				"\tjnz %t1, @integer_range_failure, @l0",
+			),
+		).to_equal(2)
+		expect(
+			qbe.include?(
+				"%t0 =l add %p0, 1024\n" +
+				"\t%t1 =w csgtl %t0, 9007199254740991\n" +
+				"\tjnz %t1, @integer_range_failure, @l0",
+			),
+		).to_be_true()
+		expect(
+			qbe.include?(
+				"%t0 =l add %p0, 1025\n" +
+				"\t%t1 =w csgtl %t0, 9007199254740991\n" +
+				"\tjnz %t1, @integer_range_failure, @l0",
+			),
+		).to_be_true()
+		expect(
+			qbe.include?(
+				"%t0 =l add %p0, %p1\n" +
+				"\t%t1 =l add %t0, 9007199254740991\n" +
+				"\t%t2 =w cugtl %t1, 18014398509481982",
+			),
+		).to_be_true()
+	end
+end

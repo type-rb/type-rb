@@ -1,0 +1,26 @@
+module Outer
+	VALUE := 3
+	module Inner
+		VALUE := 5
+		class Base
+			VALUE := 7
+			def value(): Integer
+				return VALUE
+			end
+			def captured(): () -> Integer
+				return fn(): Integer
+					return VALUE
+				end
+			end
+		end
+		class Child < Base
+			VALUE := 11
+		end
+	end
+end
+def main()
+	child := Outer::Inner::Child.new()
+	puts(child.value())
+	reader := child.captured()
+	puts(reader())
+end

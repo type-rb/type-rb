@@ -1,0 +1,228 @@
+import { mir_function_control } from mir/model/control
+import { mir_op_array_position, mir_op_array_store, mir_op_callable_new, mir_op_direct_call, mir_op_enum_new, mir_op_hash_new, mir_op_hash_set, mir_op_indirect_call, mir_op_record_new, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_singleton_literal, mir_op_string_compare, mir_op_string_concat, mir_op_string_index, mir_op_string_literal, mir_op_string_replace } from mir/model/instructions
+import { mir_count_definition, mir_identity_key } from mir/analysis/identities
+import { MirFunction, MirModule, MirStringConcat } from mir/model/module
+
+record MirStringChain
+	instruction: Integer
+	parent: Integer
+	side: Integer
+end
+
+def mir_concat_argument_uses(native_module: MirModule, function_id: Integer, start: Integer, count: Integer, mut uses: Hash<String, Integer>)
+	mut index := start
+	while index < start + count
+		mir_count_definition(uses, function_id, native_module.arguments[index])
+		index += 1
+	end
+end
+
+# Count occurrences, rather than liveness membership: two operands in one
+# operation are two uses. Edge arguments and returns also escape the chain.
+def mir_concat_uses(native_module: MirModule, function: MirFunction): Hash<String, Integer>
+	mut uses: Hash<String, Integer> := {}
+	mut at := function.block_start
+	while at < function.block_start + function.block_count
+		block := native_module.blocks[at]
+		mir_count_definition(uses, function.id, block.condition)
+		mir_count_definition(uses, function.id, block.return_value)
+		mir_concat_argument_uses(native_module, function.id, block.first_argument_start, block.first_argument_count, uses)
+		mir_concat_argument_uses(native_module, function.id, block.second_argument_start, block.second_argument_count, uses)
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			kind := instruction.kind
+			if kind == mir_op_indirect_call()
+				mir_count_definition(uses, function.id, instruction.first)
+				mir_concat_argument_uses(native_module, function.id, instruction.payload, instruction.second, uses)
+			elsif kind == mir_op_direct_call()
+				call := native_module.calls[instruction.payload]
+				mir_concat_argument_uses(native_module, function.id, call.argument_start, call.argument_count, uses)
+			elsif kind == mir_op_record_new() || kind == mir_op_enum_new() || kind == mir_op_callable_new()
+				mir_concat_argument_uses(native_module, function.id, instruction.first, instruction.second, uses)
+			elsif kind != mir_op_scalar_literal() && kind != mir_op_string_literal() && kind != mir_op_singleton_literal() && kind != mir_op_hash_new()
+				mir_count_definition(uses, function.id, instruction.first)
+				if kind == mir_op_scalar_binary() || kind == mir_op_string_concat() || kind == mir_op_string_compare() || kind == mir_op_string_index() || kind >= mir_op_array_position()
+					mir_count_definition(uses, function.id, instruction.second)
+				end
+			end
+			if kind == mir_op_array_store() || kind == mir_op_hash_set() || kind == mir_op_string_replace()
+				mir_count_definition(uses, function.id, instruction.payload)
+			end
+			index += 1
+		end
+		at += 1
+	end
+	return uses
+end
+
+# Only literal materialization is transparent. A zero effect summary alone
+# does not establish that an arbitrary operation may move past allocation.
+def mir_concat_literal_interval(native_module: MirModule, start: Integer, finish: Integer): Boolean
+	mut index := start
+	while index < finish
+		kind := native_module.instructions[index].kind
+		if kind != mir_op_scalar_literal() && kind != mir_op_string_literal() && kind != mir_op_singleton_literal()
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# Same-block, single-use trees are flattened only along a chain with literal
+# instructions between its nodes. Original instructions/types/origins remain
+# intact; this independently verified plan owns their effective operation.
+def mir_function_string_concats(native_module: MirModule, function: MirFunction): Array<MirStringConcat>
+	mut result: Array<MirStringConcat> := []
+	if function.kind != mir_function_control()
+		return result
+	end
+	mut candidates := 0
+	mut at := function.block_start
+	while at < function.block_start + function.block_count
+		block := native_module.blocks[at]
+		mut count := 0
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			if native_module.instructions[index].kind == mir_op_string_concat()
+				count += 1
+			end
+			index += 1
+		end
+		if count > 1
+			candidates += 1
+		end
+		at += 1
+	end
+	if candidates == 0
+		return result
+	end
+	uses := mir_concat_uses(native_module, function)
+	at = function.block_start
+	while at < function.block_start + function.block_count
+		block := native_module.blocks[at]
+		mut chains: Array<MirStringChain> := []
+		mut consumed: Array<Boolean> := []
+		mut producers: Hash<String, Integer> := {}
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_string_concat()
+				mut parent := -1
+				mut side := 0
+				mut operand := 0
+				while operand < 2 && parent == -1
+					mut value := instruction.first
+					if operand == 1
+						value = instruction.second
+					end
+					key := mir_identity_key(function.id, value)
+					if producers.key?(key) && uses.key?(key) && uses[key] == 1
+						candidate := producers[key]
+						chain := chains[candidate]
+						previous := chain.instruction
+						if mir_concat_literal_interval(native_module, previous + 1, index)
+							parent = candidate
+							side = operand
+						end
+					end
+					operand += 1
+				end
+				if parent >= 0
+					consumed[parent] = true
+				end
+				producers[mir_identity_key(function.id, instruction.result)] = chains.size()
+				chains.push(MirStringChain.new(instruction: index, parent: parent, side: side))
+				consumed.push(false)
+			end
+			index += 1
+		end
+		index = 0
+		while index < chains.size()
+			chain := chains[index]
+			if !consumed[index] && chain.parent >= 0
+				mut instructions: Array<Integer> := []
+				mut fragments: Array<Integer> := []
+				mut suffix: Array<Integer> := []
+				mut cursor := index
+				while cursor >= 0
+					node := chains[cursor]
+					instruction := native_module.instructions[node.instruction]
+					instructions.push(node.instruction)
+					if node.parent == -1
+						fragments.push(instruction.first)
+						fragments.push(instruction.second)
+					elsif node.side == 0
+						suffix.push(instruction.second)
+					else
+						fragments.push(instruction.first)
+					end
+					cursor = node.parent
+				end
+				cursor = suffix.size() - 1
+				while cursor >= 0
+					fragments.push(suffix[cursor])
+					cursor -= 1
+				end
+				mut step := instructions.size() - 1
+				while step >= 0
+					mut operands: Array<Integer> := []
+					if step == 0
+						operands = fragments
+					end
+					row := MirStringConcat.new(instruction: instructions[step], fragments: operands)
+					result.push(row)
+					mut position := result.size() - 1
+					while position > 0 && result[position - 1].instruction > row.instruction
+						result[position] = result[position - 1]
+						position -= 1
+					end
+					result[position] = row
+					step -= 1
+				end
+			end
+			index += 1
+		end
+		at += 1
+	end
+	return result
+end
+
+def mir_string_concat_index(plans: Array<MirStringConcat>, instruction: Integer): Integer
+	mut low := 0
+	mut high := plans.size()
+	while low < high
+		middle := low + (high - low) / 2
+		if plans[middle].instruction < instruction
+			low = middle + 1
+		else
+			high = middle
+		end
+	end
+	if low < plans.size() && plans[low].instruction == instruction
+		return low
+	end
+	return -1
+end
+
+def mir_string_concats_equal(left: Array<MirStringConcat>, right: Array<MirStringConcat>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].instruction != right[index].instruction || left[index].fragments.size() != right[index].fragments.size()
+			return false
+		end
+		mut fragment := 0
+		while fragment < left[index].fragments.size()
+			if left[index].fragments[fragment] != right[index].fragments[fragment]
+				return false
+			end
+			fragment += 1
+		end
+		index += 1
+	end
+	return true
+end

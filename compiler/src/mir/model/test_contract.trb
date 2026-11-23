@@ -1,0 +1,74 @@
+import { mir_type_composite_start } from mir/model/type_ids
+import { MirModule, mir_type_id } from mir/model/module
+import { mir_semantic_type_name } from mir/model/types
+
+def test_adapter_capture(): Integer
+	return 60
+end
+
+def test_adapter_fail(): Integer
+	return 61
+end
+
+def test_outcome_names(): Array<String>
+	return ["failed", "message", "path", "line", "column"]
+end
+
+def test_outcome_types(): Array<String>
+	return ["Boolean", "String", "String", "Integer", "Integer"]
+end
+
+# The opaque capture outcome has an independently checked managed layout. A
+# same-sized arbitrary record cannot be returned by this runtime boundary.
+def mir_test_outcome(native_module: MirModule, name: String): Boolean
+	native_module.records.each do |definition|
+		if mir_semantic_type_name(native_module, definition.type_id) == name
+			if definition.name != "TestOutcome" || definition.field_count != 5
+				return false
+			end
+			names := test_outcome_names()
+			types := test_outcome_types()
+			mut index := 0
+			while index < 5
+				field := native_module.fields[definition.field_start + index]
+				if field.name != names[index] || mir_semantic_type_name(native_module, field.type_id) != types[index]
+					return false
+				end
+				index += 1
+			end
+			return true
+		end
+	end
+	return false
+end
+
+def test_adapter_equal(): Integer
+	return 62
+end
+
+def mir_test_value_id(native_module: MirModule, name: String): Integer
+	primitive := mir_type_id(name)
+	if primitive > 0
+		return primitive
+	end
+	mut index := 0
+	while index < native_module.types.size()
+		if native_module.types[index].name == name
+			return index + mir_type_composite_start()
+		end
+		index += 1
+	end
+	return 0
+end
+def test_adapter_inspect(): Integer
+	return 64
+end
+
+def test_adapter_finish(): Integer
+	return 63
+end
+
+# Exact scalar predicate: 0 nil, 1 true, 2 false, 3 every other value.
+def test_adapter_scalar_kind(): Integer
+	return 65
+end

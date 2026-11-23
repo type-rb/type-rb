@@ -1,0 +1,126 @@
+import { mir_string_query_contains, mir_string_query_first, mir_string_query_last, mir_string_query_prefix, mir_string_query_suffix } from mir/model/operation_modes
+import { string_method_chars, string_method_codepoints, string_method_downcase, string_method_empty, string_method_end_with, string_method_include, string_method_index, string_method_lstrip, string_method_none, string_method_replace_all, string_method_reverse, string_method_rindex, string_method_rstrip, string_method_slice, string_method_split, string_method_start_with, string_method_strip, string_method_upcase } from frontend/types/method_kinds
+import { mir_op_nullable_inject, mir_op_nullable_none, mir_op_string_case, mir_op_string_query, mir_op_string_sequence, mir_op_string_size, mir_op_string_slice, mir_op_string_split, mir_op_string_trim } from mir/model/instructions
+import { CheckedValue, checked_mir_value, scalar_mir_binary, scalar_mir_literal } from frontend/checking/body/values
+import { mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { mir_checked_nullable } from mir/lowering/nullable
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+def string_method_kind(name: String): Integer
+	if name == "empty?"
+		return string_method_empty()
+	elsif name == "include?"
+		return string_method_include()
+	elsif name == "start_with?"
+		return string_method_start_with()
+	elsif name == "end_with?"
+		return string_method_end_with()
+	elsif name == "index"
+		return string_method_index()
+	elsif name == "rindex"
+		return string_method_rindex()
+	end
+	if name == "codepoints"
+		return string_method_codepoints()
+	elsif name == "chars"
+		return string_method_chars()
+	elsif name == "reverse"
+		return string_method_reverse()
+	elsif name == "slice"
+		return string_method_slice()
+	elsif name == "strip"
+		return string_method_strip()
+	elsif name == "lstrip"
+		return string_method_lstrip()
+	elsif name == "rstrip"
+		return string_method_rstrip()
+	elsif name == "split"
+		return string_method_split()
+	elsif name == "replace_all"
+		return string_method_replace_all()
+	elsif name == "upcase"
+		return string_method_upcase()
+	elsif name == "downcase"
+		return string_method_downcase()
+	end
+	return string_method_none()
+end
+
+def string_method_arity(kind: Integer): Integer
+	if kind == string_method_replace_all()
+		return 2
+	end
+	if (kind >= string_method_include() && kind <= string_method_rindex()) || kind == string_method_slice() || kind == string_method_split()
+		return 1
+	end
+	return 0
+end
+
+def string_method_argument_type(kind: Integer): String
+	if kind == string_method_slice()
+		return "Range<Integer>"
+	end
+	return "String"
+end
+
+# Index search returns a code-point offset or -1 internally. Predicate modes
+# return zero or -1 and compare literal bytes. Public missing results
+# are explicit optional values; predicates and boxing stay in verified MIR.
+def mir_string_method(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, receiver: CheckedValue, argument: CheckedValue, origin: Integer): CheckedValue
+	if kind >= string_method_upcase()
+		return mir_checked_string_operation(state, locals, mir_op_string_case(), checked_mir_value(receiver), -1, kind - string_method_upcase(), "String", origin)
+	end
+	if kind == string_method_split()
+		return mir_checked_string_operation(state, locals, mir_op_string_split(), checked_mir_value(receiver), checked_mir_value(argument), 0, "Array<String>", origin)
+	end
+	if kind >= string_method_strip()
+		return mir_checked_string_operation(state, locals, mir_op_string_trim(), checked_mir_value(receiver), -1, kind - string_method_strip(), "String", origin)
+	end
+	if kind == string_method_slice()
+		return mir_checked_string_operation(state, locals, mir_op_string_slice(), checked_mir_value(receiver), checked_mir_value(argument), 0, "String", origin)
+	end
+	if kind >= string_method_codepoints()
+		mut result_type := "Array<Integer>"
+		if kind == string_method_chars()
+			result_type = "Array<String>"
+		elsif kind == string_method_reverse()
+			result_type = "String"
+		end
+		return mir_checked_string_operation(state, locals, mir_op_string_sequence(), checked_mir_value(receiver), -1, kind - string_method_codepoints(), result_type, origin)
+	end
+	mir_control_prepare(state, locals)
+	zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	if kind == string_method_empty()
+		size := mir_checked_string_operation(state, locals, mir_op_string_size(), checked_mir_value(receiver), -1, 0, "Integer", origin)
+		return scalar_mir_binary(state, locals, "==", size, zero, "Boolean", origin)
+	end
+	mut mode := mir_string_query_first()
+	if kind == string_method_include()
+		mode = mir_string_query_contains()
+	end
+	if kind == string_method_rindex()
+		mode = mir_string_query_last()
+	elsif kind == string_method_start_with()
+		mode = mir_string_query_prefix()
+	elsif kind == string_method_end_with()
+		mode = mir_string_query_suffix()
+	end
+	offset := mir_checked_string_operation(state, locals, mir_op_string_query(), checked_mir_value(receiver), checked_mir_value(argument), mode, "Integer", origin)
+	found := scalar_mir_binary(state, locals, ">=", offset, zero, "Boolean", origin)
+	if kind < string_method_index()
+		return found
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut join := mir_value_join(locals, line)
+	alternate := mir_control_branch(state, locals, found, line)
+	present := mir_checked_nullable(state, locals, mir_op_nullable_inject(), offset, "Integer?", 0, origin)
+	mir_value_exit(state, locals, join, present)
+	mir_control_enter(state, locals, alternate, line)
+	absent := mir_checked_nullable(state, locals, mir_op_nullable_none(), offset, "Integer?", 0, origin)
+	mir_value_exit(state, locals, join, absent)
+	return mir_value_complete(state, locals, join, "Integer?", origin)
+end

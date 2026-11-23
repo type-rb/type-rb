@@ -1,0 +1,61 @@
+import { parse_test_options } from project/test_options
+import { describe, expect, test } from trb/std/test
+
+describe("Native test command options") do
+	test("accepts interspersed path and reporter arguments") do
+		options := parse_test_options(["src/a_test.trb", "--reporter", "json", "src/domain", "--config=app/trbconfig.jsonc"])
+		expect(options.error).to_equal("")
+		expect(options.paths).to_equal(["src/a_test.trb", "src/domain"])
+		expect(options.reporter).to_equal("json")
+		expect(options.config).to_equal("app/trbconfig.jsonc")
+	end
+
+	test("keeps delimiter operands as paths even when they look like options") do
+		options := parse_test_options(["--", "-t", "--test-name-pattern"])
+		expect(options.error).to_equal("")
+		expect(options.paths).to_equal(["-t", "--test-name-pattern"])
+		expect(parse_test_options(["-"]).paths).to_equal(["-"])
+	end
+
+	test("explicitly rejects deferred name options in every accepted flag spelling") do
+		["-t", "--t", "--test-name-pattern", "-test-name-pattern", "-t=case", "--test-name-pattern="].each do |flag|
+			options := parse_test_options(["src/a_test.trb", flag, "case"])
+			expect(options.error).to_equal(flag + ": test name selection is deferred; select a file or directory")
+		end
+	end
+
+	test("validates Boolean spellings and supports explicit false") do
+		["1", "t", "T", "TRUE", "true", "True"].each do |value|
+			options := parse_test_options(["--compile=" + value, "--debug=" + value])
+			expect(options.error).to_equal("")
+			expect(options.compile).to_be_true()
+			expect(options.debug).to_be_true()
+		end
+		["0", "f", "F", "FALSE", "false", "False"].each do |value|
+			options := parse_test_options(["--compile=" + value, "--debug=" + value])
+			expect(options.error).to_equal("")
+			expect(options.compile).to_be_false()
+			expect(options.debug).to_be_false()
+		end
+		expect(parse_test_options(["--compile=yes"]).error).to_equal("invalid Boolean value for --compile")
+	end
+
+	test("rejects conflicting executable and execution options") do
+		expect(parse_test_options(["--debug"]).error).to_equal("--debug requires --compile")
+		expect(parse_test_options(["--outfile", "bin/tests"]).error).to_equal("--outfile requires --compile")
+		expect(parse_test_options(["--compile", "src/a_test.trb"]).error).to_equal("test paths, --test-name-pattern, and --reporter select a test execution and cannot be combined with --compile")
+		expect(parse_test_options(["--compile", "--reporter=json"]).error).to_equal("test paths, --test-name-pattern, and --reporter select a test execution and cannot be combined with --compile")
+		options := parse_test_options(["--compile", "--debug", "--outfile", "bin/tests"])
+		expect(options.error).to_equal("")
+		expect(options.output).to_equal("bin/tests")
+	end
+
+	test("rejects missing or unknown flags and keeps the last supplied value") do
+		expect(parse_test_options(["--reporter"]).error).to_equal("missing value for --reporter")
+		expect(parse_test_options(["--verbose"]).error).to_equal("unknown option --verbose")
+		expect(parse_test_options(["--reporter="]).error).to_equal("--reporter must be human or json; got \"\"")
+		options := parse_test_options(["-reporter=json", "--reporter=human"])
+		expect(options.error).to_equal("")
+		expect(options.reporter).to_equal("human")
+	end
+end

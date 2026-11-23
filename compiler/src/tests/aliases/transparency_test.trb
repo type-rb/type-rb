@@ -1,0 +1,148 @@
+import { TypeAlias, TypeAliasInstance } from frontend/types/alias_model
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { verify_mir } from mir/verify/module
+import { GenericBinding, GenericDefinition, GenericFunction, GenericFunctionInstance, GenericInstance } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR transparent aliases") do
+	test("expands aliases before MIR and executes independently of alias declarations") do
+		sources := ["alias Values<T> = Array<T>\nrecord Box<T>\nvalue: Values<T>\nend\nrecord Pair<A, B>\nfirst: A\nsecond: B\nend\nalias Both = Pair<Box<Integer>, Values<String>>\ndef main()\nvalue: Both? := nil\nputs(value == nil)\nend\n",
+			"alias Count = Integer\nalias Label = String\ndef read(value: Count): Label\nreturn value.to_s()\nend\ndef main()\nputs(read(7))\nend\n",
+			"alias Key = String\nalias Counts = Array<Integer>\nalias Table = Hash<Key, Counts>\ndef main()\nmut values: Table := {\"one\" => [7]}\nputs(values[\"one\"][0])\nend\n",
+			"alias Maybe<T> = T?\ndef absent(): Maybe<Integer>\nreturn nil\nend\ndef main()\nvalue := absent()\nputs(value == nil)\nend\n",
+			"alias Identity<T> = T\nalias Values<T> = Array<Identity<T>>\ndef keep<T>(value: Identity<T>): Identity<T>\nreturn value\nend\ndef main()\nvalues: Values<String> := [\"held\"]\nputs(keep<String>(values[0]))\nend\n",
+			"record Box\nvalue: String\nend\nalias Holder = Box\ndef main()\nputs(Holder.new(value: \"held\").value)\nend\n",
+			"record Box<T>\nvalue: T\ncopy: T = value\nend\nalias Holder<T> = Box<T>\nalias TextBox = Holder<String>\ndef main()\nputs(Holder<Integer>.new(value: 7).copy)\nputs(TextBox.new(value: \"held\").copy)\nend\n",
+			"enum Choice\nFirst\nSecond\nend\nalias Pick = Choice\ndef main()\nvalue := Pick::First\ncase value\nwhen Pick::First\nputs(1)\nwhen Pick::Second\nputs(2)\nend\nend\n",
+			"enum Outcome<T, E>\nGood(value: T)\nBad(error: E)\nend\nalias Answer<T> = Outcome<T, String>\ndef main()\nvalue := Answer<Integer>::Good(7)\ncase value\nwhen Answer::Good(item)\nputs(item)\nwhen Answer::Bad(error)\nputs(error)\nend\nend\n",
+			"enum Pair<A, B>\nFirst(value: A)\nSecond(value: B)\nend\nalias Swap<X, Y> = Pair<Y, X>\ndef main()\nvalue := Swap<Integer, String>::First(\"held\")\ncase value\nwhen Swap::First(item)\nputs(item)\nwhen Swap::Second(item)\nputs(item)\nend\nend\n",
+			"enum Pair<A, B>\nFirst(value: A)\nSecond(value: B)\nend\nalias Items<T> = Pair<Array<T>, String>\ndef main()\nvalue := Items<Integer>::First([7])\ncase value\nwhen Items::First(items)\nputs(items[0])\nwhen Items::Second(error)\nputs(error)\nend\nend\n",
+			"import trb/std/result\nalias Answer<T> = Result<T, String>\ndef read(): Answer<Integer>\nreturn Answer<Integer>::Ok(7)\nend\ndef relay(): Answer<Integer>\nvalue := try read()\nreturn Answer<Integer>::Ok(value + 1)\nend\ndef main()\nvalue := relay() catch |error|\nputs(error)\n0\nend\nputs(value)\nend\n",
+			"alias Values<T> = Array<T>\nrecord Box<T>\nvalue: T\nitems: Values<T> = [value]\nend\ndef main()\nputs(Box<String>.new(value: \"held\").items[0])\nend\n",
+			"alias Tree<T> = Node<T>\nrecord Node<T>\nvalue: T\nchildren: Array<Tree<T>>\nend\ndef main()\nvalue := Tree<Integer>.new(value: 7, children: [])\nputs(value.value)\nend\n"]
+		outputs := ["true\n",
+			"7\n",
+			"7\n",
+			"true\n",
+			"held\n",
+			"held\n",
+			"7\nheld\n",
+			"1\n",
+			"7\n",
+			"held\n",
+			"7\n",
+			"8\n",
+			"held\n",
+			"7\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				mut alias_index := 0
+				while alias_index < state.type_resolution.type_aliases.size()
+					state.type_resolution.type_aliases[alias_index] = TypeAlias.new(name: "unavailable", source_id: -1, line: -1, parameters: [], target: "Invalid")
+					alias_index += 1
+				end
+				state.type_resolution.alias_patterns.used[0] = 0
+				alias_index = 0
+				while alias_index < state.type_resolution.alias_instances.size()
+					state.type_resolution.alias_instances[alias_index] = TypeAliasInstance.new(definition: -1, arguments: [], type_name: "Invalid")
+					alias_index += 1
+				end
+				mut item := 0
+				while item < state.type_resolution.generic_functions.size()
+					state.type_resolution.generic_functions[item] = GenericFunction.new(receiver_type: "", name: "unavailable", source_id: -1, line: -1, type_parameters: [], parameters: [], result_type: "Invalid", body_start: -1, body_finish: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_function_instances.size()
+					state.type_resolution.generic_function_instances[item] = GenericFunctionInstance.new(application_key: "unavailable", definition: -1, arguments: [], function: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_bindings.size()
+					state.type_resolution.generic_bindings[item] = GenericBinding.new(source_id: -1, parameters: [], arguments: [], depth: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_definitions.size()
+					state.type_resolution.generic_definitions[item] = GenericDefinition.new(kind: 0, name: "unavailable", source_id: -1, line: -1, parameters: [], variants: [])
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_instances.size()
+					state.type_resolution.generic_instances[item] = GenericInstance.new(definition: -1, arguments: [], type_name: "Invalid")
+					item += 1
+				end
+				state.callables.checked_bodies.each do |body|
+					body.local_types.used[0] = 0
+					body.generic_calls.used[0] = 0
+					body.generic_application_finishes.used[0] = 0
+					body.generic_binding[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					before.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects invalid aliases, cycles and nontransparent assignments") do
+		sources := ["alias item = Integer\ndef main()\nputs(1)\nend\n",
+			"alias Done = Void\ndef act(): Done\nputs(1)\nend\ndef main()\nact()\nend\n",
+			"alias Left = Right\nalias Right = Left\ndef main()\nputs(1)\nend\n",
+			"alias Loop<T> = Loop<Array<T>>\ndef main()\nputs(1)\nend\n",
+			"alias Missing = Absent\ndef main()\nputs(1)\nend\n",
+			"alias Values<T> = Array<T>\nalias Invalid = Values<Integer, String>\ndef main()\nputs(1)\nend\n",
+			"alias Item = Integer\nalias Item = String\ndef main()\nputs(1)\nend\n",
+			"record Item\nvalue: Integer\nend\nalias Item = Integer\ndef main()\nputs(1)\nend\n",
+			"alias Values<T> = Array<T>\ndef read(value: Values<String>): Integer\nreturn 1\nend\ndef main()\nputs(read([1]))\nend\n"]
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			expect(valid).to_be_false()
+		end
+	end
+
+end

@@ -1,0 +1,14 @@
+def copy(input: Array<Integer>, mut output: Array<Integer>, take: Boolean)
+	if take
+		output[0] = input[-1]
+	end
+	return
+end
+
+def main()
+	mut output := [1]
+	empty: Array<Integer> := []
+	copy(empty, output, false)
+	copy(empty, output, true)
+	return
+end

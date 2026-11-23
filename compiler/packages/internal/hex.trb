@@ -1,0 +1,49 @@
+import trb/std/encoding/hex as PublicHex
+import trb/std/result
+import trb/internal/encoding_bytes as Octets
+
+module Hex
+end
+
+# One decoded nibble per input octet; the sentinel marks every other byte.
+# Raw literal bytes are read through Bytes, never as Unicode characters.
+INVALID_DIGIT := 255
+DECODE_DIGITS := "\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\xff\xff\xff\xff\xff\xff\xff\x0a\x0b\x0c\x0d\x0e\x0f\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x0a\x0b\x0c\x0d\x0e\x0f\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+
+def encode(value: Bytes): String
+	mut parts: Array<String> := []
+	mut index := 0
+	while index < value.size()
+		octet := value.at(index)
+		parts.push("0123456789abcdef"[octet / 16])
+		parts.push("0123456789abcdef"[octet % 16])
+		index += 1
+	end
+	return parts.join("")
+end
+
+def decode(value: String): Result<Bytes, PublicHex::DecodeError>
+	digits := DECODE_DIGITS.to_bytes()
+	bytes := value.to_bytes()
+	mut index := 0
+	# Every accepted character is ASCII. At the first invalid character,
+	# the byte offset is therefore also the reference code-point offset.
+	while index < bytes.size()
+		digit := digits.at(bytes.at(index))
+		if digit == INVALID_DIGIT
+			return Result<Bytes, PublicHex::DecodeError>::Err(PublicHex::DecodeError.new(kind: PublicHex::DecodeErrorKind::InvalidCharacter, input: value, index: index, message: "invalid hexadecimal character"))
+		end
+		index += 1
+	end
+	if bytes.size() % 2 != 0
+		return Result<Bytes, PublicHex::DecodeError>::Err(PublicHex::DecodeError.new(kind: PublicHex::DecodeErrorKind::OddLength, input: value, index: bytes.size(), message: "hex input has odd length"))
+	end
+	octets := Octets.table()
+	mut parts: Array<String> := []
+	index = 0
+	while index < bytes.size()
+		parts.push(octets[digits.at(bytes.at(index)) * 16 + digits.at(bytes.at(index + 1))])
+		index += 2
+	end
+	return Result<Bytes, PublicHex::DecodeError>::Ok(parts.join("").to_bytes())
+end

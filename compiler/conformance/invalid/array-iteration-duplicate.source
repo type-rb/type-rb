@@ -1,0 +1,3 @@
+def main()
+[1].each.with_index { |value, value| puts(value) }
+end

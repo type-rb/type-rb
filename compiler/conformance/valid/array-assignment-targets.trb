@@ -1,0 +1,51 @@
+def grow(mut values: Array<Integer>): Integer
+	mut count := 0
+	while count < 64
+		values.push(3)
+		count += 1
+	end
+	return 9
+end
+
+def index(mut values: Array<Integer>): Integer
+	puts("index")
+	values.push(3)
+	return -1
+end
+
+def replace(mut values: Array<Integer>): Integer
+	values[1] = 20
+	return grow(values)
+end
+
+def grow_float(mut values: Array<Float>): Float
+	mut count := 0
+	while count < 64
+		values.push(3.0)
+		count += 1
+	end
+	return 9.0
+end
+
+def main()
+	mut values := [1, 2]
+	mut shared := values
+	values[-1] = grow(shared)
+	puts(values[1])
+	puts(shared[1])
+	puts(values.size())
+	values = [1, 2]
+	values[values.size() - 1] = grow(values)
+	puts(values[1])
+	values = [1, 2]
+	values[-1] += replace(values)
+	puts(values[1])
+	values = [1, 2]
+	values[index(values)] = grow(values)
+	puts(values[1])
+	puts(values[2])
+	mut floats := [1.0, 2.0]
+	floats[-1] += grow_float(floats)
+	puts(floats[1] == 11.0)
+	return
+end

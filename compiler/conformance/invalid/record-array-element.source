@@ -1,0 +1,10 @@
+record Entry
+id: Integer
+end
+record Other
+id: Integer
+end
+def main()
+values: Array<Entry> := [Entry.new(id: 1), Other.new(id: 2)]
+puts(values.size())
+end

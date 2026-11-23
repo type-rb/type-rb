@@ -1,0 +1,441 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { ScalarType } from scalar/mir
+import trb/std/result
+
+AGGREGATE_MAX_TYPE_DEFINITIONS := 1024
+AGGREGATE_MAX_FIELDS := 256
+AGGREGATE_MAX_VARIANTS := 1024
+AGGREGATE_MAX_LAYOUT_BYTES := 1048576
+
+enum AggregateValueType
+	Scalar(value_type: ScalarType)
+	Aggregate(type_id: String)
+end
+
+record AggregateField
+	name: String
+	value_type: AggregateValueType
+end
+
+record AggregateVariant
+	name: String
+	fields: Array<AggregateField>
+end
+
+enum AggregateTypeDefinition
+	Record(type_id: String, fields: Array<AggregateField>)
+	Tagged(type_id: String, variants: Array<AggregateVariant>)
+end
+
+enum AggregateLayoutKind
+	Record
+	Tagged
+end
+
+record AggregateFieldLayout
+	name: String
+	value_type: AggregateValueType
+	offset: Integer
+	size: Integer
+	alignment: Integer
+end
+
+record AggregateVariantLayout
+	name: String
+	tag: Integer
+	fields: Array<AggregateFieldLayout>
+	payload_size: Integer
+	payload_alignment: Integer
+end
+
+record AggregateLayout
+	type_id: String
+	kind: AggregateLayoutKind
+	size: Integer
+	alignment: Integer
+	payload_offset: Integer
+	fields: Array<AggregateFieldLayout>
+	variants: Array<AggregateVariantLayout>
+end
+
+record AggregateSizeAlignment
+	size: Integer
+	alignment: Integer
+end
+
+def aggregate_value_types_equal(left: AggregateValueType, right: AggregateValueType): Boolean
+	case left
+	when AggregateValueType::Scalar(left_scalar)
+		case right
+		when AggregateValueType::Scalar(right_scalar)
+			return left_scalar == right_scalar
+		when AggregateValueType::Aggregate(_right_id)
+			return false
+		end
+	when AggregateValueType::Aggregate(left_id)
+		case right
+		when AggregateValueType::Scalar(_right_scalar)
+			return false
+		when AggregateValueType::Aggregate(right_id)
+			return left_id == right_id
+		end
+	end
+end
+
+def verify_aggregate_layouts(definitions: Array<AggregateTypeDefinition>): Result<Boolean, Diagnostic>
+	if definitions.size() > AGGREGATE_MAX_TYPE_DEFINITIONS
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/types", "type definition count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut type_ids: Hash<String, Boolean> := {}
+	mut index := 0
+	while index < definitions.size()
+		type_id := _aggregate_definition_id(definitions[index])
+		if type_id.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/types/" + index.to_s() + "/id", "type identifier must not be empty")
+			)
+		end
+		if type_ids.key?(type_id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/types/" + index.to_s() + "/id", "type identifier is duplicated")
+			)
+		end
+		type_ids[type_id] = true
+		index += 1
+	end
+	index = 0
+	while index < definitions.size()
+		try compute_aggregate_layout(definitions, _aggregate_definition_id(definitions[index]))
+		index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def compute_aggregate_layout(
+		definitions: Array<AggregateTypeDefinition>,
+		type_id: String,
+	): Result<AggregateLayout, Diagnostic>
+	return _aggregate_compute_layout(definitions, type_id, [], "/types/" + type_id)
+end
+
+def _aggregate_compute_layout(
+		definitions: Array<AggregateTypeDefinition>,
+		type_id: String,
+		visiting: Array<String>,
+		path: String,
+	): Result<AggregateLayout, Diagnostic>
+	if visiting.include?(type_id)
+		return Result<AggregateLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "recursive by-value aggregate layout is unsupported")
+		)
+	end
+	definition := _aggregate_definition(definitions, type_id)
+	if definition == nil
+		return Result<AggregateLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "aggregate type does not exist")
+		)
+	end
+	mut next_visiting: Array<String> := []
+	mut visiting_index := 0
+	while visiting_index < visiting.size()
+		next_visiting.push(visiting[visiting_index])
+		visiting_index += 1
+	end
+	next_visiting.push(type_id)
+	case definition
+	when AggregateTypeDefinition::Record(_id, fields)
+		return _aggregate_record_layout(definitions, type_id, fields, next_visiting, path)
+	when AggregateTypeDefinition::Tagged(_id, variants)
+		return _aggregate_tagged_layout(definitions, type_id, variants, next_visiting, path)
+	end
+end
+
+def _aggregate_record_layout(
+		definitions: Array<AggregateTypeDefinition>,
+		type_id: String,
+		fields: Array<AggregateField>,
+		visiting: Array<String>,
+		path: String,
+	): Result<AggregateLayout, Diagnostic>
+	if fields.size() > AGGREGATE_MAX_FIELDS
+		return Result<AggregateLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/fields", "field count exceeds the Aggregate recovery limit")
+		)
+	end
+	field_layouts := try _aggregate_fields_layout(definitions, fields, visiting, path + "/fields", 0)
+	mut alignment := 1
+	mut end_offset := 0
+	mut index := 0
+	while index < field_layouts.size()
+		field := field_layouts[index]
+		alignment = _aggregate_max(alignment, field.alignment)
+		end_offset = field.offset + field.size
+		index += 1
+	end
+	mut size := _aggregate_align_up(end_offset, alignment)
+	if size == 0
+		size = 1
+	end
+	try _aggregate_require_layout_size(size, path)
+	return Result<AggregateLayout, Diagnostic>::Ok(
+		AggregateLayout.new(
+			type_id: type_id,
+			kind: AggregateLayoutKind::Record,
+			size: size,
+			alignment: alignment,
+			payload_offset: 0,
+			fields: field_layouts,
+			variants: [],
+		)
+	)
+end
+
+def _aggregate_tagged_layout(
+		definitions: Array<AggregateTypeDefinition>,
+		type_id: String,
+		variants: Array<AggregateVariant>,
+		visiting: Array<String>,
+		path: String,
+	): Result<AggregateLayout, Diagnostic>
+	if variants.empty?()
+		return Result<AggregateLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/variants", "tagged type must declare at least one variant")
+		)
+	end
+	if variants.size() > AGGREGATE_MAX_VARIANTS
+		return Result<AggregateLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/variants", "variant count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut names: Hash<String, Boolean> := {}
+	mut payload_alignment := 1
+	mut index := 0
+	while index < variants.size()
+		variant := variants[index]
+		variant_path := path + "/variants/" + index.to_s()
+		try _aggregate_require_name(names, variant.name, variant_path + "/name", "variant")
+		if variant.fields.size() > AGGREGATE_MAX_FIELDS
+			return Result<AggregateLayout, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", variant_path + "/fields", "field count exceeds the Aggregate recovery limit")
+			)
+		end
+		probe := try _aggregate_fields_layout(definitions, variant.fields, visiting, variant_path + "/fields", 0)
+		mut field_index := 0
+		while field_index < probe.size()
+			payload_alignment = _aggregate_max(payload_alignment, probe[field_index].alignment)
+			field_index += 1
+		end
+		index += 1
+	end
+	payload_offset := _aggregate_align_up(4, payload_alignment)
+	mut variant_layouts: Array<AggregateVariantLayout> := []
+	mut payload_size := 0
+	index = 0
+	while index < variants.size()
+		variant := variants[index]
+		variant_path := path + "/variants/" + index.to_s()
+		fields := try _aggregate_fields_layout(
+			definitions,
+			variant.fields,
+			visiting,
+			variant_path + "/fields",
+			payload_offset,
+		)
+		mut variant_end := payload_offset
+		mut variant_alignment := 1
+		mut field_index := 0
+		while field_index < fields.size()
+			field := fields[field_index]
+			variant_end = field.offset + field.size
+			variant_alignment = _aggregate_max(variant_alignment, field.alignment)
+			field_index += 1
+		end
+		current_payload_size := variant_end - payload_offset
+		payload_size = _aggregate_max(payload_size, current_payload_size)
+		variant_layouts.push(
+			AggregateVariantLayout.new(
+				name: variant.name,
+				tag: index,
+				fields: fields,
+				payload_size: current_payload_size,
+				payload_alignment: variant_alignment,
+			)
+		)
+		index += 1
+	end
+	alignment := _aggregate_max(4, payload_alignment)
+	size := _aggregate_align_up(payload_offset + payload_size, alignment)
+	try _aggregate_require_layout_size(size, path)
+	return Result<AggregateLayout, Diagnostic>::Ok(
+		AggregateLayout.new(
+			type_id: type_id,
+			kind: AggregateLayoutKind::Tagged,
+			size: size,
+			alignment: alignment,
+			payload_offset: payload_offset,
+			fields: [],
+			variants: variant_layouts,
+		)
+	)
+end
+
+def _aggregate_fields_layout(
+		definitions: Array<AggregateTypeDefinition>,
+		fields: Array<AggregateField>,
+		visiting: Array<String>,
+		path: String,
+		start_offset: Integer,
+	): Result<Array<AggregateFieldLayout>, Diagnostic>
+	mut names: Hash<String, Boolean> := {}
+	mut layouts: Array<AggregateFieldLayout> := []
+	mut offset := start_offset
+	mut index := 0
+	while index < fields.size()
+		field := fields[index]
+		field_path := path + "/" + index.to_s()
+		try _aggregate_require_name(names, field.name, field_path + "/name", "field")
+		size_alignment := try _aggregate_size_alignment(definitions, field.value_type, visiting, field_path + "/type")
+		offset = _aggregate_align_up(offset, size_alignment.alignment)
+		if offset + size_alignment.size > AGGREGATE_MAX_LAYOUT_BYTES
+			return Result<Array<AggregateFieldLayout>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", field_path, "aggregate layout exceeds the Aggregate recovery byte limit")
+			)
+		end
+		layouts.push(
+			AggregateFieldLayout.new(
+				name: field.name,
+				value_type: field.value_type,
+				offset: offset,
+				size: size_alignment.size,
+				alignment: size_alignment.alignment,
+			)
+		)
+		offset += size_alignment.size
+		index += 1
+	end
+	return Result<Array<AggregateFieldLayout>, Diagnostic>::Ok(layouts)
+end
+
+def _aggregate_size_alignment(
+		definitions: Array<AggregateTypeDefinition>,
+		value_type: AggregateValueType,
+		visiting: Array<String>,
+		path: String,
+	): Result<AggregateSizeAlignment, Diagnostic>
+	case value_type
+	when AggregateValueType::Scalar(scalar)
+		if scalar == ScalarType::Boolean
+			return Result<AggregateSizeAlignment, Diagnostic>::Ok(AggregateSizeAlignment.new(size: 1, alignment: 1))
+		end
+		if scalar == ScalarType::Integer || scalar == ScalarType::Float
+			return Result<AggregateSizeAlignment, Diagnostic>::Ok(AggregateSizeAlignment.new(size: 8, alignment: 8))
+		end
+		return Result<AggregateSizeAlignment, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Void is not a storable Aggregate recovery value")
+		)
+	when AggregateValueType::Aggregate(type_id)
+		layout := try _aggregate_compute_layout(definitions, type_id, visiting, path)
+		return Result<AggregateSizeAlignment, Diagnostic>::Ok(
+			AggregateSizeAlignment.new(size: layout.size, alignment: layout.alignment)
+		)
+	end
+end
+
+def _aggregate_require_name(
+		mut names: Hash<String, Boolean>,
+		name: String,
+		path: String,
+		kind: String,
+	): Result<Boolean, Diagnostic>
+	if name.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, kind + " name must not be empty")
+		)
+	end
+	if names.key?(name)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, kind + " name is duplicated")
+		)
+	end
+	names[name] = true
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _aggregate_require_layout_size(size: Integer, path: String): Result<Boolean, Diagnostic>
+	if size > AGGREGATE_MAX_LAYOUT_BYTES
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path, "aggregate layout exceeds the Aggregate recovery byte limit")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _aggregate_definition_id(definition: AggregateTypeDefinition): String
+	case definition
+	when AggregateTypeDefinition::Record(type_id, _fields)
+		return type_id
+	when AggregateTypeDefinition::Tagged(type_id, _variants)
+		return type_id
+	end
+end
+
+def _aggregate_definition(
+		definitions: Array<AggregateTypeDefinition>,
+		type_id: String,
+	): AggregateTypeDefinition?
+	mut index := 0
+	while index < definitions.size()
+		definition := definitions[index]
+		if _aggregate_definition_id(definition) == type_id
+			return definition
+		end
+		index += 1
+	end
+	return nil
+end
+
+def aggregate_field_layout(layout: AggregateLayout, name: String): AggregateFieldLayout?
+	mut index := 0
+	while index < layout.fields.size()
+		if layout.fields[index].name == name
+			return layout.fields[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def aggregate_variant_layout(layout: AggregateLayout, name: String): AggregateVariantLayout?
+	mut index := 0
+	while index < layout.variants.size()
+		if layout.variants[index].name == name
+			return layout.variants[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def aggregate_variant_field_layout(variant: AggregateVariantLayout, name: String): AggregateFieldLayout?
+	mut index := 0
+	while index < variant.fields.size()
+		if variant.fields[index].name == name
+			return variant.fields[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def _aggregate_align_up(value: Integer, alignment: Integer): Integer
+	return ((value + alignment - 1) / alignment) * alignment
+end
+
+def _aggregate_max(left: Integer, right: Integer): Integer
+	if left > right
+		return left
+	end
+	return right
+end

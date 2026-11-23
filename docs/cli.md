@@ -1,5 +1,8 @@
 # Command-line reference
 
+This guide describes the Go implementation. Invoke the companion as `trbg`.
+See the [Native command guide](native-cli.md) for the default `trb` compiler.
+
 Run commands from a directory containing `trbconfig.jsonc` unless the command
 explicitly supports a standalone file or scratch session.
 

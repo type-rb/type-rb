@@ -1,0 +1,95 @@
+import { integer_string } from support/literals
+import { mir_terminator_jump, mir_terminator_return } from mir/model/control
+import { MirFunction, MirModule, MirValue } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { mir_rewrite_arguments, mir_rewrite_block, mir_rewrite_function, mir_rewrite_instruction, mir_rewrite_next_block, mir_rewrite_next_value, mir_rewrite_value } from mir/passes/rewrite
+
+def mir_function_body_size(native_module: MirModule, function: MirFunction): Integer
+	mut count := 0
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		count += native_module.blocks[index].instruction_count
+		index += 1
+	end
+	return count
+end
+
+# Callers establish eligibility and growth limits. Arguments retain their already
+# evaluated SSA values; each return joins the original continuation and origins.
+def mir_inline_call(mut native_module: MirModule, function_index: Integer, block_index: Integer, instruction_index: Integer, callee: MirFunction)
+	function := native_module.functions[function_index]
+	block := native_module.blocks[block_index]
+	instruction := native_module.instructions[instruction_index]
+	call := native_module.calls[instruction.payload]
+	mut values: Hash<String, Integer> := {}
+	mut blocks: Hash<String, Integer> := {}
+	mut next_value := mir_rewrite_next_value(native_module, function)
+	mut next_block := mir_rewrite_next_block(native_module, function)
+	continuation := next_block
+	next_block += 1
+	mut parameter := 0
+	while parameter < callee.parameter_count
+		values[integer_string(native_module.arguments[callee.parameter_start + parameter])] = native_module.arguments[call.argument_start + parameter]
+		parameter += 1
+	end
+	# Snapshot rows before appending clones: mutating an iterated owner would
+	# otherwise make alias and GC behavior depend on container growth.
+	mut callee_values: Array<MirValue> := []
+	native_module.values.each do |value|
+		if value.function_id == callee.id
+			callee_values.push(value)
+		end
+	end
+	callee_values.each do |value|
+		if !values.key?(integer_string(value.id))
+			values[integer_string(value.id)] = next_value
+			native_module.values.push(MirValue.new(function_id: function.id, id: next_value, type_id: value.type_id, source_id: value.source_id, line: value.line))
+			next_value += 1
+		end
+	end
+	mut index := callee.block_start
+	while index < callee.block_start + callee.block_count
+		blocks[integer_string(native_module.blocks[index].id)] = next_block
+		next_block += 1
+		index += 1
+	end
+	start := native_module.blocks.size()
+	index = function.block_start
+	while index < function.block_start + function.block_count
+		if index == block_index
+			native_module.blocks.push(mir_block(block.id, block.source_id, block.line, block.parameter_start, block.parameter_count, block.instruction_start, instruction_index - block.instruction_start, mir_terminator_jump(), -1, blocks[integer_string(callee.entry_block)], -1, 0, 0, 0, 0, -1))
+		else
+			native_module.blocks.push(native_module.blocks[index])
+		end
+		index += 1
+	end
+	parameter_start := native_module.arguments.size()
+	mut result_count := 0
+	if instruction.result >= 0
+		native_module.arguments.push(instruction.result)
+		result_count = 1
+	end
+	native_module.blocks.push(mir_block(continuation, block.source_id, block.line, parameter_start, result_count, instruction_index + 1, block.instruction_start + block.instruction_count - instruction_index - 1, block.terminator, block.condition, block.first_target, block.second_target, block.first_argument_start, block.first_argument_count, block.second_argument_start, block.second_argument_count, block.return_value))
+	index = callee.block_start
+	while index < callee.block_start + callee.block_count
+		body := native_module.blocks[index]
+		instruction_start := native_module.instructions.size()
+		mut cursor := body.instruction_start
+		while cursor < body.instruction_start + body.instruction_count
+			native_module.instructions.push(mir_rewrite_instruction(native_module, native_module.instructions[cursor], values, blocks))
+			cursor += 1
+		end
+		if body.terminator == mir_terminator_return()
+			arguments := native_module.arguments.size()
+			if result_count > 0
+				native_module.arguments.push(mir_rewrite_value(values, body.return_value))
+			end
+			parameters := mir_rewrite_arguments(native_module, body.parameter_start, body.parameter_count, values)
+			native_module.blocks.push(mir_block(blocks[integer_string(body.id)], body.source_id, body.line, parameters, body.parameter_count, instruction_start, body.instruction_count, mir_terminator_jump(), -1, continuation, -1, arguments, result_count, 0, 0, -1))
+		else
+			native_module.blocks.push(mir_rewrite_block(native_module, body, values, blocks, instruction_start, body.instruction_count))
+		end
+		index += 1
+	end
+	native_module.functions[function_index] = mir_rewrite_function(function, start, function.block_count + callee.block_count + 1)
+end

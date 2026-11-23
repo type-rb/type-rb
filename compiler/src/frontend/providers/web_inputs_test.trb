@@ -1,0 +1,127 @@
+import { declare_web_bindings, web_binding_kind } from frontend/providers/web_declarations
+import { web_input_body, web_input_fields } from frontend/providers/web_inputs
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { find_record_in_module } from frontend/resolution/declaration_lookup
+import { record_type } from frontend/resolution/type_resolution
+import { GenericFunction } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { official_source_kind } from project/official_catalog
+import { load_standard_source } from project/standard_library
+import { standard_source_errors } from state/standard_source_kinds
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_string, store_integer } from support/storage
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { MirSignature } from mir/model/module
+import { describe, expect, test } from trb/std/test
+
+# The small owned fixture isolates provider composition from HTTP byte adapters.
+# CLI scenarios separately exercise the complete pinned Web and JSON sources.
+def web_input_test_state(kind: Integer): CompilerState
+	source := "import trb/std/result\nrecord DecodeError\ninput: String\nend\nenum ParameterSource\nPath\nQuery\nend\nenum ParameterError\nMalformedQuery(error: DecodeError)\nMissing(*, source: ParameterSource, name: String)\nDuplicate(*, source: ParameterSource, name: String)\nInvalid(*, source: ParameterSource, name: String, value: String, expected: String)\nend\nenum EndpointInputError\nParams(error: ParameterError)\nQuery(error: ParameterError)\nBody(error: String)\nend\nclass Context\ndef path_value(_name: String): String\nreturn \"7\"\nend\nend\nrecord PathInput\nid: Integer\nend\nrecord Input\nparams: PathInput\nend\ndef main()\ncase Context.new().bind<Input>()\nwhen Result::Ok(value)\nputs(value.params.id)\nwhen Result::Err(_error)\nputs(\"error\")\nend\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, kind)
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	declare_web_bindings(state, 0)
+	load_standard_source(state, standard_source_errors(), 1)
+	expect_compiler_phase(state, "resolve", resolve(state))
+	return state
+end
+
+describe("Checked Web endpoint input providers") do
+	test("composes parameter providers through verified source-independent MIR") do
+		mut state := web_input_test_state(official_source_kind("trb/web"))
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("rejects a forged generated result independently of source") do
+		mut state := web_input_test_state(official_source_kind("trb/web"))
+		expect_compiler_phase(state, "check", check(state))
+		mut changed := 0
+		state.type_resolution.generic_function_instances.each do |instance|
+			if web_binding_kind(state, instance.definition) == 3
+				row := state.scalar_mir.signatures[instance.function]
+				state.scalar_mir.signatures[instance.function] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: row.parameter_types, parameter_mutable: row.parameter_mutable, result_type: "Integer")
+				changed += 1
+			end
+		end
+		expect(changed).to_equal(1)
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("validates speculative child schemas without mutating borrowed syntax") do
+		parent := web_input_test_state(official_source_kind("trb/web"))
+		tokens := parent.source_tokens.token_count[0]
+		aliases := parent.type_resolution.type_aliases.size()
+		controls := parent.parsed.controls.size()
+		mut fork := generic_program_fork(parent)
+		mut definition := 0
+		mut checked := 0
+		while definition < fork.type_resolution.generic_functions.size()
+			if web_binding_kind(fork, definition) == 3
+				target := record_type(find_record_in_module(fork, 0, "Input"))
+				expect(instantiate_generic_function(fork, definition, [target], 0) >= 0).to_be_true()
+				checked += 1
+			end
+			definition += 1
+		end
+		expect(checked).to_equal(1)
+		expect(parent.source_tokens.token_count[0]).to_equal(tokens)
+		expect(parent.type_resolution.type_aliases.size()).to_equal(aliases)
+		expect(parent.parsed.controls.size()).to_equal(controls)
+	end
+
+	test("requires loader ownership and the complete endpoint result signature") do
+		[0, official_source_kind("trb/http")].each do |kind|
+			mut authored := web_input_test_state(kind)
+			expect(check(authored)).to_be_false()
+			expect(load_string(authored.diagnostics.messages, 0)).to_equal("unknown class method bind")
+		end
+		mut state := web_input_test_state(official_source_kind("trb/web"))
+		mut index := 0
+		mut changed := 0
+		while index < state.type_resolution.generic_functions.size()
+			if web_binding_kind(state, index) == 3
+				row := state.type_resolution.generic_functions[index]
+				state.type_resolution.generic_functions[index] = GenericFunction.new(receiver_type: row.receiver_type, name: row.name, source_id: row.source_id, line: row.line, type_parameters: row.type_parameters, parameters: row.parameters, result_type: "Result<T,ParameterError>", body_start: row.body_start, body_finish: row.body_finish)
+				expect(web_binding_kind(state, index)).to_equal(0)
+				changed += 1
+			end
+			index += 1
+		end
+		expect(changed).to_equal(1)
+	end
+
+	test("orders canonical sections independently of record field order") do
+		mut state := logical_checked_source("record Path\nid: Integer\nend\nrecord Query\nname: String\nend\nrecord Input\nbody: Array<String?>\nquery: Query\nparams: Path\nend\ndef main()\nend\n")
+		fields := web_input_fields(state, "Record#2", 7)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(fields.size()).to_equal(3)
+		expect(fields[0].name).to_equal("params")
+		expect(fields[1].name).to_equal("query")
+		expect(fields[2].name).to_equal("body")
+		expect(web_input_body(fields).start_with?("params_value := self.params<Params>() catch |error|")).to_be_true()
+	end
+
+	test("rejects invalid envelopes and child schemas at the call boundary") do
+		["", "extra: String", "params: String", "query: String", "body: Bytes"].each do |fields|
+			mut state := logical_checked_source("record Input\n" + fields + "\nend\ndef main()\nend\n")
+			web_input_fields(state, "Record#0", 9)
+			expect(has_diagnostic(state)).to_be_true()
+		end
+		mut nullable := logical_checked_source("record Input\nbody: String\nend\ndef main()\nend\n")
+		web_input_fields(nullable, "Record#0?", 9)
+		expect(load_string(nullable.diagnostics.messages, 0)).to_equal("endpoint input type must be a non-nullable record")
+	end
+end

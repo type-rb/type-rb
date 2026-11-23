@@ -1,0 +1,332 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirRootPlan, MirType } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { mir_element_type, mir_managed_type, mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
+import { verify_mir } from mir/verify/module
+import { string_starts_with } from support/path
+import { load_integer, load_string, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { array_mir_test_read, array_mir_test_state } from testing/mir/arrays
+import trb/std/process
+import trb/std/result
+
+describe("Managed Array MIR") do
+	test("infers a mutable empty Array from a later element write") do
+		source := "def main()\nmut values := []\nputs(values.size())\nvalues.push(3)\nputs(values[0])\nend\n"
+		mut state := logical_checked_source(source)
+		checked := check(state)
+		if !checked
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(checked).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("keeps empty Array inference across ordinary mutations and control flow") do
+		sources := [
+			"def main()\nmut values := []\nputs(values.empty?())\nvalues.push(3)\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nvalues.unshift(3)\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nvalues = [3]\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(3)\nelse\nvalues.push(4)\nend\nputs(values[0])\nend\n",
+		]
+		sources.each.with_index do |source, index|
+			mut state := logical_checked_source(source)
+			checked := check(state)
+			if !checked
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+	test("promotes numeric empty Array writes throughout one control statement") do
+		sources := [
+			"def main()\nmut values := []\nif true\nvalues.push(1)\nelse\nvalues.push(2.0)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif false\nvalues.push(1)\nelse\nvalues.push(2.0)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(1)\nvalues.push(2.0)\nelse\nvalues.push(3)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(1.0)\nelse\nvalues.push(2)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.unshift(1)\nelse\nvalues.push(2.0)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(1)\nvalues.push(2)\nelse\nvalues.push(3.0)\nend\nputs(values[1])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(1)\nvalues.unshift(2)\nelse\nvalues.push(3.0)\nend\nputs(values[0])\nend\n",
+			"def main()\nmut values := []\nif true\nvalues.push(1)\nvalues.unshift(2.0)\nelse\nvalues.push(3)\nend\nputs(values[0])\nend\n",
+		]
+		outputs := ["1.0\n", "2.0\n", "1.0\n", "1.0\n", "1.0\n", "2.0\n", "2.0\n", "2.0\n"]
+		sources.each.with_index do |source, index|
+			mut state := logical_checked_source(source)
+			checked := check(state)
+			if !checked
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal(outputs[index])
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+		mut separate := logical_checked_source("def main()\nmut values := []\nvalues.push(1)\nvalues.push(2.0)\nputs(values[0])\nend\n")
+		expect(check(separate)).to_be_false()
+		mut explicit := logical_checked_source("def main()\nmut values: Array<Integer> := []\nif true\nvalues.push(1)\nelse\nvalues.push(2.0)\nend\nputs(values[0])\nend\n")
+		expect(check(explicit)).to_be_false()
+	end
+
+	test("elides discarded untyped empty collections without inventing element types") do
+		source := "def main()\n[]\n{}\nputs(1)\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		mut required := logical_checked_source("def values(): Array<Integer>\nreturn []\nend\ndef main()\nputs(values().size())\nend\n")
+		expect(check(required)).to_be_true()
+		mut untyped := logical_checked_source("def main()\nvalue := []\nputs(value.size())\nend\n")
+		expect(check(untyped)).to_be_false()
+		mut discarded_hash := logical_checked_source("def main()\n{}\nputs(1)\nend\n")
+		expect(check(discarded_hash)).to_be_true()
+		mut branch_state := logical_checked_source("def main()\nvalues := if true\n[]\n[2]\nelse\n[3]\nend\nputs(values.size())\nend\n")
+		expect(check(branch_state)).to_be_true()
+		expect(verify_mir(branch_state.scalar_mir, true)).to_equal("")
+		mut interactive_branch := logical_checked_source("def main()\nvalues := if true\n[]\n[2]\nelse\n[3]\nend\nputs(values.size())\nend\n", true)
+		expect(check(interactive_branch)).to_be_true()
+		mut interactive_value := logical_checked_source("def main()\n[]\nend\n", true)
+		expect(check(interactive_value)).to_be_true()
+		expect(verify_mir(interactive_value.scalar_mir, true)).to_equal("")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(branch_state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps computed method results immutable while retaining writable elements") do
+		["values.size() = 1", "values.size() += 1", "values.push(1) = values.push(2)"].each do |statement|
+			mut state := logical_checked_source("def main()\nmut values := [1]\n" + statement + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+		mut state := logical_checked_source("def main()\nmut values := [1]\nvalues[0] += 1\nvalues[0] = 3\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+	end
+
+	test("requires binding roots for mutation but permits fresh Array arguments") do
+		["", "_marker := {1 => 1}\n"].each do |prefix|
+			["[1] = [2]", "([1])[0] = 2", "[[1]][0].push(2)", "[1].push(2)", "([1]).push(2)", "[[1]][0][0] += 2"].each do |statement|
+				mut state := logical_checked_source("def main()\n" + prefix + statement + "\nend\n")
+				expect(check(state)).to_be_false()
+			end
+			mut state := logical_checked_source("def grow(mut values: Array<Integer>)\nvalues.push(2)\nend\ndef main()\n" + prefix + "grow([1])\nmut rows := [[1]]\n((rows))[0][0] += 2\nrows[0].push(4)\nend\n")
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+
+	test("retains nested element identity and rejects forged composite graphs") do
+		mut state := array_mir_test_state()
+		mut native_module := state.scalar_mir
+		strings := mir_semantic_type_id(native_module, "Array<String>")
+		nested := mir_semantic_type_id(native_module, "Array<Array<String>>")
+		expect(mir_semantic_type_id(native_module, "Array<Array<String>>")).to_equal(nested)
+		expect(mir_semantic_type_name(native_module, nested)).to_equal("Array<Array<String>>")
+		expect(mir_element_type(native_module, nested)).to_equal(strings)
+		expect(mir_managed_type(native_module, nested)).to_be_true()
+		expect(mir_managed_type(native_module, 4)).to_be_false()
+		expect(verify_mir(native_module, true)).to_equal("")
+		native_module.types[nested - 9] = MirType.new(kind: 1, name: "Array<Array<String>>", element: nested, key: 0, declaration: -1)
+		expect(verify_mir(native_module, true)).to_equal("MIR composite element type is invalid")
+		native_module.types[nested - 9] = MirType.new(kind: 1, name: "Array<Array<Integer>>", element: strings, key: 0, declaration: -1)
+		expect(verify_mir(native_module, true)).to_equal("MIR composite type identity differs")
+		native_module.types[nested - 9] = MirType.new(kind: 1, name: "Array<String>", element: 8, key: 0, declaration: -1)
+		expect(verify_mir(native_module, true)).to_equal("MIR composite type is duplicated")
+	end
+
+	test("verifies all Array operation operands, stored values and effects") do
+		mut kind := 19
+		while kind <= 24
+			mut state := array_mir_test_state()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != kind
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			expected := [9, 0, 8, 8, 10, 11]
+			expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(expected[kind - 19])
+			mut cell := 2
+			if kind == 23
+				cell = 4
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 99999999999)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+
+	test("rejects a missing live Array owner at an allocation safe point") do
+		mut state := array_mir_test_state()
+		plan := state.scalar_mir.root_plans[0]
+		mut roots := plan.roots
+		mut index := 0
+		while roots[index].size() == 0
+			index += 1
+		end
+		roots[index] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("executes an assignment whose index joins two control-flow paths") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			source := "def main()\nmut values := [1, 2]\nmut index := 0\nif values.size() == 2\nindex = 1\nelse\nindex = 0\nend\nvalues[index] = 7\nputs(values[0])\nputs(values[1])\nend\n"
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n7\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("normalizes a negative assignment target before the right-hand side grows its Array") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			source := "def grow(mut values: Array<Integer>): Integer\nvalues.push(3)\nreturn 9\nend\ndef main()\nmut values := [1, 2]\nvalues[-1] = grow(values)\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n"
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n9\n3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("reuses a checked assignment index only before a mutating right-hand side") do
+		source := "def grow(mut values: Array<Integer>): Integer\nvalues.push(3)\nreturn 9\nend\ndef main()\nmut values := [1, 2]\nvalues[-1] += 7\nvalues[-1] = grow(values)\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut stores: Array<Integer> := []
+		mut index := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 23
+				stores.push(index)
+			end
+			index += 1
+		end
+		expect(stores.size()).to_equal(2)
+		reuse := state.scalar_mir.array_check_reuse[1]
+		expect(reuse.include?(stores[0])).to_be_true()
+		expect(reuse.include?(stores[1])).to_be_false()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n9\n3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		state.scalar_mir.array_check_reuse[1].push(stores[1])
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array check-reuse plan differs")
+	end
+
+	test("executes erased reordered Array MIR with collection at every allocating operation") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root != nil
+			if qbe != nil
+				fixture := root + "/compiler/conformance/valid/managed-array-mir"
+				mut state := logical_checked_source(array_mir_test_read(fixture + ".trb"))
+				expect(check(state)).to_be_true()
+				expect(state.scalar_mir.functions.size()).to_equal(state.declarations.function_count[0])
+				before := control_test_output(emit_qbe(state))
+				state.scalar_mir.functions.each do |function|
+					mut token := load_integer(state.declarations.function_body_starts, function.id)
+					while token < load_integer(state.declarations.function_body_ends, function.id)
+						store_string(state.source_tokens.token_texts, token, "unavailable")
+						token += 1
+					end
+				end
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				state.scalar_mir.functions.each do |function|
+					mut left := function.block_start
+					mut right := left + function.block_count - 1
+					while left < right
+						saved := state.scalar_mir.blocks[left]
+						state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+						state.scalar_mir.blocks[right] = saved
+						left += 1
+						right -= 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				output := control_test_output(emit_qbe(state))
+				mut forced := ""
+				mut ordinary := false
+				mut hooks := 0
+				output.split("\n").each do |line|
+					if string_starts_with(line, "function ")
+						ordinary = line.include?("$trbnf")
+					end
+					if line == "}"
+						ordinary = false
+					end
+					if ordinary && (line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_integer_to_string(") || line.include?("call $trbnf"))
+						forced += "\tcall $trbn_gc_collect(w 0)\n"
+						hooks += 1
+					end
+					forced += line + "\n"
+				end
+				expect(hooks > 20).to_be_true()
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(actual)
+					expect(actual).to_equal(array_mir_test_read(fixture + ".out"))
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end

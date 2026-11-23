@@ -1,0 +1,26 @@
+# String-keyed Hash counting with generated keys.
+
+def run(rounds: Integer): Integer
+	words := ["red", "green", "blue", "cyan", "magenta", "yellow", "black", "white"]
+	mut counts: Hash<String, Integer> := {}
+	mut round := 0
+	while round < rounds
+		word := words[(round * 5) % words.size()] + (round % 50).to_s()
+		if counts.key?(word)
+			counts[word] = counts[word] + 1
+		else
+			counts[word] = 1
+		end
+		round += 1
+	end
+	mut total := 0
+	counts.keys().each do |key|
+		total += counts[key] * key.size()
+	end
+	return total + counts.size()
+end
+
+def main()
+	puts(run(1200000))
+	return
+end

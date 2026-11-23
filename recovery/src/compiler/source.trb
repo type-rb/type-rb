@@ -1,0 +1,187 @@
+import { compiler_recovery_layout } from compiler/layout
+import { native_create_directories, native_read_text, native_write_text } from support/file_system
+import trb/std/result
+
+record RecoveryCompilerSources
+	names: Array<String>
+	contents: Array<String>
+	flattened: String
+end
+
+def valid_recovery_module_name(name: String): Boolean
+	parts := name.split("/")
+	parts.each do |part|
+		if part.empty?() || !"abcdefghijklmnopqrstuvwxyz".include?(part[0])
+			return false
+		end
+		mut index := 1
+		while index < part.size()
+			if !"abcdefghijklmnopqrstuvwxyz0123456789_".include?(part[index])
+				return false
+			end
+			index += 1
+		end
+	end
+	return true
+end
+
+def compiler_source_has_import(source: String): Boolean
+	lines := source.split("\n")
+	mut index := 0
+	while index < lines.size()
+		line := lines[index]
+		mut start := 0
+		while start < line.size() && (line[start] == " " || line[start] == "\t" || line[start] == "\r")
+			start += 1
+		end
+		text := line.slice(start...line.size())
+		if text.start_with?("import")
+			if text.size() == 6 || !"_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".include?(text[6])
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def compiler_source_directory(path: String): String
+	mut slash := -1
+	mut index := 0
+	while index < path.size()
+		if path[index] == "/"
+			slash = index
+		end
+		index += 1
+	end
+	if slash < 0
+		return "."
+	end
+	if slash == 0
+		return "/"
+	end
+	mut result := ""
+	index = 0
+	while index < slash
+		result += path[index]
+		index += 1
+	end
+	return result
+end
+
+def compiler_source_path(directory: String, filename: String): String
+	if directory == "/"
+		return directory + filename
+	end
+	return directory + "/" + filename
+end
+
+def read_required_compiler_source(path: String): Result<String, String>
+	case native_read_text(path)
+	when Result::Ok(source)
+		return Result<String, String>::Ok(source)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+# Array positions are bound to the checked-in module inventory, not discovered
+# by stripping arbitrary imports from source supplied by the caller.
+def flatten_compiler_recovery_source(names: Array<String>, contents: Array<String>): Result<String, String>
+	layout := compiler_recovery_layout()
+	if names.size() != layout.size() || contents.size() != layout.size()
+		return Result<String, String>::Err("compiler source inventory differs")
+	end
+	mut flattened := ""
+	layout.each.with_index do |module, index|
+		if !valid_recovery_module_name(module.name)
+			return Result<String, String>::Err("invalid compiler module path: " + module.name)
+		end
+		if names[index] != module.name
+			return Result<String, String>::Err("compiler source identity differs at " + module.name)
+		end
+		source := contents[index]
+		if !source.start_with?(module.imports)
+			return Result<String, String>::Err(module.name + " source import boundary differs")
+		end
+		core := source.slice(module.imports.size()...source.size())
+		if core.empty?()
+			return Result<String, String>::Err(module.name + " declaration source is empty")
+		end
+		if compiler_source_has_import(core)
+			return Result<String, String>::Err(module.name + " declaration source has an unexpected import")
+		end
+		if !flattened.empty?()
+			flattened += "\n"
+		end
+		flattened += core
+	end
+	return Result<String, String>::Ok(flattened)
+end
+
+def read_compiler_recovery_sources(entry_path: String): Result<RecoveryCompilerSources, String>
+	directory := compiler_source_directory(entry_path)
+	mut names: Array<String> := []
+	mut contents: Array<String> := []
+	compiler_recovery_layout().each do |module|
+		if !valid_recovery_module_name(module.name)
+			return Result<RecoveryCompilerSources, String>::Err("invalid compiler module path: " + module.name)
+		end
+		mut path := compiler_source_path(directory, module.name + ".trb")
+		if module.name == "compiler"
+			path = entry_path
+		end
+		names.push(module.name)
+		contents.push(try read_required_compiler_source(path))
+	end
+	flattened := try flatten_compiler_recovery_source(names, contents)
+	return Result<RecoveryCompilerSources, String>::Ok(RecoveryCompilerSources.new(names: names, contents: contents, flattened: flattened))
+end
+
+def recovery_compiler_source(sources: RecoveryCompilerSources, name: String): String
+	sources.names.each.with_index do |candidate, index|
+		if candidate == name
+			return sources.contents[index]
+		end
+	end
+	return ""
+end
+
+def write_compiler_recovery_sources(sources: RecoveryCompilerSources, directory: String): Result<Boolean, String>
+	try flatten_compiler_recovery_source(sources.names, sources.contents)
+	return write_recovery_source_files(sources.names, sources.contents, directory)
+end
+
+def write_recovery_source_files(names: Array<String>, contents: Array<String>, directory: String): Result<Boolean, String>
+	if names.size() != contents.size()
+		return Result<Boolean, String>::Err("compiler source inventory differs")
+	end
+	mut seen: Array<String> := []
+	mut directories: Array<String> := []
+	names.each do |name|
+		if !valid_recovery_module_name(name) || seen.include?(name)
+			return Result<Boolean, String>::Err("invalid compiler module path: " + name)
+		end
+		seen.push(name)
+		parent := compiler_source_directory(compiler_source_path(directory, name + ".trb"))
+		if !directories.include?(parent)
+			directories.push(parent)
+		end
+	end
+	# All paths are validated before preparation; write no sources if it fails.
+	if !directories.empty?()
+		case native_create_directories(directories)
+		when Result::Ok(_output)
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+	end
+	names.each.with_index do |name, index|
+		case native_write_text(compiler_source_path(directory, name + ".trb"), contents[index])
+		when Result::Ok(_unit)
+		when Result::Err(error)
+			return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+		end
+	end
+	return Result<Boolean, String>::Ok(true)
+end

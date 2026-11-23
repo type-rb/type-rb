@@ -1,0 +1,44 @@
+def smallest(): Float
+	mut value := 1.0
+	mut exponent := 0
+	while exponent < 1074
+		value = value / 2.0
+		exponent += 1
+	end
+	return value
+end
+def largest(): Float
+	mut value := 1.9999999999999998
+	mut exponent := 0
+	while exponent < 1023
+		value = value * 2.0
+		exponent += 1
+	end
+	return value
+end
+def reciprocal(value: Float): Float
+	return 1.0 / value
+end
+def negate(value: Float): Float
+	return -value
+end
+def mark(value: Float): Float
+	puts("visit")
+	return value
+end
+def optional_round(value: Float?): Integer?
+	return value&.round()
+end
+def probe()
+	puts(mark(-2.5).round())
+	absent := optional_round(nil)
+	puts(absent == nil)
+	present := optional_round(-2.5)
+	if present != nil
+		puts(present)
+	end
+end
+
+def main()
+	probe()
+end

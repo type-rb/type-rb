@@ -1,0 +1,23 @@
+import { check, emit_qbe } from compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Plain enum output") do
+	test("retains a checked ordinal projection after erasing frontend state") do
+		sources := [
+			"enum Mode\nCold\nWarm\nHot\nend\ndef selected(): Mode\nputs(\"once\")\nreturn Mode::Warm\nend\ndef main()\nputs(selected())\nputs(Mode::Cold)\nputs(Mode::Hot)\nend\n",
+			"enum Mode\nCold\nWarm\nend\ndef show<T>(value: T)\nputs(value)\nend\ndef main()\nshow<Mode>(Mode::Warm)\nend\n",
+		]
+		sources.each do |source|
+			mut state := logical_checked_source(source)
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+		end
+	end
+end

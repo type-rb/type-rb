@@ -1,0 +1,7 @@
+def main()
+	zero := 0
+	if 1 / zero == 0
+		return
+	end
+	return
+end

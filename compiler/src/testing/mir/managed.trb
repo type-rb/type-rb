@@ -1,0 +1,181 @@
+import { MirTransform } from frontend/types/transform_model
+import { MirIteration } from mir/model/iteration
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { array_mir_test_read } from testing/mir/arrays
+import { mir_hash_operation } from mir/model/hashes
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { string_starts_with } from support/path
+import { CompilerState, has_diagnostic } from state/state
+import { load_string, store_integer, store_string } from support/storage
+import { expect } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def hash_value_mir_state(): CompilerState
+	mut state := logical_checked_source("def main()\nmut table := {\"key\" => \"value\"}\ntable[\"key\"] = \"updated\"\nmerged := table.merge({\"next\" => \"other\"})\nputs(merged[\"next\"])\nend\n")
+	expect_compiler_phase(state, "check", check(state))
+	expect(state.scalar_mir.functions.size()).to_equal(1)
+	return state
+end
+
+def managed_mir_test_fixture(name: String, minimum_hooks: Integer)
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if root != nil
+		if qbe != nil
+			fixture := root + "/compiler/conformance/valid/" + name
+			mut state := logical_checked_source(array_mir_test_read(fixture + ".trb"))
+			expect_compiler_phase(state, name + ": check", check(state))
+			mut authored := 0
+			state.scalar_mir.functions.each do |function|
+				if function.id < state.declarations.function_count[0]
+					authored += 1
+				end
+			end
+			expect(authored).to_equal(state.declarations.function_count[0])
+			before := control_test_output(emit_qbe(state))
+			if has_diagnostic(state)
+				puts(name + ": " + load_string(state.diagnostics.messages, 0))
+			end
+			expect(has_diagnostic(state)).to_be_false()
+			# Erase declaration spelling and nominal/generic frontend inventories too.
+			mut origin := 0
+			while origin < state.source_tokens.token_count[0]
+				store_string(state.source_tokens.token_texts, origin, "unavailable")
+				origin += 1
+			end
+			while state.nominal.objects.size() > 0
+				state.nominal.objects.pop()
+			end
+			while state.nominal.object_instances.size() > 0
+				state.nominal.object_instances.pop()
+			end
+			while state.type_resolution.generic_functions.size() > 0
+				state.type_resolution.generic_functions.pop()
+			end
+			while state.type_resolution.generic_function_instances.size() > 0
+				state.type_resolution.generic_function_instances.pop()
+			end
+			state.callables.checked_bodies.each do |body|
+				mut index := 0
+				while index < body.hash_operations.size()
+					body.hash_operations[index] = mir_hash_operation(0, -1, -1, -1, "", false, 0)
+					index += 1
+				end
+			end
+			state.parsed.iterations.each do |plan|
+				store_integer(state.parsed.iteration_origins, plan.origin, 0)
+				store_integer(state.parsed.iteration_origins, plan.body_finish, 0)
+			end
+			state.parsed.transforms.each do |plan|
+				store_integer(state.parsed.transform_origins, plan.iteration.origin, 0)
+				store_integer(state.parsed.transform_origins, plan.iteration.body_finish, 0)
+			end
+			state.callables.checked_bodies.each do |body|
+				# Typed traversal projections are not an execution dependency either.
+				body.iterations.each.with_index do |plan, index|
+					body.iterations[index] = MirIteration.new(syntax: plan.syntax, parent_loop: -1, source_kind: 0, type_name: "", element_type: "")
+				end
+				body.transforms.each.with_index do |plan, index|
+					body.transforms[index] = MirTransform.new(syntax: plan.syntax, iteration: plan.iteration, type_name: "", key_type: "")
+					store_integer(body.transform_origins, plan.syntax.iteration.origin, 0)
+					store_string(body.transform_types, plan.syntax.iteration.origin, "")
+					store_string(body.transform_key_types, plan.syntax.iteration.origin, "")
+				end
+				body.ranges.each do |plan|
+					store_integer(body.range_origins, plan.operator_origin, 0)
+				end
+			end
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			state.scalar_mir.functions.each do |function|
+				mut left := function.block_start
+				mut right := left + function.block_count - 1
+				while left < right
+					saved := state.scalar_mir.blocks[left]
+					state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+					state.scalar_mir.blocks[right] = saved
+					left += 1
+					right -= 1
+				end
+			end
+			# Physical function order changes together with its owned plan rows.
+			count := state.scalar_mir.functions.size()
+			expect(state.scalar_mir.root_plans.size()).to_equal(count)
+			expect(state.scalar_mir.numeric_plans.size()).to_equal(1)
+			expect(state.scalar_mir.array_loops.size()).to_equal(count)
+			expect(state.scalar_mir.array_check_reuse.size()).to_equal(count)
+			mut left := 0
+			mut right := count - 1
+			while left < right
+				function := state.scalar_mir.functions[left]
+				state.scalar_mir.functions[left] = state.scalar_mir.functions[right]
+				state.scalar_mir.functions[right] = function
+				roots := state.scalar_mir.root_plans[left]
+				state.scalar_mir.root_plans[left] = state.scalar_mir.root_plans[right]
+				state.scalar_mir.root_plans[right] = roots
+				loops := state.scalar_mir.array_loops[left]
+				state.scalar_mir.array_loops[left] = state.scalar_mir.array_loops[right]
+				state.scalar_mir.array_loops[right] = loops
+				checks := state.scalar_mir.array_check_reuse[left]
+				state.scalar_mir.array_check_reuse[left] = state.scalar_mir.array_check_reuse[right]
+				state.scalar_mir.array_check_reuse[right] = checks
+				loop_calls := state.scalar_mir.loop_calls[left]
+				state.scalar_mir.loop_calls[left] = state.scalar_mir.loop_calls[right]
+				state.scalar_mir.loop_calls[right] = loop_calls
+				array_read_guards := state.scalar_mir.array_read_guards[left]
+				state.scalar_mir.array_read_guards[left] = state.scalar_mir.array_read_guards[right]
+				state.scalar_mir.array_read_guards[right] = array_read_guards
+				string_concats := state.scalar_mir.string_concats[left]
+				state.scalar_mir.string_concats[left] = state.scalar_mir.string_concats[right]
+				state.scalar_mir.string_concats[right] = string_concats
+				string_splits := state.scalar_mir.string_splits[left]
+				state.scalar_mir.string_splits[left] = state.scalar_mir.string_splits[right]
+				state.scalar_mir.string_splits[right] = string_splits
+				array_joins := state.scalar_mir.array_joins[left]
+				state.scalar_mir.array_joins[left] = state.scalar_mir.array_joins[right]
+				state.scalar_mir.array_joins[right] = array_joins
+				left += 1
+				right -= 1
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			reordered := control_test_output(emit_qbe(state))
+			expect(control_test_output(emit_qbe(state))).to_equal(reordered)
+			expect(has_diagnostic(state)).to_be_false()
+			mut forced := ""
+			mut ordinary := false
+			mut hooks := 0
+			reordered.split("\n").each do |line|
+				if string_starts_with(line, "function ")
+					ordinary = line.include?("$trbnf")
+				end
+				if line == "}"
+					ordinary = false
+				end
+				allocates := line.include?("call $trbn_bytes_to_string(") || line.include?("call $trbn_hash_new(") || line.include?("call $trbn_hash_set(") || line.include?("call $trbn_hash_copy(") || line.include?("call $trbn_hash_update(") || line.include?("call $trbn_hash_delete(") || line.include?("call $trbn_hash_entries(") || line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_new_reserved(") || line.include?("call $trbn_array_copy(") || line.include?("call $trbn_array_join(") || line.include?("call $trbn_string_join(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_array_grow_paced(") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_string_sequence(") || line.include?("call $trbn_string_reverse(") || line.include?("call $trbn_string_slice(") || line.include?("call $trbn_string_trim(") || line.include?("call $trbn_string_split(") || line.include?("call $trbn_string_replace(") || line.include?("call $trbn_string_case(") || line.include?("call $trbn_float_to_string(") || line.include?("call $trbn_integer_to_string(") || line.include?("call $trbnf")
+				if ordinary && (allocates || line.include?("call $trbn_array_unshift("))
+					forced += "\tcall $trbn_gc_collect(w 0)\n"
+					hooks += 1
+				end
+				forced += line + "\n"
+			end
+			if hooks < minimum_hooks
+				puts(name + ": collection hooks " + hooks.to_s() + ", diagnostic " + load_string(state.diagnostics.messages, 0))
+			end
+			puts(name + ": forced collection hooks " + hooks.to_s())
+			expect(hooks >= minimum_hooks).to_be_true()
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal(array_mir_test_read(fixture + ".out"))
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

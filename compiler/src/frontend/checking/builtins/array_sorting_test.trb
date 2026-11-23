@@ -1,0 +1,134 @@
+import { mir_op_array_copy, mir_op_direct_call } from mir/model/instructions
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_function_index } from mir/model/module
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Array sorting MIR") do
+	test("sorts stably with NaNs last through erased and reordered MIR") do
+		managed_mir_test_fixture("array-sorting-mir", 8)
+	end
+	test("retains managed copies closures and optional receivers across collection") do
+		managed_mir_test_fixture("array-sorting-managed-mir", 8)
+	end
+	test("lowers every portable ordering to verified control flow") do
+		["[3, 1, 2]", "[2.5, 1.0]", "[\"日本\", \"a\"]"].each do |source|
+			mut state := logical_checked_source("def main()\nputs(" + source + ".sort().size())\nend\n")
+			checked := check(state)
+			if !checked
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(state.scalar_mir.blocks.size() > 15).to_be_true()
+			state.scalar_mir.instructions.each do |instruction|
+				expect(instruction.kind <= 47).to_be_true()
+			end
+		end
+	end
+	test("rejects malformed internal String ordering facts") do
+		mut mutation := 0
+		while mutation < 7
+			mut state := logical_checked_source("def main()\nputs([\"b\", \"a\"].sort()[0])\nend\n")
+			expect(check(state)).to_be_true()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 14
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			expect(instruction.payload).to_equal(2)
+			expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(0)
+			mut cell := mutation
+			mut value := 999999
+			if mutation == 4
+				value = 3
+			elsif mutation == 5
+				value = 0
+			elsif mutation == 6
+				cell = 4
+				value = -1
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+	test("rejects a scratch allocation that loses the copied managed input") do
+		mut state := logical_checked_source("def main()\nputs([\"b\", \"a\"].sort()[0])\nend\n")
+		expect(check(state)).to_be_true()
+		plan := state.scalar_mir.root_plans[0]
+		# Both inline and shared bodies retain the copied input at scratch allocation.
+		mut point := 0
+		while point < plan.instructions.size()
+			if state.scalar_mir.instructions[plan.instructions[point]].kind == mir_op_array_copy() && plan.roots[point].size() > 0
+				break
+			end
+			point += 1
+		end
+		expect(point < plan.instructions.size()).to_be_true()
+		expect(plan.roots[point].size() >= 1).to_be_true()
+		mut roots := plan.roots
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end
+
+describe("Shared typed Array sorting functions") do
+	test("keeps a single sorting site in a small caller inline") do
+		mut state := logical_checked_source("def main()\nputs([3, 1, 2].sort()[0])\nend\n")
+		expect(check(state)).to_be_true()
+		state.scalar_mir.signatures.each do |signature|
+			expect(signature.name.include?("$sort:")).to_be_false()
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("reuses exact type and direction bodies across natural and key call sites") do
+		source := "def main()\nvalues := [2, 1]\nputs(values.sort()[0])\nputs(values.sort()[1])\nputs(values.sort()[0])\nputs(values.sort_descending()[0])\nputs([1.5, 0.5].sort()[0])\nputs(values.sort_by { |value| value }[0])\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		mut names: Array<String> := []
+		state.scalar_mir.signatures.each do |signature|
+			if signature.id >= state.declarations.function_count[0] && signature.kind == mir_signature_ordinary()
+				names.push(signature.name)
+				body := mir_function_index(state.scalar_mir, signature.id)
+				expect(body >= 0).to_be_true()
+				expect(state.scalar_mir.functions[body].parameter_count).to_equal(signature.parameter_types.size())
+				expect(state.scalar_mir.functions[body].source_id).to_equal(signature.source_id)
+				expect(state.scalar_mir.functions[body].line).to_equal(signature.line)
+			end
+		end
+		expect(names).to_equal(["$sort:Array<Integer>:Void", "$sort:Array<Integer>:Void:descending", "$sort:Array<Float>:Void", "$sort:Array<Integer>:Array<Integer>"])
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("keeps each caller input copy and roots it across the shared call") do
+		mut state := logical_checked_source("def main()\nvalues := [\"b\", \"a\"]\nputs(values.sort()[0])\nputs(values.sort()[1])\nend\n")
+		expect(check(state)).to_be_true()
+		caller := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.root_plans[caller]
+		mut copies := 0
+		mut calls := 0
+		mut point := 0
+		while point < plan.instructions.size()
+			instruction := state.scalar_mir.instructions[plan.instructions[point]]
+			if instruction.kind == mir_op_array_copy()
+				copies += 1
+			elsif instruction.kind == mir_op_direct_call()
+				calls += 1
+				expect(plan.roots[point].size() > 0).to_be_true()
+			end
+			point += 1
+		end
+		expect(copies).to_equal(3)
+		expect(calls).to_equal(1)
+	end
+end

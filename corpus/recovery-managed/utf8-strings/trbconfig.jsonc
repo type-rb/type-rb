@@ -1,0 +1,8 @@
+{
+  "name": "recovery-managed-utf8-strings",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-managed/utf8-strings"
+  }
+}

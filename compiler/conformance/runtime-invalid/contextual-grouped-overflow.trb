@@ -1,0 +1,8 @@
+def widen(value: Integer): Float
+	return (value) + 1
+end
+
+def main()
+	_value := widen(9007199254740991)
+	return
+end

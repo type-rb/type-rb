@@ -1,0 +1,28 @@
+def power(exponent: Integer): Float
+	mut value := 1.0
+	mut index := 0
+	while index > exponent
+		value = value / 2.0
+		index -= 1
+	end
+	while index < exponent
+		value = value * 2.0
+		index += 1
+	end
+	return value
+end
+
+def divide(value: Float): Float
+	return 1.0 / value
+end
+
+def main()
+	infinity := divide(0.0)
+	values := [0.0, -0.0, 1.0, -42.0, 0.1, 0.0000001, 100000000000000000000000.0, 1.2345678901234567, power(-1017), -power(-695), power(-1074), 1.9999999999999998 * power(1023), infinity, -infinity, infinity - infinity]
+	values.each do |value|
+		puts(value.to_s())
+		puts(value)
+	end
+	puts(true.to_s())
+	puts(false.to_s())
+end

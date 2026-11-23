@@ -1,0 +1,6 @@
+binutils	2.42-4ubuntu2.10
+file	1:5.45-3build1
+jq	1.7.1-3ubuntu0.24.04.2
+lld:amd64	1:18.0-59~exp2
+strace	6.8-0ubuntu2
+time	1.9-0.2build1

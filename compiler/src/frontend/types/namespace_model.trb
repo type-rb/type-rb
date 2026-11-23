@@ -1,0 +1,32 @@
+# A declaration namespace belongs to a source module; it is never a value or a
+# second source-loading identity. Reopened declarations retain the same owner.
+record NamespaceDeclaration
+	name: String
+	source_id: Integer
+	line: Integer
+end
+
+def namespace_qualify(owner: String, name: String): String
+	if owner == ""
+		return name
+	end
+	return owner + "::" + name
+end
+
+def namespace_parent(name: String): String
+	mut finish := 0
+	mut index := 0
+	while index + 1 < name.size()
+		if name[index] == ":" && name[index + 1] == ":"
+			finish = index
+		end
+		index += 1
+	end
+	mut owner := ""
+	index = 0
+	while index < finish
+		owner += name[index]
+		index += 1
+	end
+	return owner
+end

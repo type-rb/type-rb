@@ -1,0 +1,9 @@
+# Generic nominal declarations have their own tags, separate from lookup families.
+
+def generic_record(): Integer
+	return 1
+end
+
+def generic_enum(): Integer
+	return 2
+end

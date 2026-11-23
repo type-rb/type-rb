@@ -1,0 +1,137 @@
+import { RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedTypeDefinition, RecoveryManagedValueType } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedResultType, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { build_recovery_managed_executable } from managed/toolchain
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_boolean_origin(): SourceOrigin
+	return SourceOrigin.new(source_id: "main", start_line: 1, start_column: 1, end_line: 1, end_column: 8)
+end
+
+def _recovery_managed_boolean_array_module(extra: Array<RecoveryManagedInstruction>, condition: String): RecoveryManagedModule
+	origin := _recovery_managed_boolean_origin()
+	mut instructions := [
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("zero", 0, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("last", -1, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("yes", true, origin)),
+		RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("no", false, origin)),
+		RecoveryManagedInstruction::ArrayConstruct("values", "Array<Boolean>", ["no"], origin),
+		RecoveryManagedInstruction::ArrayConstruct("groups", "Array<Array<Boolean>>", ["values"], origin),
+		RecoveryManagedInstruction::RuntimeCollect(origin),
+		RecoveryManagedInstruction::ArrayGet("selected", "Array<Array<Boolean>>", "groups", "zero", origin),
+	]
+	mut index := 0
+	while index < extra.size()
+		instructions.push(extra[index])
+		index += 1
+	end
+	return RecoveryManagedModule.new(
+		id: "boolean-array",
+		entry_function: "boolean-array#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: [
+			RecoveryManagedTypeDefinition::Array("Array<Boolean>", RecoveryManagedValueType::Scalar(ScalarType::Boolean)),
+			RecoveryManagedTypeDefinition::Array("Array<Array<Boolean>>", RecoveryManagedValueType::Aggregate("Array<Boolean>")),
+			RecoveryManagedTypeDefinition::Array("Array<Integer>", RecoveryManagedValueType::Scalar(ScalarType::Integer)),
+		],
+		functions: [RecoveryManagedFunction.new(
+				id: "boolean-array#main", name: "main", parameters: [],
+				result_type: RecoveryManagedResultType::Void, entry: "entry", origin: origin,
+				blocks: [
+					RecoveryManagedBlock.new(
+						id: "entry", parameters: [], origin: origin, instructions: instructions,
+						terminator: RecoveryManagedTerminator::Branch(condition, "success", [], "failure", [], origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "success", parameters: [], origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("boolean-array-ok\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+					RecoveryManagedBlock.new(
+						id: "failure", parameters: [], origin: origin,
+						instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("boolean-array-fail\n", origin))],
+						terminator: RecoveryManagedTerminator::Return(nil, origin),
+					),
+				],
+			)],
+	)
+end
+
+describe("Managed recovery Boolean Array recovery") do
+	test("rejects mismatched elements, indices, receivers and numeric uses") do
+		origin := _recovery_managed_boolean_origin()
+		invalid := [
+			RecoveryManagedInstruction::ArrayConstruct("wrong", "Array<Boolean>", ["zero"], origin),
+			RecoveryManagedInstruction::ArrayPush("Array<Boolean>", "values", "zero", origin),
+			RecoveryManagedInstruction::ArraySet("Array<Boolean>", "values", "zero", "zero", origin),
+			RecoveryManagedInstruction::ArrayGet("wrong", "Array<Boolean>", "values", "yes", origin),
+			RecoveryManagedInstruction::ArraySet("Array<Boolean>", "values", "yes", "yes", origin),
+			RecoveryManagedInstruction::ArrayGet("wrong", "Array<Integer>", "values", "zero", origin),
+			RecoveryManagedInstruction::ArrayPush("Array<Integer>", "values", "zero", origin),
+		]
+		mut index := 0
+		while index < invalid.size()
+			case verify_recovery_managed_mir(_recovery_managed_boolean_array_module([invalid[index]], "yes"))
+			when Result::Ok(_value)
+				expect(false).to_be_true()
+			when Result::Err(diagnostic)
+				expect(diagnostic.code).to_equal("TRBN0004")
+				expect(diagnostic.message).to_equal("operand type does not match the operation")
+			end
+			index += 1
+		end
+		case verify_recovery_managed_mir(_recovery_managed_boolean_array_module([
+						RecoveryManagedInstruction::ArrayGet("value", "Array<Boolean>", "values", "zero", origin),
+						RecoveryManagedInstruction::ArrayGet("wrong", "Array<Boolean>", "values", "value", origin),
+					], "yes"))
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.message).to_equal("operand type does not match the operation")
+		end
+	end
+
+	test("executes scalar storage and preserves nested arrays across collection") do
+		origin := _recovery_managed_boolean_origin()
+		native_module := _recovery_managed_boolean_array_module([
+				RecoveryManagedInstruction::ArrayPush("Array<Boolean>", "selected", "no", origin),
+				RecoveryManagedInstruction::ArraySet("Array<Boolean>", "selected", "last", "yes", origin),
+				RecoveryManagedInstruction::RuntimeCollect(origin),
+				RecoveryManagedInstruction::ArrayGet("actual", "Array<Boolean>", "selected", "last", origin),
+			], "actual")
+		case verify_recovery_managed_mir(native_module)
+		when Result::Ok(_value)
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			workspace := "/tmp/type-rb-native-recovery-managed-boolean-array"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_managed_executable(native_module, qbe, "/usr/bin/cc", workspace, workspace + "/sample")
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("boolean-array-ok\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + " " + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,78 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_control } from mir/model/control
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+import { output_source } from testing/compiler
+import { logical_run_qbe } from testing/qbe_runner
+import trb/std/process
+import trb/std/result
+
+describe("Native TypeRB frontend") do
+	test("skips unreachable structured statements without changing block boundaries") do
+		source := "def main()\nreturn\nif true\nwhile true\nputs(\"unreachable\")\nend\nelse\nreturn\nend\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		output := emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(output_source(output).include?("export function w $main")).to_be_true()
+	end
+
+	test("still type checks unreachable structured statements") do
+		source := "def main()\nreturn\nif 1\nputs(\"unreachable\")\nend\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+	end
+
+	test("checks every elsif condition and isolates branch bindings") do
+		source := "def main()\nif false\nvalue := 1\nputs(value)\nelsif false\nvalue := true\nputs(value)\nelsif true\nvalue := \"selected\"\nputs(value)\nelse\nvalue := 2.0\nputs(value == 2.0)\nend\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_function_index(state.scalar_mir, 0) >= 0).to_be_true()
+		expect(output_source(emit_qbe(state)).include?("export function w $main")).to_be_true()
+	end
+
+	test("retains bounds checks when an elsif invalidates the loop induction") do
+		source := "def read(values: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\nif false\nreturn 0\nelsif true\nindex =- 2\nend\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(read([1]))\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.functions[index].kind).to_equal(mir_function_control())
+		# Stable headers can be reused without proving the mutated index safe.
+		state.scalar_mir.array_loops[index].each do |plan|
+			expect(plan.accesses.size()).to_equal(0)
+			plan.headers.each do |header|
+				expect(header.bounded_accesses.size()).to_equal(0)
+			end
+		end
+		output := output_source(emit_qbe(state))
+		expect(output.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("out of bounds")).to_be_true()
+			end
+		end
+	end
+end

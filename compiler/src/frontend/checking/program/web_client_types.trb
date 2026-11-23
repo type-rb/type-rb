@@ -1,0 +1,163 @@
+import { find_import_binding } from frontend/resolution/declaration_lookup
+import { generic_arguments, generic_base } from frontend/types/generic_arguments
+import { nullable_element } from frontend/types/nullable_types
+import { package_sorted_indices } from project/package_json
+import { web_route_slice } from project/web_route_paths
+import { CompilerState, diagnostic } from state/state
+import { ascii_code } from support/literals
+import { load_string } from support/storage
+import { unicode_identifier_contains, unicode_identifier_point } from support/unicode_identifiers
+import { unicode_identifier_digit_data, unicode_identifier_lower_data, unicode_identifier_upper_data } from support/unicode_identifier_data
+
+record BrowserClientBuilder
+	paths: Array<String>
+	symbols: Array<String>
+	sequence: Array<Integer>
+end
+
+def browser_client_builder(): BrowserClientBuilder
+	return BrowserClientBuilder.new(paths: [], symbols: [], sequence: [0])
+end
+
+def browser_client_error(mut state: CompilerState, line: Integer, message: String): String
+	diagnostic(state, "TRBN4003", line, message)
+	return ""
+end
+
+def browser_client_import(mut builder: BrowserClientBuilder, path: String, symbol: String)
+	mut index := 0
+	while index < builder.paths.size()
+		if builder.paths[index] == path && builder.symbols[index] == symbol
+			return
+		end
+		index += 1
+	end
+	builder.paths.push(path)
+	builder.symbols.push(symbol)
+	return
+end
+
+def browser_client_imports(builder: BrowserClientBuilder): String
+	mut paths: Array<String> := []
+	builder.paths.each do |path|
+		mut found := false
+		paths.each do |previous|
+			if previous == path
+				found = true
+			end
+		end
+		if !found
+			paths.push(path)
+		end
+	end
+	mut result := ""
+	package_sorted_indices(paths).each do |selected|
+		path := paths[selected]
+		mut symbols: Array<String> := []
+		mut index := 0
+		while index < builder.paths.size()
+			if builder.paths[index] == path
+				if builder.symbols[index] == ""
+					result += "import " + path + "\n"
+				else
+					symbols.push(builder.symbols[index])
+				end
+			end
+			index += 1
+		end
+		mut ordered: Array<String> := []
+		package_sorted_indices(symbols).each do |symbol|
+			ordered.push(symbols[symbol])
+		end
+		if ordered.size() > 0
+			result += "import { " + ordered.join(", ") + " } from " + path + "\n"
+		end
+	end
+	return result
+end
+
+# Preserve authored imports and aliases in the generated source. Canonical
+# resolved identities alone would lose the shared-module boundary.
+def browser_client_type(mut state: CompilerState, mut builder: BrowserClientBuilder, source: Integer, authored: String, line: Integer, depth: Integer): String
+	if depth >= 128
+		return browser_client_error(state, line, "browser client type nesting exceeds the supported limit")
+	end
+	optional := nullable_element(authored)
+	if optional != ""
+		return browser_client_type(state, builder, source, optional, line, depth + 1) + "?"
+	end
+	name := generic_base(authored).strip()
+	mut root := name
+	mut index := 0
+	while index + 1 < name.size()
+		if name[index] == ":" && name[index + 1] == ":"
+			root = web_route_slice(name, 0, index)
+			break
+		end
+		index += 1
+	end
+	binding := find_import_binding(state, source, root)
+	if binding >= 0
+		browser_client_import(builder, load_string(state.module_graph.import_paths, binding), name)
+	elsif name != "Boolean" && name != "Integer" && name != "Float" && name != "String" && name != "Array" && name != "Hash"
+		return browser_client_error(state, line, "browser client type " + name + " must be imported by the endpoint from a shared module; route-local contract types cannot be generated")
+	end
+	arguments := generic_arguments(authored)
+	if arguments.size() == 0
+		return name
+	end
+	mut types: Array<String> := []
+	arguments.each do |argument|
+		types.push(browser_client_type(state, builder, source, argument.strip(), line, depth + 1))
+	end
+	return name + "<" + types.join(", ") + ">"
+end
+
+def browser_client_name_valid(name: String): Boolean
+	if name == "" || ascii_code(name[0]) < 65 || ascii_code(name[0]) > 90
+		return false
+	end
+	mut index := 1
+	while index < name.size()
+		point := ascii_code(name[index])
+		if !(point >= 65 && point <= 90) && !(point >= 97 && point <= 122) && !(point >= 48 && point <= 57) && point != 95
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def browser_client_method_name(name: String): String
+	mut input := name
+	if name.size() >= 8 && web_route_slice(name, name.size() - 8, name.size()) == "Endpoint"
+		input = web_route_slice(name, 0, name.size() - 8)
+	end
+	if input == ""
+		return "endpoint"
+	end
+	mut result := ""
+	mut index := 0
+	while index < input.size()
+		character := input[index]
+		if unicode_identifier_contains(unicode_identifier_point(character), unicode_identifier_upper_data())
+			mut previous_lower := false
+			mut next_lower := false
+			if index > 0
+				point := unicode_identifier_point(input[index - 1])
+				previous_lower = unicode_identifier_contains(point, unicode_identifier_lower_data()) || unicode_identifier_contains(point, unicode_identifier_digit_data())
+			end
+			if index + 1 < input.size()
+				next_lower = unicode_identifier_contains(unicode_identifier_point(input[index + 1]), unicode_identifier_lower_data())
+			end
+			if result != "" && (previous_lower || next_lower) && result[result.size() - 1] != "_"
+				result += "_"
+			end
+			result += character.downcase()
+		else
+			result += character
+		end
+		index += 1
+	end
+	return result
+end

@@ -1,0 +1,108 @@
+import { integer_storage, integer_storage_copy, integer_storage_span, load_integer, load_string, sparse_integer_at, sparse_string_at, store_integer, store_string, string_storage, string_storage_copy, string_storage_span } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("grows chunked storage only as elements are stored") do
+		empty := integer_storage(0)
+		expect(empty.chunks.size()).to_equal(0)
+		expect(empty.used[0]).to_equal(0)
+		expect(store_integer(empty, 0, 1)).to_be_false()
+
+		integers := integer_storage(513)
+		expect(integers.chunks.size()).to_equal(0)
+		expect(store_integer(integers, 0, 10)).to_be_true()
+		expect(store_integer(integers, 255, 20)).to_be_true()
+		expect(integers.chunks.size()).to_equal(1)
+		expect(integers.chunks[0].size()).to_equal(256)
+		expect(store_integer(integers, 256, 30)).to_be_true()
+		expect(integers.chunks.size()).to_equal(2)
+		expect(store_integer(integers, 512, 40)).to_be_true()
+		expect(integers.chunks.size()).to_equal(3)
+		expect(integers.chunks[1].size()).to_equal(256)
+		expect(integers.chunks[2].size()).to_equal(256)
+		expect(integers.used[0]).to_equal(513)
+		expect(load_integer(integers, 0)).to_equal(10)
+		expect(load_integer(integers, 255)).to_equal(20)
+		expect(load_integer(integers, 256)).to_equal(30)
+		expect(load_integer(integers, 512)).to_equal(40)
+		expect(store_integer(integers, -1, 50)).to_be_false()
+		expect(store_integer(integers, 513, 50)).to_be_false()
+		expect(integers.used[0]).to_equal(513)
+
+		strings := string_storage(257)
+		expect(store_string(strings, 0, "first")).to_be_true()
+		expect(store_string(strings, 256, "last")).to_be_true()
+		expect(load_string(strings, 0)).to_equal("first")
+		expect(load_string(strings, 256)).to_equal("last")
+		expect(store_string(strings, 257, "outside")).to_be_false()
+	end
+
+	test("shares Integer storage growth and isolates explicit sparse copies") do
+		mut original := integer_storage_span(100, 1125)
+		shared := original
+		held := original.chunks
+		expect(store_integer(shared, 100, 10)).to_be_true()
+		expect(store_integer(shared, 1124, 20)).to_be_true()
+		expect(held.size()).to_equal(5)
+		expect(held[1].size()).to_equal(0)
+		expect(load_integer(original, 1124)).to_equal(20)
+		expect(sparse_integer_at(original, 612)).to_equal(0)
+		expect(store_integer(shared, 356, 30)).to_be_true()
+		expect(load_integer(original, 356)).to_equal(30)
+		expect(store_integer(shared, 99, 1)).to_be_false()
+		expect(store_integer(shared, 1125, 1)).to_be_false()
+
+		mut copied := integer_storage_copy(original)
+		expect(copied.origin).to_equal(100)
+		expect(copied.chunks[2].size()).to_equal(0)
+		expect(store_integer(copied, 100, 99)).to_be_true()
+		expect(store_integer(copied, 612, 88)).to_be_true()
+		copied.limit[0] = 1381
+		expect(store_integer(copied, 1380, 40)).to_be_true()
+		expect(load_integer(original, 100)).to_equal(10)
+		expect(sparse_integer_at(original, 612)).to_equal(0)
+		expect(original.limit[0]).to_equal(1125)
+		expect(original.used[0]).to_equal(1125)
+		expect(copied.used[0]).to_equal(1381)
+		expect(held.size()).to_equal(5)
+		expect(copied.chunks.size()).to_equal(6)
+		expect(store_integer(shared, 868, 77)).to_be_true()
+		expect(sparse_integer_at(copied, 868)).to_equal(0)
+		expect(load_integer(original, 868)).to_equal(77)
+	end
+
+	test("shares String storage growth and isolates explicit sparse copies") do
+		mut original := string_storage_span(10, 1035)
+		shared := original
+		held := original.chunks
+		value := "stored-" + (42).to_s()
+		expect(store_string(shared, 10, value)).to_be_true()
+		expect(store_string(shared, 1034, "last")).to_be_true()
+		expect(held.size()).to_equal(5)
+		expect(held[1].size()).to_equal(0)
+		expect(load_string(original, 1034)).to_equal("last")
+		expect(sparse_string_at(original, 522)).to_equal("")
+		expect(store_string(shared, 266, "middle")).to_be_true()
+		expect(load_string(original, 266)).to_equal("middle")
+		expect(store_string(shared, 9, "outside")).to_be_false()
+		expect(store_string(shared, 1035, "outside")).to_be_false()
+
+		mut copied := string_storage_copy(original)
+		expect(copied.origin).to_equal(10)
+		expect(copied.chunks[2].size()).to_equal(0)
+		expect(store_string(copied, 10, "changed")).to_be_true()
+		expect(store_string(copied, 522, "new chunk")).to_be_true()
+		copied.limit[0] = 1291
+		expect(store_string(copied, 1290, "extended")).to_be_true()
+		expect(load_string(original, 10)).to_equal(value)
+		expect(sparse_string_at(original, 522)).to_equal("")
+		expect(original.limit[0]).to_equal(1035)
+		expect(original.used[0]).to_equal(1035)
+		expect(copied.used[0]).to_equal(1291)
+		expect(held.size()).to_equal(5)
+		expect(copied.chunks.size()).to_equal(6)
+		expect(store_string(shared, 778, "original only")).to_be_true()
+		expect(sparse_string_at(copied, 778)).to_equal("")
+		expect(load_string(original, 778)).to_equal("original only")
+	end
+end

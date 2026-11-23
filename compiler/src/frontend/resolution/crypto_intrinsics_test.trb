@@ -1,0 +1,125 @@
+import { standard_crypto } from frontend/resolution/crypto_intrinsics
+import { crypto_adapter_start, crypto_parameters, crypto_result } from mir/model/crypto_contract
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { load_integer, store_integer, store_string } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCall, MirSignature } from mir/model/module
+import { mir_signature_standard } from mir/model/call_kinds
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+
+def crypto_test_state(): CompilerState
+	source := "import trb/std/digest\nimport trb/std/hmac\nimport trb/std/secure_compare\ndef main()\nvalue := (6).to_s().to_bytes()\nputs(Digest.md5(value).size())\nputs(Digest.sha1(value).size())\nputs(Digest.sha256(value).size())\nputs(Digest.sha512(value).size())\nputs(HMAC.sha256(value, value).size())\nputs(HMAC.sha512(value, value).size())\nputs(HMAC.equal(value, value))\nputs(SecureCompare.equal(value, value))\nputs(value.to_s())\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("owned cryptography boundaries") do
+	test("retains semantic Bytes and conservative effects after source erasure") do
+		mut state := crypto_test_state()
+		mut found := 0
+		state.scalar_mir.calls.each do |call|
+			row := state.scalar_mir.signatures[call.callee]
+			if standard_crypto(state, row.id) >= 0
+				found += 1
+				expect(row.kind).to_equal(mir_signature_standard())
+				expect(row.adapter).to_equal(crypto_adapter_start() + standard_crypto(state, row.id))
+				expect(row.parameter_types).to_equal(crypto_parameters(standard_crypto(state, row.id)))
+				expect(row.result_type).to_equal(crypto_result(standard_crypto(state, row.id)))
+				expect(call.effects).to_equal(15)
+			end
+		end
+		expect(found).to_equal(8)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		intrinsic_mir_erase(state)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $EVP_Q_digest(")).to_be_true()
+		expect(output.include?("call $EVP_Q_mac(")).to_be_true()
+	end
+
+	test("does not authorize authored digest declarations or link plain programs") do
+		mut state := logical_checked_source("def sha256(value: Bytes): Bytes\nreturn value\nend\ndef main()\nputs(sha256(\"ordinary\".to_bytes()).size())\nend\n")
+		expect(check(state)).to_be_true()
+		state.scalar_mir.signatures.each do |row|
+			expect(standard_crypto(state, row.id)).to_equal(-1)
+		end
+		expect(control_test_output(emit_qbe(state)).include?("EVP_Q_")).to_be_false()
+	end
+
+	test("rejects incomplete or forged loader declarations") do
+		["owner", "name", "count", "parameter", "parameter_name", "mutable", "named", "default", "body", "result"].each do |damage|
+			mut state := crypto_test_state()
+			state.scalar_mir.signatures.each do |row|
+				if standard_crypto(state, row.id) >= 0
+					parameter := load_integer(state.declarations.function_parameter_starts, row.id)
+					if damage == "owner"
+						store_integer(state.standard_modules, row.source_id, 0)
+					elsif damage == "name"
+						store_string(state.declarations.function_names, row.id, "authored_sha256")
+					elsif damage == "count"
+						store_integer(state.declarations.function_parameter_counts, row.id, 0)
+					elsif damage == "parameter"
+						store_string(state.declarations.parameter_types, parameter, "String")
+					elsif damage == "parameter_name"
+						store_string(state.declarations.parameter_names, parameter, "other")
+					elsif damage == "mutable"
+						store_integer(state.declarations.parameter_mutable, parameter, 1)
+					elsif damage == "named"
+						store_integer(state.declarations.parameter_named_only, parameter, 1)
+					elsif damage == "default"
+						store_integer(state.parsed.parameter_defaults, parameter, 1)
+					elsif damage == "body"
+						store_integer(state.declarations.function_body_ends, row.id, 99999)
+					else
+						store_string(state.declarations.function_result_types, row.id, "String")
+					end
+					expect(standard_crypto(state, row.id)).to_equal(-1)
+				end
+			end
+		end
+	end
+
+	test("independently rejects changed MIR signatures and removed effects") do
+		["name", "parameter", "mutable", "result", "effects"].each do |damage|
+			mut state := crypto_test_state()
+			state.scalar_mir.signatures.each.with_index do |row, index|
+				if row.kind == mir_signature_standard() && row.adapter >= crypto_adapter_start() && damage != "effects"
+					mut name := row.name
+					mut parameters := row.parameter_types
+					mut mutable := row.parameter_mutable
+					mut result := row.result_type
+					if damage == "name"
+						name = "authored.sha256"
+					elsif damage == "parameter"
+						parameters = row.parameter_types
+						parameters[0] = "String"
+					elsif damage == "mutable"
+						mutable = row.parameter_mutable
+						mutable[0] = 1
+					else
+						result = "String"
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+				end
+			end
+			if damage == "effects"
+				state.scalar_mir.calls.each.with_index do |row, index|
+					if state.scalar_mir.signatures[row.callee].adapter >= crypto_adapter_start()
+						state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+					end
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+end

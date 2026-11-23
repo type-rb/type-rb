@@ -1,0 +1,14 @@
+class First
+@items: Array<String> := ["first"]
+end
+class Second
+@items: Array<String> := ["second"]
+end
+alias Items = First | Second
+def change(value: Items)
+value.items.push("added")
+end
+
+def main()
+change(First.new())
+end

@@ -1,0 +1,39 @@
+record Label
+	text: String
+end
+
+def main()
+	word := "hel" + "lo"
+	words := [word, "ABC", word, "other"]
+	puts(words.include?("hello"))
+	puts(words.count("ABC"))
+	found := words.index(word)
+	if found != nil
+		puts(found)
+	end
+	mut unique := words.uniq()
+	unique[0] = "replaced"
+	puts(words[0])
+	puts(unique.size())
+	labels := [Label.new(text: word)]
+	more := labels.concat([Label.new(text: "tail")])
+	puts(more[0].text)
+	puts(more[1].text)
+	mut inner := [7]
+	nested := [inner].concat([inner])
+	inner.push(8)
+	puts(nested[0].size())
+	puts(nested[1][1])
+	callback := fn(): String
+		return word
+	end
+	callbacks := [callback].concat([callback])
+	puts(callbacks[1]())
+	optional: Array<String?> := [nil, word]
+	optional_copy := optional.concat(optional)
+	puts(optional_copy[0] == nil)
+	present := optional_copy[3]
+	if present != nil
+		puts(present)
+	end
+end

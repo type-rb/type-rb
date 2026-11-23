@@ -1,0 +1,250 @@
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_terminator_return } from mir/model/control
+import { mir_op_object_field, mir_op_object_store } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirFunction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_type } from mir/analysis/flow
+import { mir_live_before, mir_managed_add } from mir/analysis/liveness
+import { mir_object_id } from mir/model/objects
+
+# Parameter aliases are derived from CFG arguments. May-alias protects escapes;
+# must-alias alone allows a store to prove initialization of the receiver.
+def mir_object_self_aliases(native_module: MirModule, function: MirFunction, flow: MirFlow, receiver: Integer, exact: Boolean): Hash<String, Integer>
+	mut aliases: Hash<String, Integer> := {}
+	aliases[integer_string(receiver)] = 1
+	if exact
+		mut block_index := 0
+		while block_index < function.block_count
+			block := native_module.blocks[function.block_start + block_index]
+			mut parameter := 0
+			while parameter < block.parameter_count
+				value := native_module.arguments[block.parameter_start + parameter]
+				if mir_flow_type(flow, value) == mir_flow_type(flow, receiver)
+					aliases[integer_string(value)] = 1
+				end
+				parameter += 1
+			end
+			block_index += 1
+		end
+	end
+	mut changed := true
+	while changed
+		changed = false
+		mut block_index := 0
+		while block_index < function.block_count
+			block := native_module.blocks[function.block_start + block_index]
+			if flow.ranks[block_index] >= 0
+				mut parameter := 0
+				while parameter < block.parameter_count
+					value := native_module.arguments[block.parameter_start + parameter]
+					key := integer_string(value)
+					mut selected := exact
+					mut incoming := 0
+					while incoming < flow.predecessors[block_index].size()
+						if flow.ranks[flow.predecessors[block_index][incoming]] >= 0
+							argument := native_module.arguments[flow.incoming_starts[block_index][incoming] + parameter]
+							known := mir_object_alias(aliases, argument)
+							if exact && !known
+								selected = false
+							elsif !exact && known
+								selected = true
+							end
+						end
+						incoming += 1
+					end
+					mut flag := 0
+					if selected && incoming > 0
+						flag = 1
+					end
+					if !aliases.key?(key) || aliases[key] != flag
+						aliases[key] = flag
+						changed = true
+					end
+					parameter += 1
+				end
+			end
+			block_index += 1
+		end
+	end
+	return aliases
+end
+
+def mir_object_alias(aliases: Hash<String, Integer>, value: Integer): Boolean
+	key := integer_string(value)
+	if !aliases.key?(key)
+		return false
+	end
+	return aliases[key] == 1
+end
+
+def mir_object_incoming(flow: MirFlow, outputs: Array<Array<Integer>>, block: Integer, count: Integer): Array<Integer>
+	mut fields: Array<Integer> := []
+	mut field := 0
+	while field < count
+		mut initialized := 1
+		if block == flow.entry
+			initialized = 0
+		else
+			flow.predecessors[block].each do |previous|
+				if flow.ranks[previous] >= 0 && outputs[previous][field] == 0
+					initialized = 0
+				end
+			end
+		end
+		fields.push(initialized)
+		field += 1
+	end
+	return fields
+end
+
+# This is a must-analysis over completing paths, including loop backedges.
+# Zeroed memory is safe for GC, but is never a language-level initialized value.
+def mir_object_initialization_error(native_module: MirModule, function: MirFunction, flow: MirFlow): String
+	if native_module.objects.size() == 0
+		return ""
+	end
+	mut owner := -1
+	native_module.objects.each do |definition|
+		if definition.initializer == function.id
+			owner = definition.declaration
+		end
+	end
+	mut receiver := -1
+	mut count := 0
+	mut exact: Hash<String, Integer> := {}
+	mut aliases: Hash<String, Integer> := {}
+	if owner >= 0
+		receiver = native_module.arguments[function.parameter_start]
+		count = native_module.objects[owner].fields.size()
+		exact = mir_object_self_aliases(native_module, function, flow, receiver, true)
+		aliases = mir_object_self_aliases(native_module, function, flow, receiver, false)
+	end
+	mut outputs: Array<Array<Integer>> := []
+	mut block_index := 0
+	while block_index < function.block_count
+		mut fields: Array<Integer> := []
+		mut field := 0
+		while field < count
+			fields.push(1)
+			field += 1
+		end
+		outputs.push(fields)
+		block_index += 1
+	end
+	mut changed := true
+	while changed
+		changed = false
+		block_index = 0
+		while block_index < function.block_count
+			if flow.ranks[block_index] >= 0
+				mut fields := mir_object_incoming(flow, outputs, block_index, count)
+				block := native_module.blocks[function.block_start + block_index]
+				mut index := block.instruction_start
+				while index < block.instruction_start + block.instruction_count
+					instruction := native_module.instructions[index]
+					if instruction.kind == mir_op_object_store() && mir_object_alias(exact, instruction.first)
+						fields[instruction.payload] = 1
+					end
+					index += 1
+				end
+				mut field := 0
+				while field < count
+					if outputs[block_index][field] != fields[field]
+						outputs[block_index][field] = fields[field]
+						changed = true
+					end
+					field += 1
+				end
+			end
+			block_index += 1
+		end
+	end
+	mut managed: Array<Integer> := []
+	if receiver >= 0
+		mir_managed_add(managed, receiver)
+	end
+	block_index = 0
+	while block_index < function.block_count
+		block := native_module.blocks[function.block_start + block_index]
+		mut parameter := 0
+		while parameter < block.parameter_count
+			value := native_module.arguments[block.parameter_start + parameter]
+			if mir_object_alias(aliases, value)
+				mir_managed_add(managed, value)
+			end
+			parameter += 1
+		end
+		block_index += 1
+	end
+	block_index = 0
+	while block_index < function.block_count
+		block := native_module.blocks[function.block_start + block_index]
+		if flow.ranks[block_index] >= 0
+			mut fields := mir_object_incoming(flow, outputs, block_index, count)
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				mut ready := true
+				fields.each do |initialized|
+					if initialized == 0
+						ready = false
+					end
+				end
+				if instruction.kind == mir_op_object_store()
+					target := mir_object_id(native_module, mir_flow_type(flow, instruction.first))
+					if native_module.objects[target].fields[instruction.payload].readonly && !mir_object_alias(exact, instruction.first)
+						return "MIR readonly class field store is outside its initializer"
+					end
+				end
+				if !ready
+					uses := mir_live_before(native_module, managed, instruction, [])
+					uses.each do |value|
+						if value == instruction.first && (instruction.kind == mir_op_object_field() || instruction.kind == mir_op_object_store())
+							if instruction.kind == mir_op_object_field() && fields[instruction.payload] == 0
+								return "MIR class field is read before definite initialization"
+							end
+							if instruction.kind == mir_op_object_store() && value == instruction.second
+								return "MIR class receiver escapes before definite initialization"
+							end
+						else
+							return "MIR class receiver escapes before definite initialization"
+						end
+					end
+				end
+				if instruction.kind == mir_op_object_store() && mir_object_alias(exact, instruction.first)
+					fields[instruction.payload] = 1
+				end
+				index += 1
+			end
+			if block.terminator == mir_terminator_return()
+				fields.each do |initialized|
+					if initialized == 0
+						return "MIR class initializer returns with an uninitialized field"
+					end
+				end
+			end
+		end
+		block_index += 1
+	end
+	return ""
+end
+
+# Constructor identities, including their signatures, are module-owned facts.
+def mir_object_initializers_error(native_module: MirModule): String
+	native_module.objects.each do |definition|
+		if definition.initializer < -1 || definition.initializer >= native_module.signatures.size()
+			return "MIR class initializer identity is invalid"
+		end
+		if definition.initializer >= 0
+			signature := native_module.signatures[definition.initializer]
+			if definition.interface_type || signature.kind != mir_signature_ordinary() || signature.result_type != "Void" || signature.parameter_types.size() == 0
+				return "MIR class initializer signature differs"
+			end
+			if signature.parameter_types[0] != native_module.types[definition.type_id - mir_type_composite_start()].name
+				return "MIR class initializer receiver differs"
+			end
+		end
+	end
+	return ""
+end

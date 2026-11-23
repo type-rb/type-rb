@@ -1,0 +1,4 @@
+def main()
+	puts(false && 0)
+	return
+end

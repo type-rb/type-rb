@@ -1,0 +1,170 @@
+def nullable_case_0_integer_label(value: Integer?): String
+	if value == nil
+		return "nil"
+	end
+	return value.to_s()
+end
+def nullable_case_0_boolean_label(value: Boolean?): String
+	if nil == value
+		return "nil"
+	end
+	if value
+		return "true"
+	else
+		return "false"
+	end
+end
+def nullable_case_0_main()
+	puts(nullable_case_0_integer_label(nil))
+	puts(nullable_case_0_integer_label(0))
+	puts(nullable_case_0_boolean_label(nil))
+	puts(nullable_case_0_boolean_label(false))
+end
+
+def nullable_case_1_normalize(mut text: String?): String
+	if text == nil
+		return "none"
+	end
+	text = text + "!"
+	return text
+end
+def nullable_case_1_main()
+	puts(nullable_case_1_normalize(nil))
+	puts(nullable_case_1_normalize("ok"))
+end
+
+def nullable_case_2_label(text: String? = "default"): String
+	if text == nil
+		return "nil"
+	end
+	return text
+end
+def nullable_case_2_main()
+	puts(nullable_case_2_label())
+	puts(nullable_case_2_label(nil))
+	puts(nullable_case_2_label("explicit"))
+end
+
+record NullableCase3Cell
+	value: String?
+end
+def nullable_case_3_label(cell: NullableCase3Cell): String
+	if cell.value == nil
+		return "none"
+	end
+	return cell.value + "!"
+end
+def nullable_case_3_main()
+	values: Array<String?> := [nil, "hello"]
+	values.each do |value|
+		puts(nullable_case_3_label(NullableCase3Cell.new(value: value)))
+	end
+end
+
+def nullable_case_4_text(flag: Boolean): String?
+	puts("receiver")
+	if flag
+		return "hello"
+	end
+	return nil
+end
+def nullable_case_4_main()
+	a := nullable_case_4_text(false)&.size()
+	puts(a == nil)
+	b := nullable_case_4_text(true)&.size()
+	if b != nil
+		puts(b)
+	end
+	puts("ok"&.size())
+end
+
+def nullable_case_5_mark(): Integer
+	puts("argument")
+	return 2
+end
+def nullable_case_5_update(mut values: Array<Integer>?)
+	values&.push(nullable_case_5_mark())
+	if values != nil
+		puts(values.size())
+	end
+end
+def nullable_case_5_main()
+	nullable_case_5_update(nil)
+	mut values := [1]
+	nullable_case_5_update(values)
+	puts(values[1])
+end
+
+def nullable_case_7_main()
+	values: Array<String?> := [nil, "hello"]
+	values.each do |value|
+		if value != nil
+			puts(value)
+		else
+			puts("none")
+		end
+	end
+	lookup: Hash<String, String?> := { "a" => nil, "b" => "hi" }
+	item := lookup["b"]
+	if item != nil
+		puts(item)
+	end
+end
+
+def nullable_case_8_main()
+	mut text: String? := "hello"
+	while text != nil
+		puts(text)
+		text = nil
+	end
+	puts(text == nil)
+end
+
+def nullable_case_9_size(text: String?): Integer
+	if text != nil && text.size() > 1
+		return 5
+	end
+	return 0
+end
+def nullable_case_9_main()
+	puts(nullable_case_9_size(nil))
+	puts(nullable_case_9_size("hello"))
+end
+
+def nullable_case_10_label(text: String?): String
+	return "nil" if text == nil
+	return text
+end
+def nullable_case_10_main()
+	puts(nullable_case_10_label(nil))
+	puts(nullable_case_10_label("ok"))
+end
+
+record NullableCase11Cell
+	value: String?
+end
+def nullable_case_11_read(cell: NullableCase11Cell?): String?
+	return cell&.value
+end
+def nullable_case_11_main()
+	x := nullable_case_11_read(nil)
+	puts(x == nil)
+	y := nullable_case_11_read(NullableCase11Cell.new(value: "ok"))
+	if y != nil
+		puts(y)
+	end
+end
+
+def main()
+	nullable_case_0_main()
+	nullable_case_1_main()
+	nullable_case_2_main()
+	nullable_case_3_main()
+	nullable_case_4_main()
+	nullable_case_5_main()
+	nullable_case_7_main()
+	nullable_case_8_main()
+	nullable_case_9_main()
+	nullable_case_10_main()
+	nullable_case_11_main()
+end

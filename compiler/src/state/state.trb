@@ -1,0 +1,217 @@
+import { ScopedCallGraph, scoped_call_graph } from mir/analysis/resource_calls
+import { token_kind_end_of_input, token_kind_end_of_module } from state/token_kinds
+import { CheckedBody, checked_body_new } from state/checked_body
+import { CompilerCallableAnalysis, compiler_callable_analysis_new } from state/callable_state
+import { CompilerGlobalBindings, compiler_global_bindings_new } from state/global_state
+import { CompilerNominalTypes, compiler_nominal_types_new } from state/nominal_state
+import { CheckedLocals, local_bind, local_find } from state/local_state
+import { CompilerDeclarationCatalog, CompilerDiagnostics, CompilerModuleGraph, CompilerTypeResolution, compiler_declaration_catalog_new, compiler_diagnostics_new, compiler_module_graph_new, compiler_type_resolution_new } from state/catalog_state
+import { CheckedSubmission, CompilerParsedProgram, CompilerSourceTokens, compiler_parsed_program_new, compiler_source_tokens_new } from state/source_state
+import { integer_string } from support/literals
+import { MirModule, mir_module_new } from mir/model/module
+import { IntegerStorage, integer_storage, integer_storage_copy, load_integer, load_string, sparse_integer_at, store_integer, store_string, string_storage_copy } from support/storage
+
+record CompilerState
+	resource_calls: ScopedCallGraph
+	nominal: CompilerNominalTypes
+	global_bindings: CompilerGlobalBindings
+	callables: CompilerCallableAnalysis
+	standard_modules: IntegerStorage
+	type_resolution: CompilerTypeResolution
+	submissions: Array<CheckedSubmission>
+	parsed: CompilerParsedProgram
+	interactive: Boolean
+	source_tokens: CompilerSourceTokens
+	scalar_mir: MirModule
+	module_graph: CompilerModuleGraph
+	declarations: CompilerDeclarationCatalog
+	diagnostics: CompilerDiagnostics
+end
+
+def compiler_declaration_catalog_fork(catalog: CompilerDeclarationCatalog): CompilerDeclarationCatalog
+	mut record_count: Array<Integer> := []
+	catalog.record_count.each do |value|
+		record_count.push(value)
+	end
+	mut field_count: Array<Integer> := []
+	catalog.field_count.each do |value|
+		field_count.push(value)
+	end
+	mut function_count: Array<Integer> := []
+	catalog.function_count.each do |value|
+		function_count.push(value)
+	end
+	mut function_lookup: Hash<String, Integer> := {}
+	mut function := 0
+	while function < catalog.function_count[0]
+		key := function_index_key(load_integer(catalog.function_modules, function), load_string(catalog.function_names, function))
+		if catalog.function_lookup.key?(key)
+			function_lookup[key] = catalog.function_lookup[key]
+		end
+		function += 1
+	end
+	mut parameter_count: Array<Integer> := []
+	catalog.parameter_count.each do |value|
+		parameter_count.push(value)
+	end
+	return CompilerDeclarationCatalog.new(
+		record_names: string_storage_copy(catalog.record_names),
+		record_modules: integer_storage_copy(catalog.record_modules),
+		record_field_starts: integer_storage_copy(catalog.record_field_starts),
+		record_field_counts: integer_storage_copy(catalog.record_field_counts),
+		record_lines: integer_storage_copy(catalog.record_lines), record_count: record_count,
+		field_names: string_storage_copy(catalog.field_names),
+		field_types: string_storage_copy(catalog.field_types),
+		field_lines: integer_storage_copy(catalog.field_lines), field_count: field_count,
+		function_names: string_storage_copy(catalog.function_names),
+		function_modules: integer_storage_copy(catalog.function_modules),
+		function_parameter_starts: integer_storage_copy(catalog.function_parameter_starts),
+		function_parameter_counts: integer_storage_copy(catalog.function_parameter_counts),
+		function_result_types: string_storage_copy(catalog.function_result_types),
+		function_body_starts: integer_storage_copy(catalog.function_body_starts),
+		function_body_ends: integer_storage_copy(catalog.function_body_ends),
+		function_lines: integer_storage_copy(catalog.function_lines),
+		function_count: function_count, function_lookup: function_lookup,
+		parameter_names: string_storage_copy(catalog.parameter_names),
+		parameter_types: string_storage_copy(catalog.parameter_types),
+		parameter_mutable: integer_storage_copy(catalog.parameter_mutable),
+		parameter_named_only: integer_storage_copy(catalog.parameter_named_only),
+		parameter_lines: integer_storage_copy(catalog.parameter_lines),
+		parameter_count: parameter_count,
+	)
+end
+
+def compiler_new(capacity: Integer): CompilerState
+	return compiler_new_with_mode(capacity, false)
+end
+
+def compiler_new_with_mode(capacity: Integer, interactive: Boolean): CompilerState
+	return CompilerState.new(resource_calls: scoped_call_graph(false), nominal: compiler_nominal_types_new(capacity),
+		global_bindings: compiler_global_bindings_new(capacity),
+		callables: compiler_callable_analysis_new(capacity),
+		standard_modules: integer_storage(capacity),
+		type_resolution: compiler_type_resolution_new(capacity),
+		submissions: [],
+		parsed: compiler_parsed_program_new(capacity),
+		interactive: interactive,
+		source_tokens: compiler_source_tokens_new(capacity),
+		scalar_mir: mir_module_new(),
+		module_graph: compiler_module_graph_new(capacity),
+		declarations: compiler_declaration_catalog_new(capacity),
+		diagnostics: compiler_diagnostics_new(),
+	)
+end
+
+def find_name_index(index: Hash<String, Integer>, name: String): Integer
+	if index.key?(name)
+		return index[name]
+	end
+	return -1
+end
+
+def function_index_key(module_index: Integer, name: String): String
+	return integer_string(module_index) + ":" + name
+end
+
+def add_module(mut state: CompilerState, name: String, filename: String): Integer
+	index := state.module_graph.module_count[0]
+	store_string(state.module_graph.module_names, index, name)
+	store_string(state.module_graph.module_files, index, filename)
+	store_integer(state.module_graph.module_import_starts, index, state.module_graph.import_count[0])
+	store_integer(state.module_graph.module_import_counts, index, 0)
+	state.module_graph.module_count[0] = index + 1
+	state.module_graph.module_lookup[name] = index
+	return index
+end
+
+def find_module(state: CompilerState, name: String): Integer
+	return find_name_index(state.module_graph.module_lookup, name)
+end
+
+def terminal_token(state: CompilerState, index: Integer): Boolean
+	kind := load_integer(state.source_tokens.token_kinds, index)
+	if kind == token_kind_end_of_input()
+		return true
+	end
+	return kind == token_kind_end_of_module()
+end
+
+def has_diagnostic(state: CompilerState): Boolean
+	return state.diagnostics.codes.used[0] > 0
+end
+
+def diagnostic(mut state: CompilerState, code: String, line: Integer, message: String)
+	if !has_diagnostic(state)
+		store_string(state.diagnostics.codes, 0, code)
+		store_integer(state.diagnostics.lines, 0, line)
+		store_string(state.diagnostics.messages, 0, message)
+		store_integer(state.diagnostics.modules, 0, state.module_graph.active_module[0])
+	end
+	return
+end
+
+# Use authored token coordinates when a semantic boundary owns an exact
+# origin. Line-only diagnostics stay line-only instead of guessing a column.
+def diagnostic_at(mut state: CompilerState, code: String, origin: Integer, message: String)
+	if !has_diagnostic(state)
+		diagnostic(state, code, load_integer(state.source_tokens.token_lines, origin), message)
+		store_integer(state.diagnostics.columns, 0, sparse_integer_at(state.source_tokens.token_columns, origin))
+	end
+end
+
+def local_add(
+		mut state: CompilerState,
+		mut locals: CheckedLocals,
+		name: String,
+		type_name: String,
+		mutable: Integer,
+		line: Integer,
+	): Boolean
+	mut first := locals.scope_start[0]
+	if first < locals.capture_parents.size()
+		first = locals.capture_parents.size()
+	end
+	if local_find(locals, name) >= first
+		diagnostic(state, "TRBN4003", line, "duplicate local declaration " + name)
+		return false
+	end
+	local_bind(locals, name, type_name, mutable)
+	return true
+end
+
+# Select by semantic function identity, preserving an explicit caller context.
+# Source token origins remain authored coordinates within each independent body.
+def select_checked_body(mut state: CompilerState, function: Integer): CheckedBody
+	previous := state.callables.checked[0]
+	if function < 0 || function >= state.declarations.function_count[0]
+		diagnostic(state, "TRBN4004", 1, "checked body requires a declared function")
+		return previous
+	end
+	mut encoded := sparse_integer_at(state.callables.checked_body_indices, function)
+	if encoded == 0
+		mut origin := load_integer(state.declarations.function_body_starts, function)
+		mut finish := load_integer(state.declarations.function_body_ends, function) + 1
+		state.type_resolution.generic_function_instances.each do |instance|
+			if instance.function == function
+				state.nominal.objects.each do |definition|
+					definition.methods.each do |method|
+						if method.generic_function == instance.definition
+							origin = definition.origin
+							definition.fields.each do |field|
+								if field.default_finish >= finish
+									finish = field.default_finish + 1
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		state.callables.checked_bodies.push(checked_body_new(function, origin, finish))
+		encoded = state.callables.checked_bodies.size()
+		store_integer(state.callables.checked_body_indices, function, encoded)
+	end
+	state.callables.checked[0] = state.callables.checked_bodies[encoded - 1]
+	state.callables.checked[0].generic_binding[0] = sparse_integer_at(state.type_resolution.function_generic_bindings, function)
+	return previous
+end

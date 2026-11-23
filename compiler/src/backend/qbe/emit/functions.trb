@@ -1,0 +1,216 @@
+import { emit_file_scope_storage } from backend/qbe/emit/file_scopes
+import { mir_array_join_size_inline } from mir/analysis/array_joins
+import { mir_function_control } from mir/model/control
+import { mir_op_direct_call, mir_op_enum_new } from mir/model/instructions
+import { mir_enum_id, mir_managed_type, mir_storage_name } from mir/model/types
+import { mir_enum_stack_result_type, mir_enum_stack_selected, mir_enum_stack_value_type } from mir/analysis/enum_stack
+import { mir_numeric_find } from mir/analysis/numeric
+import { native_managed_type } from frontend/types/hash_types
+import { integer_string } from support/literals
+import { MirValue, mir_function_index } from mir/model/module
+import { emit_context_new, emit_typed_load, emit_typed_store, qbe_type } from backend/qbe/context
+import { emit_control_mir } from backend/qbe/emit/control
+import { emit_scalar_mir } from backend/qbe/emit/mir
+import { QbeOutput, qbe_output_line, qbe_output_new } from backend/qbe/output
+import { CompilerState, diagnostic } from state/state
+import { load_string } from support/storage
+
+def emit_function(mut state: CompilerState, function_index: Integer, value_groups: Array<Array<MirValue>>, mut output: QbeOutput)
+	mir_index := mir_function_index(state.scalar_mir, function_index)
+	if mir_index < 0
+		diagnostic(state, "TRBN4004", 1, "checked function has no MIR body")
+		return
+	end
+	function := state.scalar_mir.functions[mir_index]
+	signature := state.scalar_mir.signatures[function_index]
+	result_type := mir_storage_name(state.scalar_mir, signature.result_type)
+	mut context := emit_context_new()
+	mut enum_stack_type := 0
+	if mir_enum_stack_selected(state.scalar_mir.enum_stack_functions, function_index)
+		enum_stack_type = mir_enum_stack_result_type(state.scalar_mir, function_index)
+		context.enum_stack_type[0] = enum_stack_type
+	end
+	mut body := qbe_output_new(1024, output.runtime_flags)
+	mut parameters := ""
+	mut argument_operands: Array<String> := []
+	mut argument_types: Array<String> := []
+	mut index := 0
+	while index < signature.parameter_types.size()
+		type_name := mir_storage_name(state.scalar_mir, signature.parameter_types[index])
+		if index > 0
+			parameters += ", "
+		end
+		operand := "%p" + integer_string(index)
+		parameters += qbe_type(type_name) + " " + operand
+		argument_operands.push(operand)
+		argument_types.push(type_name)
+		index += 1
+	end
+	if enum_stack_type != 0
+		if parameters != ""
+			parameters += ", "
+		end
+		parameters += "l %enum_out"
+	end
+	if function.kind == mir_function_control()
+		emit_control_mir(state, function_index, result_type, value_groups[mir_index], output.mir_literal_symbols, context, body)
+	else
+		plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], function_index, -1, -1)
+		value := emit_scalar_mir(state, function_index, argument_operands, argument_types, plan, context, body, false)
+		emit_typed_store(body, result_type, value.operand, "%return_value")
+		qbe_output_line(body, "\tjmp @return")
+	end
+	mut result_prefix := ""
+	if result_type != "Void"
+		result_prefix = qbe_type(result_type) + " "
+	end
+	qbe_output_line(output, "function " + result_prefix + "$trbnf" + integer_string(function_index) + "(" + parameters + ") {")
+	qbe_output_line(output, "@start")
+	emit_file_scope_storage(state.scalar_mir, state.scalar_mir.functions[mir_index], output)
+	roots := state.scalar_mir.root_plans[mir_index]
+	uses_roots := roots.instructions.size() > 0
+	mut lazy_roots := false
+	if enum_stack_type != 0
+		if roots.capacity > 0
+			lazy_roots = true
+		end
+	end
+	if uses_roots
+		qbe_output_line(output, "\t%temporary_roots =l loadl $trbn_gc_temp_count")
+		if lazy_roots
+			qbe_output_line(output, "\t%root_reserved =l alloc4 4")
+			qbe_output_line(output, "\tstorew 0, %root_reserved")
+		end
+	end
+	if result_type != "Void"
+		qbe_output_line(output, "\t%return_value =l alloc8 8")
+	end
+	# All fused calls finish using this table before the next call. Allocate it
+	# once in the entry block so loop iterations reuse a fixed stack frame.
+	mut hash_concat := false
+	state.scalar_mir.hash_concat_probes[0].each do |plan|
+		if plan.function_id == function_index
+			hash_concat = true
+		end
+	end
+	if hash_concat
+		qbe_output_line(output, "\t%hash_concat_slot =l alloc8 8")
+	end
+	mut fragment_capacity := 0
+	state.scalar_mir.string_concats[mir_index].each do |plan|
+		if plan.fragments.size() > 3 && plan.fragments.size() > fragment_capacity
+			fragment_capacity = plan.fragments.size()
+		end
+	end
+	if fragment_capacity > 0
+		qbe_output_line(output, "\t%string_fragments =l alloc8 " + integer_string(fragment_capacity * 8))
+	end
+	if function.kind == mir_function_control()
+		# Every join finishes before the next one. Reuse one bounded pointer table.
+		mut join_capacity := 0
+		state.scalar_mir.array_joins[mir_index].each do |plan|
+			mut capacity := plan.elements.size()
+			if capacity == 0
+				capacity = 1
+			end
+			if !mir_array_join_size_inline(plan) && capacity > join_capacity
+				join_capacity = capacity
+			end
+		end
+		if join_capacity > 0
+			qbe_output_line(output, "\t%join_fragments =l alloc8 " + integer_string(join_capacity * 8))
+		end
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[block_index]
+			mut instruction_index := block.instruction_start
+			while instruction_index < block.instruction_start + block.instruction_count
+				instruction := state.scalar_mir.instructions[instruction_index]
+				mut stack_slot := false
+				if instruction.kind == mir_op_direct_call()
+					stack_slot = mir_enum_stack_selected(state.scalar_mir.enum_stack_functions, state.scalar_mir.calls[instruction.payload].callee)
+				elsif instruction.kind == mir_op_enum_new() && enum_stack_type != 0
+					stack_slot = mir_enum_stack_value_type(state.scalar_mir, function_index, instruction.result) == enum_stack_type
+				end
+				if stack_slot
+					slot := "%enum_slot" + integer_string(instruction.result)
+					qbe_output_line(output, "\t" + slot + " =l alloc8 24")
+					qbe_output_line(output, "\tstorel 0, " + slot)
+				end
+				instruction_index += 1
+			end
+			block_index += 1
+		end
+	end
+	if uses_roots && roots.capacity > 0
+		if !lazy_roots
+			qbe_output_line(output, "\t%root_capacity =l add %temporary_roots, " + integer_string(roots.capacity))
+			qbe_output_line(output, "\tcall $trbn_gc_temp_reserve(l %root_capacity)")
+		end
+	end
+	index = 0
+	while index < body.lines.used[0]
+		qbe_output_line(output, load_string(body.lines, index))
+		index += 1
+	end
+	if context.integer_range_failure_used[0]
+		qbe_output_line(output, "@integer_range_failure")
+		qbe_output_line(output, "\tcall $trbn_fail(l $trbn_integer_range_error, l 45)")
+		qbe_output_line(output, "\thlt")
+	end
+	qbe_output_line(output, "@return")
+	if uses_roots
+		qbe_output_line(output, "\tstorel %temporary_roots, $trbn_gc_temp_count")
+	end
+	if result_type == "Void"
+		qbe_output_line(output, "\tret")
+	else
+		emit_typed_load(output, "%return_result", result_type, "%return_value")
+		if enum_stack_type != 0
+			qbe_output_line(output, "\t%enum_return_tag_address =l add %return_result, 8")
+			qbe_output_line(output, "\t%enum_return_tag =l loadl %enum_return_tag_address")
+			qbe_output_line(output, "\t%enum_out_tag_address =l add %enum_out, 8")
+			qbe_output_line(output, "\tstorel %enum_return_tag, %enum_out_tag_address")
+			qbe_output_line(output, "\t%enum_return_payload_address =l add %return_result, 16")
+			qbe_output_line(output, "\t%enum_return_payload =l loadl %enum_return_payload_address")
+			qbe_output_line(output, "\t%enum_out_payload_address =l add %enum_out, 16")
+			qbe_output_line(output, "\tstorel %enum_return_payload, %enum_out_payload_address")
+			mut managed_variants: Array<Integer> := []
+			mut variant_index := 0
+			state.scalar_mir.enum_variants.each do |variant|
+				if variant.owner == mir_enum_id(state.scalar_mir, enum_stack_type) && variant.field_count == 1
+					if mir_managed_type(state.scalar_mir, state.scalar_mir.enum_fields[variant.field_start].type_id)
+						managed_variants.push(variant_index)
+					end
+				end
+				variant_index += 1
+			end
+			if managed_variants.size() > 0
+				mut root_match := ""
+				managed_variants.each do |variant|
+					match := "%enum_root_match" + integer_string(variant)
+					qbe_output_line(output, "\t" + match + " =w ceql %enum_return_tag, " + integer_string(variant))
+					if root_match == ""
+						root_match = match
+					else
+						combined := "%enum_root_combined" + integer_string(variant)
+						qbe_output_line(output, "\t" + combined + " =w or " + root_match + ", " + match)
+						root_match = combined
+					end
+				end
+				qbe_output_line(output, "\tjnz " + root_match + ", @enum_root_push, @enum_root_done")
+				qbe_output_line(output, "@enum_root_push")
+				qbe_output_line(output, "\tcall $trbn_gc_temp_push(l %enum_return_payload)")
+				qbe_output_line(output, "\tjmp @enum_root_done")
+				qbe_output_line(output, "@enum_root_done")
+			end
+			qbe_output_line(output, "\tret %enum_out")
+		elsif native_managed_type(result_type)
+			qbe_output_line(output, "\tcall $trbn_gc_temp_push(l %return_result)")
+			qbe_output_line(output, "\tret %return_result")
+		else
+			qbe_output_line(output, "\tret %return_result")
+		end
+	end
+	qbe_output_line(output, "}\n")
+end

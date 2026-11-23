@@ -1,0 +1,39 @@
+# Token classes share one encoding across lexing, parsing, checking and REPL.
+# Newline includes semicolons. Interpolation retains its authored quoted source;
+# the parser expands it later. Input and module boundaries remain distinct.
+
+def token_kind_end_of_input(): Integer
+	return 0
+end
+
+def token_kind_identifier(): Integer
+	return 1
+end
+
+def token_kind_number(): Integer
+	return 2
+end
+
+def token_kind_string(): Integer
+	return 3
+end
+
+def token_kind_newline(): Integer
+	return 4
+end
+
+def token_kind_symbol(): Integer
+	return 5
+end
+
+def token_kind_end_of_module(): Integer
+	return 6
+end
+
+def token_kind_interpolation(): Integer
+	return 7
+end
+
+def token_kind_attribute(): Integer
+	return 8
+end

@@ -1,0 +1,1072 @@
+import support/diagnostic
+import { ComparisonOperator, FloatBinaryOperator, IntegerBinaryOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { AggregateFieldLayout, AggregateLayout, AggregateValueType, AggregateVariantLayout, compute_aggregate_layout } from aggregate/layout
+import { RecoveryAggregateBlock, RecoveryAggregateFunction, RecoveryAggregateInstruction, RecoveryAggregateModule, RecoveryAggregateParameter, RecoveryAggregateResultType, RecoveryAggregateTerminator, recovery_aggregate_block, recovery_aggregate_function, recovery_aggregate_instruction_result, verify_recovery_aggregate_mir } from aggregate/mir
+import { QbeStaticData, qbe_comparison, qbe_emit_checked_add, qbe_emit_checked_divide, qbe_emit_checked_multiply, qbe_emit_checked_power, qbe_emit_checked_remainder, qbe_emit_checked_subtract, qbe_emit_integer_binary, qbe_emit_static_data, qbe_float_operator, qbe_line, qbe_scalar_type, qbe_static_symbol } from scalar/qbe
+import { SourceOrigin } from snapshot/schema
+import trb/std/result
+import trb/std/string_builder
+
+record RecoveryAggregateQbeContext
+	values: Hash<String, String>
+	value_types: Hash<String, AggregateValueType>
+	transfer_slots: Hash<String, String>
+	storage_slots: Hash<String, String>
+end
+
+def _qbe_line(mut writer: StringBuilder, value: String)
+	qbe_line(writer, value)
+	return
+end
+
+def _qbe_emit_static_data(static_data: Array<QbeStaticData>, mut writer: StringBuilder)
+	qbe_emit_static_data(static_data, writer)
+	return
+end
+
+def _qbe_emit_checked_add(mut writer: StringBuilder)
+	qbe_emit_checked_add(writer)
+	return
+end
+
+def _qbe_emit_checked_subtract(mut writer: StringBuilder)
+	qbe_emit_checked_subtract(writer)
+	return
+end
+
+def _qbe_emit_checked_multiply(mut writer: StringBuilder)
+	qbe_emit_checked_multiply(writer)
+	return
+end
+
+def _qbe_emit_checked_divide(mut writer: StringBuilder)
+	qbe_emit_checked_divide(writer)
+	return
+end
+
+def _qbe_emit_checked_remainder(mut writer: StringBuilder)
+	qbe_emit_checked_remainder(writer)
+	return
+end
+
+def _qbe_emit_checked_power(mut writer: StringBuilder)
+	qbe_emit_checked_power(writer)
+	return
+end
+
+def _qbe_emit_integer_binary(
+		operator: IntegerBinaryOperator,
+		result: String,
+		left: String,
+		right: String,
+		block_index: Integer,
+		instruction_index: Integer,
+		mut writer: StringBuilder,
+	)
+	qbe_emit_integer_binary(operator, result, left, right, block_index, instruction_index, writer)
+	return
+end
+
+def _qbe_float_operator(operator: FloatBinaryOperator): String
+	return qbe_float_operator(operator)
+end
+
+def _qbe_comparison(operator: ComparisonOperator, suffix: String): String
+	return qbe_comparison(operator, suffix)
+end
+
+def _qbe_type(value_type: ScalarType): String
+	return qbe_scalar_type(value_type)
+end
+
+def _qbe_static_symbol(static_data: Array<QbeStaticData>, value: String): String
+	return qbe_static_symbol(static_data, value)
+end
+
+def emit_recovery_aggregate_qbe(native_module: RecoveryAggregateModule): Result<String, Diagnostic>
+	try verify_recovery_aggregate_mir(native_module)
+	static_data := _recovery_aggregate_qbe_collect_static_data(native_module)
+	mut writer := StringBuilder.new()
+	_qbe_emit_static_data(static_data, writer)
+	_recovery_aggregate_qbe_emit_projection_data(writer)
+	_recovery_aggregate_qbe_emit_runtime(writer)
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		try _recovery_aggregate_qbe_emit_function(
+			native_module,
+			native_module.functions[function_index],
+			function_index,
+			static_data,
+			writer,
+		)
+		function_index += 1
+	end
+	_recovery_aggregate_qbe_emit_entry(native_module, writer)
+	return Result<String, Diagnostic>::Ok(writer.to_s())
+end
+
+def _recovery_aggregate_qbe_collect_static_data(native_module: RecoveryAggregateModule): Array<QbeStaticData>
+	mut static_data: Array<QbeStaticData> := []
+	mut symbols: Hash<String, String> := {}
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		mut block_index := 0
+		while block_index < function.blocks.size()
+			block := function.blocks[block_index]
+			mut instruction_index := 0
+			while instruction_index < block.instructions.size()
+				case block.instructions[instruction_index]
+				when RecoveryAggregateInstruction::Scalar(scalar)
+					case scalar
+					when RecoveryScalarInstruction::WriteStatic(value, _origin)
+						if !symbols.key?(value)
+							symbol := "$trbn_data_" + static_data.size().to_s()
+							symbols[value] = symbol
+							static_data.push(QbeStaticData.new(symbol: symbol, value: value))
+						end
+					else
+					end
+				else
+				end
+				instruction_index += 1
+			end
+			block_index += 1
+		end
+		function_index += 1
+	end
+	return static_data
+end
+
+def _recovery_aggregate_qbe_emit_projection_data(mut writer: StringBuilder)
+	_qbe_line(writer, "data $trbn_variant_projection_error = { b 112 97 110 105 99 58 32 105 110 118 97 108 105 100 32 101 110 117 109 32 112 114 111 106 101 99 116 105 111 110 10 }")
+	_qbe_line(writer, "")
+	return
+end
+
+def _recovery_aggregate_qbe_emit_runtime(mut writer: StringBuilder)
+	_qbe_line(writer, "function $trbn_integer_range_fail() {")
+	_qbe_line(writer, "@start")
+	_qbe_line(writer, "\tcall $write(w 2, l $trbn_integer_range_error, l 45)")
+	_qbe_line(writer, "\tcall $exit(w 2)")
+	_qbe_line(writer, "\thlt")
+	_qbe_line(writer, "}")
+	_qbe_line(writer, "")
+	_qbe_line(writer, "function $trbn_division_fail() {")
+	_qbe_line(writer, "@start")
+	_qbe_line(writer, "\tcall $write(w 2, l $trbn_division_error, l 24)")
+	_qbe_line(writer, "\tcall $exit(w 2)")
+	_qbe_line(writer, "\thlt")
+	_qbe_line(writer, "}")
+	_qbe_line(writer, "")
+	_qbe_line(writer, "function $trbn_negative_exponent_fail() {")
+	_qbe_line(writer, "@start")
+	_qbe_line(writer, "\tcall $write(w 2, l $trbn_negative_exponent_error, l 33)")
+	_qbe_line(writer, "\tcall $exit(w 2)")
+	_qbe_line(writer, "\thlt")
+	_qbe_line(writer, "}")
+	_qbe_line(writer, "")
+	_qbe_line(writer, "function $trbn_variant_projection_fail() {")
+	_qbe_line(writer, "@start")
+	_qbe_line(writer, "\tcall $write(w 2, l $trbn_variant_projection_error, l 31)")
+	_qbe_line(writer, "\tcall $exit(w 2)")
+	_qbe_line(writer, "\thlt")
+	_qbe_line(writer, "}")
+	_qbe_line(writer, "")
+	_qbe_emit_checked_add(writer)
+	_qbe_emit_checked_subtract(writer)
+	_qbe_emit_checked_multiply(writer)
+	_qbe_emit_checked_divide(writer)
+	_qbe_emit_checked_remainder(writer)
+	_qbe_emit_checked_power(writer)
+	return
+end
+
+def _recovery_aggregate_qbe_emit_function(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+		function_index: Integer,
+		static_data: Array<QbeStaticData>,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	context := try _recovery_aggregate_qbe_context(native_module, function)
+	mut parameters: Array<String> := []
+	case function.result_type
+	when RecoveryAggregateResultType::Void
+	when RecoveryAggregateResultType::Value(value_type)
+		case value_type
+		when AggregateValueType::Scalar(_scalar)
+		when AggregateValueType::Aggregate(_type_id)
+			parameters.push("l %return")
+		end
+	end
+	mut parameter_index := 0
+	while parameter_index < function.parameters.size()
+		parameter := function.parameters[parameter_index]
+		parameters.push(_recovery_aggregate_qbe_abi_type(parameter.value_type) + " " + context.values.fetch(parameter.id))
+		parameter_index += 1
+	end
+	mut result_prefix := ""
+	case function.result_type
+	when RecoveryAggregateResultType::Void
+	when RecoveryAggregateResultType::Value(value_type)
+		case value_type
+		when AggregateValueType::Scalar(scalar)
+			result_prefix = _qbe_type(scalar) + " "
+		when AggregateValueType::Aggregate(_type_id)
+		end
+	end
+	_qbe_line(writer, "function " + result_prefix + "$trbn_aggregate_f" + function_index.to_s() + "(" + parameters.join(", ") + ") {")
+	entry_index := _recovery_aggregate_qbe_block_index(function.blocks, function.entry)
+	try _recovery_aggregate_qbe_emit_block(native_module, function, entry_index, context, static_data, writer)
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		if block_index != entry_index
+			try _recovery_aggregate_qbe_emit_block(native_module, function, block_index, context, static_data, writer)
+		end
+		block_index += 1
+	end
+	_qbe_line(writer, "}")
+	_qbe_line(writer, "")
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_context(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+	): Result<RecoveryAggregateQbeContext, Diagnostic>
+	mut values: Hash<String, String> := {}
+	mut value_types: Hash<String, AggregateValueType> := {}
+	mut transfer_slots: Hash<String, String> := {}
+	mut storage_slots: Hash<String, String> := {}
+	mut next_value := 0
+	mut next_transfer := 0
+	mut next_storage := 0
+	mut parameter_index := 0
+	while parameter_index < function.parameters.size()
+		parameter := function.parameters[parameter_index]
+		values[parameter.id] = "%v" + next_value.to_s()
+		value_types[parameter.id] = parameter.value_type
+		next_value += 1
+		parameter_index += 1
+	end
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		block := function.blocks[block_index]
+		parameter_index = 0
+		while parameter_index < block.parameters.size()
+			parameter := block.parameters[parameter_index]
+			transfer_slots[parameter.id] = "%transfer" + next_transfer.to_s()
+			next_transfer += 1
+			value_types[parameter.id] = parameter.value_type
+			case parameter.value_type
+			when AggregateValueType::Scalar(_scalar)
+				values[parameter.id] = "%v" + next_value.to_s()
+				next_value += 1
+			when AggregateValueType::Aggregate(_type_id)
+				storage_slots[parameter.id] = "%storage" + next_storage.to_s()
+				values[parameter.id] = transfer_slots.fetch(parameter.id)
+				next_storage += 1
+			end
+			parameter_index += 1
+		end
+		mut instruction_index := 0
+		while instruction_index < block.instructions.size()
+			instruction := block.instructions[instruction_index]
+			result := recovery_aggregate_instruction_result(instruction)
+			if result != nil
+				value_type := try _recovery_aggregate_qbe_instruction_type(native_module, instruction)
+				value_types[result] = value_type
+				case value_type
+				when AggregateValueType::Scalar(_scalar)
+					values[result] = "%v" + next_value.to_s()
+					next_value += 1
+				when AggregateValueType::Aggregate(_type_id)
+					storage_slots[result] = "%storage" + next_storage.to_s()
+					values[result] = storage_slots.fetch(result)
+					next_storage += 1
+				end
+			end
+			instruction_index += 1
+		end
+		block_index += 1
+	end
+	mut alias_pass := 0
+	while alias_pass < function.blocks.size()
+		block_index = 0
+		while block_index < function.blocks.size()
+			block := function.blocks[block_index]
+			parameter_index = 0
+			while parameter_index < block.parameters.size()
+				parameter := block.parameters[parameter_index]
+				case parameter.value_type
+				when AggregateValueType::Scalar(_scalar)
+				when AggregateValueType::Aggregate(_type_id)
+					incoming := _recovery_aggregate_qbe_common_incoming_value(function, block.id, parameter_index, values)
+					if !incoming.empty?()
+						values[parameter.id] = incoming
+					end
+				end
+				parameter_index += 1
+			end
+			block_index += 1
+		end
+		alias_pass += 1
+	end
+	return Result<RecoveryAggregateQbeContext, Diagnostic>::Ok(
+		RecoveryAggregateQbeContext.new(
+			values: values,
+			value_types: value_types,
+			transfer_slots: transfer_slots,
+			storage_slots: storage_slots,
+		)
+	)
+end
+
+def _recovery_aggregate_qbe_common_incoming_value(
+		function: RecoveryAggregateFunction,
+		target: String,
+		parameter_index: Integer,
+		values: Hash<String, String>,
+	): String
+	mut common := ""
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		case function.blocks[block_index].terminator
+		when RecoveryAggregateTerminator::Jump(edge_target, arguments, _origin)
+			if edge_target == target
+				candidate := values.fetch(arguments[parameter_index])
+				if common.empty?()
+					common = candidate
+				else
+					if common != candidate
+						return ""
+					end
+				end
+			end
+		when RecoveryAggregateTerminator::Branch(
+				_condition,
+				when_true,
+				true_arguments,
+				when_false,
+				false_arguments,
+				_origin,
+			)
+			if when_true == target
+				candidate := values.fetch(true_arguments[parameter_index])
+				if common.empty?()
+					common = candidate
+				else
+					if common != candidate
+						return ""
+					end
+				end
+			end
+			if when_false == target
+				candidate := values.fetch(false_arguments[parameter_index])
+				if common.empty?()
+					common = candidate
+				else
+					if common != candidate
+						return ""
+					end
+				end
+			end
+		when RecoveryAggregateTerminator::Return(_value, _origin)
+		end
+		block_index += 1
+	end
+	return common
+end
+
+def _recovery_aggregate_qbe_instruction_type(
+		native_module: RecoveryAggregateModule,
+		instruction: RecoveryAggregateInstruction,
+	): Result<AggregateValueType, Diagnostic>
+	case instruction
+	when RecoveryAggregateInstruction::Scalar(scalar)
+		case scalar
+		when RecoveryScalarInstruction::BooleanLiteral(_result, _value, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+		when RecoveryScalarInstruction::IntegerLiteral(_result, _value, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Integer))
+		when RecoveryScalarInstruction::FloatLiteral(_result, _value, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Float))
+		when RecoveryScalarInstruction::IntegerBinary(_result, _operator, _left, _right, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Integer))
+		when RecoveryScalarInstruction::FloatBinary(_result, _operator, _left, _right, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Float))
+		when RecoveryScalarInstruction::IntegerCompare(_result, _operator, _left, _right, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+		when RecoveryScalarInstruction::FloatCompare(_result, _operator, _left, _right, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+		when RecoveryScalarInstruction::BooleanNot(_result, _value, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+		when RecoveryScalarInstruction::Call(_result, _function_id, _arguments, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Void))
+		when RecoveryScalarInstruction::WriteStatic(_value, _origin)
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Void))
+		end
+	when RecoveryAggregateInstruction::RecordConstruct(_result, type_id, _arguments, _origin)
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Aggregate(type_id))
+	when RecoveryAggregateInstruction::RecordProject(_result, type_id, _record, field, _origin)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		return Result<AggregateValueType, Diagnostic>::Ok(_recovery_aggregate_qbe_required_field(layout, field).value_type)
+	when RecoveryAggregateInstruction::VariantConstruct(_result, type_id, _variant, _arguments, _origin)
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Aggregate(type_id))
+	when RecoveryAggregateInstruction::VariantTest(_result, _type_id, _value, _variant, _origin)
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+	when RecoveryAggregateInstruction::VariantProject(_result, type_id, _value, variant, field, _origin)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		variant_layout := _recovery_aggregate_qbe_required_variant(layout, variant)
+		return Result<AggregateValueType, Diagnostic>::Ok(_recovery_aggregate_qbe_required_variant_field(variant_layout, field).value_type)
+	when RecoveryAggregateInstruction::Call(_result, function_id, _arguments, _origin)
+		callee := recovery_aggregate_function(native_module.functions, function_id)
+		case callee.result_type
+		when RecoveryAggregateResultType::Void
+			return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Void))
+		when RecoveryAggregateResultType::Value(value_type)
+			return Result<AggregateValueType, Diagnostic>::Ok(value_type)
+		end
+	end
+end
+
+def _recovery_aggregate_qbe_emit_block(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+		block_index: Integer,
+		context: RecoveryAggregateQbeContext,
+		static_data: Array<QbeStaticData>,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	block := function.blocks[block_index]
+	_qbe_line(writer, "@b" + block_index.to_s())
+	if block.id == function.entry
+		try _recovery_aggregate_qbe_emit_allocations(native_module, function, context, writer)
+	else
+		try _recovery_aggregate_qbe_emit_block_parameter_loads(native_module, block, context, writer)
+	end
+	mut instruction_index := 0
+	while instruction_index < block.instructions.size()
+		try _recovery_aggregate_qbe_emit_instruction(
+			native_module,
+			block.instructions[instruction_index],
+			block_index,
+			instruction_index,
+			context,
+			static_data,
+			writer,
+		)
+		instruction_index += 1
+	end
+	try _recovery_aggregate_qbe_emit_terminator(native_module, function, block.terminator, block_index, context, writer)
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_allocations(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+		context: RecoveryAggregateQbeContext,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		block := function.blocks[block_index]
+		mut parameter_index := 0
+		while parameter_index < block.parameters.size()
+			parameter := block.parameters[parameter_index]
+			try _recovery_aggregate_qbe_emit_allocation(
+				native_module,
+				parameter.value_type,
+				context.transfer_slots.fetch(parameter.id),
+				writer,
+			)
+			case parameter.value_type
+			when AggregateValueType::Scalar(_scalar)
+			when AggregateValueType::Aggregate(_type_id)
+				try _recovery_aggregate_qbe_emit_allocation(
+					native_module,
+					parameter.value_type,
+					context.storage_slots.fetch(parameter.id),
+					writer,
+				)
+			end
+			parameter_index += 1
+		end
+		mut instruction_index := 0
+		while instruction_index < block.instructions.size()
+			result := recovery_aggregate_instruction_result(block.instructions[instruction_index])
+			if result != nil
+				if context.storage_slots.key?(result)
+					try _recovery_aggregate_qbe_emit_allocation(
+						native_module,
+						context.value_types.fetch(result),
+						context.storage_slots.fetch(result),
+						writer,
+					)
+				end
+			end
+			instruction_index += 1
+		end
+		block_index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_allocation(
+		native_module: RecoveryAggregateModule,
+		value_type: AggregateValueType,
+		slot: String,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	mut allocation := "alloc8"
+	mut size := 8
+	case value_type
+	when AggregateValueType::Scalar(scalar)
+		if scalar == ScalarType::Boolean
+			allocation = "alloc4"
+			size = 4
+		end
+	when AggregateValueType::Aggregate(type_id)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		size = layout.size
+		if layout.alignment < 8
+			allocation = "alloc4"
+			if size < 4
+				size = 4
+			end
+		end
+	end
+	_qbe_line(writer, "\t" + slot + " =l " + allocation + " " + size.to_s())
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_block_parameter_loads(
+		native_module: RecoveryAggregateModule,
+		block: RecoveryAggregateBlock,
+		context: RecoveryAggregateQbeContext,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	mut index := 0
+	while index < block.parameters.size()
+		parameter := block.parameters[index]
+		case parameter.value_type
+		when AggregateValueType::Scalar(scalar)
+			_qbe_line(writer,
+				"\t" + context.values.fetch(parameter.id) + " =" + _qbe_type(scalar) + " " +
+				_recovery_aggregate_qbe_scalar_slot_load(scalar) + " " + context.transfer_slots.fetch(parameter.id)
+			)
+		when AggregateValueType::Aggregate(_type_id)
+		end
+		index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_instruction(
+		native_module: RecoveryAggregateModule,
+		instruction: RecoveryAggregateInstruction,
+		block_index: Integer,
+		instruction_index: Integer,
+		context: RecoveryAggregateQbeContext,
+		static_data: Array<QbeStaticData>,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	prefix := "%g2_" + block_index.to_s() + "_" + instruction_index.to_s() + "_"
+	case instruction
+	when RecoveryAggregateInstruction::Scalar(scalar)
+		_recovery_aggregate_qbe_emit_scalar(native_module, scalar, block_index, instruction_index, context.values, static_data, writer)
+	when RecoveryAggregateInstruction::RecordConstruct(result, type_id, arguments, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		destination := context.values.fetch(result)
+		_recovery_aggregate_qbe_emit_zero(destination, layout.size, writer)
+		mut index := 0
+		while index < layout.fields.size()
+			try _recovery_aggregate_qbe_emit_store_field(
+				native_module,
+				layout.fields[index],
+				context.values.fetch(arguments[index]),
+				destination,
+				prefix + "field" + index.to_s(),
+				writer,
+			)
+			index += 1
+		end
+	when RecoveryAggregateInstruction::RecordProject(result, type_id, record, field, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		field_layout := _recovery_aggregate_qbe_required_field(layout, field)
+		try _recovery_aggregate_qbe_emit_project(
+			native_module,
+			field_layout,
+			context.values.fetch(record),
+			context.values.fetch(result),
+			prefix,
+			writer,
+		)
+	when RecoveryAggregateInstruction::VariantConstruct(result, type_id, variant, arguments, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		variant_layout := _recovery_aggregate_qbe_required_variant(layout, variant)
+		destination := context.values.fetch(result)
+		_recovery_aggregate_qbe_emit_zero(destination, layout.size, writer)
+		_qbe_line(writer, "\tstorew " + variant_layout.tag.to_s() + ", " + destination)
+		mut index := 0
+		while index < variant_layout.fields.size()
+			try _recovery_aggregate_qbe_emit_store_field(
+				native_module,
+				variant_layout.fields[index],
+				context.values.fetch(arguments[index]),
+				destination,
+				prefix + "payload" + index.to_s(),
+				writer,
+			)
+			index += 1
+		end
+	when RecoveryAggregateInstruction::VariantTest(result, type_id, value, variant, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		variant_layout := _recovery_aggregate_qbe_required_variant(layout, variant)
+		tag := prefix + "tag"
+		_qbe_line(writer, "\t" + tag + " =w loadw " + context.values.fetch(value))
+		_qbe_line(writer, "\t" + context.values.fetch(result) + " =w ceqw " + tag + ", " + variant_layout.tag.to_s())
+	when RecoveryAggregateInstruction::VariantProject(result, type_id, value, variant, field, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		variant_layout := _recovery_aggregate_qbe_required_variant(layout, variant)
+		tag := prefix + "tag"
+		matches := prefix + "matches"
+		ok := "@g2_" + block_index.to_s() + "_" + instruction_index.to_s() + "_project_ok"
+		fail := "@g2_" + block_index.to_s() + "_" + instruction_index.to_s() + "_project_fail"
+		_qbe_line(writer, "\t" + tag + " =w loadw " + context.values.fetch(value))
+		_qbe_line(writer, "\t" + matches + " =w ceqw " + tag + ", " + variant_layout.tag.to_s())
+		_qbe_line(writer, "\tjnz " + matches + ", " + ok + ", " + fail)
+		_qbe_line(writer, fail)
+		_qbe_line(writer, "\tcall $trbn_variant_projection_fail()")
+		_qbe_line(writer, "\thlt")
+		_qbe_line(writer, ok)
+		field_layout := _recovery_aggregate_qbe_required_variant_field(variant_layout, field)
+		try _recovery_aggregate_qbe_emit_project(
+			native_module,
+			field_layout,
+			context.values.fetch(value),
+			context.values.fetch(result),
+			prefix,
+			writer,
+		)
+	when RecoveryAggregateInstruction::Call(result, function_id, arguments, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		callee_index := _recovery_aggregate_qbe_function_index(native_module.functions, function_id)
+		callee := native_module.functions[callee_index]
+		mut call_arguments: Array<String> := []
+		case callee.result_type
+		when RecoveryAggregateResultType::Void
+		when RecoveryAggregateResultType::Value(value_type)
+			case value_type
+			when AggregateValueType::Scalar(_scalar)
+			when AggregateValueType::Aggregate(_type_id)
+				call_arguments.push("l " + context.values.fetch(_recovery_aggregate_qbe_required_id(result)))
+			end
+		end
+		mut index := 0
+		while index < arguments.size()
+			call_arguments.push(
+				_recovery_aggregate_qbe_abi_type(callee.parameters[index].value_type) + " " + context.values.fetch(arguments[index])
+			)
+			index += 1
+		end
+		mut call_prefix := "\t"
+		case callee.result_type
+		when RecoveryAggregateResultType::Void
+		when RecoveryAggregateResultType::Value(value_type)
+			case value_type
+			when AggregateValueType::Scalar(scalar)
+				call_prefix = "\t" + context.values.fetch(_recovery_aggregate_qbe_required_id(result)) + " =" + _qbe_type(scalar) + " "
+			when AggregateValueType::Aggregate(_type_id)
+			end
+		end
+		_qbe_line(writer, call_prefix + "call $trbn_aggregate_f" + callee_index.to_s() + "(" + call_arguments.join(", ") + ")")
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_scalar(
+		native_module: RecoveryAggregateModule,
+		instruction: RecoveryScalarInstruction,
+		block_index: Integer,
+		instruction_index: Integer,
+		values: Hash<String, String>,
+		static_data: Array<QbeStaticData>,
+		mut writer: StringBuilder,
+	)
+	case instruction
+	when RecoveryScalarInstruction::BooleanLiteral(result, value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		mut literal := "0"
+		if value
+			literal = "1"
+		end
+		_qbe_line(writer, "\t" + values.fetch(result) + " =w copy " + literal)
+	when RecoveryScalarInstruction::IntegerLiteral(result, value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer, "\t" + values.fetch(result) + " =l copy " + value.to_s())
+	when RecoveryScalarInstruction::FloatLiteral(result, value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer, "\t" + values.fetch(result) + " =d copy d_" + value.to_s())
+	when RecoveryScalarInstruction::IntegerBinary(result, operator, left, right, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_emit_integer_binary(
+			operator,
+			values.fetch(result),
+			values.fetch(left),
+			values.fetch(right),
+			block_index,
+			instruction_index,
+			writer,
+		)
+	when RecoveryScalarInstruction::FloatBinary(result, operator, left, right, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer,
+			"\t" + values.fetch(result) + " =d " + _qbe_float_operator(operator) + " " +
+			values.fetch(left) + ", " + values.fetch(right)
+		)
+	when RecoveryScalarInstruction::IntegerCompare(result, operator, left, right, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer,
+			"\t" + values.fetch(result) + " =w " + _qbe_comparison(operator, "l") + " " +
+			values.fetch(left) + ", " + values.fetch(right)
+		)
+	when RecoveryScalarInstruction::FloatCompare(result, operator, left, right, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer,
+			"\t" + values.fetch(result) + " =w " + _qbe_comparison(operator, "d") + " " +
+			values.fetch(left) + ", " + values.fetch(right)
+		)
+	when RecoveryScalarInstruction::BooleanNot(result, value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		_qbe_line(writer, "\t" + values.fetch(result) + " =w ceqw " + values.fetch(value) + ", 0")
+	when RecoveryScalarInstruction::Call(_result, _function_id, _arguments, _origin)
+	when RecoveryScalarInstruction::WriteStatic(value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		symbol := _qbe_static_symbol(static_data, value)
+		_qbe_line(writer,
+			"\t%g2_io_" + block_index.to_s() + "_" + instruction_index.to_s() +
+			" =l call $write(w 1, l " + symbol + ", l " + value.to_bytes().size().to_s() + ")"
+		)
+	end
+	return
+end
+
+def _recovery_aggregate_qbe_emit_store_field(
+		native_module: RecoveryAggregateModule,
+		field: AggregateFieldLayout,
+		source: String,
+		destination: String,
+		prefix: String,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	address := _recovery_aggregate_qbe_address(destination, field.offset, prefix + "_address", writer)
+	case field.value_type
+	when AggregateValueType::Scalar(scalar)
+		_qbe_line(writer, "\t" + _recovery_aggregate_qbe_scalar_field_store(scalar) + " " + source + ", " + address)
+	when AggregateValueType::Aggregate(type_id)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		_recovery_aggregate_qbe_emit_copy(address, source, layout.size, writer)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_project(
+		native_module: RecoveryAggregateModule,
+		field: AggregateFieldLayout,
+		source: String,
+		destination: String,
+		prefix: String,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	address := _recovery_aggregate_qbe_address(source, field.offset, prefix + "address", writer)
+	case field.value_type
+	when AggregateValueType::Scalar(scalar)
+		_qbe_line(writer,
+			"\t" + destination + " =" + _qbe_type(scalar) + " " + _recovery_aggregate_qbe_scalar_field_load(scalar) + " " + address
+		)
+	when AggregateValueType::Aggregate(type_id)
+		layout := try compute_aggregate_layout(native_module.types, type_id)
+		_recovery_aggregate_qbe_emit_copy(destination, address, layout.size, writer)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_terminator(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+		terminator: RecoveryAggregateTerminator,
+		block_index: Integer,
+		context: RecoveryAggregateQbeContext,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	case terminator
+	when RecoveryAggregateTerminator::Jump(target, arguments, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		try _recovery_aggregate_qbe_emit_edge(native_module, function, target, arguments, context, writer)
+		_qbe_line(writer, "\tjmp " + _recovery_aggregate_qbe_block_label(function.blocks, target))
+	when RecoveryAggregateTerminator::Branch(condition, when_true, true_arguments, when_false, false_arguments, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		true_edge := "@g2_edge_" + block_index.to_s() + "_true"
+		false_edge := "@g2_edge_" + block_index.to_s() + "_false"
+		_qbe_line(writer, "\tjnz " + context.values.fetch(condition) + ", " + true_edge + ", " + false_edge)
+		_qbe_line(writer, true_edge)
+		try _recovery_aggregate_qbe_emit_edge(native_module, function, when_true, true_arguments, context, writer)
+		_qbe_line(writer, "\tjmp " + _recovery_aggregate_qbe_block_label(function.blocks, when_true))
+		_qbe_line(writer, false_edge)
+		try _recovery_aggregate_qbe_emit_edge(native_module, function, when_false, false_arguments, context, writer)
+		_qbe_line(writer, "\tjmp " + _recovery_aggregate_qbe_block_label(function.blocks, when_false))
+	when RecoveryAggregateTerminator::Return(value, origin)
+		_recovery_aggregate_qbe_emit_origin(native_module, origin, writer)
+		case function.result_type
+		when RecoveryAggregateResultType::Void
+			_qbe_line(writer, "\tret")
+		when RecoveryAggregateResultType::Value(value_type)
+			case value_type
+			when AggregateValueType::Scalar(_scalar)
+				_qbe_line(writer, "\tret " + context.values.fetch(_recovery_aggregate_qbe_required_id(value)))
+			when AggregateValueType::Aggregate(type_id)
+				layout := try compute_aggregate_layout(native_module.types, type_id)
+				_recovery_aggregate_qbe_emit_copy("%return", context.values.fetch(_recovery_aggregate_qbe_required_id(value)), layout.size, writer)
+				_qbe_line(writer, "\tret")
+			end
+		end
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_emit_edge(
+		native_module: RecoveryAggregateModule,
+		function: RecoveryAggregateFunction,
+		target: String,
+		arguments: Array<String>,
+		context: RecoveryAggregateQbeContext,
+		mut writer: StringBuilder,
+	): Result<Boolean, Diagnostic>
+	block := recovery_aggregate_block(function.blocks, target)
+	mut index := 0
+	while index < arguments.size()
+		parameter := block.parameters[index]
+		case parameter.value_type
+		when AggregateValueType::Scalar(_scalar)
+		when AggregateValueType::Aggregate(type_id)
+			if _recovery_aggregate_qbe_parameter_uses_transfer(parameter, context)
+				source := context.values.fetch(arguments[index])
+				destination := context.transfer_slots.fetch(parameter.id)
+				if source != destination && _recovery_aggregate_qbe_edge_source_is_destination(block, source, context)
+					layout := try compute_aggregate_layout(native_module.types, type_id)
+					_recovery_aggregate_qbe_emit_copy(context.storage_slots.fetch(parameter.id), source, layout.size, writer)
+				end
+			end
+		end
+		index += 1
+	end
+	index = 0
+	while index < arguments.size()
+		parameter := block.parameters[index]
+		case parameter.value_type
+		when AggregateValueType::Scalar(scalar)
+			_qbe_line(writer,
+				"\t" + _recovery_aggregate_qbe_scalar_slot_store(scalar) + " " + context.values.fetch(arguments[index]) +
+				", " + context.transfer_slots.fetch(parameter.id)
+			)
+		when AggregateValueType::Aggregate(type_id)
+			if _recovery_aggregate_qbe_parameter_uses_transfer(parameter, context)
+				layout := try compute_aggregate_layout(native_module.types, type_id)
+				destination := context.transfer_slots.fetch(parameter.id)
+				mut source := context.values.fetch(arguments[index])
+				if source != destination && _recovery_aggregate_qbe_edge_source_is_destination(block, source, context)
+					source = context.storage_slots.fetch(parameter.id)
+				end
+				if source != destination
+					_recovery_aggregate_qbe_emit_copy(destination, source, layout.size, writer)
+				end
+			end
+		end
+		index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_aggregate_qbe_parameter_uses_transfer(parameter: RecoveryAggregateParameter, context: RecoveryAggregateQbeContext): Boolean
+	return context.values.fetch(parameter.id) == context.transfer_slots.fetch(parameter.id)
+end
+
+def _recovery_aggregate_qbe_edge_source_is_destination(
+		block: RecoveryAggregateBlock?,
+		source: String,
+		context: RecoveryAggregateQbeContext,
+	): Boolean
+	mut index := 0
+	while index < block.parameters.size()
+		parameter := block.parameters[index]
+		case parameter.value_type
+		when AggregateValueType::Scalar(_scalar)
+		when AggregateValueType::Aggregate(_type_id)
+			if _recovery_aggregate_qbe_parameter_uses_transfer(parameter, context) && context.transfer_slots.fetch(parameter.id) == source
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def _recovery_aggregate_qbe_emit_entry(native_module: RecoveryAggregateModule, mut writer: StringBuilder)
+	entry_index := _recovery_aggregate_qbe_function_index(native_module.functions, native_module.entry_function)
+	_qbe_line(writer, "export function w $main() {")
+	_qbe_line(writer, "@start")
+	_qbe_line(writer, "\tcall $trbn_aggregate_f" + entry_index.to_s() + "()")
+	_qbe_line(writer, "\tret 0")
+	_qbe_line(writer, "}")
+	return
+end
+
+def _recovery_aggregate_qbe_emit_origin(native_module: RecoveryAggregateModule, origin: SourceOrigin, mut writer: StringBuilder)
+	mut source_index := 0
+	while native_module.sources[source_index].id != origin.source_id
+		source_index += 1
+	end
+	_qbe_line(writer,
+		"\t# trb-origin source=" + source_index.to_s() + " start=" + origin.start_line.to_s() + ":" +
+		origin.start_column.to_s() + " end=" + origin.end_line.to_s() + ":" + origin.end_column.to_s()
+	)
+	return
+end
+
+def _recovery_aggregate_qbe_emit_zero(destination: String, size: Integer, mut writer: StringBuilder)
+	mut offset := 0
+	while size - offset >= 8
+		address := _recovery_aggregate_qbe_address(destination, offset, destination + "_zero_" + offset.to_s(), writer)
+		_qbe_line(writer, "\tstorel 0, " + address)
+		offset += 8
+	end
+	if size - offset >= 4
+		address := _recovery_aggregate_qbe_address(destination, offset, destination + "_zero_" + offset.to_s(), writer)
+		_qbe_line(writer, "\tstorew 0, " + address)
+		offset += 4
+	end
+	if size - offset >= 2
+		address := _recovery_aggregate_qbe_address(destination, offset, destination + "_zero_" + offset.to_s(), writer)
+		_qbe_line(writer, "\tstoreh 0, " + address)
+		offset += 2
+	end
+	if size - offset == 1
+		address := _recovery_aggregate_qbe_address(destination, offset, destination + "_zero_" + offset.to_s(), writer)
+		_qbe_line(writer, "\tstoreb 0, " + address)
+	end
+	return
+end
+
+def _recovery_aggregate_qbe_emit_copy(destination: String, source: String, size: Integer, mut writer: StringBuilder)
+	_qbe_line(writer, "\tblit " + source + ", " + destination + ", " + size.to_s())
+	return
+end
+
+def _recovery_aggregate_qbe_address(base: String, offset: Integer, name: String, mut writer: StringBuilder): String
+	if offset == 0
+		return base
+	end
+	_qbe_line(writer, "\t" + name + " =l add " + base + ", " + offset.to_s())
+	return name
+end
+
+def _recovery_aggregate_qbe_abi_type(value_type: AggregateValueType): String
+	case value_type
+	when AggregateValueType::Scalar(scalar)
+		return _qbe_type(scalar)
+	when AggregateValueType::Aggregate(_type_id)
+		return "l"
+	end
+end
+
+def _recovery_aggregate_qbe_scalar_field_load(value_type: ScalarType): String
+	if value_type == ScalarType::Boolean
+		return "loadub"
+	end
+	if value_type == ScalarType::Float
+		return "loadd"
+	end
+	return "loadl"
+end
+
+def _recovery_aggregate_qbe_scalar_field_store(value_type: ScalarType): String
+	if value_type == ScalarType::Boolean
+		return "storeb"
+	end
+	if value_type == ScalarType::Float
+		return "stored"
+	end
+	return "storel"
+end
+
+def _recovery_aggregate_qbe_scalar_slot_load(value_type: ScalarType): String
+	if value_type == ScalarType::Boolean
+		return "loadw"
+	end
+	return _recovery_aggregate_qbe_scalar_field_load(value_type)
+end
+
+def _recovery_aggregate_qbe_scalar_slot_store(value_type: ScalarType): String
+	if value_type == ScalarType::Boolean
+		return "storew"
+	end
+	return _recovery_aggregate_qbe_scalar_field_store(value_type)
+end
+
+def _recovery_aggregate_qbe_function_index(functions: Array<RecoveryAggregateFunction>, id: String): Integer
+	mut index := 0
+	while functions[index].id != id
+		index += 1
+	end
+	return index
+end
+
+def _recovery_aggregate_qbe_block_label(blocks: Array<RecoveryAggregateBlock>, id: String): String
+	return "@b" + _recovery_aggregate_qbe_block_index(blocks, id).to_s()
+end
+
+def _recovery_aggregate_qbe_block_index(blocks: Array<RecoveryAggregateBlock>, id: String): Integer
+	mut index := 0
+	while blocks[index].id != id
+		index += 1
+	end
+	return index
+end
+
+def _recovery_aggregate_qbe_required_id(value: String?): String
+	if value == nil
+		return ""
+	end
+	return value
+end
+
+def _recovery_aggregate_qbe_required_field(layout: AggregateLayout, name: String): AggregateFieldLayout
+	mut index := 0
+	while layout.fields[index].name != name
+		index += 1
+	end
+	return layout.fields[index]
+end
+
+def _recovery_aggregate_qbe_required_variant(layout: AggregateLayout, name: String): AggregateVariantLayout
+	mut index := 0
+	while layout.variants[index].name != name
+		index += 1
+	end
+	return layout.variants[index]
+end
+
+def _recovery_aggregate_qbe_required_variant_field(variant: AggregateVariantLayout, name: String): AggregateFieldLayout
+	mut index := 0
+	while variant.fields[index].name != name
+		index += 1
+	end
+	return variant.fields[index]
+end

@@ -1,0 +1,170 @@
+import { load_string } from support/storage
+import { check, emit_qbe } from compiler
+import { mir_string_concats_equal } from mir/analysis/string_concats
+import { MirStringConcat, mir_module_new } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { occurrence_count, output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Verified MIR String concat chains") do
+	test("passes three fragments directly across high-allocation loop iterations") do
+		source := "def main()\nmut index := 0\nmut total := 0\nwhile index < 400000\ntext := index.to_s()\nlabel := \"[\" + text + \"]\"\ntotal += label.size()\nindex += 1\nend\nputs(total)\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		body := qbe.split("function $trbnf0() {")[1].split("\n}")[0]
+		entry := body.split("\tjmp @mir_")[0]
+		expect(entry.include?("%string_fragments")).to_be_false()
+		expect(body.include?("call $trbn_string_concat_three(l ")).to_be_true()
+		expect(qbe.include?("function l $trbn_string_concat_many(")).to_be_false()
+		expect(occurrence_count(body, " =l alloc8 ")).to_equal(0)
+		binary := Process.environment("TYPE_RB_NATIVE_QBE")
+		if binary != nil
+			case logical_run_qbe(binary, qbe)
+			when Result::Ok(actual)
+				expect(actual).to_equal("3088890\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("shares maximum-sized scratch within a frame and isolates recursive frames") do
+		source := "def nest(depth: Integer): String\nif depth == 0\nreturn \"x\"\nend\ninner := nest(depth - 1)\nshort := \"[\" + inner + \"]\"\ntag := depth.to_s()\nreturn \"<\" + short + \"|\" + tag + \">\"\nend\ndef main()\nputs(nest(2))\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(occurrence_count(qbe, "%string_fragments =l alloc8 ")).to_equal(1)
+		expect(qbe.include?("%string_fragments =l alloc8 40")).to_be_true()
+		binary := Process.environment("TYPE_RB_NATIVE_QBE")
+		if binary != nil
+			case logical_run_qbe(binary, qbe)
+			when Result::Ok(actual)
+				expect(actual).to_equal("<[<[x]|1>]|2>\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("owns ordered fragments and roots through one allocation without source inspection") do
+		mut state := logical_checked_source("def decorate(a: String, b: String, c: String): String\nreturn \"[\" + a + b + c + \"]\"\nend\ndef main()\nputs(decorate(1.to_s(), 2.to_s(), 3.to_s()))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		plans := state.scalar_mir.string_concats[0]
+		expect(plans.size()).to_equal(4)
+		expect(plans[3].fragments.size()).to_equal(5)
+		roots := state.scalar_mir.root_plans[0]
+		expect(roots.instructions).to_equal([plans[3].instruction])
+		# The three parameters may be allocated; the surrounding literals
+		# already have permanent storage and need no temporary roots.
+		expect(roots.roots).to_equal([[plans[3].fragments[1], plans[3].fragments[2], plans[3].fragments[3]]])
+		expect(roots.capacity).to_equal(3)
+		mut index := 0
+		while index < 3
+			expect(plans[index].fragments.empty?()).to_be_true()
+			expect(roots.roots[0].include?(state.scalar_mir.instructions[plans[index].instruction].result)).to_be_false()
+			index += 1
+		end
+		before := output_source(emit_qbe(state))
+		expect(occurrence_count(before, "call $trbn_string_concat_many(l ")).to_equal(1)
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_string_concats_equal(plans, state.scalar_mir.string_concats[0])).to_be_true()
+		expect(output_source(emit_qbe(state))).to_equal(before)
+	end
+
+	test("preserves right-nested operand order and physical block reordering") do
+		mut state := logical_checked_source("def decorate(a: String, b: String): String\nreturn a + (\"[\" + b + \"]\")\nend\ndef main()\nputs(decorate(1.to_s(), 2.to_s()))\nend\n")
+		expect(check(state)).to_be_true()
+		plans := state.scalar_mir.string_concats[0]
+		expect(plans.size()).to_equal(3)
+		expect(plans[2].fragments[0]).to_equal(0)
+		expect(plans[2].fragments[2]).to_equal(1)
+		function := state.scalar_mir.functions[0]
+		first := state.scalar_mir.blocks[function.block_start]
+		last := state.scalar_mir.blocks[function.block_start + function.block_count - 1]
+		state.scalar_mir.blocks[function.block_start] = last
+		state.scalar_mir.blocks[function.block_start + function.block_count - 1] = first
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects I/O allocation failure mutation call capture and multiple-use barriers") do
+		bodies := [
+			"first := \"[\" + value\nputs(first)\nreturn first + \"]\"",
+			"first := \"[\" + value\nother := 42.to_s()\nreturn first + other",
+			"first := \"[\" + value\n_other := 1 / value.size()\nreturn first + \"]\"",
+			"mut first := \"[\" + value\nfirst = value\nreturn first + \"]\"",
+			"first := \"[\" + value\njoined := first + \"]\"\nputs(first)\nreturn joined",
+			"first := \"[\" + value\njoined := first + first\nreturn joined",
+			"first := \"[\" + value\njoined := first + \"]\"\nobserve(first)\nreturn joined",
+			"first := \"[\" + value\njoined := first + \"]\"\ncallback := fn(): String\nreturn first\nend\nputs(callback())\nreturn joined",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source("def observe(value: String)\nreturn\nend\ndef decorate(value: String): String\n" + body + "\nend\ndef main()\nputs(decorate(7.to_s()))\nend\n")
+			checked := check(state)
+			if !checked
+				puts(body + "\n" + load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(state.scalar_mir.string_concats[1].empty?()).to_be_true()
+		end
+	end
+
+	test("retains edge and return uses across branches") do
+		mut state := logical_checked_source("def decorate(value: String, flag: Boolean): String\nfirst := \"[\" + value\nif flag\nreturn first + \"]\"\nelse\nreturn first\nend\nend\ndef main()\nputs(decorate(7.to_s(), true))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.string_concats[0].empty?()).to_be_true()
+	end
+
+	test("independently rejects supplied plans reordered operands and forged elision") do
+		mut raw := mir_module_new()
+		raw.string_concats.push([])
+		expect(verify_mir(raw, false)).to_equal("MIR input cannot supply String concat plans")
+		mut state := logical_checked_source("def decorate(value: String): String\nreturn \"[\" + value + \"]\"\nend\ndef main()\nputs(decorate(7.to_s()))\nend\n")
+		expect(check(state)).to_be_true()
+		original := state.scalar_mir.string_concats[0]
+		final := original[1]
+		forged := MirStringConcat.new(instruction: final.instruction, fragments: [final.fragments[2], final.fragments[1], final.fragments[0]])
+		state.scalar_mir.string_concats[0] = [original[0], forged]
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR String concat plan differs")
+		state.scalar_mir.string_concats[0] = [original[0], MirStringConcat.new(instruction: final.instruction, fragments: [])]
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR String concat plan differs")
+		state.scalar_mir.string_concats[0] = original
+		state.scalar_mir.root_plans[0].roots[0] = []
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("retains original managed fragments and returned chains under forced collection") do
+		source := "def decorate(a: String, b: String, c: String): String\nreturn \"[\" + a + b + c + \"]\"\nend\ndef main()\nmut held: Array<String> := []\nmut index := 0\nwhile index < 64\ntext := index.to_s()\nheld.push(decorate(text, text, text))\nindex += 1\nend\nputs(held[0])\nputs(held[63])\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := output_source(emit_qbe(state))
+		binary := Process.environment("TYPE_RB_NATIVE_QBE")
+		if binary != nil
+			marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+			parts := qbe.split(marker)
+			expect(parts.size()).to_equal(2)
+			forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+			case logical_run_qbe(binary, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("[000]\n[636363]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

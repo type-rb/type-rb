@@ -1,0 +1,8 @@
+case	candidate	command	arg1	arg2	arg3	arg4	expected
+n-body	typerb-native	/home/runner/work/_temp/prepare-workspace/backend-pair/n-body/native	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	typerb-go	/home/runner/work/_temp/prepare-workspace/backend-pair/n-body/reference	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	c	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/c/program	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	cpp	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/cpp/program	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	go	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/go/program	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	rust	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/rust/program	50000000	-	-	-	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt
+n-body	java	/usr/bin/java	-cp	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes	nbody	50000000	/home/runner/work/type-rb-native/type-rb-native/benchmarks/benchmarksgame/n-body/expected/50000000.txt

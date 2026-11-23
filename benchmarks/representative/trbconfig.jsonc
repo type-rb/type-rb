@@ -1,0 +1,10 @@
+{
+  "name": "representative-performance",
+  "version": "0.1.0",
+  "mode": "trb",
+  "sourceDir": "src",
+  "outDir": "build",
+  "copyFiles": false,
+  "packageManagement": "managed",
+  "go": { "module": "example.org/representative", "version": "1.27" }
+}

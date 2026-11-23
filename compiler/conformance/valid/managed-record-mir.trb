@@ -1,0 +1,58 @@
+record Node
+	text: String
+	children: Array<Node>
+end
+
+record Sample
+	node: Node
+	flag: Boolean
+	score: Float
+end
+
+def label(mut order: Array<Integer>, value: Integer): String
+	order.push(value)
+	return value.to_s()
+end
+
+def make(mut order: Array<Integer>, value: Integer): Node
+	return Node.new(text: label(order, value), children: [])
+end
+
+def choose(value: Node, other: Node, flag: Boolean): Node
+	if flag
+		return value
+	end
+	return other
+end
+
+def inspect(value: Sample): String
+	if value.flag && value.score > 1.0
+		return value.node.text
+	end
+	return "wrong"
+end
+
+def main()
+	mut order: Array<Integer> := []
+	mut first := make(order, 1)
+	second := make(order, 2)
+	first.children.push(first)
+	first.children.push(second)
+	mut selected := choose(first, second, true)
+	saved := selected.children[1]
+	selected = make(order, 3)
+	puts(saved.text)
+	puts(first.children[0].text)
+	puts(inspect(Sample.new(node: selected, flag: true, score: 2)))
+	puts(order[0])
+	puts(order[1])
+	puts(order[2])
+	mut count := 0
+	while count < 100
+		mut trash := make(order, count)
+		trash.children.push(trash)
+		count += 1
+	end
+	puts(saved.text)
+	puts(first.children[1].text)
+end

@@ -1,0 +1,29 @@
+import { string_method_downcase, string_method_replace_all, string_method_upcase } from frontend/types/method_kinds
+import { ReplStore, repl_string, repl_value } from repl/model
+
+# The regenerated CLI uses the same compiled operations as ordinary programs.
+# Validate terminal failures here so a failed submission preserves the session.
+def repl_string_transform(mut store: ReplStore, kind: Integer, receiver: Integer, arguments: Array<Integer>): Integer
+	value := store.texts[receiver]
+	if kind == string_method_upcase()
+		return repl_string(store, value.upcase())
+	elsif kind == string_method_downcase()
+		return repl_string(store, value.downcase())
+	end
+	pattern := store.texts[arguments[0]]
+	if pattern == ""
+		store.error[0] = "panic: String split separator is empty"
+		if kind == string_method_replace_all()
+			store.error[0] = "panic: String replacement pattern is empty"
+		end
+		return 0
+	end
+	if kind == string_method_replace_all()
+		return repl_string(store, value.replace_all(pattern, store.texts[arguments[1]]))
+	end
+	mut children: Array<Integer> := []
+	value.split(pattern).each do |part|
+		children.push(repl_string(store, part))
+	end
+	return repl_value(store, "Array<String>", 0, 0.0, "", children)
+end

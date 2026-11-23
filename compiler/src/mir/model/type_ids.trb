@@ -1,0 +1,44 @@
+# Value type IDs are independent of composite row categories. Zero means no
+# concrete value type: Void results and failed lookups share it; callers decide
+# validity. The two address IDs are low-level Array element addresses, not values
+# admitted by general control flow. Composite rows follow the fixed primitive IDs.
+
+def mir_type_none(): Integer
+	return 0
+end
+
+def mir_type_integer(): Integer
+	return 1
+end
+
+def mir_type_boolean(): Integer
+	return 2
+end
+
+def mir_type_integer_array(): Integer
+	return 3
+end
+
+def mir_type_integer_address(): Integer
+	return 4
+end
+
+def mir_type_float(): Integer
+	return 5
+end
+
+def mir_type_float_array(): Integer
+	return 6
+end
+
+def mir_type_float_address(): Integer
+	return 7
+end
+
+def mir_type_string(): Integer
+	return 8
+end
+
+def mir_type_composite_start(): Integer
+	return 9
+end

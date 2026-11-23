@@ -1,0 +1,67 @@
+def increment(mut table: Hash<String, Integer>, key: String)
+	table[key] = table[key] + 1
+	table[key] = table[key] + 2
+end
+
+def main()
+	mut words: Hash<String, Integer> := {}
+	keys := ["", "a\x00b", "あ😀é", "alpha", "beta"]
+	keys.each do |key|
+		words[key] = 10
+		increment(words, key + "")
+	end
+	keys.each do |key|
+		puts(words[key])
+	end
+	# These String keys collide in the initial eight buckets. The deleted
+	# first key leaves a tombstone before the retained successful lookup.
+	mut collisions: Hash<String, Integer> := {}
+	collision_key := "q"
+	collisions["a"] = 1
+	collisions["i"] = 2
+	collisions[collision_key] = 3
+	collisions.delete("a")
+	collisions[collision_key] = collisions[collision_key] + 4
+	puts(collisions[collision_key])
+	managed_key := 17.to_s()
+	mut managed := { managed_key => managed_key + "!" }
+	managed[managed_key] = managed[managed_key]
+	noise := managed_key + "?"
+	puts(managed[managed_key])
+	puts(noise)
+	mut values: Hash<Integer, Integer> := {}
+	mut index := 0
+	while index < 80
+		values[index] = index
+		index += 1
+	end
+	index = 0
+	while index < 60
+		values.delete(index)
+		index += 1
+	end
+	key := 75
+	values[key] = values[key] + 1
+	values[key] = values[key] + 2
+	puts(values[key])
+	index = 0
+	while index < 60
+		values[index] = index + 100
+		values[index] = values[index] + 1
+		index += 1
+	end
+	puts(values[0])
+	puts(values.size())
+	index = 0
+	while index < 80
+		values.delete(index)
+		index += 1
+	end
+	values[key] = 7
+	values[key] = values[key] + 1
+	puts(values[key])
+	float_key := -2
+	mut floats := { float_key => 1.5 }
+	floats[float_key] = floats[float_key] + 2.25
+	puts(floats[float_key] == 3.75)
+end

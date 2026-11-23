@@ -1,0 +1,29 @@
+# Integer-keyed Hash insertion, update, membership and lookup.
+
+def run(count: Integer): Integer
+	mut table: Hash<Integer, Integer> := {}
+	mut index := 0
+	while index < count
+		key := (index * 7919) % 65536
+		if table.key?(key)
+			table[key] = table[key] + index % 13
+		else
+			table[key] = index % 13
+		end
+		index += 1
+	end
+	mut total := 0
+	mut probe := 0
+	while probe < 65536
+		if table.key?(probe)
+			total += table[probe]
+		end
+		probe += 1
+	end
+	return total + table.size()
+end
+
+def main()
+	puts(run(2400000))
+	return
+end

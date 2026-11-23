@@ -1,0 +1,28 @@
+def allocate(value: Integer): String
+	return [value.to_s(), "kept"].join(":")
+end
+
+def guarded(value: Integer, callback: (Integer) -> String): String
+	if value < 2
+		return value.to_s()
+	end
+	kept := ["root", value.to_s()]
+	first := allocate(value - 1)
+	second := callback(value - 2)
+	return kept.join("/") + ":" + first + ":" + second
+end
+
+def maximum(value: Integer): Integer
+	if value >= 9007199254740991
+		return value - 9007199254740991
+	end
+	return 0
+end
+
+def main()
+	puts(guarded(-9007199254740991, allocate))
+	puts(guarded(1, allocate))
+	puts(guarded(2, allocate))
+	puts(guarded(9007199254740991, allocate))
+	puts(maximum(9007199254740991))
+end

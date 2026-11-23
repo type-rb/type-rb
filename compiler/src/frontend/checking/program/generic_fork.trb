@@ -1,0 +1,99 @@
+import { scoped_call_graph } from mir/analysis/resource_calls
+import { TypeAliasInstance } from frontend/types/alias_model
+import { generic_application } from frontend/types/generic_arguments
+import { integer_string } from support/literals
+import { GenericBinding, GenericFunctionInstance, GenericInstance } from frontend/types/generic_model
+import { compiler_callable_analysis_fork } from state/callable_state
+import { compiler_global_bindings_fork } from state/global_state
+import { compiler_nominal_types_fork } from state/nominal_state
+import { CompilerState, compiler_declaration_catalog_fork } from state/state
+import { compiler_parsed_program_fork } from state/source_state
+import { CompilerTypeResolution, compiler_diagnostics_new, compiler_module_graph_fork } from state/catalog_state
+import { integer_storage, integer_storage_copy, string_storage_copy } from support/storage
+import { mir_module_new } from mir/model/module
+
+# Template validation uses the ordinary checker with abstract parameter identities.
+# It shares immutable parsed syntax and owns all mutable semantic catalogs.
+# No synthetic source, token substitution, runtime layout or fallback is involved.
+def generic_program_fork(state: CompilerState): CompilerState
+	return checking_program_fork(state, false)
+end
+
+# Generic checking starts non-interactively; collection inference explicitly keeps
+# the caller's mode while isolating the same speculative semantic owners.
+def checking_program_fork(state: CompilerState, interactive: Boolean): CompilerState
+	capacity := state.source_tokens.token_kinds.limit[0]
+	mut alias_instances: Array<TypeAliasInstance> := []
+	mut alias_lookup: Hash<String, Integer> := {}
+	mut alias_index := 0
+	state.type_resolution.alias_instances.each do |instance|
+		alias_instances.push(instance)
+		alias_lookup[generic_application(integer_string(instance.definition), instance.arguments)] = alias_index
+		alias_index += 1
+	end
+	mut generic_bindings: Array<GenericBinding> := []
+	state.type_resolution.generic_bindings.each do |binding|
+		generic_bindings.push(binding)
+	end
+	mut generic_instances: Array<GenericInstance> := []
+	state.type_resolution.generic_instances.each do |value|
+		generic_instances.push(value)
+	end
+	mut generic_instance_lookup: Hash<String, Integer> := {}
+	mut instance := 0
+	state.type_resolution.generic_instances.each do |value|
+		key := generic_application(integer_string(value.definition), value.arguments)
+		generic_instance_lookup[key] = instance
+		instance += 1
+	end
+	mut generic_depth: Array<Integer> := []
+	state.type_resolution.generic_depth.each do |value|
+		generic_depth.push(value)
+	end
+	mut generic_function_instances: Array<GenericFunctionInstance> := []
+	state.type_resolution.generic_function_instances.each do |value|
+		generic_function_instances.push(value)
+	end
+	mut generic_function_lookup: Hash<String, Integer> := {}
+	mut function_instance := 0
+	state.type_resolution.generic_function_instances.each do |value|
+		generic_function_lookup[value.application_key] = function_instance
+		function_instance += 1
+	end
+	mut active_module: Array<Integer> := []
+	state.module_graph.active_module.each do |value|
+		active_module.push(value)
+	end
+	return CompilerState.new(resource_calls: scoped_call_graph(state.resource_calls.enabled[0]), nominal: compiler_nominal_types_fork(state.nominal),
+		global_bindings: compiler_global_bindings_fork(state.global_bindings),
+		callables: compiler_callable_analysis_fork(state.callables, capacity),
+		standard_modules: state.standard_modules,
+		type_resolution: CompilerTypeResolution.new(
+			type_aliases: state.type_resolution.type_aliases,
+			alias_instances: alias_instances,
+			alias_instance_lookup: alias_lookup,
+			alias_patterns: string_storage_copy(state.type_resolution.alias_patterns),
+			alias_expansion_path: integer_storage(capacity),
+			alias_expansion_depth: [0],
+			generic_definitions: state.type_resolution.generic_definitions,
+			generic_instances: generic_instances,
+			generic_instance_lookup: generic_instance_lookup,
+			generic_depth: generic_depth,
+			generic_functions: state.type_resolution.generic_functions,
+			generic_function_instances: generic_function_instances,
+			generic_function_lookup: generic_function_lookup,
+			generic_bindings: generic_bindings,
+			record_generic_bindings: integer_storage_copy(state.type_resolution.record_generic_bindings),
+			function_generic_bindings: integer_storage_copy(state.type_resolution.function_generic_bindings),
+			generic_template_mode: [true],
+		),
+		submissions: [],
+		parsed: compiler_parsed_program_fork(state.parsed),
+		interactive: interactive,
+		source_tokens: state.source_tokens,
+		scalar_mir: mir_module_new(),
+		module_graph: compiler_module_graph_fork(state.module_graph, active_module),
+		declarations: compiler_declaration_catalog_fork(state.declarations),
+		diagnostics: compiler_diagnostics_new(),
+	)
+end

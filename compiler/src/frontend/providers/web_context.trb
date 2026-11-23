@@ -1,0 +1,143 @@
+import { GenericFunction, GenericParameter } from frontend/types/generic_model
+import { ObjectMethod } from frontend/types/object_model
+import { TypeAlias } from frontend/types/alias_model
+import { object_method_owner } from frontend/types/object_types
+import { parse_statement_block } from frontend/syntax/body_syntax
+import { lex_module } from frontend/syntax/lexer
+import { official_source_kind } from project/official_catalog
+import { CompilerState, has_diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, sparse_integer_at, store_integer, store_string } from support/storage
+
+def web_context_body(mut state: CompilerState, function: Integer, body: String, namespace: String)
+	owner := load_integer(state.declarations.function_modules, function)
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	start := state.source_tokens.token_count[0]
+	lex_module(state, body + "end\n", owner)
+	state.global_bindings.declaration_owner[0] = namespace
+	mut token := start
+	while token < state.source_tokens.token_count[0]
+		store_string(state.source_tokens.token_namespaces, token, namespace)
+		token += 1
+	end
+	mut position := [start]
+	if !has_diagnostic(state)
+		parse_statement_block(state, position)
+	end
+	store_integer(state.declarations.function_body_starts, function, start)
+	store_integer(state.declarations.function_body_ends, function, position[0])
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+end
+
+def declare_web_context(mut state: CompilerState, source: Integer)
+	if sparse_integer_at(state.standard_modules, source) != official_source_kind("trb/web")
+		return
+	end
+	mut owner := 0
+	while owner < state.nominal.objects.size()
+		row := state.nominal.objects[owner]
+		if row.source_id == source && row.name == "Context" && !row.interface_type && row.parameters.size() == 0
+			self_parameter := GenericParameter.new(name: "self", type_name: "Context", line: row.line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+			key := GenericParameter.new(name: "key", type_name: "ContextKey<T>", line: row.line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+			value := GenericParameter.new(name: "value", type_name: "T", line: row.line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+			["with", "fetch"].each do |name|
+				mut parameters := [self_parameter, key]
+				mut result := "Result<T,ContextValueError>"
+				if name == "with"
+					parameters.push(value)
+					result = "Context"
+				end
+				definition := state.type_resolution.generic_functions.size()
+				state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: "Context", name: "Context::" + name, source_id: source, line: row.line, type_parameters: ["T"], parameters: parameters, result_type: result, body_start: row.origin, body_finish: row.origin))
+				state.nominal.objects[owner].methods.push(ObjectMethod.new(name: name, class_member: false, origin: row.origin, function: -1, generic_function: definition))
+			end
+		end
+		owner += 1
+	end
+end
+
+def web_context_kind(state: CompilerState, definition: Integer): Integer
+	if definition < 0 || definition >= state.type_resolution.generic_functions.size()
+		return 0
+	end
+	row := state.type_resolution.generic_functions[definition]
+	if sparse_integer_at(state.standard_modules, row.source_id) != official_source_kind("trb/web") || row.receiver_type != "Context"
+		return 0
+	end
+	owner := object_method_owner(state, definition)
+	if owner < 0
+		return 0
+	end
+	object := state.nominal.objects[owner]
+	if object.name != "Context" || object.source_id != row.source_id || object.interface_type || object.parameters.size() != 0
+		return 0
+	end
+	mut owned_method := false
+	object.methods.each do |method|
+		if method.generic_function == definition && !method.class_member && row.name == "Context::" + method.name
+			owned_method = true
+		end
+	end
+	if !owned_method
+		return 0
+	end
+	mut kind := 0
+	mut names := ["self", "key"]
+	mut types := ["Context", "ContextKey<T>"]
+	if row.name == "Context::with_request" && row.result_type == "Context" && row.type_parameters.size() == 0
+		kind = 3
+		names[1] = "request"
+		types[1] = "Request"
+	elsif row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.body_start != row.body_finish || row.body_start != object.origin
+		return 0
+	elsif row.name == "Context::with" && row.result_type == "Context"
+		kind = 1
+		names.push("value")
+		types.push("T")
+	elsif row.name == "Context::fetch" && row.result_type == "Result<T,ContextValueError>"
+		kind = 2
+	end
+	if kind == 0 || row.parameters.size() != names.size()
+		return 0
+	end
+	mut index := 0
+	while index < names.size()
+		parameter := row.parameters[index]
+		if parameter.name != names[index] || parameter.type_name != types[index] || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0 || parameter.default_finish >= 0
+			return 0
+		end
+		index += 1
+	end
+	return kind
+end
+
+def web_context_function(state: CompilerState, function: Integer): Integer
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return web_context_kind(state, instance.definition)
+		end
+	end
+	return 0
+end
+
+def specialize_web_context(mut state: CompilerState, function: Integer, target: String, kind: Integer): Boolean
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	line := load_integer(state.declarations.function_lines, function)
+	namespace := "$web_context" + integer_string(function)
+	if kind != 3
+		state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Target", source_id: owner, line: line, parameters: [], target: target))
+	end
+	mut body := "stored := ContextStorage.put<ContextKey<Target>, Target>(@_trb_context_state, key, value)\nstate: Any? := stored\nreturn ContextStorage.copy_state<Context, Any?>(self, state)\n"
+	if kind == 3
+		body = "return ContextStorage.copy_request<Context, Request>(self, request)\n"
+	elsif kind == 2
+		body = "case ContextStorage.find<ContextKey<Target>, Target>(@_trb_context_state, key)\nwhen Result::Ok(value)\nreturn Result<Target, ContextValueError>::Ok(value)\nwhen Result::Err(_error)\nreturn Result<Target, ContextValueError>::Err(ContextValueError.new(key: key.name))\nend\n"
+	end
+	web_context_body(state, function, body, namespace)
+	return !has_diagnostic(state)
+end

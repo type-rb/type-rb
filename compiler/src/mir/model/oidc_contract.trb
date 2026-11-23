@@ -1,0 +1,81 @@
+# Internal OIDC host ABI selected only from complete owned declarations.
+def oidc_adapter_start(): Integer
+	return 43
+end
+
+def oidc_adapter(kind: Integer): Integer
+	if kind >= 0 && kind < 7
+		return oidc_adapter_start() + kind
+	elsif kind == 7
+		return 71
+	end
+	return -1
+end
+
+def oidc_kind(adapter: Integer): Integer
+	if adapter >= oidc_adapter_start() && adapter < oidc_adapter_start() + 7
+		return adapter - oidc_adapter_start()
+	elsif adapter == oidc_adapter(7)
+		return 7
+	end
+	return -1
+end
+
+def oidc_names(): Array<String>
+	return ["fetch", "verify_rs256", "timestamp", "describe_uri", "monotonic_millis", "ip_address", "environment", "ascii_hostname"]
+end
+
+def oidc_parameters(kind: Integer): Array<String>
+	if kind == 6 || kind == 7
+		return ["String"]
+	end
+	if kind == 0
+		return ["String", "String", "Integer", "Array<Bytes>"]
+	elsif kind == 2
+		return ["Float"]
+	elsif kind == 3
+		return ["String", "Array<String>"]
+	elsif kind == 4
+		return []
+	elsif kind == 5
+		return ["String", "Array<Integer>"]
+	end
+	return ["Bytes", "Bytes", "Bytes", "Bytes"]
+end
+
+def oidc_parameter_names(kind: Integer): Array<String>
+	if kind == 6 || kind == 7
+		return ["name"]
+	end
+	if kind == 0
+		return ["uri", "proxy", "timeout", "output"]
+	elsif kind == 2
+		return ["value"]
+	elsif kind == 3
+		return ["uri", "parts"]
+	elsif kind == 4
+		return []
+	elsif kind == 5
+		return ["address", "bytes"]
+	end
+	return ["modulus", "exponent", "message", "signature"]
+end
+
+def oidc_mutable(kind: Integer, index: Integer): Integer
+	if (kind == 0 && index == 3) || ((kind == 3 || kind == 5) && index == 1)
+		return 1
+	end
+	return 0
+end
+
+def oidc_result(kind: Integer): String
+	if kind == 6 || kind == 7
+		return "String"
+	end
+	if kind == 2 || kind == 4
+		return "Float"
+	elsif kind == 0 || kind == 5
+		return "Integer"
+	end
+	return "Boolean"
+end

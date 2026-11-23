@@ -1,0 +1,10 @@
+case	candidate	artifact	bytes	sha256
+n-body	typerb-native	/home/runner/work/_temp/prepare-workspace/backend-pair/n-body/native	21920	93738f4a9c461278063be187024e10146058dcab762784caaaab6361562ed68f
+n-body	typerb-go	/home/runner/work/_temp/prepare-workspace/backend-pair/n-body/reference	2817378	a2b9dc45960c4af005b0520191418b733a7ff1c415f5160e4d713454cf03138f
+n-body	c	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/c/program	70856	22e5ab86b6e9f8c9750197f635b294fbf25335ce8afe83dc3209dc90580ab772
+n-body	cpp	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/cpp/program	71336	6619ffb3ef679b819d663f7e61d535189c720bc982f1c3795c7d6f9923a947c9
+n-body	go	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/go/program	2382167	0dab62bb5f245f234ded9081671ee3416896ba5ed7d2c8bdaaaa0e93472b0948
+n-body	rust	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/rust/program	4651312	4aca24829ada49adc1fc018b8f5848c2893865bf7577ee003c8dc9b16122d775
+n-body	java	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes/Body.class	1477	334487b5563c8117c88b52eeebf962b17befa235fe29b98dbab1d1d0924c87cd
+n-body	java	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes/NBodySystem.class	1746	68a43f54882bffc2ed9e27bc70751d4d82410ad55e0cee0e2fd1de10c4825a4f
+n-body	java	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes/nbody.class	796	b349152c8214c6c0437c05187cd094dae0d8ead117b55a761c08ee0a841a64a9

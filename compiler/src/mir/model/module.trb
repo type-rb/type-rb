@@ -1,0 +1,684 @@
+import { checked_logical_and, checked_logical_or, checked_operator_invalid } from frontend/types/operator_plans
+import { loop_transfer_break, loop_transfer_continue } from state/control_kinds
+import { binary_and, binary_or } from frontend/types/operators
+import { mir_type_boolean, mir_type_float, mir_type_float_array, mir_type_integer, mir_type_integer_address, mir_type_integer_array, mir_type_none, mir_type_string } from mir/model/type_ids
+import { mir_terminator_trap } from mir/model/control
+import { MirProgram } from mir/model/program
+import { MirObject, MirObjectMethod, MirObjectWitness } from frontend/types/object_model
+import { MirNewtype } from frontend/types/newtype_model
+import { EnumDefinition, EnumVariant } from frontend/types/enum_model
+record MirLoopTransfer
+	kind: Integer
+	origin: Integer
+	target: Integer
+end
+
+# Break and continue transfer to the nearest while exit/header. Targets
+# and origins belong to the checked source projection, not backend labels.
+def mir_loop_transfer_valid(plan: MirLoopTransfer, origin: Integer, kind: Integer, target: Integer, token_count: Integer): Boolean
+	if plan.kind != loop_transfer_break()
+		if plan.kind != loop_transfer_continue()
+			return false
+		end
+	end
+	if plan.kind != kind
+		return false
+	end
+	if plan.origin != origin
+		return false
+	end
+	if plan.target != target
+		return false
+	end
+	if target < 0
+		return false
+	end
+	if target >= origin
+		return false
+	end
+	return origin < token_count
+end
+
+record MirInstruction
+	kind: Integer
+	result: Integer
+	first: Integer
+	second: Integer
+	payload: Integer
+	failure: Integer
+	source_id: Integer
+	line: Integer
+end
+
+def mir_instruction_with_payload(instruction: MirInstruction, payload: Integer): MirInstruction
+	return MirInstruction.new(
+		kind: instruction.kind,
+		result: instruction.result,
+		first: instruction.first,
+		second: instruction.second,
+		payload: payload,
+		failure: instruction.failure,
+		source_id: instruction.source_id,
+		line: instruction.line,
+	)
+end
+
+record MirBlock
+	id: Integer
+	source_id: Integer
+	line: Integer
+	parameter_start: Integer
+	parameter_count: Integer
+	instruction_start: Integer
+	instruction_count: Integer
+	terminator: Integer
+	condition: Integer
+	first_target: Integer
+	second_target: Integer
+	first_argument_start: Integer
+	first_argument_count: Integer
+	second_argument_start: Integer
+	second_argument_count: Integer
+	return_value: Integer
+end
+
+record MirControlLoop
+	origin: Integer
+	header: Integer
+	exit: Integer
+	continuation: Integer
+	binding_count: Integer
+	exit_binding_count: Integer
+end
+
+record MirFunction
+	# Categories are named in mir/model/control.
+	# The retired positional induction adapter (2) is invalid.
+	kind: Integer
+	result_type: String
+	integer_guard: Integer
+	id: Integer
+	entry_block: Integer
+	source_id: Integer
+	line: Integer
+	parameter_start: Integer
+	parameter_count: Integer
+	block_start: Integer
+	block_count: Integer
+end
+
+record MirValue
+	function_id: Integer
+	id: Integer
+	type_id: Integer
+	source_id: Integer
+	line: Integer
+end
+
+# A prior successful guard supplies a normalized position, never an address.
+# A loaded or stored primitive SSA value may also be reused while independently
+# proven unchanged. A loaded_value of -1 reuses only the checked position.
+record MirArrayReadGuard
+	instruction: Integer
+	source: Integer
+	loaded_value: Integer
+end
+
+# An Array retains its own length and storage across a header-stable loop.
+# Accesses still perform their own bounds checks against that cached length.
+record MirArrayHeader
+	identity: Integer
+	owner: Integer
+	accesses: Array<Integer>
+	nonnegative_accesses: Array<Integer>
+	# Both bounds follow from an exclusive true edge and a stable loop header.
+	bounded_accesses: Array<Integer>
+end
+
+# A primitive element held across a loop, initialized only after body entry and
+# written back at its exclusive exit. All access lists and alias proofs are
+# reconstructed from canonical instructions; no unchecked load is introduced.
+record MirArrayCachedValue
+	owner: Integer
+	index: Integer
+	type_id: Integer
+	body: Integer
+	exit: Integer
+	loads: Array<Integer>
+	stores: Array<Integer>
+end
+
+# Header reuse for one verified natural loop. A guard Array also proves its
+# own checked indexes; other Arrays require a separate dominating length guard.
+# owner and length are -1 when no Array supplies the loop bound.
+record MirArrayLoop
+	header: Integer
+	preheader: Integer
+	owner: Integer
+	length: Integer
+	accesses: Array<Integer>
+	headers: Array<MirArrayHeader>
+	# Fresh reserved outputs append at most once per induction step.
+	reserved_pushes: Array<Integer>
+	cached_values: Array<MirArrayCachedValue>
+	# Duplicate the verified first header/body visit when this body is present.
+	peel_body: Integer
+	# The first visit is known to enter; later visits still test the condition.
+	peel_nonempty: Boolean
+end
+
+# One lazy scalar result cache, reset on each entry from its loop preheader.
+# The verifier rederives both invariant operands and the complete effect region.
+record MirLoopCall
+	header: Integer
+	preheader: Integer
+	instruction: Integer
+end
+
+# Derived safe-point plans contain only values demanded by future operations.
+# Each row corresponds to one instruction index; roots are sorted value IDs.
+# A single-use String Array has no observable container identity. Instructions
+# stay canonical; the independently verified plan owns storage elision and roots.
+record MirArrayJoin
+	construction: Integer
+	array: Integer
+	join: Integer
+	# Sole adjacent String.size instruction; -1 keeps the materialized String.
+	size: Integer
+	# Verified separator literal with ASCII boundary bytes; -1 keeps runtime checks.
+	separator_literal: Integer
+	# Confined concat producers represented by byte/point counts at their original sites.
+	size_concats: Array<Integer>
+	appends: Array<Integer>
+	elements: Array<Integer>
+	# Verified literal identity for each element; -1 keeps runtime header loads.
+	element_literals: Array<Integer>
+end
+
+record MirRootPlan
+	function_id: Integer
+	instructions: Array<Integer>
+	roots: Array<Array<Integer>>
+	capacity: Integer
+end
+
+# Instructions name their opcode, result, operands, opcode-specific payload,
+# failure target and origin. Verified rewrites replace whole readonly records.
+# Array regions retain parameter, access, and effect operations.
+# The verifier derives their plans; input facts remain empty.
+# Array loop plans are derived from CFG edges and SSA value identities.
+# Verification re-derives them before header reuse or check elimination.
+record MirSignature
+	id: Integer
+	# Categories are named in mir/model/call_kinds, including interface signatures.
+	kind: Integer
+	name: String
+	# Runtime adapter tag, or a method-table index for an interface signature.
+	adapter: Integer
+	source_id: Integer
+	line: Integer
+	parameter_types: Array<String>
+	parameter_mutable: Array<Integer>
+	result_type: String
+end
+
+# A recursive scalar function has an effect-free identity return on this guard.
+record MirCallReturnGuard
+	function_id: Integer
+	comparison: Integer
+	bound: Integer
+end
+
+record MirCall
+	callee: Integer
+	argument_start: Integer
+	argument_count: Integer
+	# Conservative ordinary call effects: allocation, mutation, I/O, failure.
+	effects: Integer
+end
+
+# A scoped body is a statically known source function. Its final immutable
+# parameter borrows the acquired File; preceding parameters are synchronous
+# captures. The error constructor receives path, operation and host status.
+record MirFileScope
+	body: Integer
+	error: Integer
+	error_variant: Integer
+	argument_start: Integer
+	argument_count: Integer
+end
+
+# Target-independent checked arithmetic selection; named modes and their proof
+# meanings live in mir/model/numeric_modes. Unused proof fields remain zero;
+# an absent tested dividend is -1.
+# A call plan owns its cloned leaf
+# operations; ordinary plans have caller and call_instruction equal to -1.
+record MirNumericOperation
+	instruction: Integer
+	mode: Integer
+	# Original dividend when a Boolean comparison bypasses a remainder result.
+	# Other numeric selections leave this operand absent.
+	tested_value: Integer
+	divisor: Integer
+	reciprocal: Integer
+	shift: Integer
+end
+
+record MirNumericPlan
+	# -1 for ordinary/direct plans; otherwise an exact runtime witness guard.
+	witness: Integer
+	function_id: Integer
+	caller: Integer
+	call_instruction: Integer
+	operations: Array<MirNumericOperation>
+end
+
+# Composite values retain semantic element identity independently of ABI layout.
+# mir/model/type_ids owns the primitive IDs and composite table offset.
+record MirType
+	# mir/model/type_kinds owns composite row categories, separate from type IDs.
+	kind: Integer
+	name: String
+	element: Integer
+	key: Integer
+	declaration: Integer
+end
+
+record MirRecord
+	declaration: Integer
+	type_id: Integer
+	name: String
+	source_id: Integer
+	line: Integer
+	field_start: Integer
+	field_count: Integer
+end
+
+record MirField
+	owner: Integer
+	name: String
+	type_id: Integer
+	source_id: Integer
+	line: Integer
+end
+
+record MirIndexedTarget
+	origin: Integer
+	owner: Integer
+	index: Integer
+end
+
+record MirUnionTarget
+	origin: Integer
+	owner: Integer
+	type_name: String
+	member: String
+end
+
+# Invocation rows prove a direct target and effects while retaining its capture
+# ABI. Constructor rows prove an unused environment and have no effects.
+# Verification rederives both from the current SSA.
+record MirCallablePlan
+	instruction: Integer
+	callee: Integer
+	captures: Integer
+	effects: Integer
+end
+
+record MirCallable
+	type_id: Integer
+	parameters: Array<Integer>
+	result: Integer
+end
+
+# A global has one initializer and a checked mutation capability.
+# Initialization order and persistent roots are part of the verified module.
+record MirGlobal
+	cyclic: Boolean
+	mutable: Boolean
+	runtime: Boolean
+	id: Integer
+	name: String
+	source_id: Integer
+	line: Integer
+	type_id: Integer
+	initializer: Integer
+	managed: Boolean
+end
+
+record MirUnion
+	type_id: Integer
+	alternatives: Array<Integer>
+end
+
+# Portable String data; target packing and compression are backend choices.
+# points == -1 denotes a literal-table entry with no String materialization.
+record MirLiteralData
+	bytes: Array<Integer>
+	points: Integer
+end
+
+# Empty fragments elide a single-use intermediate; a final row owns the
+# ordered operands of one allocation. Rows are sorted by instruction identity.
+record MirStringConcat
+	instruction: Integer
+	fragments: Array<Integer>
+end
+
+# A verified store reuses one successful lookup, carrying only its bucket index.
+record MirHashLookupReuse
+	producer: Integer
+	store: Integer
+end
+
+# A read on the successful membership edge reuses its nonnegative bucket index.
+record MirHashMembershipReuse
+	membership: Integer
+	lookup: Integer
+end
+
+# The original allocating concat may reuse an equal immutable Hash key.
+# The bucket result is consumed only by its immediate membership operation.
+record MirHashConcatProbe
+	function_id: Integer
+	concat: Integer
+	membership: Integer
+end
+
+# A split keeps its canonical operation and fresh mutable result. Only the
+# immutable fragment bytes are precomputed; verification derives them anew.
+# Literal splits store their complete fragments. Dynamic splits carry the
+# inclusive range observable through the fresh Array's checked element reads.
+record MirStringSplit
+	instruction: Integer
+	fragments: Array<MirLiteralData>
+	first_field: Integer
+	last_field: Integer
+end
+
+record MirEnumScalar
+	variant: Integer
+	type_id: Integer
+	text: String
+end
+
+record MirModule
+	enum_scalars: Array<MirEnumScalar>
+	source_names: Array<String>
+	program: Array<MirProgram>
+	object_methods: Array<MirObjectMethod>
+	object_witnesses: Array<MirObjectWitness>
+	objects: Array<MirObject>
+	newtypes: Array<MirNewtype>
+	unions: Array<MirUnion>
+	globals: Array<MirGlobal>
+	global_initialization: Array<Integer>
+	call_return_guards: Array<Array<MirCallReturnGuard>>
+	callables: Array<MirCallable>
+	callable_plans: Array<Array<MirCallablePlan>>
+	enums: Array<EnumDefinition>
+	enum_variants: Array<EnumVariant>
+	enum_fields: Array<MirField>
+	numeric_plans: Array<Array<MirNumericPlan>>
+	hash_lookup_reuse: Array<Array<MirHashLookupReuse>>
+	hash_membership_reuse: Array<Array<MirHashMembershipReuse>>
+	hash_concat_probes: Array<Array<MirHashConcatProbe>>
+	types: Array<MirType>
+	records: Array<MirRecord>
+	fields: Array<MirField>
+	root_plans: Array<MirRootPlan>
+	# One bit per declaration: the verifier re-derives caller-owned enum returns.
+	enum_stack_functions: Array<Integer>
+	array_loops: Array<Array<MirArrayLoop>>
+	loop_calls: Array<Array<MirLoopCall>>
+	# Per-function instruction indexes whose checked position is still valid.
+	array_check_reuse: Array<Array<Integer>>
+	array_joins: Array<Array<MirArrayJoin>>
+	string_splits: Array<Array<MirStringSplit>>
+	array_read_guards: Array<Array<MirArrayReadGuard>>
+	signatures: Array<MirSignature>
+	calls: Array<MirCall>
+	file_scopes: Array<MirFileScope>
+	source_count: Array<Integer>
+	entry_function: Array<Integer>
+	functions: Array<MirFunction>
+	blocks: Array<MirBlock>
+	values: Array<MirValue>
+	instructions: Array<MirInstruction>
+	arguments: Array<Integer>
+	literal_texts: Array<String>
+	literal_data: Array<MirLiteralData>
+	string_concats: Array<Array<MirStringConcat>>
+end
+
+def mir_module_new(): MirModule
+	return MirModule.new(enum_scalars: [], source_names: [], program: [], object_methods: [], object_witnesses: [], objects: [], newtypes: [], unions: [], globals: [], global_initialization: [], callables: [], callable_plans: [[]], enums: [], enum_variants: [], enum_fields: [], numeric_plans: [[]], hash_lookup_reuse: [[]], hash_membership_reuse: [[]], hash_concat_probes: [[]], call_return_guards: [[]], types: [], records: [], fields: [], root_plans: [], enum_stack_functions: [], array_loops: [], loop_calls: [], array_check_reuse: [], array_read_guards: [], array_joins: [], string_splits: [],
+		signatures: [], calls: [], file_scopes: [],
+		source_count: [1],
+		entry_function: [0],
+		functions: [],
+		blocks: [],
+		values: [],
+		instructions: [],
+		arguments: [],
+		literal_texts: [],
+		literal_data: [],
+		string_concats: [],
+	)
+end
+
+def mir_table_span_valid(start: Integer, count: Integer, size: Integer): Boolean
+	if start >= 0
+		if count >= 0
+			if start <= size
+				return count <= size - start
+			end
+		end
+	end
+	return false
+end
+
+# Bounded structured Boolean plans. These describe a conditional RHS region,
+# not an eager binary instruction. The source-indexed checked plan retains its
+# origin in the existing projection; adapters must validate that binding.
+def mir_logical_plan(operator_id: Integer, left: String, right: String): Integer
+	if left == "Boolean"
+		if right == "Boolean"
+			if operator_id == binary_or()
+				return checked_logical_or()
+			end
+			if operator_id == binary_and()
+				return checked_logical_and()
+			end
+		end
+	end
+	return checked_operator_invalid()
+end
+
+def mir_logical_short_value(plan: Integer): Integer
+	if plan == checked_logical_or()
+		return 1
+	end
+	if plan == checked_logical_and()
+		return 0
+	end
+	return -1
+end
+
+def mir_origin_valid(source: Integer, line: Integer, source_count: Integer): Boolean
+	if source >= 0
+		if source < source_count
+			return line > 0
+		end
+	end
+	return false
+end
+
+def mir_function_index(native_module: MirModule, function_id: Integer): Integer
+	if function_id >= 0 && function_id < native_module.functions.size() && native_module.functions[function_id].id == function_id
+		return function_id
+	end
+	native_module.functions.each.with_index do |row, index|
+		if row.id == function_id
+			return index
+		end
+	end
+	return -1
+end
+
+def mir_block_index(
+		native_module: MirModule,
+		function: MirFunction,
+		block_id: Integer,
+	): Integer
+	mut index := function.block_start
+	finish := index + function.block_count
+	while index < finish
+		if native_module.blocks[index].id == block_id
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def mir_value_index(
+		native_module: MirModule,
+		function_id: Integer,
+		value_id: Integer,
+	): Integer
+	# Compiler-built values are grouped by function. Locate that group without
+	# walking every earlier function's values on each lookup. Independent MIR
+	# fixtures may arrange rows differently, so retain the general scan below.
+	mut lower := 0
+	mut upper := native_module.values.size()
+	while lower < upper
+		middle := lower + (upper - lower) / 2
+		if native_module.values[middle].function_id < function_id
+			lower = middle + 1
+		else
+			upper = middle
+		end
+	end
+	mut candidate := lower
+	while candidate < native_module.values.size() && native_module.values[candidate].function_id == function_id
+		if native_module.values[candidate].id == value_id
+			return candidate
+		end
+		candidate += 1
+	end
+	mut index := 0
+	while index < native_module.values.size()
+		row := native_module.values[index]
+		if row.function_id == function_id
+			if row.id == value_id
+				return index
+			end
+		end
+		index += 1
+	end
+	return -1
+end
+
+def mir_value_type(
+		native_module: MirModule,
+		function_id: Integer,
+		value_id: Integer,
+	): Integer
+	index := mir_value_index(native_module, function_id, value_id)
+	if index < 0
+		return mir_type_none()
+	end
+	return native_module.values[index].type_id
+end
+
+def mir_array_element_type(type_id: Integer): Integer
+	if type_id == mir_type_integer_array()
+		return mir_type_integer()
+	end
+	if type_id == mir_type_float_array()
+		return mir_type_float()
+	end
+	return mir_type_none()
+end
+
+def mir_failure_error(
+		native_module: MirModule,
+		function: MirFunction,
+		failure: Integer,
+	): String
+	block_index := mir_block_index(native_module, function, failure)
+	if block_index < 0
+		return "MIR failure target does not exist"
+	end
+	if native_module.blocks[block_index].terminator != mir_terminator_trap()
+		return "MIR failure target is not a trap block"
+	end
+	block := native_module.blocks[block_index]
+	if block.parameter_count != 0 || block.instruction_count != 0
+		return "MIR failure target must be an empty trap"
+	end
+	return ""
+end
+
+def mir_type_id(type_name: String): Integer
+	if type_name == "String"
+		return mir_type_string()
+	end
+	if type_name == "Integer"
+		return mir_type_integer()
+	end
+	if type_name == "Boolean"
+		return mir_type_boolean()
+	end
+	if type_name == "Float"
+		return mir_type_float()
+	end
+	if type_name == "Array<Integer>"
+		return mir_type_integer_array()
+	end
+	if type_name == "Array<Float>"
+		return mir_type_float_array()
+	end
+	if type_name == "Address"
+		return mir_type_integer_address()
+	end
+	return mir_type_none()
+end
+
+def mir_type_name(type_id: Integer): String
+	if type_id == mir_type_string()
+		return "String"
+	end
+	if type_id == mir_type_none()
+		return "Void"
+	end
+	if type_id == mir_type_integer()
+		return "Integer"
+	end
+	if type_id == mir_type_boolean()
+		return "Boolean"
+	end
+	if type_id == mir_type_float()
+		return "Float"
+	end
+	if type_id == mir_type_integer_array()
+		return "Array<Integer>"
+	end
+	if type_id == mir_type_float_array()
+		return "Array<Float>"
+	end
+	if type_id == mir_type_integer_address()
+		return "Address"
+	end
+	return "Invalid"
+end
+
+# Portable value kinds admitted by the general control adapter. String retains
+# its language identity; pointer width/layout is chosen only by backend lowering.
+def mir_control_value_type(type_id: Integer): Boolean
+	if type_id == mir_type_integer() || type_id == mir_type_boolean() || type_id == mir_type_float()
+		return true
+	end
+	return type_id == mir_type_string()
+end

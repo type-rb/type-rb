@@ -1,0 +1,23 @@
+record Box
+	values: Array<Integer>
+end
+
+def grow(mut values: Array<Integer>): Integer
+	values.push(2)
+	return values.size()
+end
+
+def main()
+	puts(grow([1]))
+	mut rows := [[1]]
+	((rows))[0][0] += 2
+	rows[0].push(4)
+	puts(rows[0][0])
+	puts(rows[0][1])
+	mut box := Box.new(values: [1])
+	box.values[0] = 5
+	puts(box.values[0])
+	mut slots := { "key" =>[1] }
+	slots["key"].push(6)
+	puts(slots["key"][1])
+end

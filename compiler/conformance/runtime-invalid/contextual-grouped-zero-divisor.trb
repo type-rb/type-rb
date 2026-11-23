@@ -1,0 +1,8 @@
+def widen(value: Integer): Float
+	return (value) / 0
+end
+
+def main()
+	_value := widen(7)
+	return
+end

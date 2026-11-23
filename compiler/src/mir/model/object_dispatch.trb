@@ -1,0 +1,41 @@
+import { MirObjectMethod } from frontend/types/object_model
+
+def object_dispatch_method(methods: Array<MirObjectMethod>, owner: Integer, name: String): Integer
+	mut index := 0
+	methods.each do |method|
+		if method.owner == owner && method.name == name && !method.class_member
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# Positional arguments retain order. Named-only arguments follow labels,
+# independently of their implementation declaration order or local mutability.
+def object_dispatch_arguments(contract: MirObjectMethod, implementation: MirObjectMethod): Array<Integer>
+	mut result: Array<Integer> := []
+	if contract.parameter_names.size() != implementation.parameter_names.size()
+		return result
+	end
+	mut slot := 0
+	while slot < implementation.parameter_names.size()
+		mut selected := slot
+		if implementation.parameter_named[slot] == 1
+			selected = -1
+			mut candidate := 0
+			while candidate < contract.parameter_names.size()
+				if contract.parameter_named[candidate] == 1 && contract.parameter_names[candidate] == implementation.parameter_names[slot]
+					selected = candidate
+				end
+				candidate += 1
+			end
+		end
+		if selected < 0 || contract.parameter_named[selected] != implementation.parameter_named[slot] || contract.parameter_optional[selected] != implementation.parameter_optional[slot]
+			return []
+		end
+		result.push(selected)
+		slot += 1
+	end
+	return result
+end

@@ -1,0 +1,99 @@
+import { MirArrayHeader, MirBlock, MirFunction, MirModule } from mir/model/module
+import { mir_terminator_jump } from mir/model/control
+import { mir_op_array_new, mir_op_array_push, mir_op_integer_to_float, mir_op_scalar_literal } from mir/model/instructions
+import { mir_type_integer } from mir/model/type_ids
+import { mir_element_type } from mir/model/types
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_block_index, mir_flow_dominates, mir_flow_position, mir_flow_type } from mir/analysis/flow
+import { mir_live_add } from mir/analysis/liveness
+
+# After this append, an unconditional path must advance the already verified
+# induction before returning to its header. This excludes nested cycles and
+# same-index backedges without imposing an ordering on physical blocks.
+def mir_append_advances(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, header: MirBlock, index_slot: Integer, block: MirBlock): Boolean
+	mut current := mir_flow_block_index(flow, block.id)
+	mut visited := 0
+	while visited < function.block_count
+		member := native_module.blocks[function.block_start + current]
+		if member.terminator != mir_terminator_jump()
+			return false
+		end
+		if member.first_target == header.id
+			next_index := mir_flow_alias(aliases, native_module.arguments[member.first_argument_start + index_slot])
+			return next_index != native_module.arguments[header.parameter_start + index_slot]
+		end
+		current = mir_flow_block_index(flow, member.first_target)
+		visited += 1
+	end
+	return false
+end
+
+# The Array-loop analysis has already established a nonnegative unit induction,
+# stable input headers and fresh disjoint Integer outputs. Require the output
+# to start empty with the full input length reserved. No intervening operation
+# may publish or mutate it before the loop. Exactly one append site, followed
+# by an advancing backedge, keeps length <= induction < reserved capacity.
+def mir_array_reserved_pushes(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, header: MirBlock, index_slot: Integer, preheader: MirBlock, input_owner: Integer, members: Array<Integer>, outputs: Array<MirArrayHeader>): Array<Integer>
+	mut pushes: Array<Integer> := []
+	if input_owner < 0
+		return pushes
+	end
+	outputs.each do |output|
+		if mir_element_type(native_module, mir_flow_type(flow, output.owner)) != mir_type_integer()
+			next
+		end
+		position := mir_flow_position(flow, output.owner)
+		if position < preheader.instruction_start || position >= preheader.instruction_start + preheader.instruction_count
+			next
+		end
+		allocation := native_module.instructions[position]
+		if allocation.kind != mir_op_array_new() || allocation.payload != 0 || allocation.first < 0
+			next
+		end
+		if allocation.first != input_owner
+			capacity_owner := mir_flow_alias(aliases, allocation.first)
+			if capacity_owner < 0 || capacity_owner != mir_flow_alias(aliases, input_owner)
+				next
+			end
+		end
+		mut fresh := true
+		# Separate header parameters can carry the same preheader allocation.
+		# Do not count their append sites as distinct fresh outputs.
+		outputs.each do |other|
+			if other.identity != output.identity && other.owner == output.owner
+				fresh = false
+			end
+		end
+		mut after := position + 1
+		while after < preheader.instruction_start + preheader.instruction_count
+			kind := native_module.instructions[after].kind
+			if kind < mir_op_scalar_literal() || kind > mir_op_integer_to_float()
+				fresh = false
+			end
+			after += 1
+		end
+		if !fresh
+			next
+		end
+		mut append := -1
+		mut count := 0
+		members.each do |member|
+			block := native_module.blocks[function.block_start + member]
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if instruction.kind == mir_op_array_push() && mir_flow_alias(aliases, instruction.first) == output.identity
+					count += 1
+					body := mir_flow_block_index(flow, header.first_target)
+					if mir_flow_dominates(flow, body, member) && mir_append_advances(native_module, function, flow, aliases, header, index_slot, block)
+						append = index
+					end
+				end
+				index += 1
+			end
+		end
+		if count == 1 && append >= 0
+			mir_live_add(pushes, append)
+		end
+	end
+	return pushes
+end

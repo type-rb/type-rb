@@ -1,0 +1,104 @@
+import { mir_type_boolean, mir_type_float, mir_type_integer } from mir/model/type_ids
+import { mir_function_control } from mir/model/control
+import { mir_op_array_load, mir_op_array_position, mir_op_array_store, mir_op_direct_call } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { integer_string } from support/literals
+import { MirArrayReadGuard, MirFunction, MirModule, MirValue } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { mir_live_add } from mir/analysis/liveness
+import { mir_fixed_array_index_checks } from mir/analysis/array_lengths
+import { mir_array_value_guards } from mir/analysis/array_values
+
+record MirArrayChecks
+	reuse: Array<Integer>
+	guards: Array<MirArrayReadGuard>
+end
+
+# Reconstruct both same-block proofs together, retaining their different
+# barriers. Captured positions clear on every mutation; repeated raw indexes
+# may cross primitive overwrites but never calls. Neither proof caches storage.
+def mir_function_array_checks(native_module: MirModule, function: MirFunction, values: Array<MirValue>): MirArrayChecks
+	mut reuse: Array<Integer> := []
+	mut guards: Array<MirArrayReadGuard> := []
+	if function.kind != mir_function_control()
+		return MirArrayChecks.new(reuse: reuse, guards: guards)
+	end
+	mut primitive: Hash<String, Integer> := {}
+	mut primitive_ready := false
+	mut positions: Array<Integer> := []
+	mut sources: Hash<String, Integer> := {}
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut captured: Hash<String, Integer> := {}
+		mut checked: Hash<String, Integer> := {}
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_array_load() || instruction.kind == mir_op_array_store()
+				key := integer_string(instruction.second)
+				if captured.key?(key) && captured[key] == instruction.first
+					mir_live_add(reuse, index)
+				end
+			end
+			if instruction.kind == mir_op_array_position() || instruction.kind == mir_op_array_load()
+				key := integer_string(instruction.first) + ":" + integer_string(instruction.second)
+				if checked.key?(key)
+					mir_live_add(positions, index)
+					sources[integer_string(index)] = checked[key]
+				else
+					checked[key] = index
+				end
+			end
+			effects := mir_instruction_effects(native_module, instruction)
+			if effects != mir_effect_none() && effects != mir_effect_failure()
+				captured = {}
+			end
+			if instruction.kind == mir_op_direct_call()
+				checked = {}
+			elsif effects != mir_effect_none() && effects != mir_effect_failure()
+				# Most functions do not need type membership. Build it only for a
+				# store instead of eagerly scanning every function value.
+				if instruction.kind == mir_op_array_store() && !primitive_ready
+					values.each do |value|
+						if value.type_id == mir_type_integer() || value.type_id == mir_type_boolean() || value.type_id == mir_type_float()
+							primitive[integer_string(value.id)] = 1
+						end
+					end
+					primitive_ready = true
+				end
+				if instruction.kind != mir_op_array_store() || !primitive.key?(integer_string(instruction.payload))
+					checked = {}
+				end
+			end
+			if instruction.kind == mir_op_array_position()
+				captured[integer_string(instruction.result)] = instruction.first
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	# Canonical instruction order keeps verification independent of block storage.
+	positions.each do |position|
+		guards.push(MirArrayReadGuard.new(instruction: position, source: sources[integer_string(position)], loaded_value: -1))
+	end
+	mir_fixed_array_index_checks(native_module, function, values, reuse)
+	return MirArrayChecks.new(reuse: reuse, guards: mir_array_value_guards(native_module, function, guards))
+end
+
+def mir_array_read_guards_equal(left: Array<MirArrayReadGuard>, right: Array<MirArrayReadGuard>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].instruction != right[index].instruction || left[index].source != right[index].source
+			return false
+		end
+		if left[index].loaded_value != right[index].loaded_value
+			return false
+		end
+		index += 1
+	end
+	return true
+end

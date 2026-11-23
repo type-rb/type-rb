@@ -1,0 +1,29 @@
+import { standard_source_errors, standard_source_result } from state/standard_source_kinds
+import { find_generic_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { enum_type } from frontend/types/enum_types
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { load_standard_source } from project/standard_library
+import { instantiate_generic_nominal, record_type } from frontend/resolution/type_resolution
+import { CompilerState, has_diagnostic } from state/state
+import { store_string } from support/storage
+
+# Instantiate generated Result types before the MIR catalogs are frozen.
+def resolve_raw_enum_results(mut state: CompilerState): Boolean
+	if state.nominal.raw_enum_values.size() == 0
+		return true
+	end
+	result_source := load_standard_source(state, standard_source_result(), 1)
+	error_source := load_standard_source(state, standard_source_errors(), 1)
+	result_definition := find_generic_in_module(state, result_source, "Result")
+	error_type := record_type(find_record_in_module(state, error_source, "EnumValueError"))
+	count := state.nominal.enums.size()
+	mut owner := 0
+	while owner < count && !has_diagnostic(state)
+		if raw_enum_type(state, owner) != ""
+			result_type := instantiate_generic_nominal(state, result_definition, [enum_type(owner), error_type])
+			store_string(state.nominal.raw_enum_results, owner, result_type)
+		end
+		owner += 1
+	end
+	return !has_diagnostic(state)
+end

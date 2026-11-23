@@ -1,0 +1,157 @@
+import { mir_guard_slice_size, mir_range_field_first, mir_range_field_last } from mir/model/operation_modes
+import { checked_category_value } from frontend/types/value_categories
+import { mir_control_loop_depth_slot, mir_state_failure_block_slot } from state/local_slots
+import { iteration_source_array, iteration_source_range } from frontend/types/iteration_kinds
+import { mir_op_array_load, mir_op_array_new, mir_op_array_push, mir_op_array_size, mir_op_guard } from mir/model/instructions
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_binary, scalar_mir_instruction, scalar_mir_literal } from frontend/checking/body/values
+import { MirIteration } from mir/model/iteration
+import { MirControlLoop } from mir/model/module
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { mir_control_active, mir_control_allocate, mir_control_branch, mir_control_conditional, mir_control_enter, mir_control_jump, mir_control_loop_begin, mir_control_loop_branch, mir_control_loop_end, mir_control_prepare } from mir/build/control
+import { mir_iteration_has_edge, mir_iteration_local, mir_iteration_range_test } from mir/build/iteration
+import { mir_checked_range_field } from mir/lowering/ranges
+import { CompilerState } from state/state
+import { CheckedLocals, local_bind_temporary } from state/local_state
+import { load_integer, store_integer } from support/storage
+
+# Slots retain source, cursor, batch ordinal, requested size and exhaustion.
+# Only the current fresh batch and its count live inside the filling loop.
+def mir_slice_available(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, frame: MirControlLoop, ready: Integer, saved: Integer)
+	origin := plan.syntax.origin
+	line := load_integer(state.source_tokens.token_lines, origin)
+	finished := mir_iteration_local(locals, saved + 4, "Boolean", origin)
+	test_source := mir_control_allocate(locals)
+	mir_control_conditional(state, locals, checked_mir_value(finished), frame.exit, frame.exit_binding_count, test_source, frame.binding_count)
+	mir_control_enter(state, locals, test_source, line)
+	if plan.source_kind == iteration_source_range()
+		mir_iteration_range_test(state, locals, frame, ready, saved)
+	else
+		owner := load_integer(locals.mir_values, saved) - 1
+		cursor := mir_iteration_local(locals, saved + 1, "Integer", origin)
+		length := mir_checked_array_operation(state, locals, mir_op_array_size(), owner, -1, 0, "Integer", origin)
+		available := scalar_mir_binary(state, locals, "<", cursor, length, "Boolean", origin)
+		mir_control_conditional(state, locals, checked_mir_value(available), ready, frame.binding_count, frame.exit, frame.exit_binding_count)
+	end
+end
+
+def mir_slice_advance(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, saved: Integer)
+	origin := plan.syntax.origin
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut joined := -1
+	if plan.source_kind == iteration_source_range()
+		owner := load_integer(locals.mir_values, saved) - 1
+		bound := mir_checked_range_field(state, locals, owner, mir_range_field_last(), origin)
+		cursor := mir_iteration_local(locals, saved + 1, "Integer", origin)
+		last := scalar_mir_binary(state, locals, "==", cursor, bound, "Boolean", origin)
+		step := mir_control_branch(state, locals, last, line)
+		finished := scalar_mir_literal(state, locals, "Boolean", origin, "true")
+		store_integer(locals.mir_values, saved + 4, checked_mir_value(finished) + 1)
+		joined = mir_control_allocate(locals)
+		mir_control_jump(state, locals, joined, locals.count[0])
+		mir_control_enter(state, locals, step, line)
+	end
+	cursor := mir_iteration_local(locals, saved + 1, "Integer", origin)
+	one := scalar_mir_literal(state, locals, "Integer", origin, "1")
+	next_cursor := scalar_mir_binary(state, locals, "+", cursor, one, "Integer", origin)
+	store_integer(locals.mir_values, saved + 1, checked_mir_value(next_cursor) + 1)
+	if joined >= 0
+		mir_control_jump(state, locals, joined, locals.count[0])
+		mir_control_enter(state, locals, joined, line)
+	end
+end
+
+def mir_sliced_iteration_begin(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, receiver: CheckedValue, size: CheckedValue, saved: Integer): CheckedValue
+	origin := plan.syntax.origin
+	batch_type := "Array<" + plan.element_type + ">"
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(batch_type, checked_category_value(), plan.syntax.element_origin, 1)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	valid := scalar_mir_binary(state, locals, ">", size, zero, "Boolean", plan.syntax.slice_start)
+	scalar_mir_instruction(state, locals, mir_op_guard(), -1, checked_mir_value(valid), -1, mir_guard_slice_size(), locals.mir_state[mir_state_failure_block_slot()], line)
+	owner := checked_mir_value(receiver)
+	store_integer(locals.mir_values, saved, owner + 1)
+	mut cursor := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	if plan.source_kind == iteration_source_range()
+		cursor = mir_checked_range_field(state, locals, owner, mir_range_field_first(), origin)
+	end
+	store_integer(locals.mir_values, saved + 1, checked_mir_value(cursor) + 1)
+	store_integer(locals.mir_values, saved + 2, checked_mir_value(zero) + 1)
+	store_integer(locals.mir_values, saved + 3, checked_mir_value(size) + 1)
+	finished := scalar_mir_literal(state, locals, "Boolean", origin, "false")
+	store_integer(locals.mir_values, saved + 4, checked_mir_value(finished) + 1)
+	exit := mir_control_loop_begin(state, locals, origin, line)
+	depth := locals.mir_control[mir_control_loop_depth_slot()] - 1
+	previous := locals.mir_loops[depth]
+	frame := MirControlLoop.new(origin: origin, header: previous.header, exit: exit, continuation: mir_control_allocate(locals), binding_count: previous.binding_count, exit_binding_count: saved)
+	locals.mir_loops[depth] = frame
+	ready := mir_control_allocate(locals)
+	mir_slice_available(state, locals, plan, frame, ready, saved)
+	mir_control_enter(state, locals, ready, line)
+	batch := mir_checked_array_operation(state, locals, mir_op_array_new(), -1, -1, 0, batch_type, origin)
+	batch_slot := local_bind_temporary(locals, "$slice.batch", batch_type, 1)
+	store_integer(locals.mir_values, batch_slot, checked_mir_value(batch) + 1)
+	count := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	count_slot := local_bind_temporary(locals, "$slice.count", "Integer", 1)
+	store_integer(locals.mir_values, count_slot, checked_mir_value(count) + 1)
+	filled := mir_control_loop_begin(state, locals, origin, line)
+	current_count := mir_iteration_local(locals, count_slot, "Integer", origin)
+	requested := mir_iteration_local(locals, saved + 3, "Integer", origin)
+	room := scalar_mir_binary(state, locals, "<", current_count, requested, "Boolean", origin)
+	mir_control_loop_branch(state, locals, room, filled, line)
+	inner := locals.mir_loops[depth + 1]
+	exhausted := mir_control_allocate(locals)
+	available_frame := MirControlLoop.new(origin: origin, header: inner.header, exit: exhausted, continuation: inner.continuation, binding_count: inner.binding_count, exit_binding_count: inner.binding_count)
+	consume := mir_control_allocate(locals)
+	mir_slice_available(state, locals, plan, available_frame, consume, saved)
+	mir_control_enter(state, locals, exhausted, line)
+	done := scalar_mir_literal(state, locals, "Boolean", origin, "true")
+	store_integer(locals.mir_values, saved + 4, checked_mir_value(done) + 1)
+	mir_control_jump(state, locals, filled, inner.binding_count)
+	mir_control_enter(state, locals, consume, line)
+	mut element := mir_iteration_local(locals, saved + 1, "Integer", origin)
+	if plan.source_kind == iteration_source_array()
+		array := load_integer(locals.mir_values, saved) - 1
+		element = mir_checked_array_operation(state, locals, mir_op_array_load(), array, checked_mir_value(element), 0, plan.element_type, origin)
+	end
+	current_batch := load_integer(locals.mir_values, batch_slot) - 1
+	mir_checked_array_operation(state, locals, mir_op_array_push(), current_batch, checked_mir_value(element), 0, "Void", origin)
+	mir_slice_advance(state, locals, plan, saved)
+	previous_count := mir_iteration_local(locals, count_slot, "Integer", origin)
+	one := scalar_mir_literal(state, locals, "Integer", origin, "1")
+	next_count := scalar_mir_binary(state, locals, "+", previous_count, one, "Integer", origin)
+	store_integer(locals.mir_values, count_slot, checked_mir_value(next_count) + 1)
+	mir_control_loop_end(state, locals, line)
+	result := mir_iteration_local(locals, batch_slot, batch_type, plan.syntax.element_origin)
+	locals.count[0] = frame.binding_count
+	return result
+end
+
+def mir_sliced_iteration_end(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, saved: Integer)
+	if !mir_control_active(locals)
+		return
+	end
+	depth := locals.mir_control[mir_control_loop_depth_slot()] - 1
+	frame := locals.mir_loops[depth]
+	line := load_integer(state.source_tokens.token_lines, plan.syntax.body_finish)
+	mir_control_jump(state, locals, frame.continuation, frame.binding_count)
+	locals.count[0] = frame.binding_count
+	if mir_iteration_has_edge(locals, frame.continuation)
+		mir_control_enter(state, locals, frame.continuation, line)
+		advance := mir_control_allocate(locals)
+		mir_slice_available(state, locals, plan, frame, advance, saved)
+		mir_control_enter(state, locals, advance, line)
+		if plan.syntax.second_origin >= 0
+			ordinal := mir_iteration_local(locals, saved + 2, "Integer", plan.syntax.origin)
+			one := scalar_mir_literal(state, locals, "Integer", plan.syntax.origin, "1")
+			next_ordinal := scalar_mir_binary(state, locals, "+", ordinal, one, "Integer", plan.syntax.origin)
+			store_integer(locals.mir_values, saved + 2, checked_mir_value(next_ordinal) + 1)
+		end
+		mir_control_jump(state, locals, frame.header, frame.binding_count)
+	end
+	locals.mir_control[mir_control_loop_depth_slot()] = depth
+	locals.count[0] = saved
+	mir_control_enter(state, locals, frame.exit, line)
+end

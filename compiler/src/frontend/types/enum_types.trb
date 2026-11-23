@@ -1,0 +1,81 @@
+import { ArgumentBindings, argument_bindings } from frontend/resolution/argument_binding
+import { ascii_code, integer_string } from support/literals
+import { CompilerState } from state/state
+
+def enum_type(index: Integer): String
+	return "Enum#" + integer_string(index)
+end
+
+def find_enum_type(state: CompilerState, type_name: String): Integer
+	mut index := 0
+	while index < state.nominal.enums.size()
+		if enum_type(index) == type_name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def find_enum_in_module(state: CompilerState, source: Integer, name: String): Integer
+	mut index := state.nominal.enums.size() - 1
+	while index >= 0
+		row := state.nominal.enums[index]
+		if row.source_id == source && row.name == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def find_enum_variant(state: CompilerState, owner: Integer, name: String): Integer
+	if owner < 0 || owner >= state.nominal.enums.size()
+		return -1
+	end
+	definition := state.nominal.enums[owner]
+	mut index := definition.variant_start
+	while index < definition.variant_start + definition.variant_count
+		if state.nominal.enum_variants[index].name == name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def enum_payloadless(state: CompilerState, owner: Integer): Boolean
+	definition := state.nominal.enums[owner]
+	mut index := definition.variant_start
+	while index < definition.variant_start + definition.variant_count
+		if state.nominal.enum_variants[index].field_count > 0
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def enum_argument_bindings(state: CompilerState, variant: Integer): ArgumentBindings
+	row := state.nominal.enum_variants[variant]
+	mut names: Array<String> := []
+	mut named: Array<Boolean> := []
+	mut field := row.field_start
+	while field < row.field_start + row.field_count
+		names.push(state.nominal.enum_fields[field].name)
+		named.push(state.nominal.enum_fields[field].named_only)
+		field += 1
+	end
+	return argument_bindings(names, named)
+end
+
+def enum_uppercase(name: String): Boolean
+	if name == ""
+		return false
+	end
+	code := ascii_code(name[0])
+	if code < 65
+		return false
+	end
+	return code <= 90
+end

@@ -1,0 +1,7 @@
+workflow	name	artifact_id	archive_bytes
+33412872678	runtime-worker-cross-target	9765891943	244
+33412872678	runtime-worker-linux-arm64	9765887854	380047
+33412872678	runtime-worker-darwin-arm64	9765869031	312689
+33412703306	static-string-compactness-cross-target	9765861596	292
+33412703306	static-string-compactness-darwin-arm64	9765854869	11311
+33412703306	static-string-compactness-linux-arm64	9765818568	18036

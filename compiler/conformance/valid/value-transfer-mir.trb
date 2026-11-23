@@ -1,0 +1,38 @@
+def mark(): Integer
+	puts("value")
+	return 7
+end
+
+def guard(flag: Boolean): Boolean
+	puts("guard")
+	return flag
+end
+
+def choose(flag: Boolean): Integer
+	return mark() if guard(flag)
+	value := if flag
+		return 8
+	else
+		9
+	end
+	return value
+end
+
+def main()
+	puts(choose(false))
+	puts(choose(true))
+	mut sum := 0
+	(1..6).each do |i|
+		next if i == 2
+		break if i == 5
+		value := if i == 3
+			next
+		else
+			i
+		end
+		sum += value
+	end
+	puts(sum)
+	return if true
+	puts("unreachable")
+end

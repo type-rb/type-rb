@@ -1,0 +1,77 @@
+import { checked_binary_plan_type } from frontend/checking/body/types
+import { checked_mir_value, checked_value, mir_checked_value } from frontend/checking/body/values
+import { MirBlock, mir_type_id } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { logical_checked_source } from testing/pipeline
+import { check } from compiler
+import { has_diagnostic } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Checked program and MIR construction") do
+	test("rejects unsupported aggregate equality before either execution path") do
+		["==", "!="].each do |operator|
+			["Entry.new(value: 1)", "[1]", "{one: 1}"].each do |value|
+				source := "record Entry\nvalue: Integer\nend\ndef main()\nputs(" + value + " " + operator + " " + value + ")\nend\n"
+				mut state := logical_checked_source(source)
+				expect(check(state)).to_be_false()
+				expect(has_diagnostic(state)).to_be_true()
+				expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+			end
+		end
+	end
+
+	test("constructs named MIR blocks with exact fields and origins") do
+		mut branch := mir_block(31, 1, 71, 2, 3, 4, 5, 2, 6, 32, 33, 7, 8, 9, 10, -1)
+		other := mir_block(31, 1, 71, 2, 3, 4, 5, 2, 6, 32, 33, 7, 8, 9, 10, -1)
+		returned := mir_block(40, 2, 81, 3, 0, 4, 5, 3, -1, -1, -1, 0, 0, 0, 0, 12)
+		trap := mir_block(41, 2, 82, 8, 0, 9, 0, 4, -1, -1, -1, 0, 0, 0, 0, -1)
+		expect(branch).to_equal(MirBlock.new(id: 31, source_id: 1, line: 71, parameter_start: 2, parameter_count: 3, instruction_start: 4, instruction_count: 5, terminator: 2, condition: 6, first_target: 32, second_target: 33, first_argument_start: 7, first_argument_count: 8, second_argument_start: 9, second_argument_count: 10, return_value: -1))
+		expect(returned).to_equal(MirBlock.new(id: 40, source_id: 2, line: 81, parameter_start: 3, parameter_count: 0, instruction_start: 4, instruction_count: 5, terminator: 3, condition: -1, first_target: -1, second_target: -1, first_argument_start: 0, first_argument_count: 0, second_argument_start: 0, second_argument_count: 0, return_value: 12))
+		expect(trap).to_equal(MirBlock.new(id: 41, source_id: 2, line: 82, parameter_start: 8, parameter_count: 0, instruction_start: 9, instruction_count: 0, terminator: 4, condition: -1, first_target: -1, second_target: -1, first_argument_start: 0, first_argument_count: 0, second_argument_start: 0, second_argument_count: 0, return_value: -1))
+		branch = mir_block(99, 1, 100, 2, 3, 4, 5, 2, 6, 32, 33, 101, 8, 9, 10, -1)
+		expect(branch.id).to_equal(99)
+		expect(other).to_equal(MirBlock.new(id: 31, source_id: 1, line: 71, parameter_start: 2, parameter_count: 3, instruction_start: 4, instruction_count: 5, terminator: 2, condition: 6, first_target: 32, second_target: 33, first_argument_start: 7, first_argument_count: 8, second_argument_start: 9, second_argument_count: 10, return_value: -1))
+		expect(returned.id).to_equal(40)
+		expect(trap.id).to_equal(41)
+	end
+
+	test("validates the checked binary operator and result tags") do
+		expect(checked_binary_plan_type(17)).to_equal("Integer")
+		expect(checked_binary_plan_type(21)).to_equal("Integer")
+		expect(checked_binary_plan_type(22)).to_equal("Integer")
+		expect(checked_binary_plan_type(33)).to_equal("Float")
+		expect(checked_binary_plan_type(36)).to_equal("Float")
+		expect(checked_binary_plan_type(37)).to_equal("Float")
+		expect(checked_binary_plan_type(54)).to_equal("Boolean")
+		expect(checked_binary_plan_type(59)).to_equal("Boolean")
+		expect(checked_binary_plan_type(65)).to_equal("String")
+		invalid := [-1, 0, 1, 16, 23, 32, 38, 48, 53, 60, 64, 66, 9007199254740991]
+		mut index := 0
+		while index < invalid.size()
+			expect(checked_binary_plan_type(invalid[index])).to_equal("Invalid")
+			index += 1
+		end
+	end
+
+	test("keeps checked origins and value identities separate from backend operands") do
+		value := mir_checked_value("Integer", 7, 31, 1)
+		expect(value.type_name).to_equal("Integer")
+		expect(value.origin).to_equal(31)
+		expect(value.mutable).to_equal(1)
+		expect(checked_mir_value(value)).to_equal(7)
+		ordinary := checked_value("Float", 0, 9007199254740991, 0)
+		expect(checked_mir_value(ordinary)).to_equal(-1)
+		expect(ordinary.origin).to_equal(9007199254740991)
+	end
+
+	test("maps only the registered scalar String and Array MIR types") do
+		names := ["Integer", "Boolean", "Float", "Array<Integer>", "Array<Float>", "Address", "String", "Unknown", "Array<Boolean>", "Array<Array<Boolean>>", "Array<Record#0>", "Array<Array<Record#1>>"]
+		types := [1, 2, 5, 3, 6, 4, 8, 0, 0, 0, 0, 0]
+		mut index := 0
+		while index < names.size()
+			expect(mir_type_id(names[index])).to_equal(types[index])
+			index += 1
+		end
+	end
+end

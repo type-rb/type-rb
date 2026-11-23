@@ -1,0 +1,51 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_type_boolean } from mir/model/type_ids
+import { mir_op_union_extract, mir_op_union_inject, mir_op_union_test } from mir/model/instructions
+import { CheckedValue, checked_mir_value, checked_view, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirFunction, MirInstruction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id, mir_union_contains } from mir/model/types
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# 52 injection, 53 alternative test, 54 checked extraction. The payload names
+# a semantic type, never a source spelling, runtime tag guess or nominal slot.
+def mir_union_operation(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, value: CheckedValue, alternative: String, result_type: String, origin: Integer): CheckedValue
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+	if result < 0
+		return checked_view(value, result_type, checked_category_value())
+	end
+	payload := mir_semantic_type_id(state.scalar_mir, alternative)
+	scalar_mir_instruction(state, locals, kind, result, checked_mir_value(value), -1, payload, -1, load_integer(state.source_tokens.token_lines, origin))
+	return checked_view(value, result_type, -result - 1)
+end
+
+def mir_union_instruction_error(flow: MirFlow, native_module: MirModule, function: MirFunction, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.second != -1 || instruction.failure != -1
+		return "MIR union instruction shape differs"
+	end
+	if !mir_value_available(flow, block, index, instruction.first)
+		return "MIR union operand is unavailable"
+	end
+	first := mir_flow_type(flow, instruction.first)
+	result := mir_flow_type(flow, instruction.result)
+	if instruction.kind == mir_op_union_inject()
+		if first != instruction.payload || !mir_union_contains(native_module, result, first)
+			return "MIR union injection alternative differs"
+		end
+	elsif instruction.kind == mir_op_union_test() || instruction.kind == mir_op_union_extract()
+		if !mir_union_contains(native_module, first, instruction.payload)
+			return "MIR union operation alternative differs"
+		end
+		if instruction.kind == mir_op_union_test() && result != mir_type_boolean()
+			return "MIR union test result differs"
+		end
+		if instruction.kind == mir_op_union_extract() && result != instruction.payload
+			return "MIR union extraction result differs"
+		end
+	else
+		return "MIR union operation is invalid"
+	end
+	return ""
+end

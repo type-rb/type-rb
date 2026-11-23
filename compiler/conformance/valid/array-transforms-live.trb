@@ -1,0 +1,56 @@
+def source(mut events: Array<Integer>, values: Array<Integer>): Array<Integer>
+	events.push(1)
+	return values
+end
+
+def initial(mut events: Array<Integer>, mut values: Array<Integer>): Integer
+	events.push(2)
+	values.push(3)
+	return 10
+end
+
+def main()
+	mut values := [1, 2]
+	mut retained := values
+	mut calls: Array<Integer> := []
+	mapped := source(calls, values).map.with_index do |item, index|
+		if index == 0
+			retained.push(3)
+			retained[1] = 20
+			values = [99]
+		end
+		index = 100
+		item + index
+	end
+	puts(calls.size())
+	puts(mapped.size())
+	puts(mapped[1])
+	puts(mapped[2])
+	puts(values[0])
+	mut original := [4, 5]
+	selected := original.select.with_index do |item, index|
+		original[index] = 40
+		item = 90
+		item > index
+	end
+	puts(selected[0])
+	puts(selected[1])
+	mut numbers := [1, 2]
+	mut events: Array<Integer> := []
+	total := source(events, numbers).reduce(initial(events, numbers)) do |sum, item|
+		events.push(item + 2)
+		sum + item
+	end
+	puts(total)
+	puts(events[0])
+	puts(events[1])
+	puts(events.size())
+	mut nested := [[1], [2]]
+	readonly := nested
+	result := readonly.map do |row|
+		row.push(3)
+		row.size()
+	end
+	puts(result[0])
+	puts(nested[1][1])
+end

@@ -1,0 +1,190 @@
+import { nullable_state_head_slot } from state/local_slots
+import { checking_discovery } from state/checking_phases
+import { find_visible_alias } from frontend/resolution/declaration_lookup
+import { checked_reference_name } from frontend/resolution/namespace_references
+import { generic_arguments, generic_base } from frontend/types/generic_arguments
+import { resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { token_is } from frontend/syntax/syntax_tokens
+import { nullable_fact, nullable_lookup } from frontend/checking/nominal/nullable_flow
+import { nullable_element } from frontend/types/nullable_types
+import { find_field, find_record_type } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic } from state/state
+import { CheckedFlowFact } from state/source_state
+import { CheckedLocals, local_find, local_identity } from state/local_state
+import { load_integer, load_string, sparse_string_at, store_integer, store_string } from support/storage
+
+# These facts come from a successfully checked and completed submission. They
+# describe binding identity and optional presence, never an observed payload.
+def checked_submission_boundary(mut state: CompilerState, mut locals: CheckedLocals, origin: Integer)
+	if state.submissions.size() == 0 || locals.lambda_result.size() > 0
+		return
+	end
+	submission := state.submissions[0]
+	submission.resets.each do |reset|
+		if origin == reset
+			locals.nullable_state[nullable_state_head_slot()] = -1
+		end
+	end
+	if origin >= submission.start && origin < submission.finish && token_is(state, origin, "return")
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "return is only valid inside a function or method")
+	end
+	if origin == submission.start
+		submission.captured.each do |name|
+			binding := local_find(locals, name)
+			if binding < 0 || load_integer(locals.mutable, binding) == 0
+				diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "invalid retained capture binding")
+			else
+				identity := local_identity(locals, binding)
+				store_integer(locals.mir_cell_plans, identity, 1)
+				if state.callables.lambda_phase[0] == checking_discovery()
+					mut planned := false
+					state.callables.checked[0].shared_bindings.each do |existing|
+						if existing == identity
+							planned = true
+						end
+					end
+					if !planned
+						state.callables.checked[0].shared_bindings.push(identity)
+					end
+				end
+			end
+		end
+		submission.before.each do |fact|
+			binding := local_find(locals, fact.name)
+			mut field := -1
+			mut declared := ""
+			if binding >= 0
+				declared = load_string(locals.types, binding)
+				if fact.field != ""
+					mut record_type := declared
+					if nullable_element(record_type) != ""
+						record_type = nullable_element(record_type)
+					end
+					record_index := find_record_type(state, record_type)
+					if record_index >= 0
+						field = find_field(state, record_index, fact.field)
+					end
+					if field >= 0
+						declared = load_string(state.declarations.field_types, field)
+					else
+						declared = ""
+					end
+				end
+			end
+			element := nullable_element(declared)
+			if element == "" || (fact.presence != 1 && fact.presence != 2)
+				diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "invalid checked submission fact")
+			else
+				mut flow := element
+				if fact.presence == 1
+					flow = "Nil"
+				end
+				locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, binding, field, flow, locals.nullable_state[nullable_state_head_slot()])
+			end
+		end
+	end
+	if origin == submission.finish && state.callables.lambda_phase[0] != checking_discovery()
+		mut binding := 0
+		while binding < locals.count[0]
+			declared := load_string(locals.types, binding)
+			checked_submission_fact(state, locals, binding, -1, declared)
+			mut record_type := declared
+			if nullable_element(record_type) != ""
+				record_type = nullable_element(record_type)
+			end
+			record_index := find_record_type(state, record_type)
+			if record_index >= 0
+				start := load_integer(state.declarations.record_field_starts, record_index)
+				mut field := start
+				while field < start + load_integer(state.declarations.record_field_counts, record_index)
+					checked_submission_fact(state, locals, binding, field, load_string(state.declarations.field_types, field))
+					field += 1
+				end
+			end
+			binding += 1
+		end
+	end
+	return
+end
+
+def checked_submission_fact(mut state: CompilerState, locals: CheckedLocals, binding: Integer, field: Integer, declared: String)
+	if nullable_element(declared) == ""
+		return
+	end
+	flow := nullable_lookup(locals, binding, field, declared)
+	if flow == declared
+		return
+	end
+	mut presence := 2
+	if flow == "Nil"
+		presence = 1
+	end
+	mut name := ""
+	if field >= 0
+		name = load_string(state.declarations.field_names, field)
+	end
+	state.submissions[0].after.push(CheckedFlowFact.new(name: load_string(locals.names, binding), field: name, presence: presence))
+	return
+end
+
+# Static presentation accompanies the checked expression/assignment result.
+# Backend emission has no dependency on this optional frontend projection.
+def checked_submission_result(mut state: CompilerState, origin: Integer, type_name: String, mutable: Integer, presentation: String)
+	if state.submissions.size() > 0 && state.callables.checked[0].function >= 0 && state.callables.lambda_phase[0] != checking_discovery()
+		store_string(state.submissions[0].types, origin, type_name)
+		store_string(state.submissions[0].presentations, origin, presentation)
+		store_integer(state.submissions[0].mutable, origin, mutable)
+	end
+	return
+end
+
+# The constructor has already resolved successfully. Select its actual authored
+# alias declaration, never a reverse lookup through aliases of the target type.
+def checked_enum_presentation(mut state: CompilerState, origin: Integer): String
+	if state.submissions.size() == 0
+		return ""
+	end
+	mut name := sparse_string_at(state.callables.checked[0].generic_application_names, origin)
+	if name == ""
+		name = checked_reference_name(state, origin)
+	end
+	alias_index := find_visible_alias(state, state.module_graph.active_module[0], generic_base(name))
+	if alias_index < 0
+		return ""
+	end
+	return checked_alias_presentation(state, name, alias_index)
+end
+
+def checked_alias_presentation(mut state: CompilerState, name: String, alias_index: Integer): String
+	mut result := state.type_resolution.type_aliases[alias_index].name
+	arguments := generic_arguments(name)
+	if arguments.size() == 0
+		return result
+	end
+	result += "<"
+	mut index := 0
+	arguments.each do |argument|
+		if index > 0
+			result += ", "
+		end
+		resolved := resolve_type_name(state, state.module_graph.active_module[0], argument, false)
+		result += type_display(state, resolved)
+		index += 1
+	end
+	return result + ">"
+end
+
+# Only compiler-generated witnesses may import retained presentation facts.
+# Authored declarations, including same-named locals, use their own checking.
+def checked_retained_presentation(state: CompilerState, source_id: Integer, line: Integer, name: String): String
+	if state.submissions.size() == 0 || source_id != state.module_graph.entry_module[0] || line < state.nominal.projected_type_lines[0] || line >= state.nominal.projected_type_lines[1]
+		return ""
+	end
+	mut result := ""
+	state.submissions[0].retained_presentations.each do |binding|
+		if binding.name == name
+			result = binding.type_name
+		end
+	end
+	return result
+end

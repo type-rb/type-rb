@@ -1,0 +1,21 @@
+def append_value(mut values: Array<String>, prefix: String, index: Integer): Boolean
+	values.push(prefix + index.to_s())
+	return true
+end
+
+def main()
+	mut values: Array<String> := []
+	mut index := 0
+	while index < 20000 && values.size() <= 20000
+		if (index % 2 == 0 && append_value(values, "even", index)) || append_value(values, "odd", index)
+			index += 1
+		end
+	end
+	held := values[0]
+	puts(true || append_value(values, "skipped", index))
+	puts(false && append_value(values, "skipped", index))
+	puts(values.size())
+	puts(held)
+	puts(values[19999])
+	return
+end

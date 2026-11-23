@@ -1,0 +1,56 @@
+import { json_provider_decode, json_provider_request } from frontend/providers/json_declarations
+import { JsonCodecSchema, json_codec_schema } from frontend/providers/json_schema
+import { json_codec_body } from frontend/providers/json_bodies
+import { TypeAlias } from frontend/types/alias_model
+import { parse_statement_block } from frontend/syntax/body_syntax
+import { lex_module } from frontend/syntax/lexer
+import { integer_string } from support/literals
+import { CompilerState, has_diagnostic } from state/state
+import { load_integer, store_integer, store_string } from support/storage
+
+def specialize_json_codec(mut state: CompilerState, function: Integer, target: String, kind: Integer, call_origin: Integer): Boolean
+	mut line := load_integer(state.declarations.function_lines, function)
+	if call_origin >= 0
+		line = load_integer(state.source_tokens.token_lines, call_origin)
+	end
+	mut schemas: Array<JsonCodecSchema> := []
+	mut inbound := false
+	if kind == json_provider_decode() || kind == json_provider_request()
+		inbound = true
+	end
+	root := json_codec_schema(state, target, inbound, line, [], schemas)
+	if root < 0 || has_diagnostic(state)
+		return false
+	end
+	# Forked speculative checking borrows immutable tokens and parsed controls.
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	namespace := "$json_codec" + integer_string(function)
+	state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Target", source_id: owner, line: line, parameters: [], target: target))
+	mut index := 0
+	schemas.each do |schema|
+		state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Node" + integer_string(index), source_id: owner, line: line, parameters: [], target: schema.type_name))
+		index += 1
+	end
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	start := state.source_tokens.token_count[0]
+	lex_module(state, json_codec_body(schemas, root, kind), owner)
+	state.global_bindings.declaration_owner[0] = namespace
+	mut token := start
+	while token < state.source_tokens.token_count[0]
+		store_string(state.source_tokens.token_namespaces, token, namespace)
+		token += 1
+	end
+	mut position := [start]
+	if !has_diagnostic(state)
+		parse_statement_block(state, position)
+	end
+	store_integer(state.declarations.function_body_starts, function, start)
+	store_integer(state.declarations.function_body_ends, function, position[0])
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return !has_diagnostic(state)
+end

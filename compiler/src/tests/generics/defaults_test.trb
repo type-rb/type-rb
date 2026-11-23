@@ -1,0 +1,126 @@
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { verify_mir } from mir/verify/module
+import { GenericBinding, GenericDefinition, GenericFunction, GenericFunctionInstance, GenericInstance } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR generic record defaults") do
+	test("checks typed defaults and executes them independently of source templates") do
+		sources := ["record Box<T>\nfirst: T\nsecond: T = first\nthird: T = second\nend\ndef main()\nputs(Box<Integer>.new(first: 7).third)\nputs(Box<String>.new(first: \"held\").third)\nend\n",
+			"record Box<T>\nvalue: T\nitems: Array<T> = [value]\ntable: Hash<String, T> = {\"key\" => value}\nend\ndef main()\nbox := Box<String>.new(value: \"held\")\nputs(box.items[0])\nputs(box.table[\"key\"])\nend\n",
+			"record Box<T>\nitems: Array<T> = []\nend\ndef main()\nmut left := Box<Integer>.new()\nmut right := Box<Integer>.new()\nleft.items.push(7)\nputs(left.items.size())\nputs(right.items.size())\nend\n",
+			"record Item<T>\nvalue: T\nend\nrecord Box<T>\nvalue: T\nitem: Item<T> = Item<T>.new(value: value)\nend\ndef main()\nputs(Box<String>.new(value: \"nested\").item.value)\nend\n",
+			"def keep<T>(value: T): T\nreturn value\nend\nrecord Box<T>\nvalue: T\nother: T = keep<T>(value)\nend\ndef make<T>(value: T): Box<T>\nreturn Box<T>.new(value: value)\nend\ndef main()\nputs(make<String>(\"held\").other)\nputs(make<Integer>(7).other)\nend\n",
+			"record Box<T>\nvalue: T? = nil\nend\ndef main()\nputs(Box<Integer>.new().value == nil)\nvalue := Box<Integer>.new(value: 7).value\nif value != nil\nputs(value)\nend\nend\n",
+			"import trb/std/result\nrecord Box<T>\nvalue: T\nresult: Result<T, String> = Result<T, String>::Ok(value)\nend\ndef main()\ncase Box<Integer>.new(value: 7).result\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error)\nend\nend\n",
+			"def mark(value: String): String\nputs(value)\nreturn value\nend\nrecord Box<T>\nvalue: T\nfirst: String = mark(\"first\")\nsecond: String = mark(\"second\")\ncopy: T = value\nend\ndef main()\nbox := Box<String>.new(value: mark(\"value\"), second: mark(\"explicit\"))\nputs(box.first)\nputs(box.copy)\nend\n",
+			"record Box<T>\nvalue: T\nchoose: Boolean = true\ncopy: T = choose ? value : value\nend\ndef main()\nputs(Box<String>.new(value: \"held\").copy)\nend\n",
+			"enum Choice\nFirst\nSecond\nend\nrecord Box<T>\nvalue: T\nchoose: Boolean = true\ncopy: T = if choose\nvalue\nelse\nvalue\nend\nchoice: Choice = Choice::First\nnumber: Integer = case choice\nwhen Choice::First\n1\nwhen Choice::Second\n2\nend\ntail: String = \"after\"\nend\ndef main()\nputs(Box<String>.new(value: \"held\").copy)\nputs(Box<Integer>.new(value: 7, choose: false, choice: Choice::Second).number)\nputs(Box<Integer>.new(value: 7).tail)\nend\n",
+			"record Box<T>\nvalue: T\ncopy: T = value\nend\ndef main()\nputs(1)\nend\n"]
+		outputs := ["7\nheld\n", "held\nheld\n", "1\n0\n", "nested\n", "held\n7\n", "true\n7\n", "7\n", "value\nexplicit\nfirst\nfirst\nvalue\n", "held\n", "held\n2\nafter\n", "1\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				mut item := 0
+				while item < state.type_resolution.generic_functions.size()
+					state.type_resolution.generic_functions[item] = GenericFunction.new(receiver_type: "", name: "unavailable", source_id: -1, line: -1, type_parameters: [], parameters: [], result_type: "Invalid", body_start: -1, body_finish: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_function_instances.size()
+					state.type_resolution.generic_function_instances[item] = GenericFunctionInstance.new(application_key: "unavailable", definition: -1, arguments: [], function: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_bindings.size()
+					state.type_resolution.generic_bindings[item] = GenericBinding.new(source_id: -1, parameters: [], arguments: [], depth: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_definitions.size()
+					state.type_resolution.generic_definitions[item] = GenericDefinition.new(kind: 0, name: "unavailable", source_id: -1, line: -1, parameters: [], variants: [])
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_instances.size()
+					state.type_resolution.generic_instances[item] = GenericInstance.new(definition: -1, arguments: [], type_name: "Invalid")
+					item += 1
+				end
+				state.callables.checked_bodies.each do |body|
+					body.generic_calls.used[0] = 0
+					body.generic_application_finishes.used[0] = 0
+					body.generic_binding[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					before.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects invalid unused defaults and declaration-scope references") do
+		sources := ["record Box<T>\nvalue: T = 7\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nvalue: Integer = missing\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nfirst: T = second\nsecond: T = first\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nvalue: T = value\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nvalue: Integer = 7\nother: T\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nvalue: T\ncopy: T = value + value\nend\ndef main()\nputs(1)\nend\n",
+			"record Box<T>\nvalue: T = 7\nend\ndef main()\nputs(Box<Integer>.new(value: 1).value)\nend\n",
+			"record Box<T>\nvalue: T = source\nend\ndef main()\nsource := 7\nputs(Box<Integer>.new().value)\nend\n"]
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			expect(valid).to_be_false()
+		end
+	end
+
+	test("bounds mutually growing function and record default instantiations") do
+		source := "record Box<T>\nvalue: Integer = size<Array<T>>()\nend\ndef size<T>(): Integer\nreturn Box<T>.new().value\nend\ndef main()\nputs(Box<Integer>.new().value)\nend\n"
+		mut state := compiler_new(source.size() * 8 + 1024)
+		valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+		expect(valid).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("generic type expansion exceeds the compiler nesting limit")
+	end
+
+end

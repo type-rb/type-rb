@@ -1,0 +1,24 @@
+def probe()
+	missing: String? := nil
+	puts(missing&.reverse() == nil)
+	puts(missing&.chars() == nil)
+	puts(missing&.codepoints() == nil)
+	present: String? := "A😀"
+	chars := present&.chars()
+	points := present&.codepoints()
+	reversed := present&.reverse()
+	if chars != nil
+		puts(chars[1])
+	end
+	if points != nil
+		puts(points[1])
+	end
+	if reversed != nil
+		puts(reversed)
+	end
+
+end
+
+def main()
+	probe()
+end

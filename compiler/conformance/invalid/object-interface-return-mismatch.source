@@ -1,0 +1,11 @@
+interface Named
+name(): String
+end
+class Label implements Named
+def name(): Integer
+return 1
+end
+end
+def main()
+Label.new()
+end

@@ -1,0 +1,21 @@
+import { lex } from frontend/syntax/lexer
+import { compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("String escape decoding") do
+	test("rejects malformed single-quoted escapes") do
+		invalid := ["'\\q'", "'\\#'", "'\\x0'", "'\\uD800'", ":'\\q'", "'unterminated"]
+		invalid.each do |literal|
+			mut state := compiler_new(128)
+			expect(lex(state, "def main()\nputs(" + literal + ")\nend\n")).to_be_false()
+		end
+	end
+
+	test("rejects malformed numeric escapes and invalid scalar values before construction") do
+		invalid := ["\"\\x0\"", "\"\\xGG\"", "\"\\u123\"", "\"\\uD800\"", "\"\\uDFFF\"", "\"\\U00110000\"", "\"\\Uffffffff\"", "\"\\400\"", "\"\\777\"", "\"\\08\"", "\"\\0\"", "\"\\{bad}\"", "\"\\q\""]
+		invalid.each do |literal|
+			mut state := compiler_new(128)
+			expect(lex(state, "def main()\nputs(" + literal + ")\nend\n")).to_be_false()
+		end
+	end
+end

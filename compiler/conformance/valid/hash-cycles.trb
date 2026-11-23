@@ -1,0 +1,20 @@
+record HashNode
+	links: Hash<Integer, HashNode>
+	label: String
+end
+
+def hash_cycle(value: Integer)
+	mut links: Hash<Integer, HashNode> := {}
+	node := HashNode.new(links: links, label: value.to_s())
+	links[1] = node
+	return
+end
+
+def main()
+	mut index := 0
+	while index < 20000
+		hash_cycle(index)
+		index += 1
+	end
+	puts(index)
+end

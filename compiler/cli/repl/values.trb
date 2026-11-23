@@ -1,0 +1,617 @@
+import { repl_builder_snapshot } from repl/string_builder
+import { find_object_type } from frontend/types/object_types
+import { literal_type_base, literal_integer_type, literal_string_type } from frontend/types/literal_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { union_parts } from frontend/types/union_types
+import { callable_parts } from frontend/types/callable_types
+import { generic_base } from frontend/types/generic_arguments
+import { find_enum_type } from frontend/types/enum_types
+import { nullable_assignable, nullable_element } from frontend/types/nullable_types
+import { repl_absent, repl_none, repl_payload } from repl/nullable
+import { ReplStore, ReplEnvironment, repl_store, repl_value, repl_float, repl_get, repl_type, ReplValue } from repl/model
+import { repl_hash_new, repl_hash_set, repl_hash_slot } from repl/hash
+import { hash_key_type } from frontend/types/hash_types
+import { CompilerState } from state/state
+import { type_display, find_record_type, generic_instance_for_type } from frontend/resolution/type_resolution
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { integer_string } from support/literals
+import { string_starts_with } from support/path
+import { native_cli_byte, native_cli_byte_length, native_cli_float_text, native_cli_scalar } from host
+
+def repl_find(environment: ReplEnvironment, name: String): Integer
+	mut index := environment.count[0] - 1
+	while index >= 0
+		if environment.names[index] == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def repl_bind(mut environment: ReplEnvironment, name: String, value: Integer, mutable: Integer, presentation: String = "")
+	index := environment.count[0]
+	if index == environment.names.size()
+		environment.names.push(name)
+		environment.values.push(value)
+		environment.cells.push(0)
+		environment.mutable.push(mutable)
+		environment.presentations.push(presentation)
+	else
+		environment.names[index] = name
+		environment.values[index] = value
+		environment.cells[index] = 0
+		environment.mutable[index] = mutable
+		environment.presentations[index] = presentation
+	end
+	environment.count[0] += 1
+	return
+end
+
+# Captures share a traced pool node. Allocate only when a binding is captured;
+# ordinary calls and iteration bindings keep the direct-value representation.
+def repl_capture_binding(mut store: ReplStore, mut environment: ReplEnvironment, binding: Integer): Integer
+	if environment.cells[binding] == 0
+		environment.cells[binding] = repl_value(store, "$Binding", 0, 0.0, "", [environment.values[binding]])
+		environment.values[binding] = 0
+	end
+	return environment.cells[binding]
+end
+
+def repl_binding_value(store: ReplStore, environment: ReplEnvironment, binding: Integer): Integer
+	if environment.cells[binding] > 0
+		return store.children[environment.cells[binding]][0]
+	end
+	return environment.values[binding]
+end
+
+def repl_assign_binding(mut store: ReplStore, mut environment: ReplEnvironment, binding: Integer, value: Integer)
+	if environment.cells[binding] > 0
+		store.children[environment.cells[binding]][0] = value
+	else
+		environment.values[binding] = value
+	end
+end
+
+# Enum values are immutable views over shared payloads. A declaration or a
+# projected read can change its display type without changing the saved value.
+# Containers retain their existing identity; their checked type labels belong
+# to the submission/binding projection, not their mutable payload pool nodes.
+def repl_present(mut store: ReplStore, id: Integer, presentation: String): Integer
+	if nullable_element(repl_type(store, id)) != "" || union_parts(repl_type(store, id)).size() > 0
+		if repl_absent(store, id)
+			return id
+		end
+		payload := repl_present(store, store.children[id][0], presentation)
+		if payload == store.children[id][0]
+			return id
+		end
+		view := repl_value(store, store.types[id], store.integers[id], store.floats[id], store.texts[id], [payload])
+		store.value_programs[view] = store.value_programs[id]
+		return view
+	end
+	current := store.active_program[0]
+	if current < 0 || find_enum_type(store.programs[current], repl_type(store, id)) < 0 || store.presentations[id] == presentation
+		return id
+	end
+	copied := repl_value(store, store.types[id], store.integers[id], store.floats[id], store.texts[id], store.children[id])
+	store.value_programs[copied] = store.value_programs[id]
+	store.presentations[copied] = presentation
+	return copied
+end
+
+def repl_coerce(mut store: ReplStore, id: Integer, expected: String): Integer
+	if expected == "" || repl_type(store, id) == expected
+		return id
+	end
+	if union_parts(repl_type(store, id)).size() > 0
+		return repl_coerce(store, store.children[id][0], expected)
+	end
+	value := repl_get(store, id)
+	if string_starts_with(expected, "Interface#") && string_starts_with(value.type_name, "Class#")
+		return repl_value(store, expected, 0, 0.0, "", [id])
+	end
+	mut literal := ""
+	if value.type_name == "Integer"
+		literal = literal_integer_type(integer_string(value.integer))
+	elsif value.type_name == "String"
+		literal = literal_string_type(value.text)
+	end
+	if expected == literal
+		return repl_value(store, expected, value.integer, value.floating, value.text, [])
+	end
+	if literal_type_base(repl_type(store, id)) == expected
+		return repl_value(store, expected, value.integer, value.floating, value.text, [])
+	end
+	alternatives := union_parts(expected)
+	if alternatives.size() > 0
+		mut selected := ""
+		alternatives.each do |alternative|
+			if selected == "" && (nullable_assignable(repl_type(store, id), alternative) || literal == alternative)
+				selected = alternative
+			end
+		end
+		if selected == ""
+			store.error[0] = "union value disagrees with its checked alternative"
+			return 0
+		end
+		payload := repl_coerce(store, id, selected)
+		return repl_value(store, expected, 0, 0.0, "", [payload])
+	end
+	element := nullable_element(expected)
+	if element != ""
+		if repl_absent(store, id)
+			return repl_none(store, expected)
+		end
+		payload := repl_coerce(store, repl_payload(store, id), element)
+		return repl_value(store, expected, 0, 0.0, "", [payload])
+	end
+	if expected == "Float"
+		if repl_get(store, id).type_name == "Integer"
+			return repl_float(store, store.integers[id])
+		end
+	end
+	return id
+end
+
+# Conversions use the ordinary scalar MIR/runtime contract, not display formatting.
+def repl_scalar_string(value: ReplValue): String
+	if value.type_name == "Float"
+		return value.floating.to_s()
+	end
+	if value.type_name == "Boolean"
+		if value.integer == 1
+			return "true"
+		end
+		return "false"
+	end
+	return integer_string(value.integer)
+end
+
+def repl_quoted_utf8_width(text: String, offset: Integer, length: Integer, lead: Integer): Integer
+	mut width := 0
+	if lead >= 194 && lead <= 223
+		width = 2
+	elsif lead >= 224 && lead <= 239
+		width = 3
+	elsif lead >= 240 && lead <= 244
+		width = 4
+	end
+	if width == 0 || offset + width > length
+		return 0
+	end
+	second := native_cli_byte(text, offset + 1)
+	if second < 128 || second > 191
+		return 0
+	end
+	if lead == 224 && second < 160
+		return 0
+	end
+	if lead == 237 && second >= 160
+		return 0
+	end
+	if lead == 240 && second < 144
+		return 0
+	end
+	if lead == 244 && second >= 144
+		return 0
+	end
+	mut index := 2
+	while index < width
+		continuation := native_cli_byte(text, offset + index)
+		if continuation < 128 || continuation > 191
+			return 0
+		end
+		index += 1
+	end
+	return width
+end
+
+def repl_quote_string(text: String): String
+	mut result := "\""
+	mut byte_index := 0
+	mut scalar_index := 0
+	hex := "0123456789abcdef"
+	length := native_cli_byte_length(text)
+	while byte_index < length
+		point := native_cli_byte(text, byte_index)
+		if point >= 128
+			width := repl_quoted_utf8_width(text, byte_index, length, point)
+			if width == 0
+				result += "\\x" + hex[point / 16] + hex[point % 16]
+				byte_index += 1
+			else
+				result += text[scalar_index]
+				byte_index += width
+			end
+			scalar_index += 1
+			next
+		end
+		character := text[scalar_index]
+		if character == "\\"
+			result += "\\\\"
+		elsif character == "\""
+			result += "\\\""
+		elsif point == 7
+			result += "\\a"
+		elsif point == 8
+			result += "\\b"
+		elsif point == 9
+			result += "\\t"
+		elsif point == 10
+			result += "\\n"
+		elsif point == 11
+			result += "\\v"
+		elsif point == 12
+			result += "\\f"
+		elsif point == 13
+			result += "\\r"
+		elsif point < 32 || point == 127
+			result += "\\x" + hex[point / 16] + hex[point % 16]
+		else
+			result += character
+		end
+		byte_index += 1
+		scalar_index += 1
+	end
+	return result + "\""
+end
+
+# Go's shortest `g` display uses fixed notation for exponents -4 through 5,
+# independent of how many significant digits were needed to round-trip.
+def repl_float_inspect(value: Float): String
+	text := native_cli_float_text(value)
+	mut marker := -1
+	mut index := 0
+	while index < text.size()
+		if text[index] == "e"
+			marker = index
+			break
+		end
+		index += 1
+	end
+	if marker < 0
+		if text == "NaN" || text == "+Inf" || text == "-Inf" || (value < 1000000.0 && value > -1000000.0)
+			return text
+		end
+		mut sign := ""
+		mut source := 0
+		if text[0] == "-"
+			sign = "-"
+			source = 1
+		end
+		mut places := 0
+		mut digits := ""
+		while source < text.size()
+			if text[source] == "."
+				places = digits.size()
+			else
+				digits += text[source]
+			end
+			source += 1
+		end
+		if places == 0
+			places = digits.size()
+		end
+		mut result := sign + digits[0]
+		index = 1
+		if index < digits.size()
+			result += "."
+		end
+		while index < digits.size()
+			result += digits[index]
+			index += 1
+		end
+		exponent := places - 1
+		mut power_text := integer_string(exponent)
+		if exponent < 10
+			power_text = "0" + power_text
+		end
+		return result + "e+" + power_text
+	end
+	mut power := 0
+	mut exponent_sign := 1
+	index = marker + 1
+	if text[index] == "-"
+		exponent_sign = -1
+		index += 1
+	elsif text[index] == "+"
+		index += 1
+	end
+	while index < text.size()
+		power = power * 10 + native_cli_scalar(text[index]) - 48
+		index += 1
+	end
+	power *= exponent_sign
+	if power < -4 || power >= 6
+		return text
+	end
+	mut sign := ""
+	mut source := 0
+	if text[0] == "-"
+		sign = "-"
+		source = 1
+	end
+	mut digits := ""
+	while source < marker
+		if text[source] != "."
+			digits += text[source]
+		end
+		source += 1
+	end
+	point := power + 1
+	mut result := sign
+	if point <= 0
+		result += "0."
+		mut pad := point
+		while pad < 0
+			result += "0"
+			pad += 1
+		end
+		return result + digits
+	end
+	index = 0
+	while index < digits.size()
+		if index == point
+			result += "."
+		end
+		result += digits[index]
+		index += 1
+	end
+	while index < point
+		result += "0"
+		index += 1
+	end
+	return result
+end
+
+def repl_render(state: CompilerState, store: ReplStore, id: Integer, depth: Integer): String
+	if repl_absent(store, id)
+		return "nil"
+	end
+	if nullable_element(repl_type(store, id)) != "" || union_parts(repl_type(store, id)).size() > 0
+		return repl_render(state, store, store.children[id][0], depth)
+	end
+	value := repl_get(store, id)
+	if find_newtype_type(state, value.type_name) >= 0
+		return repl_render(state, store, value.children[0], depth)
+	end
+	if string_starts_with(value.type_name, "Interface#")
+		return repl_render(state, store, value.children[0], depth)
+	end
+	if value.type_name == "Integer"
+		return integer_string(value.integer)
+	end
+	if value.type_name == "Float"
+		return repl_float_inspect(value.floating)
+	end
+	if value.type_name == "Boolean"
+		if value.integer == 1
+			return "true"
+		end
+		return "false"
+	end
+	if value.type_name == "Bytes"
+		bytes := value.text.to_bytes()
+		mut result := "Bytes["
+		mut index := 0
+		while index < bytes.size()
+			if index > 0
+				result += ", "
+			end
+			result += integer_string(bytes.at(index))
+			index += 1
+		end
+		return result + "]"
+	end
+	if value.type_name == "StringBuilder"
+		return "StringBuilder(" + repl_quote_string(repl_builder_snapshot(store, value.children)) + ")"
+	end
+	if value.type_name == "String"
+		return repl_quote_string(value.text)
+	end
+	if value.type_name == "Range<Integer>"
+		mut operator := ".."
+		if store.integers[value.children[2]] == 1
+			operator = "..."
+		end
+		return integer_string(store.integers[value.children[0]]) + operator + integer_string(store.integers[value.children[1]])
+	end
+	if callable_parts(value.type_name).size() > 0
+		owner := store.value_programs[id]
+		if owner >= 0 && sparse_integer_at(store.programs[owner].callables.function_lambdas, value.integer) == 0
+			return "#<callable>"
+		end
+		return "#<fn>"
+	end
+	if value.type_name == "Void"
+		return ""
+	end
+	if depth > 12
+		return "..."
+	end
+	if value.type_name == "Hash" || hash_key_type(value.type_name) != ""
+		table := store.hashes[value.integer]
+		mut rendered := "{"
+		mut index := 0
+		mut count := 0
+		while index < table.order.size()
+			key := table.order[index]
+			if key > 0
+				slot := repl_hash_slot(store, table, key)
+				if slot >= 0
+					if count > 0
+						rendered += ", "
+					end
+					rendered += repl_render(state, store, table.keys[slot], depth + 1) + ": " + repl_render(state, store, table.values[slot], depth + 1)
+					count += 1
+				end
+			end
+			index += 1
+		end
+		return rendered + "}"
+	end
+	mut nominal_name := type_display(state, value.type_name)
+	instance := generic_instance_for_type(state, value.type_name)
+	if instance >= 0
+		nominal_name = state.type_resolution.generic_definitions[state.type_resolution.generic_instances[instance].definition].name
+	end
+	object_index := find_object_type(state, value.type_name)
+	if object_index >= 0
+		definition := state.nominal.objects[state.nominal.object_instances[object_index].definition]
+		mut names: Array<String> := []
+		state.nominal.object_instances[object_index].fields.each do |field|
+			names.push(field.name)
+		end
+		mut rendered := "#<" + definition.name + " "
+		mut first := true
+		names.sort().each do |name|
+			mut slot := 0
+			while state.nominal.object_instances[object_index].fields[slot].name != name
+				slot += 1
+			end
+			if !first
+				rendered += ", "
+			end
+			first = false
+			mut field_name := ""
+			mut character := 1
+			while character < name.size()
+				field_name += name[character]
+				character += 1
+			end
+			rendered += field_name + ": " + repl_render(state, store, value.children[slot], depth + 1)
+		end
+		return rendered + ">"
+	end
+	enum_index := find_enum_type(state, value.type_name)
+	if enum_index >= 0
+		if store.presentations[id] != ""
+			nominal_name = generic_base(store.presentations[id])
+		end
+		mut text := nominal_name + "::" + value.text
+		row := state.nominal.enum_variants[value.integer]
+		if row.field_count > 0
+			text += "("
+			mut slot := 0
+			while slot < row.field_count
+				if slot > 0
+					text += ", "
+				end
+				text += state.nominal.enum_fields[row.field_start + slot].name + ": " + repl_render(state, store, value.children[slot], depth + 1)
+				slot += 1
+			end
+			text += ")"
+		end
+		return text
+	end
+	mut result := nominal_name + "("
+	mut closing := ")"
+	if value.type_name == "Array" || string_starts_with(value.type_name, "Array<")
+		result = "["
+		closing = "]"
+	end
+	mut index := 0
+	while index < value.children.size()
+		if index > 0
+			result += ", "
+		end
+		record_index := find_record_type(state, value.type_name)
+		if record_index >= 0
+			start := load_integer(state.declarations.record_field_starts, record_index)
+			result += load_string(state.declarations.field_names, start + index) + ": "
+		end
+		result += repl_render(state, store, value.children[index], depth + 1)
+		index += 1
+	end
+	return result + closing
+end
+
+def repl_copy_value(source: ReplStore, mut target: ReplStore, id: Integer, mut mapping: Array<Integer>, mut programs: Array<Integer>): Integer
+	if mapping[id] >= 0
+		return mapping[id]
+	end
+	# Copy raw identities together with their owner; contextual reads would corrupt
+	# closures created by an older catalog when a newer declaration shifts IDs.
+	value := ReplValue.new(type_name: source.types[id], integer: source.integers[id], floating: source.floats[id], text: source.texts[id], children: source.children[id])
+	owner := repl_copy_program(source, target, source.value_programs[id], programs)
+	if value.type_name == "Hash" || hash_key_type(value.type_name) != ""
+		table := source.hashes[value.integer]
+		copied := repl_hash_new(target, value.type_name, table.keys.size())
+		mapping[id] = copied
+		target.value_programs[copied] = owner
+		target.presentations[copied] = source.presentations[id]
+		mut index := 0
+		while index < table.order.size()
+			key_id := table.order[index]
+			if key_id > 0
+				slot := repl_hash_slot(source, table, key_id)
+				if slot >= 0
+					key := repl_copy_value(source, target, table.keys[slot], mapping, programs)
+					item := repl_copy_value(source, target, table.values[slot], mapping, programs)
+					repl_hash_set(target, copied, key, item)
+				end
+			end
+			index += 1
+		end
+		return copied
+	end
+	if value.type_name == "Integer" || value.type_name == "Float" || value.type_name == "Boolean" || value.type_name == "String" || value.type_name == "Bytes"
+		copied := repl_value(target, value.type_name, value.integer, value.floating, value.text, target.children[0])
+		mapping[id] = copied
+		target.value_programs[copied] = owner
+		target.presentations[copied] = source.presentations[id]
+		return copied
+	end
+	copied := repl_value(target, value.type_name, value.integer, value.floating, value.text, [])
+	mapping[id] = copied
+	target.value_programs[copied] = owner
+	target.presentations[copied] = source.presentations[id]
+	mut index := 0
+	while index < value.children.size()
+		target.children[copied].push(repl_copy_value(source, target, value.children[index], mapping, programs))
+		index += 1
+	end
+	return copied
+end
+
+# Drop unreachable evaluation temporaries between submissions while preserving
+# every reachable aggregate's identity, including multiple aliases.
+def repl_compact(source: ReplStore, mut environment: ReplEnvironment): ReplStore
+	mut target := repl_store()
+	mut programs: Array<Integer> := []
+	while programs.size() < source.programs.size()
+		programs.push(-1)
+	end
+	# Preserve the latest display/witness context and only reachable older owners.
+	target.active_program[0] = repl_copy_program(source, target, source.active_program[0], programs)
+	mut mapping: Array<Integer> := []
+	while mapping.size() < source.types.size()
+		mapping.push(-1)
+	end
+	mapping[0] = 0
+	source.globals.each do |key, value|
+		target.globals[key] = repl_copy_value(source, target, value, mapping, programs)
+	end
+	mut index := 0
+	while index < environment.count[0]
+		if environment.cells[index] > 0
+			environment.cells[index] = repl_copy_value(source, target, environment.cells[index], mapping, programs)
+		else
+			environment.values[index] = repl_copy_value(source, target, environment.values[index], mapping, programs)
+		end
+		index += 1
+	end
+	return target
+end
+
+def repl_copy_program(source: ReplStore, mut target: ReplStore, owner: Integer, mut programs: Array<Integer>): Integer
+	if owner < 0
+		return -1
+	end
+	if programs[owner] < 0
+		programs[owner] = target.programs.size()
+		target.programs.push(source.programs[owner])
+	end
+	return programs[owner]
+end

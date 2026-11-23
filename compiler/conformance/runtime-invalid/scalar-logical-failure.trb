@@ -1,0 +1,16 @@
+def left(): Boolean
+	puts(11)
+	return false
+end
+
+def right(zero: Integer): Boolean
+	return 1 / zero > 0
+end
+
+def evaluate(): Boolean
+	return left() || right(0)
+end
+
+def main()
+	puts(evaluate())
+end

@@ -1,0 +1,96 @@
+import { emit_qbe } from compiler
+import { mir_op_indirect_call } from mir/model/instructions
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def local_callable_run(output: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, output)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+def local_indirect_count(state: CompilerState, function_index: Integer): Integer
+	function := state.scalar_mir.functions[function_index]
+	mut count := 0
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := state.scalar_mir.blocks[block_index]
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			if state.scalar_mir.instructions[position].kind == mir_op_indirect_call()
+				count += 1
+			end
+			position += 1
+		end
+		block_index += 1
+	end
+	return count
+end
+
+describe("MIR local callable operands") do
+	test("inlines a scalar loop helper and forwards each visit's captures") do
+		source := "def apply(values: Array<Integer>, transform: (Integer) -> Integer): Integer\nif values.size() == 0\nreturn -1\nend\nmut total := 0\nvalues.each do |value|\ntotal += transform(value)\nend\nreturn total\nend\ndef run(rounds: Integer): Integer\nmut total := 0\nmut round := 0\nwhile round < rounds\noffset := round + 1\nshift := fn(value: Integer): Integer\nreturn value + offset\nend\ntotal += apply([2, 4], shift)\nround += 1\nend\nreturn total\nend\ndef main()\nputs(run(3))\nputs(run(0))\nputs(run(-1))\nend\n"
+		mut state := array_loop_mir_check(source)
+		expect(local_indirect_count(state, 1)).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbnf0(")).to_be_false()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		local_callable_run(before, "30\n0\n0\n")
+	end
+
+	test("retains unknown and merged callable identities") do
+		source := "def apply(value: Integer, transform: (Integer) -> Integer): Integer\nreturn transform(value)\nend\ndef choose(flag: Boolean): Integer\nmut transform := fn(value: Integer): Integer\nreturn value + 1\nend\nif flag\ntransform = fn(value: Integer): Integer\nreturn value + 10\nend\nend\nmut result := 0\nmut index := 0\nwhile index < 2\nresult += apply(index, transform)\nindex += 1\nend\nreturn result\nend\ndef main()\nputs(choose(false))\nputs(choose(true))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(local_indirect_count(state, 0) > 0).to_be_true()
+		local_callable_run(control_test_output(emit_qbe(state)), "3\n21\n")
+	end
+
+	test("preserves shared mutable captures and mixed primitive arguments") do
+		source := "def main()\nmut total := 2\nadd := fn(value: Integer): Integer\ntotal += value\nreturn total\nend\nscale := 1.5\nextra := 3\npositive := true\nmixed := fn(value: Float): Float\nif positive\nreturn value * scale + extra\nend\nreturn -value\nend\nputs(add(3))\nputs(add(4))\nputs(total)\nputs(mixed(2.0))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(local_indirect_count(state, 0)).to_equal(0)
+		local_callable_run(control_test_output(emit_qbe(state)), "5\n9\n9\n6.0\n")
+	end
+
+	test("keeps managed capture roots across collection before the call") do
+		source := "def main()\nvalues := [\"retained\"]\nread := fn(): String\nreturn values[0]\nend\nputs(123456.to_s())\nputs(read())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(local_indirect_count(state, 0)).to_equal(0)
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		expect(output.split(allocation).size()).to_equal(2)
+		local_callable_run(output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n"), "123456\nretained\n")
+	end
+
+	test("preserves checked failures after capture forwarding") do
+		state := array_loop_mir_check("def main()\nextra := 1\nadd := fn(value: Integer): Integer\nreturn value + extra\nend\nputs(add(9007199254740991))\nend\n")
+		expect(local_indirect_count(state, 0)).to_equal(0)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("Integer")).to_be_true()
+			end
+		end
+	end
+end

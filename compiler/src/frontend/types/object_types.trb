@@ -1,0 +1,177 @@
+import { integer_string } from support/literals
+import { nullable_assignable, nullable_element } from frontend/types/nullable_types
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+
+def object_type(owner: Integer, interface_type: Boolean): String
+	if interface_type
+		return "Interface#" + integer_string(owner)
+	end
+	return "Class#" + integer_string(owner)
+end
+
+def object_instance_type(state: CompilerState, owner: Integer): String
+	return object_type(owner, state.nominal.objects[state.nominal.object_instances[owner].definition].interface_type)
+end
+
+def find_object_type(state: CompilerState, type_name: String): Integer
+	mut owner := 0
+	while owner < state.nominal.object_instances.size()
+		if object_instance_type(state, owner) == type_name
+			return owner
+		end
+		owner += 1
+	end
+	return -1
+end
+
+def find_object_in_module(state: CompilerState, source: Integer, name: String): Integer
+	mut owner := 0
+	while owner < state.nominal.objects.size()
+		definition := state.nominal.objects[owner]
+		if definition.source_id == source && definition.name == name
+			return owner
+		end
+		owner += 1
+	end
+	return -1
+end
+
+# A class method has no instance `self` binding. Resolve its lexical `self`
+# through the already-instantiated class catalog, like an explicit class name.
+def object_static_self_type(state: CompilerState): String
+	definition := find_object_in_module(state, state.module_graph.active_module[0], state.global_bindings.declaration_owner[0])
+	if definition < 0 || state.nominal.objects[definition].interface_type || state.nominal.objects[definition].parameters.size() > 0
+		return ""
+	end
+	mut owner := 0
+	while owner < state.nominal.object_instances.size()
+		if state.nominal.object_instances[owner].definition == definition
+			return object_instance_type(state, owner)
+		end
+		owner += 1
+	end
+	return ""
+end
+
+# Interface compatibility follows explicit nominal edges, never a structural
+# member match. The reference does not allow a child value in a parent-class
+# binding; inheritance alone is not a user-visible class conversion.
+def object_assignable(state: CompilerState, actual: String, expected: String): Boolean
+	target := find_object_type(state, expected)
+	mut owner := find_object_type(state, actual)
+	if target < 0 || owner < 0
+		return false
+	end
+	if !state.nominal.objects[state.nominal.object_instances[target].definition].interface_type
+		return owner == target
+	end
+	mut remaining := state.nominal.object_instances.size()
+	while owner >= 0 && owner < state.nominal.object_instances.size() && remaining > 0
+		if owner == target
+			return true
+		end
+		instance := state.nominal.object_instances[owner]
+		instance.interfaces.each do |contract|
+			if contract == target
+				return true
+			end
+		end
+		owner = instance.superclass
+		remaining -= 1
+	end
+	return false
+end
+
+# Object method templates include nongeneric methods and abstract contracts.
+# Only concrete class methods may become executable function instances.
+def object_method_owner(state: CompilerState, template: Integer): Integer
+	mut owner := 0
+	while owner < state.nominal.objects.size()
+		state.nominal.objects[owner].methods.each do |method|
+			if method.generic_function == template
+				return owner
+			end
+		end
+		owner += 1
+	end
+	return -1
+end
+
+def object_abstract_method(state: CompilerState, template: Integer): Boolean
+	owner := object_method_owner(state, template)
+	if owner < 0
+		return false
+	end
+	return state.nominal.objects[owner].interface_type
+end
+
+def object_abstract_function(state: CompilerState, function: Integer): Boolean
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return object_abstract_method(state, instance.definition)
+		end
+	end
+	return false
+end
+
+def object_function_owner(state: CompilerState, function: Integer): Integer
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return object_method_owner(state, instance.definition)
+		end
+	end
+	return -1
+end
+
+def object_value_assignable(state: CompilerState, actual: String, expected: String): Boolean
+	if nullable_assignable(actual, expected) || object_assignable(state, actual, expected)
+		return true
+	end
+	target := nullable_element(expected)
+	if target != ""
+		payload := nullable_element(actual)
+		if payload != ""
+			return object_value_assignable(state, payload, target)
+		end
+		return object_value_assignable(state, actual, target)
+	end
+	return false
+end
+
+# The constructor contract is attached to the concrete receiver specialization.
+def object_initializer_owner(state: CompilerState, function: Integer): Integer
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			owner := object_method_owner(state, instance.definition)
+			if owner >= 0
+				state.nominal.objects[owner].methods.each do |method|
+					if method.generic_function == instance.definition && method.name == "initialize" && !method.class_member
+						return find_object_type(state, load_string(state.declarations.parameter_types, load_integer(state.declarations.function_parameter_starts, function)))
+					end
+				end
+			end
+		end
+	end
+	return -1
+end
+
+def object_initializer_function(state: CompilerState, owner: Integer): Integer
+	state.type_resolution.generic_function_instances.each do |instance|
+		if object_initializer_owner(state, instance.function) == owner
+			return instance.function
+		end
+	end
+	return -1
+end
+
+def object_field_index(state: CompilerState, owner: Integer, name: String): Integer
+	mut index := 0
+	state.nominal.object_instances[owner].fields.each do |field|
+		if field.name == name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end

@@ -1,0 +1,82 @@
+import { generic_record } from frontend/types/generic_kinds
+import { GenericBinding } from frontend/types/generic_model
+import { integer_string } from support/literals
+import { CompilerState } from state/state
+
+def add_generic_binding(mut state: CompilerState, source: Integer, parameters: Array<String>, arguments: Array<String>, depth: Integer): Integer
+	state.type_resolution.generic_bindings.push(GenericBinding.new(source_id: source, parameters: parameters, arguments: arguments, depth: depth))
+	return state.type_resolution.generic_bindings.size()
+end
+
+def next_generic_depth(state: CompilerState): Integer
+	encoded := state.callables.checked[0].generic_binding[0]
+	if encoded > 0
+		return state.type_resolution.generic_bindings[encoded - 1].depth + 1
+	end
+	return 0
+end
+
+def abstract_generic_arguments(owner: String, definition: Integer, parameters: Array<String>): Array<String>
+	mut arguments: Array<String> := []
+	mut index := 0
+	parameters.each do |_parameter|
+		arguments.push("TypeParameter#" + owner + "#" + integer_string(definition) + "#" + integer_string(index))
+		index += 1
+	end
+	return arguments
+end
+
+def abstract_generic_type_valid(state: CompilerState, type_name: String): Boolean
+	return abstract_generic_type_name(state, type_name) != ""
+end
+
+def abstract_generic_type_name(state: CompilerState, type_name: String): String
+	mut definition := 0
+	while definition < state.type_resolution.generic_functions.size()
+		mut parameter := 0
+		while parameter < state.type_resolution.generic_functions[definition].type_parameters.size()
+			if type_name == "TypeParameter#function#" + integer_string(definition) + "#" + integer_string(parameter)
+				return state.type_resolution.generic_functions[definition].type_parameters[parameter]
+			end
+			parameter += 1
+		end
+		definition += 1
+	end
+	definition = 0
+	while definition < state.type_resolution.generic_definitions.size()
+		mut parameter := 0
+		while parameter < state.type_resolution.generic_definitions[definition].parameters.size()
+			if type_name == "TypeParameter#nominal#" + integer_string(definition) + "#" + integer_string(parameter)
+				return state.type_resolution.generic_definitions[definition].parameters[parameter]
+			end
+			parameter += 1
+		end
+		definition += 1
+	end
+	definition = 0
+	while definition < state.type_resolution.type_aliases.size()
+		mut parameter := 0
+		while parameter < state.type_resolution.type_aliases[definition].parameters.size()
+			if type_name == "TypeParameter#alias#" + integer_string(definition) + "#" + integer_string(parameter)
+				return state.type_resolution.type_aliases[definition].parameters[parameter]
+			end
+			parameter += 1
+		end
+		definition += 1
+	end
+	return ""
+end
+
+def generic_record_defaults(state: CompilerState, definition: Integer): Boolean
+	row := state.type_resolution.generic_definitions[definition]
+	if row.kind != generic_record()
+		return false
+	end
+	mut found := false
+	row.variants[0].fields.each do |field|
+		if field.default_start >= 0
+			found = true
+		end
+	end
+	return found
+end

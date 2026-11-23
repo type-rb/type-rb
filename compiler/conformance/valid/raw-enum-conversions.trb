@@ -1,0 +1,47 @@
+enum Status
+	Ready = "ready"
+	Done = "done"
+
+	def label(*, prefix: String = "value:"): String
+		return prefix + self.raw_value()
+	end
+end
+
+enum Code
+	Low = -1
+	High = 9007199254740991
+end
+
+def describe(text: String): String
+	case Status.from_raw(text)
+	when Result::Ok(value)
+		return value.label()
+	when Result::Err(error)
+		return error.message
+	end
+end
+
+def main()
+	inputs := ["rea" + "dy", "missing" + " value", "do" + "ne"]
+	inputs.each do |value|
+		puts(describe(value))
+	end
+	puts(Code::Low.raw_value())
+	puts(Code::High.raw_value())
+	case Code.from_raw(-2)
+	when Result::Ok(value)
+		puts(value.raw_value())
+	when Result::Err(error)
+		case error.value
+		when Integer(number)
+			puts(number)
+		when String(_text)
+			puts("unexpected")
+		end
+	end
+	value := Status::Done
+	read := fn(): String
+		return value.label(prefix: "held:")
+	end
+	puts(read())
+end

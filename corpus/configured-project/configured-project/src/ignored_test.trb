@@ -1,0 +1,7 @@
+import { describe, expect, test } from trb/std/test
+
+describe("configured-project fixture") do
+	test("is excluded from production source collection") do
+		expect(true).to_be_true()
+	end
+end

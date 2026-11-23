@@ -1,0 +1,27 @@
+record Pair
+	left: String
+	right: String
+end
+
+def mark(label: String, value: Integer): String
+	puts(label)
+	return value.to_s()
+end
+
+def combine(prefix: String, *, left: String, right: String): String
+	return prefix + left + ":" + right
+end
+
+def mutate(*, mut values: Array<Integer>, value: Integer): Integer
+	values.push(value)
+	return values.size()
+end
+
+def main()
+	puts(combine("call:", right: mark("right", 20), left: mark("left", 10)))
+	pair := Pair.new(right: mark("record-right", 40), left: mark("record-left", 30))
+	puts(pair.left + ":" + pair.right)
+	mut values := [1]
+	puts(mutate(value: 2, values: values))
+	puts(values[1])
+end

@@ -1,0 +1,216 @@
+import { binding_use_result, binding_use_stride } from state/binding_kinds
+import { MirBlock, MirCall, MirControlLoop, MirIndexedTarget, MirInstruction, MirUnionTarget, MirValue } from mir/model/module
+import { IntegerStorage, StringStorage, integer_storage, load_integer, load_string, store_integer, store_string, string_storage } from support/storage
+
+# Persistent path facts make branch rollback constant time. Field -2 is a
+# binding replacement barrier; field -1 denotes the binding itself.
+record NullableFact
+	identity: Integer
+	field: Integer
+	type_name: String
+	version: Integer
+	previous: Integer
+end
+
+record CheckedLocals
+	# Checked ownership is independent of MIR emission and reusable local slots.
+	concurrent_scope: Array<Integer>
+	# 0: ordinary checking, 1: fresh constructor, 2: transitive ordinary call.
+	concurrent_function: Array<Integer>
+	concurrent_borrowed: IntegerStorage
+	# Active slots can be reused after scope exit; declaration identities cannot.
+	binding_ids: IntegerStorage
+	binding_slots: Array<Integer>
+	# Anonymous checking has an inherited prefix followed by its own bindings.
+	capture_parents: Array<Integer>
+	capture_uses: Array<Integer>
+	lambda_result: Array<String>
+	file_body: Array<Boolean>
+	transaction_body: Array<Boolean>
+	# Direct acquisition result context: statement-value origin and declaration/assignment/return.
+	file_value: Array<Integer>
+	# Source token and binding kind share one encoded obligation per active slot.
+	binding_use_obligations: IntegerStorage
+	binding_use_counts: IntegerStorage
+	nullable_facts: Array<NullableFact>
+	# Shared head/version cells; indices are named in state/local_slots.
+	nullable_state: Array<Integer>
+	lexical_loop: Array<Integer>
+	value_block: Array<Boolean>
+	hash_literal_origins: IntegerStorage
+	hash_declaration_origins: IntegerStorage
+	hash_inference_regions: IntegerStorage
+	array_literal_origins: IntegerStorage
+	array_declaration_origins: IntegerStorage
+	array_inference_regions: IntegerStorage
+	inference_active_region: Array<Integer>
+	collection_scopes: IntegerStorage
+	collection_statement_regions: Array<Integer>
+	collection_region_count: Array<Integer>
+	names: StringStorage
+	types: StringStorage
+	presentations: StringStorage
+	mutable: IntegerStorage
+	# Binding semantics remain in types; cells have independent MIR storage types.
+	mir_cell_plans: IntegerStorage
+	mir_cell_types: StringStorage
+	mir_values: IntegerStorage
+	mir_value_rows: Array<MirValue>
+	mir_instructions: Array<MirInstruction>
+	mir_literal_texts: Array<String>
+	# Shared builder slots are named in state/local_slots, preserving alias updates.
+	mir_control: Array<Integer>
+	mir_blocks: Array<MirBlock>
+	mir_loops: Array<MirControlLoop>
+	mir_hash_refinements: Array<Integer>
+	mir_array_refinements: Array<Integer>
+	mir_array_numeric_candidates: Array<Integer>
+	mir_hash_numeric_candidates: Array<Integer>
+	mir_object_targets: Array<MirIndexedTarget>
+	mir_union_targets: Array<MirUnionTarget>
+	mir_targets: Array<MirIndexedTarget>
+	mir_calls: Array<MirCall>
+	mir_arguments: Array<Integer>
+	mir_state: Array<Integer>
+	count: Array<Integer>
+	# First active slot declared in the current lexical block. Outer bindings
+	# remain readable but do not conflict with declarations in this block.
+	scope_start: Array<Integer>
+end
+
+def locals_new(capacity: Integer): CheckedLocals
+	return CheckedLocals.new(
+		concurrent_scope: [-1], concurrent_function: [0], concurrent_borrowed: integer_storage(capacity),
+		binding_ids: integer_storage(capacity), binding_slots: [],
+		capture_parents: [], capture_uses: [], lambda_result: [], file_body: [false], transaction_body: [false], file_value: [-1, 0],
+		binding_use_obligations: integer_storage(capacity), binding_use_counts: integer_storage(capacity),
+		nullable_facts: [],
+		nullable_state: [-1, 0],
+		lexical_loop: [-1], value_block: [false],
+		hash_literal_origins: integer_storage(capacity),
+		hash_declaration_origins: integer_storage(capacity),
+		hash_inference_regions: integer_storage(capacity),
+		array_literal_origins: integer_storage(capacity),
+		array_declaration_origins: integer_storage(capacity),
+		array_inference_regions: integer_storage(capacity),
+		inference_active_region: [0],
+		collection_scopes: integer_storage(capacity),
+		collection_statement_regions: [],
+		collection_region_count: [0],
+		names: string_storage(capacity),
+		types: string_storage(capacity),
+		presentations: string_storage(capacity),
+		mutable: integer_storage(capacity),
+		mir_cell_plans: integer_storage(capacity), mir_cell_types: string_storage(capacity),
+		mir_values: integer_storage(capacity),
+		mir_value_rows: [],
+		mir_instructions: [],
+		mir_literal_texts: [],
+		# active, current/next block, instruction start, parameter span,
+		# terminated, source line and lexical loop depth for checked control flow.
+		mir_control: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+		mir_blocks: [],
+		mir_loops: [],
+		mir_hash_refinements: [],
+		mir_array_refinements: [],
+		mir_array_numeric_candidates: [],
+		mir_hash_numeric_candidates: [],
+		mir_object_targets: [],
+		mir_union_targets: [],
+		mir_targets: [],
+		mir_calls: [],
+		mir_arguments: [],
+		# Active, function, next value, Integer failure, return value.
+		mir_state: [0, -1, 0, -1, -1],
+		count: [0],
+		scope_start: [0],
+	)
+end
+
+def local_find(locals: CheckedLocals, name: String): Integer
+	mut index := locals.count[0] - 1
+	while index >= 0
+		if load_string(locals.names, index) == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+# Register one lexical binding, including deliberate block-parameter shadowing.
+# Each concrete body owns its identities independently of reusable active slots.
+def local_bind(mut locals: CheckedLocals, name: String, type_name: String, mutable: Integer): Integer
+	return local_bind_identity(locals, name, type_name, mutable, locals.binding_slots.size())
+end
+
+# Materialized closures retain analyzed declaration IDs even when unused
+# inherited declarations have no runtime parameter or active lookup slot.
+def local_bind_identity(mut locals: CheckedLocals, name: String, type_name: String, mutable: Integer, identity: Integer): Integer
+	index := local_bind_temporary(locals, name, type_name, mutable)
+	while locals.binding_slots.size() <= identity
+		locals.binding_slots.push(-1)
+	end
+	store_integer(locals.binding_ids, index, identity)
+	locals.binding_slots[identity] = index
+	return index
+end
+
+# MIR-only scratch slots must not consume analyzed lexical declaration IDs.
+# They cannot be captured and disappear when their builder restores the count.
+def local_bind_temporary(mut locals: CheckedLocals, name: String, type_name: String, mutable: Integer): Integer
+	index := locals.count[0]
+	store_integer(locals.binding_ids, index, -1)
+	store_integer(locals.binding_use_obligations, index, 0)
+	store_integer(locals.binding_use_counts, index, 0)
+	store_integer(locals.hash_literal_origins, index, 0)
+	store_integer(locals.hash_declaration_origins, index, 0)
+	store_integer(locals.hash_inference_regions, index, 0)
+	store_integer(locals.array_literal_origins, index, 0)
+	store_integer(locals.array_declaration_origins, index, 0)
+	store_integer(locals.array_inference_regions, index, 0)
+	store_string(locals.names, index, name)
+	store_string(locals.types, index, type_name)
+	store_string(locals.presentations, index, "")
+	store_integer(locals.mutable, index, mutable)
+	store_integer(locals.mir_values, index, 0)
+	store_string(locals.mir_cell_types, index, "")
+	locals.count[0] = index + 1
+	return index
+end
+
+# Only authored bindings have a use obligation. A leading underscore explicitly
+# permits a named discard, except that a Result binding retains must-use policy.
+# Binding kinds and their packed representation are owned by state/binding_kinds.
+def local_require_use(mut locals: CheckedLocals, slot: Integer, name: String, origin: Integer, kind: Integer)
+	if kind != binding_use_result() && (name.size() == 0 || name[0] == "_")
+		return
+	end
+	store_integer(locals.binding_use_obligations, slot, (origin + 1) * binding_use_stride() + kind)
+end
+
+def local_storage_type(locals: CheckedLocals, slot: Integer): String
+	cell := load_string(locals.mir_cell_types, slot)
+	if cell != ""
+		return cell
+	end
+	return load_string(locals.types, slot)
+end
+
+def local_identity(locals: CheckedLocals, slot: Integer): Integer
+	if slot < 0 || slot >= locals.count[0]
+		return -1
+	end
+	return load_integer(locals.binding_ids, slot)
+end
+
+def local_slot(locals: CheckedLocals, identity: Integer): Integer
+	if identity < 0 || identity >= locals.binding_slots.size()
+		return -1
+	end
+	slot := locals.binding_slots[identity]
+	if slot < 0 || slot >= locals.count[0] || load_integer(locals.binding_ids, slot) != identity
+		return -1
+	end
+	return slot
+end

@@ -1,0 +1,9 @@
+class Counter
+	@value: Integer := 1
+end
+def main()
+	mut item := Counter.new()
+	item.value = 4
+	item.value += 2
+	puts(item.value)
+end

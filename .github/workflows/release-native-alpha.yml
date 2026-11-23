@@ -1,0 +1,90 @@
+name: Native alpha release
+
+on:
+  push:
+    tags:
+      - "v0.5.0-alpha.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-alpha-release
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    outputs:
+      validation_run: ${{ steps.validation.outputs.run }}
+    if: github.repository == 'type-rb/type-rb'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - id: validation
+        name: Verify the tag, Go companion, and exact Native Main validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^0\.5\.0-alpha\.[1-9][0-9]*$ ]]
+          test "$(cat NATIVE_VERSION)" = "$version"
+          gh api "repos/type-rb/type-rb-go/releases/tags/$GITHUB_REF_NAME" \
+            | jq -e --arg tag "$GITHUB_REF_NAME" --arg version "$version" '
+                (.assets | map(.name)) as $assets
+                | .tag_name == $tag and .prerelease and (.draft | not)
+                  and all([
+                    "checksums.txt", "build-info.json",
+                    ("trbg_" + $version + "_darwin_arm64.tar.gz"),
+                    ("trbg_" + $version + "_darwin_amd64.tar.gz"),
+                    ("trbg_" + $version + "_linux_arm64.tar.gz"),
+                    ("trbg_" + $version + "_linux_amd64.tar.gz")
+                  ][]; . as $name | $assets | index($name) != null)
+              '
+          contract=$(sha256sum contracts/v0.5/manifest.json | cut -d ' ' -f1)
+          gh release download "$GITHUB_REF_NAME" --repo type-rb/type-rb-go --pattern build-info.json --output - \
+            | jq -e --arg version "$version" --arg contract "$contract" \
+                '.implementation == "go" and .version == $version and .contractSha256 == $contract'
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/push-validation.yml/runs?head_sha=$GITHUB_SHA&branch=main&event=push&status=success" \
+            | jq -er --arg revision "$GITHUB_SHA" '.workflow_runs | map(select(.head_sha == $revision and .conclusion == "success")) | first | .id // empty')
+          printf 'run=%s\n' "$run" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: qualify
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download the matching Main validation artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ needs.qualify.outputs.validation_run }}
+        run: gh run download "$VALIDATION_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'trbn-*' --dir dist/inputs
+      - name: Verify and publish immutable Native artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RUN: ${{ needs.qualify.outputs.validation_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          python3 tools/package-native-alpha.py "$version" "$GITHUB_SHA" dist/inputs dist/native
+          jq -n \
+            --arg version "$version" \
+            --arg revision "$GITHUB_SHA" \
+            --arg run "$VALIDATION_RUN" \
+            --arg manifest "$(sha256sum contracts/v0.5/manifest.json | cut -d ' ' -f1)" \
+            '{implementation:"native",version:$version,revision:$revision,contractSha256:$manifest,validationRun:$run}' \
+            > dist/native/build-info.json
+          cd dist/native
+          sha256sum -c checksums.txt
+          gh release create "$GITHUB_REF_NAME" trb_*.tar.gz checksums.txt build-info.json \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "TypeRB ${GITHUB_REF_NAME}" \
+            --notes-file ../../docs/native-alpha-release-notes.md

@@ -1,0 +1,130 @@
+import { discover_web_routes } from project/web_routes
+import { web_route_path_error, web_route_segments } from project/web_route_paths
+import { web_dispatch_quote, web_dispatch_source } from project/web_dispatch_source
+import { web_dispatch_function } from frontend/resolution/web_dispatch
+import { compiler_module_graph_fork } from state/catalog_state
+import { ProjectWebRoute } from state/web_routes
+import { CompilerState, add_module, compiler_new, has_diagnostic } from state/state
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve, resolve_without_entry } from frontend/checking/program/resolution
+import { CompilerProjectSources, check, emit_qbe, load_project_sources, load_project_sources_with_entry } from compiler
+import { official_source_kind } from project/official_catalog
+import { load_string, store_integer, store_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+def web_route_test_sources(names: Array<String>, sources: Array<String>): CompilerState
+	mut state := compiler_new(1048576)
+	mut index := 0
+	while index < names.size()
+		add_module(state, names[index], names[index] + ".trb")
+		index += 1
+	end
+	index = 0
+	while index < names.size()
+		state.module_graph.active_module[0] = index
+		start := state.source_tokens.token_count[0]
+		expect_compiler_phase(state, "lex", lex_module(state, sources[index], index))
+		expect_compiler_phase(state, "parse", parse_module(state, start, index))
+		index += 1
+	end
+	state.module_graph.active_module[0] = 0
+	return state
+end
+
+def web_route_test_handler(method: String = "get"): String
+	return "import { Context, Response } from trb/web\ndef " + method + "(context: Context): Response\nreturn Response.text(context.request.path)\nend\n"
+end
+
+def web_dispatch_test_state(): CompilerState
+	sources := [
+		"import { dispatch } from trb/web/testing\nimport { Request } from trb/web\ndef main()\nputs(dispatch(Request.new(\"/hello\")).value)\nend\n",
+		"class Request\nreadonly @path: String\ndef initialize(path: String)\n@path = path\nend\nend\nclass Response\nreadonly @value: String\ndef initialize(value: String)\n@value = value\nend\nend\n",
+		"import { Request, Response } from trb/web\ndef dispatch(request: Request): Response\nif request.path == \"/hello\"\nreturn Response.new(\"hello\")\nend\nreturn Response.new(\"missing\")\nend\n",
+	]
+	mut state := web_route_test_sources(["main", "trb/web/index", "trb/web/testing/index"], sources)
+	store_integer(state.standard_modules, 1, official_source_kind("trb/web"))
+	store_integer(state.standard_modules, 2, official_source_kind("trb/web/testing"))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Project-owned Web routing") do
+	test("allows entry-free project validation only when explicitly selected") do
+		bundle := CompilerProjectSources.new(paths: ["/project/helper.trb"], sources: ["def value(): Integer\nreturn 1\nend\n"], error: "")
+		ordinary := load_project_sources("/project/trbconfig.jsonc", "/project", bundle)
+		expect(has_diagnostic(ordinary)).to_be_true()
+		mut interactive := load_project_sources_with_entry("/project/trbconfig.jsonc", "/project", bundle, false)
+		expect(has_diagnostic(interactive)).to_be_false()
+		expect_compiler_phase(interactive, "resolve without entry", resolve_without_entry(interactive))
+	end
+
+	test("orders static routes before parameters independent of source order") do
+		mut state := web_route_test_sources(["routes/items/[id]", "routes/items/reserved/index"], [web_route_test_handler(), web_route_test_handler()])
+		expect(discover_web_routes(state, [-1, -1])).to_be_true()
+		expect(state.module_graph.web_routes.size()).to_equal(2)
+		expect(state.module_graph.web_routes[0].path).to_equal("/items/reserved")
+		expect(state.module_graph.web_routes[1].segments).to_equal(["items", ":id"])
+		fork := compiler_module_graph_fork(state.module_graph, [1])
+		expect(fork.web_routes).to_equal(state.module_graph.web_routes)
+	end
+
+	test("ignores external package routes and ordinary projects without Web") do
+		mut external := web_route_test_sources(["routes/foreign"], [web_route_test_handler()])
+		expect(discover_web_routes(external, [0])).to_be_true()
+		expect(external.module_graph.web_routes.size()).to_equal(0)
+		mut ordinary := web_route_test_sources(["routes/ordinary"], ["def helper(): Integer\nreturn 1\nend\n"])
+		expect(discover_web_routes(ordinary, [-1])).to_be_true()
+		expect(ordinary.module_graph.web_routes.size()).to_equal(0)
+	end
+
+	test("rejects ambiguous same-method patterns and invalid parameter shapes") do
+		mut state := web_route_test_sources(["routes/[id]", "routes/[name]"], [web_route_test_handler(), web_route_test_handler()])
+		expect(discover_web_routes(state, [-1, -1])).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0).include?("conflicts with route")).to_be_true()
+		["[...tail]/after", "[id]/[id]", "[bad-name]", "[missing", "[...]"].each do |path|
+			expect(web_route_path_error(web_route_segments(path)) != "").to_be_true()
+		end
+		expect(web_route_path_error(web_route_segments("files/[...rest]/index"))).to_equal("")
+	end
+
+	test("retains static method precedence and generated target bindings") do
+		mut state := web_route_test_sources(["routes/items/[id]", "routes/items/reserved/index"], [web_route_test_handler(), web_route_test_handler("post")])
+		expect(discover_web_routes(state, [-1, -1])).to_be_true()
+		generated := web_dispatch_source(state, false)
+		expect(generated.include?("route_handler_0(context)")).to_be_true()
+		expect(generated.include?("route_handler_1(context)")).to_be_true()
+		expect(generated.include?("routes/items/")).to_be_false()
+		expect(web_dispatch_quote("#" + "{data}\n\"quoted\"")).to_equal("\"\\u0023{data}\\n\\\"quoted\\\"\"")
+	end
+
+	test("retains ordinary dispatch after poisoning route facts and erasing source bodies") do
+		mut state := web_dispatch_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		state.module_graph.web_routes.push(ProjectWebRoute.new(source_id: 999, function_id: 999, path: "unavailable", directory: "unavailable", method: "INVALID", segments: []))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("requires owned complete signatures for the REPL-unavailable entry") do
+		mut state := web_dispatch_test_state()
+		mut found := -1
+		state.scalar_mir.signatures.each do |signature|
+			if web_dispatch_function(state, signature.id)
+				found = signature.id
+			end
+		end
+		expect(found >= 0).to_be_true()
+		store_integer(state.standard_modules, 2, 0)
+		expect(web_dispatch_function(state, found)).to_be_false()
+		store_integer(state.standard_modules, 2, official_source_kind("trb/web/testing"))
+		store_string(state.declarations.function_result_types, found, "String")
+		expect(web_dispatch_function(state, found)).to_be_false()
+	end
+end

@@ -1,0 +1,109 @@
+import { concurrent_value } from frontend/checking/body/concurrency
+import { binary_equal, binary_not_equal } from frontend/types/operators
+import { checked_category_value } from frontend/types/value_categories
+import { mir_type_boolean } from mir/model/type_ids
+import { mir_op_enum_compare, mir_op_enum_field, mir_op_enum_new, mir_op_enum_test } from mir/model/instructions
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_disable, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { mir_enum_id } from mir/model/types
+import { enum_type } from frontend/types/enum_types
+import { MirBlock, MirFunction, MirInstruction, MirModule, mir_table_span_valid } from mir/model/module
+import { mir_control_prepare } from mir/build/control
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id } from mir/model/types
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# 37 construction, 38 variant test, 39 checked field extraction, 40 equality.
+def mir_enum_construct(mut state: CompilerState, mut locals: CheckedLocals, variant: Integer, arguments: Array<Integer>, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	type_name := enum_type(state.nominal.enum_variants[variant].owner)
+	arguments.each do |value|
+		if value < 0
+			scalar_mir_disable(locals)
+		end
+	end
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, type_name), origin)
+	if result < 0
+		return checked_value(type_name, checked_category_value(), origin, 0)
+	end
+	start := locals.mir_arguments.size()
+	arguments.each do |value|
+		locals.mir_arguments.push(value)
+	end
+	scalar_mir_instruction(state, locals, mir_op_enum_new(), result, start, arguments.size(), variant, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(type_name, result, origin, 0)
+end
+
+def mir_enum_operation(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, first: CheckedValue, second: Integer, payload: Integer, type_name: String, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	if checked_mir_value(first) < 0
+		scalar_mir_disable(locals)
+	end
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, type_name), origin)
+	if result < 0
+		return concurrent_value(state, checked_value(type_name, checked_category_value(), origin, 0), first.concurrent_borrowed)
+	end
+	scalar_mir_instruction(state, locals, kind, result, checked_mir_value(first), second, payload, -1, load_integer(state.source_tokens.token_lines, origin))
+	return concurrent_value(state, mir_checked_value(type_name, result, origin, 0), first.concurrent_borrowed)
+end
+
+def mir_enum_instruction_error(flow: MirFlow, native_module: MirModule, function: MirFunction, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	result := mir_flow_type(flow, instruction.result)
+	if instruction.failure != -1
+		return "MIR enum failure shape differs"
+	end
+	if instruction.kind == mir_op_enum_compare()
+		owner := mir_enum_id(native_module, mir_flow_type(flow, instruction.first))
+		if owner < 0 || mir_enum_id(native_module, mir_flow_type(flow, instruction.second)) != owner || result != mir_type_boolean() || (instruction.payload != binary_equal() && instruction.payload != binary_not_equal())
+			return "MIR enum equality identity differs"
+		end
+		if !mir_value_available(flow, block, index, instruction.first) || !mir_value_available(flow, block, index, instruction.second)
+			return "MIR enum equality operand is unavailable"
+		end
+		mut variant := 0
+		while variant < native_module.enum_variants.size()
+			row := native_module.enum_variants[variant]
+			if row.owner == owner && row.field_count > 0
+				return "MIR payload enum equality is unsupported"
+			end
+			variant += 1
+		end
+		return ""
+	end
+	mut variant := instruction.payload
+	if instruction.kind == mir_op_enum_field()
+		if variant < 0 || variant >= native_module.enum_fields.size()
+			return "MIR enum field is missing"
+		end
+		variant = native_module.enum_fields[variant].owner
+	end
+	if variant < 0 || variant >= native_module.enum_variants.size()
+		return "MIR enum variant is missing"
+	end
+	row := native_module.enum_variants[variant]
+	if instruction.kind == mir_op_enum_new()
+		if mir_enum_id(native_module, result) != row.owner || instruction.second != row.field_count || !mir_table_span_valid(instruction.first, instruction.second, native_module.arguments.size())
+			return "MIR enum constructor shape differs"
+		end
+		mut field := 0
+		while field < row.field_count
+			value := native_module.arguments[instruction.first + field]
+			if !mir_value_available(flow, block, index, value) || mir_flow_type(flow, value) != native_module.enum_fields[row.field_start + field].type_id
+				return "MIR enum payload operand or type differs"
+			end
+			field += 1
+		end
+		return ""
+	end
+	if instruction.second != -1 || !mir_value_available(flow, block, index, instruction.first) || mir_enum_id(native_module, mir_flow_type(flow, instruction.first)) != row.owner
+		return "MIR enum operand identity differs"
+	end
+	if instruction.kind == mir_op_enum_test() && result != mir_type_boolean()
+		return "MIR enum test result differs"
+	end
+	if instruction.kind == mir_op_enum_field() && result != native_module.enum_fields[instruction.payload].type_id
+		return "MIR enum extraction type differs"
+	end
+	return ""
+end

@@ -1,0 +1,102 @@
+import { test_provider_kind } from frontend/providers/test_declarations
+import { TypeAlias } from frontend/types/alias_model
+import { parse_statement_block } from frontend/syntax/body_syntax
+import { lex_module } from frontend/syntax/lexer
+import { package_json_quote } from project/package_json
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+record TestCallOrigin
+	path: String
+	line: Integer
+	column: Integer
+end
+
+def test_call_origin(state: CompilerState, origin: Integer): TestCallOrigin
+	return TestCallOrigin.new(path: load_string(state.module_graph.module_files, state.module_graph.active_module[0]), line: load_integer(state.source_tokens.token_lines, origin), column: load_integer(state.source_tokens.token_columns, origin))
+end
+
+# Two same-type expect calls must never share the first call's source location.
+# Internal assertions already receive an explicit origin and can share bodies.
+def test_origin_specialization_key(state: CompilerState, definition: Integer, origin: Integer): String
+	kind := test_provider_kind(state, definition)
+	if kind >= 1 && kind <= 3
+		return ":origin:" + integer_string(origin)
+	end
+	return ""
+end
+
+def test_origin_quote(value: String): String
+	quoted := package_json_quote(value)
+	mut result := ""
+	mut index := 0
+	while index < quoted.size()
+		if quoted[index] == "#"
+			result += "\\u0023"
+		else
+			result += quoted[index]
+		end
+		index += 1
+	end
+	return result
+end
+
+def test_expectation_body(kind: Integer, origin: TestCallOrigin): String
+	location := test_origin_quote(origin.path) + ", " + integer_string(origin.line) + ", " + integer_string(origin.column)
+	if kind == 2 || kind == 3
+		# These public functions immediately extract one variant. Forward to the
+		# same owned assertion without requiring the unused opposite method.
+		mut assertion := "assert_result_ok"
+		if kind == 3
+			assertion = "assert_result_err"
+		end
+		return "return " + assertion + "<Target,Error>(actual, " + location + ")\nend\n"
+	end
+	return "return Expectation<Target>.new(actual, " + location + ")\nend\n"
+end
+
+def specialize_test_expectation(mut state: CompilerState, function: Integer, arguments: Array<String>, kind: Integer, origin: TestCallOrigin): Boolean
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	if kind < 1 || kind > 3 || origin.line < 1 || origin.column < 1 || arguments.size() < 1
+		diagnostic(state, "TRBN4003", origin.line, "test expectation requires an authored call origin")
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	namespace := "$test_origin" + integer_string(function)
+	state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Target", source_id: owner, line: origin.line, parameters: [], target: arguments[0]))
+	if kind == 2 || kind == 3
+		if arguments.size() != 2
+			diagnostic(state, "TRBN4003", origin.line, "test Result expectation requires both variant types")
+			return false
+		end
+		state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Error", source_id: owner, line: origin.line, parameters: [], target: arguments[1]))
+	end
+	return install_test_body(state, function, namespace, test_expectation_body(kind, origin))
+end
+
+# Owned provider bodies are checked as ordinary TypeRB after specialization.
+def install_test_body(mut state: CompilerState, function: Integer, namespace: String, source: String): Boolean
+	owner := load_integer(state.declarations.function_modules, function)
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	start := state.source_tokens.token_count[0]
+	lex_module(state, source, owner)
+	state.global_bindings.declaration_owner[0] = namespace
+	mut token := start
+	while token < state.source_tokens.token_count[0]
+		store_string(state.source_tokens.token_namespaces, token, namespace)
+		token += 1
+	end
+	mut position := [start]
+	if !has_diagnostic(state)
+		parse_statement_block(state, position)
+	end
+	store_integer(state.declarations.function_body_starts, function, start)
+	store_integer(state.declarations.function_body_ends, function, position[0])
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return !has_diagnostic(state)
+end

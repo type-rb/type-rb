@@ -1,0 +1,281 @@
+import { emit_qbe } from compiler
+import { MirBlock, MirInstruction, mir_function_index } from mir/model/module
+import { mir_op_scalar_binary, mir_op_scalar_literal } from mir/model/instructions
+import { mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_flow_blocks, mir_flow_parameter_slot, mir_function_value_groups } from mir/analysis/flow
+import { MirThreadedEdge, mir_boolean_edge_block, mir_boolean_edge_known_literals, mir_boolean_edge_literals, mir_boolean_edge_path, mir_boolean_edge_target_retained } from mir/passes/boolean_edges
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { integer_string } from support/literals
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def boolean_edge_run(output: String, expected: String, failure: Boolean)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut expected_status := 0
+		if failure
+			expected_status = 2
+		end
+		case logical_run_qbe(qbe, output, expected_status)
+		when Result::Ok(actual)
+			expect(failure).to_be_false()
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			if !failure
+				puts(error)
+			end
+			expect(failure).to_be_true()
+			expect(error).to_equal(expected)
+		end
+	end
+end
+
+def boolean_edge_choice_source(): String
+	return "def choose(flag: Boolean): Integer\nmut selected := flag\nmut result := 4\nif flag\nselected = false\nresult = 10\nelse\nselected = true\nresult = 20\nend\nif selected\nreturn result + 1\nend\nreturn result + 2\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n"
+end
+
+describe("MIR Boolean edge threading") do
+	test("resolves a loop-carried literal after its false exit is threaded") do
+		state := array_loop_mir_check("def count(limit: Integer): Integer\nmut running := true\nmut total := 0\nwhile running\ntotal += 1\nif total >= limit\nrunning = false\nend\nend\nreturn total\nend\ndef main()\nputs(count(1))\nputs(count(5))\nend\n")
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		entry := state.scalar_mir.blocks[function.block_start + blocks[integer_string(function.entry_block)]]
+		header := state.scalar_mir.blocks[function.block_start + blocks[integer_string(entry.first_target)]]
+		expect(header.terminator).to_equal(mir_terminator_branch())
+		values := mir_function_value_groups(state.scalar_mir)
+		facts := mir_boolean_edge_known_literals(state.scalar_mir, function, blocks, values[0])
+		key := integer_string(header.condition)
+		expect(facts.values.key?(key)).to_be_true()
+		expect(state.scalar_mir.literal_texts[facts.values[key]]).to_equal("true")
+		boolean_edge_run(control_test_output(emit_qbe(state)), "1\n5\n", false)
+	end
+
+	test("keeps an external Boolean input unknown through a forwarding cycle") do
+		state := array_loop_mir_check("def count(flag: Boolean, limit: Integer): Integer\nmut running := flag\nmut total := 0\nwhile running\ntotal += 1\nif total >= limit\nrunning = false\nend\nend\nreturn total\nend\ndef main()\nputs(count(false, 5))\nputs(count(true, 5))\nend\n")
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		entry := state.scalar_mir.blocks[function.block_start + blocks[integer_string(function.entry_block)]]
+		header := state.scalar_mir.blocks[function.block_start + blocks[integer_string(entry.first_target)]]
+		expect(header.terminator).to_equal(mir_terminator_branch())
+		values := mir_function_value_groups(state.scalar_mir)
+		facts := mir_boolean_edge_known_literals(state.scalar_mir, function, blocks, values[0])
+		expect(facts.values.key?(integer_string(header.condition))).to_be_false()
+		boolean_edge_run(control_test_output(emit_qbe(state)), "0\n5\n", false)
+	end
+
+	test("retains conflicting literals before an observable condition use") do
+		state := array_loop_mir_check("def choose(flag: Boolean): Integer\nmut selected := true\nif flag\nselected = false\nend\nputs(selected)\nif selected\nreturn 1\nend\nreturn 2\nend\ndef main()\nputs(choose(true))\nputs(choose(false))\nend\n")
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		values := mir_function_value_groups(state.scalar_mir)
+		facts := mir_boolean_edge_known_literals(state.scalar_mir, function, blocks, values[0])
+		mut found := false
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[index]
+			if block.terminator == mir_terminator_branch() && mir_flow_parameter_slot(state.scalar_mir, block, block.condition) >= 0
+				expect(facts.values.key?(integer_string(block.condition))).to_be_false()
+				found = true
+			end
+			index += 1
+		end
+		expect(found).to_be_true()
+		boolean_edge_run(control_test_output(emit_qbe(state)), "false\n2\ntrue\n1\n", false)
+	end
+
+	test("preserves true false and unknown paths with distinct incoming values") do
+		state := array_loop_mir_check(boolean_edge_choice_source())
+		boolean_edge_run(control_test_output(emit_qbe(state)), "12\n21\n", false)
+		loop := array_loop_mir_check("def count(flag: Boolean): Integer\nmut running := flag\nmut total := 0\nwhile running\ntotal += 2\nif total > 8\nrunning = false\nelse\ntotal += 1\nend\nend\nreturn total\nend\ndef main()\nputs(count(true))\nputs(count(false))\nend\n")
+		boolean_edge_run(control_test_output(emit_qbe(loop)), "11\n0\n", false)
+	end
+
+	test("copies only one of two parallel edges sharing their old argument span") do
+		mut state := array_loop_mir_check(boolean_edge_choice_source())
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		facts := mir_boolean_edge_literals(state.scalar_mir, function)
+		literals := facts.values
+		mut found := false
+		mut index := function.block_start
+		while index < function.block_start + function.block_count && !found
+			block := state.scalar_mir.blocks[index]
+			if block.terminator == mir_terminator_jump()
+				mut arguments: Array<Integer> := []
+				mut argument := 0
+				while argument < block.first_argument_count
+					arguments.push(state.scalar_mir.arguments[block.first_argument_start + argument])
+					argument += 1
+				end
+				original := MirThreadedEdge.new(target: block.first_target, arguments: arguments, resolved: false)
+				path := mir_boolean_edge_path(state.scalar_mir, function, blocks, literals, original)
+				mut condition := -1
+				mut position := block.instruction_start
+				while position < block.instruction_start + block.instruction_count
+					instruction := state.scalar_mir.instructions[position]
+					if instruction.kind == mir_op_scalar_literal()
+						text := state.scalar_mir.literal_texts[instruction.payload]
+						if text == "true" || text == "false"
+							condition = instruction.result
+						end
+					end
+					position += 1
+				end
+				if path.resolved && condition >= 0
+					parallel := MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: mir_terminator_branch(), condition: condition, first_target: block.first_target, second_target: block.first_target, first_argument_start: block.first_argument_start, first_argument_count: block.first_argument_count, second_argument_start: block.first_argument_start, second_argument_count: block.first_argument_count, return_value: block.return_value)
+					state.scalar_mir.blocks[index] = parallel
+					rewritten := mir_boolean_edge_block(state.scalar_mir, function, blocks, literals, parallel, true)
+					expect(rewritten.first_target).to_equal(path.target)
+					expect(rewritten.first_argument_start != parallel.first_argument_start).to_be_true()
+					expect(rewritten.second_argument_start).to_equal(parallel.second_argument_start)
+					expect(rewritten.second_target).to_equal(parallel.second_target)
+					mut offset := 0
+					while offset < arguments.size()
+						expect(state.scalar_mir.arguments[parallel.first_argument_start + offset]).to_equal(arguments[offset])
+						offset += 1
+					end
+					state.scalar_mir.blocks[index] = rewritten
+					found = true
+				end
+			end
+			index += 1
+		end
+		expect(found).to_be_true()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		boolean_edge_run(control_test_output(emit_qbe(state)), "12\n21\n", false)
+	end
+
+	test("does not disconnect a loop whose only other predecessors are inside the loop") do
+		mut state := array_loop_mir_check("def count(flag: Boolean): Integer\nmut running := true\nmut total := 0\nwhile running\ntotal += 1\nrunning = flag\nif total > 2\nreturn total\nend\nend\nreturn total\nend\ndef main()\nputs(count(false))\nputs(count(true))\nend\n")
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		entry := state.scalar_mir.blocks[function.block_start]
+		expect(entry.id).to_equal(function.entry_block)
+		expect(entry.terminator).to_equal(mir_terminator_jump())
+		expect(mir_boolean_edge_target_retained(state.scalar_mir, function, blocks, entry.id, true, entry.first_target)).to_be_false()
+		facts := mir_boolean_edge_literals(state.scalar_mir, function)
+		literals := facts.values
+		expect(mir_boolean_edge_block(state.scalar_mir, function, blocks, literals, entry, true)).to_equal(entry)
+		boolean_edge_run(control_test_output(emit_qbe(state)), "1\n3\n", false)
+	end
+
+	test("does not bypass a parameter directly referenced by a later block") do
+		mut state := array_loop_mir_check("def choose(flag: Boolean, selected: Boolean): Integer\nknown := true\nputs(known)\nmut result := 4\nif flag\nresult = 10\nelse\nresult = 20\nend\nif selected\nreturn result + 1\nend\nreturn result + 2\nend\ndef main()\nputs(choose(true, false))\nputs(choose(false, true))\nend\n")
+		function := state.scalar_mir.functions[0]
+		blocks := mir_flow_blocks(state.scalar_mir, function)
+		facts := mir_boolean_edge_literals(state.scalar_mir, function)
+		mut literal := -1
+		mut index := function.block_start
+		while index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				instruction := state.scalar_mir.instructions[position]
+				if instruction.kind == mir_op_scalar_literal() && state.scalar_mir.literal_texts[instruction.payload] == "true"
+					literal = instruction.result
+				end
+				position += 1
+			end
+			index += 1
+		end
+		expect(literal >= 0).to_be_true()
+		mut found := false
+		index = function.block_start
+		while index < function.block_start + function.block_count && !found
+			block := state.scalar_mir.blocks[index]
+			if block.instruction_count == 0 && block.terminator == mir_terminator_branch()
+				body := state.scalar_mir.blocks[function.block_start + blocks[integer_string(block.first_target)]]
+				mut position := body.instruction_start
+				while position < body.instruction_start + body.instruction_count && !found
+					instruction := state.scalar_mir.instructions[position]
+					if instruction.kind == mir_op_scalar_binary()
+						mut slot := 0
+						while slot < body.parameter_count && !found
+							if state.scalar_mir.arguments[body.parameter_start + slot] == instruction.first
+								direct := state.scalar_mir.arguments[block.first_argument_start + slot]
+								state.scalar_mir.instructions[position] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: direct, second: instruction.second, payload: instruction.payload, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line)
+								mut incoming: Array<Integer> := []
+								mut parameter := 0
+								while parameter < block.parameter_count
+									mut value := state.scalar_mir.arguments[block.parameter_start + parameter]
+									if value == block.condition
+										value = literal
+									end
+									incoming.push(value)
+									parameter += 1
+								end
+								original := MirThreadedEdge.new(target: block.id, arguments: incoming, resolved: false)
+								expect(mir_boolean_edge_path(state.scalar_mir, function, blocks, facts.values, original)).to_equal(original)
+								found = true
+							end
+							slot += 1
+						end
+					end
+					position += 1
+				end
+			end
+			index += 1
+		end
+		expect(found).to_be_true()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		boolean_edge_run(control_test_output(emit_qbe(state)), "true\n12\ntrue\n21\n", false)
+	end
+
+	test("keeps effects and checked failures on their original paths") do
+		state := array_loop_mir_check("def work(flag: Boolean): Integer\nmut running := flag\nmut count := 0\nwhile running\nputs(\"body\")\ncount += 1\nrunning = false\nend\nreturn count\nend\ndef main()\nputs(work(false))\nputs(work(true))\nend\n")
+		boolean_edge_run(control_test_output(emit_qbe(state)), "0\nbody\n1\n", false)
+		failure := array_loop_mir_check("def work(flag: Boolean): Integer\nmut running := flag\nwhile running\nempty: Array<Integer> := []\nputs(empty[0])\nrunning = false\nend\nreturn 0\nend\ndef main()\nputs(work(true))\nend\n")
+		boolean_edge_run(control_test_output(emit_qbe(failure)), "panic: index is out of bounds\n", true)
+	end
+
+	test("retains substituted managed arguments across forced collection") do
+		state := array_loop_mir_check("def choose(flag: Boolean, text: String, number: Integer): String\nmut selected := flag\nmut result := text\nif flag\nselected = false\nresult = text + \"!\"\nelse\nselected = true\nresult = text + \"?\"\nend\nif selected\nreturn result + number.to_s()\nend\nreturn result + number.to_s()\nend\ndef source(value: Integer): String\nreturn value.to_s()\nend\ndef main()\ntext := source(1000)\nputs(choose(true, text, 456))\nputs(choose(false, text, 123))\nend\n")
+		output := control_test_output(emit_qbe(state))
+		marker := " %string =l call $trbn_string_alloc(l %size)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		boolean_edge_run(forced, "1000!456\n1000?123\n", false)
+	end
+
+	test("keeps source erasure block and value reordering and repeated optimization stable") do
+		mut state := array_loop_mir_check(boolean_edge_choice_source())
+		before := control_test_output(emit_qbe(state))
+		arguments := state.scalar_mir.arguments.size()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(state.scalar_mir.arguments.size()).to_equal(arguments)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			block := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = block
+			left += 1
+			right -= 1
+		end
+		left = 0
+		right = state.scalar_mir.values.size() - 1
+		while left < right
+			value := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = value
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(state.scalar_mir.arguments.size()).to_equal(arguments)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		boolean_edge_run(control_test_output(emit_qbe(state)), "12\n21\n", false)
+	end
+end

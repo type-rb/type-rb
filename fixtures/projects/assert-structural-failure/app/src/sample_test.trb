@@ -1,0 +1,17 @@
+import { describe, expect, test } from trb/std/test
+
+record Point
+	x: Integer
+	y: Integer
+end
+
+enum Shape
+	Circle(radius: Integer)
+	Square(side: Integer)
+end
+
+describe("Structure") do
+	test("record") do
+		expect(Point.new(x: 1, y: 2)).to_equal(Point.new(x: 1, y: 3))
+	end
+end

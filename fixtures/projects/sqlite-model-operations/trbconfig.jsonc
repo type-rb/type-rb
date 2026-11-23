@@ -1,0 +1,9 @@
+{
+  "name": "sqlite-model-operations",
+  "mode": "trb",
+  "sourceDir": "src",
+  "db": {"adapter": "sqlite"},
+  "packageOptions": {
+    "trb/orm": {"adapter": "sqlite", "schemaLock": "application.schema.json", "database": {"environment": "DATABASE_URL"}}
+  }
+}

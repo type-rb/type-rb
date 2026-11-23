@@ -1,0 +1,25 @@
+def main()
+	mut values := [1, 2, 3, 4]
+	view := values
+	values.unshift(0)
+	puts(values.pop())
+	puts(values.shift())
+	puts(view.size())
+	values.each { |value| puts(value) }
+	mut floating := [1.5]
+	floating.unshift(-2.5)
+	puts(floating.shift() == -2.5)
+	puts(floating.pop() == 1.5)
+	puts(floating.empty?())
+	mut optional: Array<Integer?> := [nil]
+	optional.unshift(2)
+	puts(optional.pop() == nil)
+	first := optional.shift()
+	if first != nil
+		puts(first)
+	end
+	mut flags := [false]
+	flags.unshift(true)
+	puts(flags.shift())
+	puts(flags.pop())
+end

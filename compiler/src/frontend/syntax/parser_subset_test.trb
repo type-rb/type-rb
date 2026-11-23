@@ -1,0 +1,80 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { frontend_test_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("lexes and parses the registered declaration and expression subset") do
+		source := frontend_test_source()
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.declarations.record_count[0]).to_equal(1)
+		expect(load_string(state.declarations.record_names, 0)).to_equal("Pair")
+		expect(state.declarations.field_count[0]).to_equal(2)
+		expect(load_string(state.declarations.field_names, 0)).to_equal("left")
+		expect(load_string(state.declarations.field_names, 1)).to_equal("right")
+		expect(state.declarations.function_count[0]).to_equal(2)
+		expect(load_string(state.declarations.function_names, 0)).to_equal("add")
+		expect(load_string(state.declarations.function_names, 1)).to_equal("main")
+		expect(load_string(state.declarations.function_result_types, 0)).to_equal("Integer")
+		expect(load_string(state.declarations.function_result_types, 1)).to_equal("Void")
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+	end
+
+	test("rejects an unfinished function deterministically") do
+		source := "def main()\n\tputs(\"missing\")\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4002")
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("expected end")
+	end
+
+	test("rejects statement-leading next bindings before resolution") do
+		declarations := ["next := 1", "next: Integer := 1"]
+		mut index := 0
+		while index < declarations.size()
+			source := "def main()\n\t" + declarations[index] + "\n\tputs(next.to_s())\nend\n"
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4002")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("next does not take a value")
+			index += 1
+		end
+	end
+
+	test("preserves contextual next identifiers and nearby names") do
+		source := "record Value\n\tnext: Integer\nend\n\ndef next_parameter(next: Integer): Integer\n\treturn next\nend\n\ndef main()\n\tnext_value := 1\n\tnext2 := 2\n\tmut next := 3\n\tvalue := Value.new(next: 4)\n\tputs((next_value + next_parameter(next2) + next + value.next).to_s())\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+	end
+
+	test("distinguishes keyword strings from parameter-reassignment boundaries") do
+		keywords := ["end", "if", "while"]
+		mut index := 0
+		while index < keywords.size()
+			keyword := keywords[index]
+			source := "def rewrite(mut values: Array<Integer>)\n\tputs(\"" + keyword + "\")\n\tif true\n\t\twhile false\n\t\t\tputs(\"end\")\n\t\tend\n\t\tvalues = [123]\n\tend\n\treturn\nend\n\ndef untouched(values: Array<Integer>)\n\tputs(\"" + keyword + "\")\n\treturn\nend\n\ndef later(mut values: Array<Integer>)\n\tvalues = [999]\n\treturn\nend\n\ndef append(mut value: String)\n\tputs(\"end\")\n\tvalue += \"x\"\n\treturn\nend\n\ndef main()\n\treturn\nend\n"
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_true()
+
+			index += 1
+		end
+	end
+end

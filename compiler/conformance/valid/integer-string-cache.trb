@@ -1,0 +1,20 @@
+def decimal(value: Integer): String
+	return value.to_s()
+end
+
+def main()
+	mut labels: Array<String> := []
+	mut positions: Hash<String, Integer> := {}
+	mut index := -1
+	while index <= 100
+		label := decimal(index)
+		labels.push(label)
+		positions[label] = index
+		index += 1
+	end
+	labels.each do |label|
+		puts(label + ":" + label.size().to_s() + ":" + label.to_bytes().size().to_s() + ":" + positions[label].to_s())
+	end
+	puts(decimal(-9007199254740991))
+	puts(decimal(9007199254740991))
+end

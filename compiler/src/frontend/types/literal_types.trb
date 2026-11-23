@@ -1,0 +1,125 @@
+import { compiler_string_bytes } from support/compiler_bytes
+import { ascii_code, integer_literal_in_range, number_without_underscores } from support/literals
+import { string_starts_with } from support/path
+
+# Byte-encoded names cannot collide with source identifiers or container delimiters.
+def literal_integer_text(input: String): String
+	text := number_without_underscores(input)
+	mut index := 0
+	mut negative := false
+	if text.size() > 0 && text[0] == "-"
+		negative = true
+		index = 1
+	end
+	mut digits := ""
+	mut significant := false
+	while index < text.size()
+		code := ascii_code(text[index])
+		if code < 48 || code > 57
+			return ""
+		end
+		if code != 48
+			significant = true
+		end
+		if significant
+			digits += text[index]
+		end
+		index += 1
+	end
+	if text == "" || text == "-"
+		return ""
+	end
+	if digits == ""
+		return "0"
+	end
+	if !integer_literal_in_range(digits)
+		return ""
+	end
+	if negative
+		return "-" + digits
+	end
+	return digits
+end
+
+def literal_integer_type(text: String): String
+	value := literal_integer_text(text)
+	if value == ""
+		return ""
+	end
+	return "LiteralInteger#" + value
+end
+
+def literal_string_type(text: String): String
+	mut result := "LiteralString#"
+	digits := "0123456789abcdef"
+	compiler_string_bytes(text).each do |byte|
+		result += digits[byte / 16] + digits[byte % 16]
+	end
+	return result
+end
+
+def literal_type_payload(name: String): String
+	mut start := 14
+	if string_starts_with(name, "LiteralInteger#")
+		start = 15
+	end
+	mut result := ""
+	while start < name.size()
+		result += name[start]
+		start += 1
+	end
+	return result
+end
+
+def literal_hex_value(character: String): Integer
+	code := ascii_code(character)
+	if code >= 48 && code <= 57
+		return code - 48
+	end
+	if code >= 97 && code <= 102
+		return code - 87
+	end
+	return -1
+end
+
+def literal_type_base(name: String): String
+	if string_starts_with(name, "LiteralInteger#")
+		text := literal_type_payload(name)
+		if text != "" && literal_integer_text(text) == text
+			return "Integer"
+		end
+	elsif string_starts_with(name, "LiteralString#")
+		if (name.size() - 14) % 2 != 0
+			return ""
+		end
+		mut index := 14
+		while index < name.size()
+			if literal_hex_value(name[index]) < 0
+				return ""
+			end
+			index += 1
+		end
+		return "String"
+	end
+	return ""
+end
+
+# A portable escaped spelling preserves every byte in diagnostics, including NUL.
+def literal_type_display(name: String): String
+	if literal_type_base(name) == "Integer"
+		return literal_type_payload(name)
+	end
+	mut result := "\""
+	mut index := 14
+	while index + 1 < name.size()
+		code := literal_hex_value(name[index]) * 16 + literal_hex_value(name[index + 1])
+		if code >= 32 && code < 127 && code != 34 && code != 92
+			printable := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+			result += printable[code - 32]
+		else
+			result += "\\x" + name[index] + name[index + 1]
+		end
+		index += 2
+	end
+	return result + "\""
+end

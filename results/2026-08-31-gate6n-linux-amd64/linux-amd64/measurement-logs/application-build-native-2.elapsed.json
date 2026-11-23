@@ -1,0 +1,47 @@
+{
+  "artifact": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-workspace/measured-application-native/program",
+    "sha256": "f55d78ee71381d275a6169635c2609d205b2067ba5b9e6f5bfc050fc75164b56",
+    "size": 14056
+  },
+  "clock": "time.monotonic_ns",
+  "clockInfo": {
+    "adjustable": false,
+    "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+    "monotonic": true,
+    "resolutionSeconds": 1e-09
+  },
+  "command": [
+    "/home/runner/work/_temp/gate6n-linux-amd64-compiler",
+    "build",
+    "/home/runner/work/type-rb-native/type-rb-native/.gate6n-candidate/corpus/gate6m/portable-entry/trbconfig.jsonc",
+    "--output",
+    "/home/runner/work/_temp/gate6n-linux-amd64-workspace/measured-application-native/program",
+    "--qbe",
+    "/home/runner/work/_temp/qbe-1.3/qbe",
+    "--cc",
+    "/usr/bin/cc",
+    "--target",
+    "linux-amd64-v0"
+  ],
+  "elapsedNanoseconds": 41675675,
+  "elapsedSeconds": "0.041675675",
+  "inputExecutableAfter": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-compiler",
+    "sha256": "cb6002b84dcfcb05d6c1336a7d5affa4eaa16a216f2fcb776d48c01bbe605a0b",
+    "size": 240888
+  },
+  "inputExecutableBefore": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-compiler",
+    "sha256": "cb6002b84dcfcb05d6c1336a7d5affa4eaa16a216f2fcb776d48c01bbe605a0b",
+    "size": 240888
+  },
+  "schemaVersion": 1,
+  "status": 0
+}

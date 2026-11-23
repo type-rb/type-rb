@@ -1,0 +1,32 @@
+alias Choice = Integer | String
+alias Wider = Boolean | Float | String
+
+def widen(value: Choice): Wider
+	return value
+end
+
+def describe(value: Wider): String
+	case value
+	when Boolean(flag)
+		return flag.to_s()
+	when Float(number)
+		return number.to_s()
+	when String(text)
+		return text
+	end
+end
+
+def widen_optional(value: Choice?): Wider?
+	return value
+end
+
+def main()
+	puts(describe(widen(7)))
+	puts(describe(widen("text")))
+	puts(describe(false))
+	value := widen_optional(12)
+	if value != nil
+		puts(describe(value))
+	end
+	puts(widen_optional(nil) == nil)
+end

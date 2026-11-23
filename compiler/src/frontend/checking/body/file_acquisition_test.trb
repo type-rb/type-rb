@@ -1,0 +1,124 @@
+import { check, emit_qbe } from compiler
+import { CompilerState } from state/state
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { logical_run_qbe, logical_run_qbe_arguments } from testing/qbe_runner
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def public_file_program(path: String, body: String): String
+	return "import trb/std/file\nimport trb/std/path\nimport trb/std/result\nimport { FileSystemError } from trb/std/errors\ndef read(path: Path): Result<String, FileSystemError>\nreturn File.open(path) do |file|\n" + body + "\nend\nend\ndef main()\ncase read(Path.new(\"" + path + "\"))\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.operation)\nputs(error.message)\nend\nend\n"
+end
+
+def public_file_state(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "public File check", check(state))
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def public_file_temporary(source: String, expected: String, collect: Boolean)
+	mut state := public_file_state(source)
+	intrinsic_mir_erase(state)
+	mut runtime := output_source(emit_qbe(state))
+	if collect
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+	end
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	allocated := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/type-rb-native-public-file.XXXXXX"])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+		return
+	end
+	expect(allocated.success).to_be_true()
+	workspace := allocated.stdout.strip()
+	executed := logical_run_qbe_arguments(qbe, runtime, [workspace + "/example"])
+	# Remove temporary data before asserting execution so failures do not leak it.
+	case Process.run("/bin/rm", ["-r", workspace])
+	when Result::Ok(value)
+		expect(value.success).to_be_true()
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+	end
+	case executed
+	when Result::Ok(value)
+		expect(value).to_equal(expected)
+	when Result::Err(error)
+		puts(error)
+		expect(false).to_be_true()
+	end
+end
+
+def public_file_round_trip(): String
+	return "import { File, FileMode } from trb/std/file\nimport trb/std/path\nimport trb/std/result\nimport trb/std/unit\nimport trb/std/process\nimport { FileSystemError } from trb/std/errors\n\ndef round_trip(path: Path): Result<String, FileSystemError>\n_created := try File.open(path, mode: FileMode::CreateNew) do |file|\ntry file.write(\"prefix\".to_bytes())\ntry file.write_text(\"abcdef\")\nend\n_written := try File.open(path, mode: FileMode::Write) do |file|\ntry file.write_text(\"hello\")\nend\nreturn File.open(path) do |file|\nbytes := try file.read(max_bytes: 5)\nputs(bytes.size())\ntry file.read_text(max_bytes: 0)\nend\nend\n\ndef main()\nargs := Process.argv()\npath := Path.new(args[0])\ncase round_trip(path)\nwhen Result::Ok(value)\nputs(\"remaining:\" + value)\nwhen Result::Err(error)\nputs(error.operation + \":\" + error.message)\nend\ncreated := File.open(path, mode: FileMode::CreateNew) do |_file|\nUnit.new()\nend\ncase created\nwhen Result::Ok(_unit)\nputs(\"unexpected create\")\nwhen Result::Err(error)\nputs(error.operation)\nend\nend\n"
+end
+
+describe("Public structured File acquisition") do
+	test("checks and executes canonical File.open and its typed read method") do
+		mut state := public_file_state(public_file_program("/dev/null", "try file.read_text(max_bytes: 32)"))
+		expect(state.scalar_mir.file_scopes.size() > 0).to_be_true()
+		intrinsic_mir_erase(state)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output_source(emit_qbe(state)))
+			when Result::Ok(value)
+				expect(value).to_equal("open\nopened handle is not a regular file\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("reports a missing structured body before executing an acquisition") do
+		mut state := logical_checked_source("import trb/std/file\nimport trb/std/path\ndef main()\n_value := File.open(Path.new(\"example\"))\nend\n")
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("File.open requires a structured block")
+	end
+
+	test("reads and writes a real regular file through the public methods") do
+		public_file_temporary(public_file_round_trip(), "5\nremaining:\nopen\n", false)
+	end
+
+	test("keeps File and method outputs alive across collection at every allocation") do
+		public_file_temporary(public_file_round_trip(), "5\nremaining:\nopen\n", true)
+	end
+
+	test("checks acquisition argument types labels and owned aliases") do
+		["File.open(1)", "File.open(Path.new(\"x\"), mode: 0)", "File.open(Path.new(\"x\"), Path.new(\"y\"))", "File.open(Path.new(\"x\"), extra: 1)", "File.open()"].each do |call|
+			mut state := logical_checked_source("import trb/std/file\nimport trb/std/path\ndef main()\n_value := " + call + " do |_file|\n1\nend\nend\n")
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		end
+		_state := public_file_state(public_file_program("/dev/null", "try file.read_text(max_bytes: 32)").replace_all("import trb/std/file", "import trb/std/file as InputFile").replace_all("File.open", "InputFile.open"))
+	end
+
+	test("accepts explicit File result types and checks the actual block yield") do
+		_state := public_file_state(public_file_program("/dev/null", "try file.read_text(max_bytes: 32)").replace_all("File.open(path)", "File.open<String>(path)"))
+		mut mismatch := logical_checked_source(public_file_program("/dev/null", "_read := try file.read_text(max_bytes: 32)\n1").replace_all("File.open(path)", "File.open<String>(path)"))
+		expect(check(mismatch)).to_be_false()
+		expect(load_string(mismatch.diagnostics.messages, 0).include?("expected String")).to_be_true()
+	end
+
+	test("rejects indirect or discarded acquisition results and wrapped assignments") do
+		["File.open(Path.new(\"x\")) { |_file| 1 }", "try File.open(Path.new(\"x\")) { |_file| 1 }", "mut value := 0\nvalue = try File.open(Path.new(\"x\")) { |_file| 1 }\nputs(value)", "value := if true\nFile.open(Path.new(\"x\")) { |_file| 1 }\nelse\nResult<Integer, FileSystemError>::Ok(1)\nend\nputs(value)"].each do |body|
+			mut state := logical_checked_source("import trb/std/file\nimport trb/std/path\nimport trb/std/result\nimport { FileSystemError } from trb/std/errors\ndef sample(): Result<Integer, FileSystemError>\n" + body + "\nreturn Result<Integer, FileSystemError>::Ok(1)\nend\ndef main()\nputs(sample())\nend\n")
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0).include?("File.open")).to_be_true()
+		end
+	end
+
+end

@@ -1,0 +1,313 @@
+import { find_visible_declaration, find_visible_function, find_visible_generic_function } from frontend/resolution/declaration_lookup
+import { declaration_object } from frontend/types/declaration_kinds
+import { namespace_parent } from frontend/types/namespace_model
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { ObjectDefinition } from frontend/types/object_model
+import { callable_parts } from frontend/types/callable_types
+import { find_object_type } from frontend/types/object_types
+import { official_source_kind } from project/official_catalog
+import { jobs_class_owner } from frontend/providers/jobs_wrappers
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { token_kind_identifier, token_kind_number } from state/token_kinds
+import { ProjectWebEndpoint, ProjectWebResponse } from state/web_routes
+import { integer_string } from support/literals
+import { load_integer, load_string, sparse_integer_at, sparse_string_at } from support/storage
+
+# Declaration capabilities belong to a resolved direct superclass. A local
+# namesake, descendant or nested class cannot acquire them through its spelling.
+# The pinned declaration exporter discovers top-level endpoint classes only.
+def web_endpoint_owner(mut state: CompilerState, row: ObjectDefinition): Boolean
+	if row.interface_type || row.superclass == "" || namespace_parent(row.name) != ""
+		return false
+	end
+	parent := find_visible_declaration(state, row.source_id, row.superclass, declaration_object())
+	if parent < 0
+		return false
+	end
+	definition := state.nominal.objects[parent]
+	if definition.name == "Endpoint" && !definition.interface_type && definition.parameters.size() == 0 && sparse_integer_at(state.standard_modules, definition.source_id) == official_source_kind("trb/web")
+		return true
+	end
+	return false
+end
+
+def web_endpoint_public_type(state: CompilerState, target: String, source: Integer, name: String): Boolean
+	object := find_object_type(state, target)
+	if object < 0
+		return false
+	end
+	row := state.nominal.objects[state.nominal.object_instances[object].definition]
+	if row.source_id == source && row.name == name && !row.interface_type && row.parameters.size() == 0
+		return true
+	end
+	return false
+end
+
+# Calls remain ordinary owned functions, but never enter executable bodies.
+# Check their canonical identity and complete public signature before granting
+# the metadata capability to this particular class-body occurrence.
+def web_endpoint_directive(mut state: CompilerState, source: Integer, name: String): Integer
+	# The pinned declaration catalog recognizes these authored directive names.
+	# Renamed superclass imports are supported; renamed directives are not.
+	if name != "handles" && name != "input" && name != "response"
+		return 0
+	end
+	function := find_visible_function(state, source, name)
+	if function >= 0
+		owner := load_integer(state.declarations.function_modules, function)
+		start := load_integer(state.declarations.function_parameter_starts, function)
+		if sparse_integer_at(state.standard_modules, owner) != official_source_kind("trb/web") || load_string(state.declarations.function_names, function) != "handles" || load_integer(state.declarations.function_parameter_counts, function) != 1 || load_string(state.declarations.function_result_types, function) != "Void" || load_integer(state.declarations.parameter_named_only, start) != 0
+			return 0
+		end
+		if sparse_string_at(state.nominal.function_receivers, function) != "" || load_string(state.declarations.parameter_names, start) != "handler" || load_integer(state.declarations.parameter_mutable, start) != 0 || sparse_integer_at(state.parsed.parameter_defaults, start) != 0
+			return 0
+		end
+		parts := callable_parts(load_string(state.declarations.parameter_types, start))
+		if parts.size() != 2
+			return 0
+		end
+		if !web_endpoint_public_type(state, parts[0], owner, "Response") || !web_endpoint_public_type(state, parts[1], owner, "Context")
+			return 0
+		end
+		return 1
+	end
+	generic := find_visible_generic_function(state, source, name)
+	if generic < 0
+		return 0
+	end
+	row := state.type_resolution.generic_functions[generic]
+	if sparse_integer_at(state.standard_modules, row.source_id) != official_source_kind("trb/web") || row.receiver_type != "" || row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.result_type != "Void"
+		return 0
+	end
+	if row.name == "input" && row.parameters.size() == 0
+		return 2
+	end
+	if row.name == "response" && row.parameters.size() == 1
+		parameter := row.parameters[0]
+		if parameter.name == "status" && parameter.type_name == "Integer" && parameter.named_only == 1 && parameter.mutable == 0 && parameter.default_start < 0
+			return 3
+		end
+	end
+	return 0
+end
+
+def web_endpoint_error(mut state: CompilerState, origin: Integer, message: String): Boolean
+	diagnostic(state, "TRBN4003", load_integer(state.source_tokens.token_lines, origin), "trb/web endpoint " + message)
+	return false
+end
+
+def web_endpoint_close(state: CompilerState, mut position: Array<Integer>, finish: Integer): Boolean
+	skip_newlines(state, position)
+	if token_is(state, position[0], ",")
+		position[0] += 1
+		skip_newlines(state, position)
+	end
+	if !token_is(state, position[0], ")")
+		return false
+	end
+	position[0] += 1
+	return position[0] == finish
+end
+
+def web_endpoint_status(state: CompilerState, origin: Integer): Integer
+	if load_integer(state.source_tokens.token_kinds, origin) != token_kind_number()
+		return -1
+	end
+	raw := load_string(state.source_tokens.token_texts, origin)
+	mut value := 0
+	mut index := 0
+	while index < raw.size()
+		character := raw[index]
+		if character != "_"
+			mut digit := 0
+			while digit < 10 && "0123456789"[digit] != character
+				digit += 1
+			end
+			if digit == 10 || value > 599
+				return -1
+			end
+			value = value * 10 + digit
+		end
+		index += 1
+	end
+	if value < 100 || value > 599
+		return -1
+	end
+	return value
+end
+
+def web_endpoint_group_start(state: CompilerState, mut position: Array<Integer>): Integer
+	mut count := 0
+	while token_is(state, position[0], "(")
+		count += 1
+		position[0] += 1
+		skip_newlines(state, position)
+	end
+	return count
+end
+
+def web_endpoint_group_finish(state: CompilerState, mut position: Array<Integer>, count: Integer): Boolean
+	mut remaining := count
+	skip_newlines(state, position)
+	while remaining > 0
+		if !token_is(state, position[0], ")")
+			return false
+		end
+		position[0] += 1
+		remaining -= 1
+		skip_newlines(state, position)
+	end
+	return true
+end
+
+def validate_web_endpoint(mut state: CompilerState, object_id: Integer): Boolean
+	row := state.nominal.objects[object_id]
+	if row.parameters.size() > 0
+		return web_endpoint_error(state, row.origin, "contract " + row.name + " cannot declare type parameters")
+	end
+	mut handler := -1
+	mut input_type := ""
+	mut input_name := ""
+	mut handles_count := 0
+	mut input_count := 0
+	mut responses: Array<ProjectWebResponse> := []
+	state.nominal.object_directives.each do |directive|
+		if directive.source_id == row.source_id && directive.owner == row.name
+			mut position := [directive.origin]
+			name := load_string(state.source_tokens.token_texts, position[0])
+			kind := web_endpoint_directive(state, row.source_id, name)
+			if kind == 0
+				return web_endpoint_error(state, directive.origin, "unsupported class-body declaration " + name)
+			end
+			position[0] += 1
+			mut type_name := ""
+			mut authored_type := ""
+			if kind > 1
+				if !token_is(state, position[0], "<")
+					return web_endpoint_error(state, directive.origin, "declaration requires one type argument")
+				end
+				position[0] += 1
+				skip_newlines(state, position)
+				authored_type = parse_type(state, position)
+				type_name = resolve_type_name(state, row.source_id, authored_type, false)
+				skip_newlines(state, position)
+				if has_diagnostic(state)
+					return false
+				end
+				if !token_is(state, position[0], ">")
+					return web_endpoint_error(state, directive.origin, "declaration requires one type argument")
+				end
+				position[0] += 1
+			end
+			if !token_is(state, position[0], "(")
+				return web_endpoint_error(state, directive.origin, "invalid declaration arguments")
+			end
+			position[0] += 1
+			skip_newlines(state, position)
+			if kind == 1
+				handles_count += 1
+				groups := web_endpoint_group_start(state, position)
+				if load_integer(state.source_tokens.token_kinds, position[0]) != token_kind_identifier()
+					return web_endpoint_error(state, directive.origin, "handles must reference a top-level function in the same module")
+				end
+				handler = find_visible_function(state, row.source_id, load_string(state.source_tokens.token_texts, position[0]))
+				if handler < 0
+					return web_endpoint_error(state, directive.origin, "handles must reference a top-level function in the same module")
+				end
+				if load_integer(state.declarations.function_modules, handler) != row.source_id
+					return web_endpoint_error(state, directive.origin, "handles must reference a top-level function in the same module")
+				end
+				position[0] += 1
+				if !web_endpoint_group_finish(state, position, groups)
+					return web_endpoint_error(state, directive.origin, "handles must reference a top-level function in the same module")
+				end
+			elsif kind == 2
+				input_count += 1
+				input_type = type_name
+				input_name = authored_type
+			else
+				if !token_is(state, position[0], "status") || !token_is(state, position[0] + 1, ":")
+					return web_endpoint_error(state, directive.origin, "response declaration must be response<T>(status: code)")
+				end
+				position[0] += 2
+				skip_newlines(state, position)
+				groups := web_endpoint_group_start(state, position)
+				status := web_endpoint_status(state, position[0])
+				if status < 0
+					return web_endpoint_error(state, directive.origin, "response status must be an integer literal from 100 through 599")
+				end
+				responses.each do |previous|
+					if previous.status == status
+						return web_endpoint_error(state, directive.origin, "declares response status " + integer_string(status) + " more than once")
+					end
+				end
+				responses.push(ProjectWebResponse.new(status: status, type_name: type_name, authored_type: authored_type, origin: directive.origin))
+				position[0] += 1
+				if !web_endpoint_group_finish(state, position, groups)
+					return web_endpoint_error(state, directive.origin, "response status must be an integer literal from 100 through 599")
+				end
+			end
+			if !web_endpoint_close(state, position, directive.finish)
+				return web_endpoint_error(state, directive.origin, "invalid declaration arguments")
+			end
+		end
+	end
+	if handles_count != 1
+		return web_endpoint_error(state, row.origin, "contract " + row.name + " must declare handles(handler) exactly once")
+	end
+	if input_count > 1
+		return web_endpoint_error(state, row.origin, "contract " + row.name + " declares input more than once")
+	end
+	if responses.size() == 0
+		return web_endpoint_error(state, row.origin, "contract " + row.name + " must declare at least one response<T>(status: code)")
+	end
+	mut route_index := -1
+	mut index := 0
+	while index < state.module_graph.web_routes.size()
+		route := state.module_graph.web_routes[index]
+		if route.source_id == row.source_id && route.function_id == handler
+			route_index = index
+		end
+		index += 1
+	end
+	if route_index < 0
+		return web_endpoint_error(state, row.origin, "contract must handle a file-route handler in the same module")
+	end
+	state.module_graph.web_endpoints.each do |endpoint|
+		if endpoint.route_index == route_index
+			return web_endpoint_error(state, row.origin, "route is declared by more than one contract")
+		end
+	end
+	state.module_graph.web_endpoints.push(ProjectWebEndpoint.new(object_id: object_id, route_index: route_index, input_type: input_type, input_name: input_name, responses: responses))
+	return true
+end
+
+def validate_web_endpoints(mut state: CompilerState): Boolean
+	previous_source := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	mut object_id := 0
+	while object_id < state.nominal.objects.size()
+		row := state.nominal.objects[object_id]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = row.name
+		if web_endpoint_owner(state, row)
+			if !validate_web_endpoint(state, object_id)
+				return false
+			end
+		elsif !jobs_class_owner(state, row)
+			state.nominal.object_directives.each do |directive|
+				if directive.source_id == row.source_id && directive.owner == row.name
+					return web_endpoint_error(state, directive.origin, "unsupported class-body declaration")
+				end
+			end
+		end
+		if has_diagnostic(state)
+			return false
+		end
+		object_id += 1
+	end
+	state.module_graph.active_module[0] = previous_source
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return true
+end

@@ -1,0 +1,76 @@
+import { analyze_scoped_body } from frontend/checking/body/file_bodies
+import { type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value, checked_value } from frontend/checking/body/values
+import { find_generic_function_in_module } from frontend/resolution/declaration_lookup
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { advance, expect, skip_newlines } from frontend/syntax/syntax_tokens
+import { next_generic_depth } from frontend/types/generic_bindings
+import { checked_category_value } from frontend/types/value_categories
+import { mir_binding_capture } from mir/build/bindings
+import { mir_control_active } from mir/build/control
+import { mir_checked_closure } from mir/lowering/callables
+import { mir_checked_call } from mir/lowering/calls
+import { checking_lowering } from state/checking_phases
+import { CheckedLocals, local_slot } from state/local_state
+import { CompilerState, find_module, has_diagnostic } from state/state
+import { load_integer, sparse_integer_at, store_integer } from support/storage
+
+def check_orm_transaction(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, root: Boolean, declared: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	advance(position)
+	skip_newlines(state, position)
+	if !expect(state, position, ")")
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	encoded := sparse_integer_at(state.callables.call_block_origins, position[0])
+	if encoded <= 0
+		return type_diagnostic(state, line, "transaction requires a structured block")
+	end
+	syntax := state.callables.call_blocks[encoded - 1]
+	position[0] = syntax.finish
+	if state.callables.lambda_phase[0] == checking_lowering()
+		runner := sparse_integer_at(state.callables.checked[0].generic_calls, origin) - 1
+		state.callables.checked[0].file_bodies.each do |body|
+			if body.origin == syntax.origin && runner >= 0
+				mut captures: Array<Integer> := []
+				body.captures.each do |capture|
+					slot := local_slot(locals, capture.identity)
+					if slot >= 0
+						store_integer(locals.binding_use_counts, slot, sparse_integer_at(locals.binding_use_counts, slot) + 1)
+					end
+					if mir_control_active(locals)
+						captures.push(mir_binding_capture(state, locals, capture, origin))
+					end
+				end
+				callback := mir_checked_closure(state, locals, body.function[0], captures, origin)
+				mut arguments: Array<Integer> := []
+				if !root
+					arguments.push(checked_mir_value(receiver))
+				end
+				arguments.push(checked_mir_value(callback))
+				return mir_checked_call(state, locals, runner, arguments, body.result_type, origin)
+			end
+		end
+		return type_diagnostic(state, line, "transaction has no checked body")
+	end
+	runtime := find_module(state, "trb/internal/orm/sql/index")
+	mut name := "_orm_nested"
+	if root
+		name = "_orm_root"
+	end
+	template := find_generic_function_in_module(state, runtime, name)
+	if template < 0
+		return type_diagnostic(state, line, "transaction requires a configured SQLite database")
+	end
+	tx := resolve_type_name(state, find_module(state, "trb/orm/index"), "Transaction", false)
+	index := analyze_scoped_body(state, locals, syntax, tx, declared, true)
+	if index < 0 || has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	body := state.callables.file_bodies[index]
+	runner := instantiate_generic_function(state, template, [body.yield_type], next_generic_depth(state))
+	store_integer(state.callables.checked[0].generic_calls, origin, runner + 1)
+	return checked_value(body.result_type, checked_category_value(), origin, 0)
+end

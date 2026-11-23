@@ -1,0 +1,2657 @@
+{
+  "schemaVersion": 1,
+  "candidate": "f4ef0986678ad0870dea48cdeb28decc6eed4e30",
+  "baseline": "923f4bd31c70f1e83979034916bf4f781523dcc0",
+  "run": 34309605826,
+  "attempt": 1,
+  "checkout": {
+    "revision": "c9305051ba272f1b52c0eb445855a9612da48604",
+    "tree": "9e9c4ab4a107bfd8d9c7971f17733cf5a2e119c7",
+    "sameTreeAsCandidate": true,
+    "parents": [
+      "923f4bd31c70f1e83979034916bf4f781523dcc0",
+      "f4ef0986678ad0870dea48cdeb28decc6eed4e30"
+    ]
+  },
+  "amd64": {
+    "artifactId": 10088016496,
+    "status": "PASS",
+    "observations": [
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "1.042651650",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61272064",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "1.044656692",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61190144",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "1.045369291",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61435904",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "1.042490827",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61218816",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "1.051137354",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61300736",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "1.048321183",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61247488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "1.051288379",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61415424",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "1.052647121",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61489152",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "1.053527813",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61595648",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "1.049301301",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61329408",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "1.052315085",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61341696",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "1.047443206",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61452288",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "1.041926548",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61251584",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "1.037885912",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61292544",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "1.042939156",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61394944",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "1.042895983",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61337600",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b2-b3",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "1.042231243",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61313024",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "adjacent-build",
+        "candidate": "b3-b4",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "1.043759856",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61599744",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "1.044023371",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61558784",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "1.050822591",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61386752",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "1.051160665",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61321216",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "1.047628361",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61337600",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "1.048710568",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61415424",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "1.053417730",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61419520",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "1.054258970",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61280256",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "1.042464961",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61501440",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "1.042240707",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61497344",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "1.052429350",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61464576",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "1.050862668",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61317120",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "1.043175401",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61394944",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "1.051197908",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61358080",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "1.050855184",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61550592",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "1.054454574",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61558784",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "1.053299888",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61456384",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "1.052636433",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61255680",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "compiler-build",
+        "candidate": "external",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "1.043343525",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61485056",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.026464816",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61009920",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.131643158",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75149312",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.129452195",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77131776",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.026193942",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60747776",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.025269180",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60780544",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.134551091",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75177984",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.131642116",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77000704",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.026773573",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60825600",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.025294251",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60751872",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.133655601",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77111296",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.132686096",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75309056",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.026601132",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60907520",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.025334291",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61046784",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.133696400",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75010048",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.132597994",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75026432",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.026695318",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61079552",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.025042688",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "61067264",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.135542096",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77152256",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.131149549",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "76996608",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.025818157",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60686336",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.025091379",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60981248",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.133576270",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "77361152",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.134086745",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75083776",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.026933450",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60715008",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "native",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.024824415",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "60727296",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-build",
+        "candidate": "go",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.135237554",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "75018240",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.000430540",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1748992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "-2",
+        "elapsed_seconds_per_repetition": "0.001111643",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6246400",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.001149005",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6164480",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "-1",
+        "elapsed_seconds_per_repetition": "0.000456912",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1810432",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.000409510",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1810432",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "1",
+        "elapsed_seconds_per_repetition": "0.001199201",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.001136278",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "2",
+        "elapsed_seconds_per_repetition": "0.000413088",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.000408599",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1855488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "3",
+        "elapsed_seconds_per_repetition": "0.001112074",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6225920",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.001102484",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "4",
+        "elapsed_seconds_per_repetition": "0.000412327",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1736704",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.000418165",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1855488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "5",
+        "elapsed_seconds_per_repetition": "0.001133379",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6230016",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.001085631",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "6",
+        "elapsed_seconds_per_repetition": "0.000406652",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1748992",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.000409082",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1859584",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "7",
+        "elapsed_seconds_per_repetition": "0.001116918",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.001153195",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "4067328",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "8",
+        "elapsed_seconds_per_repetition": "0.000406184",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1855488",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.000405694",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "9",
+        "elapsed_seconds_per_repetition": "0.001081382",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6221824",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.001097041",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6189056",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "10",
+        "elapsed_seconds_per_repetition": "0.000405532",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "native",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.000400322",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "1875968",
+        "rss_status": "0",
+        "observer_status": "0"
+      },
+      {
+        "stage": "application-runtime",
+        "candidate": "go",
+        "iteration": "11",
+        "elapsed_seconds_per_repetition": "0.001095232",
+        "elapsed_status": "0",
+        "peak_rss_bytes": "6189056",
+        "rss_status": "0",
+        "observer_status": "0"
+      }
+    ],
+    "medians": [
+      {
+        "metric": "compiler-build-time",
+        "native": "1.048710568",
+        "comparison": "1.052429350",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "compiler-build-rss",
+        "native": "61415424",
+        "comparison": "61464576",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "adjacent-build-time",
+        "native": "1.047443206",
+        "comparison": "1.048321183",
+        "limit_percent": "110"
+      },
+      {
+        "metric": "adjacent-build-rss",
+        "native": "61337600",
+        "comparison": "61341696",
+        "limit_percent": "110"
+      },
+      {
+        "metric": "application-build-time",
+        "native": "0.025334291",
+        "comparison": "0.133655601",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-build-rss",
+        "native": "60825600",
+        "comparison": "75309056",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-runtime-time",
+        "native": "0.000408599",
+        "comparison": "0.001112074",
+        "limit_percent": "125"
+      },
+      {
+        "metric": "application-runtime-rss",
+        "native": "1855488",
+        "comparison": "4067328",
+        "limit_percent": "125"
+      }
+    ],
+    "retained": 72,
+    "warmups": 16,
+    "evidence": {
+      "compiler-size.txt": "platform=linux-amd64\nraw_compiler_bytes=279976\nraw_compiler_limit_bytes=310000\n",
+      "identities.txt": "pre_implementation_revision=266c996668a4c3e0ad6eb833ca646b73ca7e56e1\ncandidate_revision=c9305051ba272f1b52c0eb445855a9612da48604\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\ntype_rb_version=0.4.6-dev\nroot_qbe_sha256=62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a\nqbe_binary_sha256=2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9\ncandidate_compiler_sha256=5ca4886eb57f8e4094f7c20d017dd1ae72625a6bc47065e1f96ebfbabee4aadb\nmeasurement_controller_sha256=f2382da12f117fe099b7a6cc86e064ae35fe3d9108238e169b48f32e8afc755f\napplication_build_elapsed_repetitions=8\napplication_runtime_elapsed_repetitions=32\npython_command=/usr/bin/python3\npython_command_sha256=a92f0f95e883390c7256b2e441484aac06b1002dbe1d924141a77c8d82f96223\ncandidate_fixed_point_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\nportable_entry_qbe_sha256=3deb18dcfc43842551eda05c5a6eabe9fb38d5822674fc17af3c9d3902feb722\nnative_application_sha256=bf00e810b4721a8354fadd3cec36bdf0802bdf0dcb86c39222a771a43bdddd64\ngo_application_sha256=12f70d38bdf9e6cc41f295d7e4f5343bf8b89f144020e67885757424f50745a8\nnative_application_raw_bytes=14624\nnative_application_stripped_bytes=14616\ngo_application_raw_bytes=2876965\ngo_application_stripped_bytes=1900152\n",
+      "environment.txt": "verifier_revision=c9305051ba272f1b52c0eb445855a9612da48604\ncandidate_revision=c9305051ba272f1b52c0eb445855a9612da48604\nprofile=linux-amd64-v0\nqbe_target=amd64_sysv\nrunner_image=ubuntu-24.04\nLinux runnervmejwal 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n0.4.6-dev\ngo version go1.27.1 linux/amd64\n/home/runner/.cache/go-build\n/home/runner/.config/go/env\nlinux\namd64\nPython 3.12.3\n{\"adjustable\": false, \"implementation\": \"clock_gettime(CLOCK_MONOTONIC)\", \"monotonic\": true, \"resolutionSeconds\": 1e-09}\ncc1_command=/usr/libexec/gcc/x86_64-linux-gnu/13/cc1\ncollect2_command=/usr/libexec/gcc/x86_64-linux-gnu/13/collect2\nassembler_command=/usr/bin/as\narchitecture_assembler_command=/usr/bin/x86_64-linux-gnu-as\nld_lld_command=/usr/bin/ld.lld\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv (default), amd64_apple, amd64_win, arm64, arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+      "bootstrap-metadata.json": "{\n  \"architecture\": \"amd64\",\n  \"asset\": \"gate6n-candidate-linux-amd64\",\n  \"attestationSubjectSha256\": \"5ca4886eb57f8e4094f7c20d017dd1ae72625a6bc47065e1f96ebfbabee4aadb\",\n  \"ccBoundary\": \"system-cc\",\n  \"mode\": \"0755\",\n  \"os\": \"linux\",\n  \"profile\": \"linux-amd64-v0\",\n  \"qbeBinarySha256\": \"2bc09f15ceef535dcfaf8dfd0a55abcbf25cd514edc150ed3533d64c29077ee9\",\n  \"qbeBinarySize\": 679048,\n  \"qbeTarget\": \"amd64_sysv\",\n  \"runnerImage\": \"ubuntu-24.04\",\n  \"sha256\": \"5ca4886eb57f8e4094f7c20d017dd1ae72625a6bc47065e1f96ebfbabee4aadb\",\n  \"size\": 279976\n}\n",
+      "bootstrap-checks.stdout": "ok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\nok\n"
+    },
+    "identityNote": "The amd64 recipe retains its original gate baseline in pre_implementation_revision; current candidate_revision is the verified PR merge-ref checkout, whose tree equals the accepted candidate head. Adjacent rows compare generations of the same candidate, not the previous Native feature baseline."
+  },
+  "claims": {
+    "applicationSpeedup": false,
+    "newCumulativeTiming": false,
+    "thresholdChange": false,
+    "specialConfirmation": false
+  },
+  "arm64CompilerCosts": {
+    "darwin-arm64": {
+      "artifactId": 10088345184,
+      "evidence": {
+        "baseline-bootstrap-metadata.json": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-baseline",
+          "attestationSubjectSha256": "f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "11733a8932573fa82809c7be81c6636d25fb767a81dfc28e7737677d1e710964",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17",
+          "size": 365768
+        },
+        "candidate-bootstrap-metadata.json": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-candidate",
+          "attestationSubjectSha256": "84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "darwin",
+          "profile": "darwin-arm64-v0",
+          "qbeBinarySha256": "11733a8932573fa82809c7be81c6636d25fb767a81dfc28e7737677d1e710964",
+          "qbeBinarySize": 404192,
+          "qbeTarget": "arm64_apple",
+          "runnerImage": "macos-15",
+          "sha256": "84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761",
+          "size": 349256
+        },
+        "comparison-evidence/catastrophic.tsv": [
+          {
+            "metric": "build_elapsed",
+            "stage": "b2-b3",
+            "role": "baseline",
+            "baseline_median": "1.69",
+            "maximum_observation": "1.74",
+            "ratio": "1.029586",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b2-b3",
+            "role": "baseline",
+            "baseline_median": "41238528",
+            "maximum_observation": "41336832",
+            "ratio": "1.002384",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b2-b3",
+            "role": "candidate",
+            "baseline_median": "1.69",
+            "maximum_observation": "1.83",
+            "ratio": "1.082840",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b2-b3",
+            "role": "candidate",
+            "baseline_median": "41238528",
+            "maximum_observation": "41402368",
+            "ratio": "1.003973",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b3-b4",
+            "role": "baseline",
+            "baseline_median": "1.71",
+            "maximum_observation": "1.80",
+            "ratio": "1.052632",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b3-b4",
+            "role": "baseline",
+            "baseline_median": "41336832",
+            "maximum_observation": "41435136",
+            "ratio": "1.002378",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b3-b4",
+            "role": "candidate",
+            "baseline_median": "1.71",
+            "maximum_observation": "1.98",
+            "ratio": "1.157895",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b3-b4",
+            "role": "candidate",
+            "baseline_median": "41336832",
+            "maximum_observation": "41484288",
+            "ratio": "1.003567",
+            "maximum": "2.0",
+            "status": "pass"
+          }
+        ],
+        "comparison-evidence/code-sections.tsv": [
+          {
+            "target": "darwin-arm64",
+            "baseline_text_bytes": "260700",
+            "candidate_text_bytes": "260512",
+            "status": "observed"
+          }
+        ],
+        "comparison-evidence/comparison.tsv": [
+          {
+            "metric": "compiler_bytes",
+            "stage": "fixed-point",
+            "baseline": "365768",
+            "candidate": "349256",
+            "candidate_baseline_ratio": "0.954857",
+            "maximum": "1.05",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "fixed-point-build",
+            "baseline": "1.695000",
+            "candidate": "1.675000",
+            "candidate_baseline_ratio": "0.988201",
+            "maximum": "1.05",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "fixed-point-build",
+            "baseline": "41295872.000000",
+            "candidate": "41271296.000000",
+            "candidate_baseline_ratio": "0.999405",
+            "maximum": "1.05",
+            "status": "pass"
+          }
+        ],
+        "comparison-evidence/identities.txt": "target=darwin-arm64\nbaseline_compiler_bytes=365768\ncandidate_compiler_bytes=349256\ncandidate_compiler_limit=366000\nbaseline_text_bytes=260700\ncandidate_text_bytes=260512\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nbaseline_fixed_point_qbe_size=1150705\nfixed_point_qbe_size=1151406\nfixed_point_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\n",
+        "comparison-evidence/interleaved-measurements.csv": [
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41566208",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41205760",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41254912",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.69",
+            "peak_rss_bytes": "41320448",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41353216",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41222144",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.69",
+            "peak_rss_bytes": "41418752",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41205760",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41238528",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.80",
+            "peak_rss_bytes": "41369600",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41025536",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.67",
+            "peak_rss_bytes": "41271296",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41336832",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41336832",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "40910848",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41287680",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41304064",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41172992",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.75",
+            "peak_rss_bytes": "41402368",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41238528",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41402368",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41156608",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41484288",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.80",
+            "peak_rss_bytes": "41435136",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.69",
+            "peak_rss_bytes": "41304064",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41222144",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.68",
+            "peak_rss_bytes": "41336832",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41205760",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.83",
+            "peak_rss_bytes": "41336832",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.74",
+            "peak_rss_bytes": "41222144",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.98",
+            "peak_rss_bytes": "41287680",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.77",
+            "peak_rss_bytes": "41271296",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41222144",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.68",
+            "peak_rss_bytes": "41123840",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.68",
+            "peak_rss_bytes": "41402368",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41271296",
+            "status": "0"
+          }
+        ],
+        "comparison-evidence/measurement-policy.txt": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n",
+        "baseline-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365768\ninput_sha256=f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17\nb1_size=365768\nb1_sha256=f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17\nb2_size=365768\nb2_sha256=f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17\nb3_size=365768\nb3_sha256=f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17\nb4_size=365768\nb4_sha256=f56aba2559a2c4898398b810416ac85bada3b6f8facecce8a79b26683f787e17\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncompiler_size_limit=366000\n",
+        "baseline-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=1.75 peak_rss_bytes=41238528 cpu_seconds=1.74\nb3-b4 elapsed_seconds=1.67 peak_rss_bytes=41271296 cpu_seconds=1.67\n",
+        "baseline-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=366000\n",
+        "baseline-bootstrap-evidence/measurements.csv": [
+          {
+            "stage": "b2-b3",
+            "iteration": "1",
+            "elapsed_seconds": "1.98",
+            "peak_rss_bytes": "40927232",
+            "status": "0",
+            "cpu_seconds": "1.88"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "1",
+            "elapsed_seconds": "1.86",
+            "peak_rss_bytes": "41009152",
+            "status": "0",
+            "cpu_seconds": "1.83"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "2",
+            "elapsed_seconds": "1.95",
+            "peak_rss_bytes": "40992768",
+            "status": "0",
+            "cpu_seconds": "1.88"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "2",
+            "elapsed_seconds": "1.85",
+            "peak_rss_bytes": "41336832",
+            "status": "0",
+            "cpu_seconds": "1.85"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "3",
+            "elapsed_seconds": "1.77",
+            "peak_rss_bytes": "41320448",
+            "status": "0",
+            "cpu_seconds": "1.77"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "3",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41271296",
+            "status": "0",
+            "cpu_seconds": "1.67"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "4",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41238528",
+            "status": "0",
+            "cpu_seconds": "1.72"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "4",
+            "elapsed_seconds": "1.67",
+            "peak_rss_bytes": "41189376",
+            "status": "0",
+            "cpu_seconds": "1.67"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "5",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41304064",
+            "status": "0",
+            "cpu_seconds": "1.67"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "5",
+            "elapsed_seconds": "1.67",
+            "peak_rss_bytes": "41271296",
+            "status": "0",
+            "cpu_seconds": "1.68"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "6",
+            "elapsed_seconds": "1.75",
+            "peak_rss_bytes": "41304064",
+            "status": "0",
+            "cpu_seconds": "1.74"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "6",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41369600",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "7",
+            "elapsed_seconds": "1.68",
+            "peak_rss_bytes": "41140224",
+            "status": "0",
+            "cpu_seconds": "1.68"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "7",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41385984",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          }
+        ],
+        "baseline-bootstrap-evidence/environment.txt": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=923f4bd31c70f1e83979034916bf4f781523dcc0\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin sat12-dp147-352de679-e471-4581-9606-12b472821bf0-26C643AEB37C.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+        "baseline-bootstrap-evidence/executable-dependencies.txt": "/Users/runner/work/_temp/baseline-bootstrap-workspace/b4/compiler:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+        "baseline-bootstrap-evidence/process-inventory.txt": "observer: /bin/sh tools/bootstrap-seed.sh\nordinary compiler stages: B1, B2, B3\nNative compiler child boundary: /Users/runner/work/_temp/qbe-1.3/qbe\nNative compiler child boundary: /usr/bin/cc\nsystem assembler/linker: selected by /usr/bin/cc\nforbidden ordinary stages: Go, reference trb, recovery compiler, shell child\n",
+        "candidate-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=349256\ninput_sha256=84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761\nb1_size=349256\nb1_sha256=84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761\nb2_size=349256\nb2_sha256=84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761\nb3_size=349256\nb3_sha256=84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761\nb4_size=349256\nb4_sha256=84ecbd59f9f387ae91ac9ed20ca5a01f3ecc9e68433e11bf08e915def738d761\nfixed_point_qbe_size=1151406\nfixed_point_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\ncompiler_size_limit=366000\n",
+        "candidate-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=1.66 peak_rss_bytes=41222144 cpu_seconds=1.67\nb3-b4 elapsed_seconds=1.67 peak_rss_bytes=41304064 cpu_seconds=1.68\n",
+        "candidate-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=366000\n",
+        "candidate-bootstrap-evidence/measurements.csv": [
+          {
+            "stage": "b2-b3",
+            "iteration": "1",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41385984",
+            "status": "0",
+            "cpu_seconds": "1.67"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "1",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41320448",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "2",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41271296",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "2",
+            "elapsed_seconds": "1.69",
+            "peak_rss_bytes": "41402368",
+            "status": "0",
+            "cpu_seconds": "1.69"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "3",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41156608",
+            "status": "0",
+            "cpu_seconds": "1.70"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "3",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41369600",
+            "status": "0",
+            "cpu_seconds": "1.72"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "4",
+            "elapsed_seconds": "1.69",
+            "peak_rss_bytes": "41484288",
+            "status": "0",
+            "cpu_seconds": "1.68"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "4",
+            "elapsed_seconds": "1.66",
+            "peak_rss_bytes": "41222144",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "5",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41172992",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "5",
+            "elapsed_seconds": "1.71",
+            "peak_rss_bytes": "41287680",
+            "status": "0",
+            "cpu_seconds": "1.71"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "6",
+            "elapsed_seconds": "1.70",
+            "peak_rss_bytes": "41222144",
+            "status": "0",
+            "cpu_seconds": "1.70"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "6",
+            "elapsed_seconds": "1.67",
+            "peak_rss_bytes": "41304064",
+            "status": "0",
+            "cpu_seconds": "1.68"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "7",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41140224",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "7",
+            "elapsed_seconds": "1.65",
+            "peak_rss_bytes": "41287680",
+            "status": "0",
+            "cpu_seconds": "1.66"
+          }
+        ],
+        "candidate-bootstrap-evidence/environment.txt": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=c9305051ba272f1b52c0eb445855a9612da48604\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin sat12-dp147-352de679-e471-4581-9606-12b472821bf0-26C643AEB37C.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+        "candidate-bootstrap-evidence/executable-dependencies.txt": "/Users/runner/work/_temp/candidate-bootstrap-workspace/b4/compiler:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+        "candidate-bootstrap-evidence/process-inventory.txt": "observer: /bin/sh tools/bootstrap-seed.sh\nordinary compiler stages: B1, B2, B3\nNative compiler child boundary: /Users/runner/work/_temp/qbe-1.3/qbe\nNative compiler child boundary: /usr/bin/cc\nsystem assembler/linker: selected by /usr/bin/cc\nforbidden ordinary stages: Go, reference trb, recovery compiler, shell child\n",
+        "application-evidence/sizes.tsv": [
+          {
+            "case": "no-long",
+            "artifact": "qbe",
+            "baseline_bytes": "32182",
+            "candidate_bytes": "32182",
+            "added_bytes": "0",
+            "maximum_added_bytes": "4096",
+            "status": "pass"
+          },
+          {
+            "case": "no-long",
+            "artifact": "executable",
+            "baseline_bytes": "50936",
+            "candidate_bytes": "50936",
+            "added_bytes": "0",
+            "maximum_added_bytes": "1024",
+            "status": "pass"
+          },
+          {
+            "case": "long",
+            "artifact": "qbe",
+            "baseline_bytes": "40362",
+            "candidate_bytes": "40362",
+            "added_bytes": "0",
+            "maximum_added_bytes": "4096",
+            "status": "pass"
+          },
+          {
+            "case": "long",
+            "artifact": "executable",
+            "baseline_bytes": "50952",
+            "candidate_bytes": "50952",
+            "added_bytes": "0",
+            "maximum_added_bytes": "1024",
+            "status": "pass"
+          }
+        ],
+        "application-evidence/executable-segments.txt": "/Users/runner/work/_temp/applications/candidate/long/program:\nLoad command 0\n      cmd LC_SEGMENT_64\n  cmdsize 72\n  segname __PAGEZERO\n   vmaddr 0x0000000000000000\n   vmsize 0x0000000100000000\n  fileoff 0\n filesize 0\n  maxprot 0x00000000\n initprot 0x00000000\n   nsects 0\n    flags 0x0\nLoad command 1\n      cmd LC_SEGMENT_64\n  cmdsize 312\n  segname __TEXT\n   vmaddr 0x0000000100000000\n   vmsize 0x0000000000004000\n  fileoff 0\n filesize 16384\n  maxprot 0x00000005\n initprot 0x00000005\n   nsects 3\n    flags 0x0\nSection\n  sectname __text\n   segname __TEXT\n      addr 0x00000001000004f8\n      size 0x0000000000001e70\n    offset 1272\n     align 2^2 (4)\n    reloff 0\n    nreloc 0\n     flags 0x80000400\n reserved1 0\n reserved2 0\nSection\n  sectname __stubs\n   segname __TEXT\n      addr 0x0000000100002368\n      size 0x0000000000000108\n    offset 9064\n     align 2^2 (4)\n    reloff 0\n    nreloc 0\n     flags 0x80000408\n reserved1 0 (index into indirect symbol table)\n reserved2 12 (size of stubs)\nSection\n  sectname __const\n   segname __TEXT\n      addr 0x0000000100002470\n      size 0x0000000000000010\n    offset 9328\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000000\n reserved1 0\n reserved2 0\nLoad command 2\n      cmd LC_SEGMENT_64\n  cmdsize 152\n  segname __DATA_CONST\n   vmaddr 0x0000000100004000\n   vmsize 0x0000000000004000\n  fileoff 16384\n filesize 16384\n  maxprot 0x00000003\n initprot 0x00000003\n   nsects 1\n    flags 0x10\nSection\n  sectname __got\n   segname __DATA_CONST\n      addr 0x0000000100004000\n      size 0x00000000000000b0\n    offset 16384\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000006\n reserved1 22 (index into indirect symbol table)\n reserved2 0\nLoad command 3\n      cmd LC_SEGMENT_64\n  cmdsize 232\n  segname __DATA\n   vmaddr 0x0000000100008000\n   vmsize 0x0000000000008000\n  fileoff 32768\n filesize 16384\n  maxprot 0x00000003\n initprot 0x00000003\n   nsects 2\n    flags 0x0\nSection\n  sectname __data\n   segname __DATA\n      addr 0x0000000100008000\n      size 0x000000000000087c\n    offset 32768\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000000\n reserved1 0\n reserved2 0\nSection\n  sectname __bss\n   segname __DATA\n      addr 0x0000000100008880\n      size 0x0000000000004878\n    offset 0\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000001\n reserved1 0\n reserved2 0\nLoad command 4\n      cmd LC_SEGMENT_64\n  cmdsize 72\n  segname __LINKEDIT\n   vmaddr 0x0000000100010000\n   vmsize 0x0000000000004000\n  fileoff 49152\n filesize 1800\n  maxprot 0x00000001\n initprot 0x00000001\n   nsects 0\n    flags 0x0\nLoad command 5\n      cmd LC_DYLD_CHAINED_FIXUPS\n  cmdsize 16\n  dataoff 49152\n datasize 360\nLoad command 6\n      cmd LC_DYLD_EXPORTS_TRIE\n  cmdsize 16\n  dataoff 49512\n datasize 48\nLoad command 7\n     cmd LC_SYMTAB\n cmdsize 24\n  symoff 49648\n   nsyms 24\n  stroff 50208\n strsize 200\nLoad command 8\n            cmd LC_DYSYMTAB\n        cmdsize 80\n      ilocalsym 0\n      nlocalsym 0\n     iextdefsym 0\n     nextdefsym 2\n      iundefsym 2\n      nundefsym 22\n         tocoff 0\n           ntoc 0\n      modtaboff 0\n        nmodtab 0\n   extrefsymoff 0\n    nextrefsyms 0\n indirectsymoff 50032\n  nindirectsyms 44\n      extreloff 0\n        nextrel 0\n      locreloff 0\n        nlocrel 0\nLoad command 9\n          cmd LC_LOAD_DYLINKER\n      cmdsize 32\n         name /usr/lib/dyld (offset 12)\nLoad command 10\n     cmd LC_UUID\n cmdsize 24\n    uuid 07582D04-02EF-38AF-9E19-633D467B1FF7\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 15.0\n      sdk 15.5\n   ntools 1\n     tool 3\n  version 1167.5\nLoad command 12\n      cmd LC_SOURCE_VERSION\n  cmdsize 16\n  version 0.0\nLoad command 13\n       cmd LC_MAIN\n   cmdsize 24\n  entryoff 8000\n stacksize 0\nLoad command 14\n          cmd LC_LOAD_DYLIB\n      cmdsize 56\n         name /usr/lib/libSystem.B.dylib (offset 24)\n   time stamp 2 Thu Jan  1 00:00:02 1970\n      current version 1351.0.0\ncompatibility version 1.0.0\nLoad command 15\n      cmd LC_FUNCTION_STARTS\n  cmdsize 16\n  dataoff 49560\n datasize 88\nLoad command 16\n      cmd LC_DATA_IN_CODE\n  cmdsize 16\n  dataoff 49648\n datasize 0\nLoad command 17\n      cmd LC_CODE_SIGNATURE\n  cmdsize 16\n  dataoff 50416\n datasize 536\n"
+      }
+    },
+    "linux-arm64": {
+      "artifactId": 10088324951,
+      "evidence": {
+        "baseline-bootstrap-metadata.json": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-baseline",
+          "attestationSubjectSha256": "bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "linux",
+          "profile": "linux-arm64-v0",
+          "qbeBinarySha256": "510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c",
+          "qbeBinarySize": 714640,
+          "qbeTarget": "arm64",
+          "runnerImage": "ubuntu-24.04-arm",
+          "sha256": "bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838",
+          "size": 327448
+        },
+        "candidate-bootstrap-metadata.json": {
+          "architecture": "arm64",
+          "asset": "static-string-compactness-candidate",
+          "attestationSubjectSha256": "bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042",
+          "ccBoundary": "system-cc",
+          "mode": "0755",
+          "os": "linux",
+          "profile": "linux-arm64-v0",
+          "qbeBinarySha256": "510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c",
+          "qbeBinarySize": 714640,
+          "qbeTarget": "arm64",
+          "runnerImage": "ubuntu-24.04-arm",
+          "sha256": "bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042",
+          "size": 327264
+        },
+        "comparison-evidence/catastrophic.tsv": [
+          {
+            "metric": "build_elapsed",
+            "stage": "b2-b3",
+            "role": "baseline",
+            "baseline_median": "1.40",
+            "maximum_observation": "1.42",
+            "ratio": "1.014286",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b2-b3",
+            "role": "baseline",
+            "baseline_median": "64688128",
+            "maximum_observation": "64921600",
+            "ratio": "1.003609",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b2-b3",
+            "role": "candidate",
+            "baseline_median": "1.40",
+            "maximum_observation": "1.41",
+            "ratio": "1.007143",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b2-b3",
+            "role": "candidate",
+            "baseline_median": "64688128",
+            "maximum_observation": "64811008",
+            "ratio": "1.001900",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b3-b4",
+            "role": "baseline",
+            "baseline_median": "1.39",
+            "maximum_observation": "1.40",
+            "ratio": "1.007194",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b3-b4",
+            "role": "baseline",
+            "baseline_median": "64679936",
+            "maximum_observation": "64737280",
+            "ratio": "1.000887",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "b3-b4",
+            "role": "candidate",
+            "baseline_median": "1.39",
+            "maximum_observation": "1.41",
+            "ratio": "1.014388",
+            "maximum": "2.0",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "b3-b4",
+            "role": "candidate",
+            "baseline_median": "64679936",
+            "maximum_observation": "64921600",
+            "ratio": "1.003736",
+            "maximum": "2.0",
+            "status": "pass"
+          }
+        ],
+        "comparison-evidence/code-sections.tsv": [
+          {
+            "target": "linux-arm64",
+            "baseline_text_bytes": "263280",
+            "candidate_text_bytes": "263120",
+            "status": "observed"
+          }
+        ],
+        "comparison-evidence/comparison.tsv": [
+          {
+            "metric": "compiler_bytes",
+            "stage": "fixed-point",
+            "baseline": "327448",
+            "candidate": "327264",
+            "candidate_baseline_ratio": "0.999438",
+            "maximum": "1.05",
+            "status": "pass"
+          },
+          {
+            "metric": "build_elapsed",
+            "stage": "fixed-point-build",
+            "baseline": "1.390000",
+            "candidate": "1.360000",
+            "candidate_baseline_ratio": "0.978417",
+            "maximum": "1.05",
+            "status": "pass"
+          },
+          {
+            "metric": "build_peak_rss",
+            "stage": "fixed-point-build",
+            "baseline": "64688128.000000",
+            "candidate": "64677888.000000",
+            "candidate_baseline_ratio": "0.999842",
+            "maximum": "1.05",
+            "status": "pass"
+          }
+        ],
+        "comparison-evidence/identities.txt": "target=linux-arm64\nbaseline_compiler_bytes=327448\ncandidate_compiler_bytes=327264\ncandidate_compiler_limit=328000\nbaseline_text_bytes=263280\ncandidate_text_bytes=263120\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nbaseline_fixed_point_qbe_size=1150705\nfixed_point_qbe_size=1151406\nfixed_point_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\n",
+        "comparison-evidence/interleaved-measurements.csv": [
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64552960",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64536576",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64540672",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.33",
+            "peak_rss_bytes": "64790528",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.64",
+            "peak_rss_bytes": "64602112",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64798720",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64548864",
+            "status": "0"
+          },
+          {
+            "phase": "warmup",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64671744",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64811008",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64548864",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64552960",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "1",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64684032",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64675840",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.42",
+            "peak_rss_bytes": "64794624",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64675840",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "2",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64688128",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64679936",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64679936",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64679936",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "3",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64659456",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.34",
+            "peak_rss_bytes": "64589824",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64921600",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64671744",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "4",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64737280",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64688128",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64622592",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64679936",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "5",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64757760",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64811008",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.42",
+            "peak_rss_bytes": "64544768",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "1",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64921600",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "6",
+            "order": "2",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64655360",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64688128",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b2-b3",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64679936",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "1",
+            "role": "baseline",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64729088",
+            "status": "0"
+          },
+          {
+            "phase": "retained",
+            "round": "7",
+            "order": "2",
+            "role": "candidate",
+            "stage": "b3-b4",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64684032",
+            "status": "0"
+          }
+        ],
+        "comparison-evidence/measurement-policy.txt": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n",
+        "baseline-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=327448\ninput_sha256=bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838\nb1_size=327448\nb1_sha256=bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838\nb2_size=327448\nb2_sha256=bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838\nb3_size=327448\nb3_sha256=bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838\nb4_size=327448\nb4_sha256=bb0a09e03e7ee0ec80a830258aad1f39a5a5704ce7acbdce3c39d193998ff838\nfixed_point_qbe_size=1150705\nfixed_point_qbe_sha256=5a7c176ca0f1fa887abfe233dcbd45bed73f8d2c294734a799257430598c85e8\ncompiler_size_limit=328000\n",
+        "baseline-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=1.42 peak_rss_bytes=64663552 cpu_seconds=1.42\nb3-b4 elapsed_seconds=1.40 peak_rss_bytes=64684032 cpu_seconds=1.39\n",
+        "baseline-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=328000\n",
+        "baseline-bootstrap-evidence/measurements.csv": [
+          {
+            "stage": "b2-b3",
+            "iteration": "1",
+            "elapsed_seconds": "1.42",
+            "peak_rss_bytes": "64548864",
+            "status": "0",
+            "cpu_seconds": "1.42"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "1",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64684032",
+            "status": "0",
+            "cpu_seconds": "1.39"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "2",
+            "elapsed_seconds": "1.44",
+            "peak_rss_bytes": "64561152",
+            "status": "0",
+            "cpu_seconds": "1.43"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "2",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64671744",
+            "status": "0",
+            "cpu_seconds": "1.40"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "3",
+            "elapsed_seconds": "1.44",
+            "peak_rss_bytes": "64684032",
+            "status": "0",
+            "cpu_seconds": "1.43"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "3",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64798720",
+            "status": "0",
+            "cpu_seconds": "1.35"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "4",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64778240",
+            "status": "0",
+            "cpu_seconds": "1.36"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "4",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64532480",
+            "status": "0",
+            "cpu_seconds": "1.36"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "5",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64663552",
+            "status": "0",
+            "cpu_seconds": "1.39"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "5",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64790528",
+            "status": "0",
+            "cpu_seconds": "1.40"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "6",
+            "elapsed_seconds": "1.44",
+            "peak_rss_bytes": "64548864",
+            "status": "0",
+            "cpu_seconds": "1.43"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "6",
+            "elapsed_seconds": "1.34",
+            "peak_rss_bytes": "64659456",
+            "status": "0",
+            "cpu_seconds": "1.33"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "7",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64679936",
+            "status": "0",
+            "cpu_seconds": "1.36"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "7",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64811008",
+            "status": "0",
+            "cpu_seconds": "1.41"
+          }
+        ],
+        "baseline-bootstrap-evidence/environment.txt": "mode=previous\nprofile=linux-arm64-v0\nrunner_image=ubuntu-24.04-arm\ncompiler_size_limit=328000\nrepository_revision=923f4bd31c70f1e83979034916bf4f781523dcc0\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nLinux runnervmfx5wp 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:12:01 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64 (default), arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+        "baseline-bootstrap-evidence/executable-dependencies.txt": "\nDynamic section at offset 0x41530 contains 27 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x8b8\n 0x0000000000000008 (RELASZ)             240 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000006ffffff9 (RELACOUNT)          6\n 0x0000000000000017 (JMPREL)             0x9a8\n 0x0000000000000002 (PLTRELSZ)           912 (bytes)\n 0x0000000000000003 (PLTGOT)             0x61708\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x2c8\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x744\n 0x000000000000000a (STRSZ)              366 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x728\n 0x0000000000000019 (INIT_ARRAY)         0x61528\n 0x000000000000001b (INIT_ARRAYSZ)       8 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x61520\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000000000000c (INIT)               0x51270\n 0x000000000000000d (FINI)               0x51288\n 0x000000006ffffff0 (VERSYM)             0x6a0\n 0x000000006ffffffe (VERNEED)            0x6f4\n 0x000000006fffffff (VERNEEDNUM)         1\n 0x0000000000000000 (NULL)               0x0\n",
+        "baseline-bootstrap-evidence/process-inventory.txt": "12560 execve(\"/home/runner/work/_temp/baseline-bootstrap-workspace/b4/compiler\", [\"/home/runner/work/_temp/baseline\"..., \"build\", \"/home/runner/work/_temp/baseline\"..., \"--output\", \"/home/runner/work/_temp/baseline\"..., \"--qbe\", \"/home/runner/work/_temp/qbe-1.3/\"..., \"--cc\", \"/usr/bin/cc\", \"--target\", \"linux-arm64-v0\"], 0xffffd81db798 /* 109 vars */) = 0\n12561 execve(\"/home/runner/work/_temp/qbe-1.3/qbe\", [\"/home/runner/work/_temp/qbe-1.3/\"..., \"-t\", \"arm64\", \"-o\", \"/home/runner/work/_temp/baseline\"..., \"/home/runner/work/_temp/baseline\"...], 0xffffe5689dd8 /* 109 vars */) = 0\n12562 execve(\"/usr/bin/cc\", [\"/usr/bin/cc\", \"-xassembler\", \"/home/runner/work/_temp/baseline\"..., \"-fuse-ld=lld\", \"-Wl,--gc-sections,--strip-all,--\"..., \"-lm\", \"-o\", \"/home/runner/work/_temp/baseline\"...], 0xffffe5689dd8 /* 109 vars */) = 0\n12563 execve(\"/snap/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/home/runner/.local/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/opt/pipx_bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/home/runner/.cargo/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/home/runner/.config/composer/vendor/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/home/runner/.dotnet/tools/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/usr/local/sbin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/usr/local/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/usr/sbin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */) = -1 ENOENT (No such file or directory)\n12563 execve(\"/usr/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccKMJQMJ.o\", \"/home/runner/work/_temp/baseline\"...], 0x1af5d60 /* 114 vars */ <unfinished ...>\n12563 <... execve resumed>)             = 0\n12564 execve(\"/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\", [\"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin\", \"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin-opt=/usr/libexec/gcc/aar\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib/ld-linux-aarch64.so.1\", \"-X\", \"-EL\", \"-maarch64linux\", \"--fix-cortex-a53-843419\", \"-pie\", \"-z\", \"now\", \"-fuse-ld=lld\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/baseline\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., ...], 0x1af6580 /* 116 vars */ <unfinished ...>\n12564 <... execve resumed>)             = 0\n12565 execve(\"/usr/bin/ld.lld\", [\"/usr/bin/ld.lld\", \"-plugin\", \"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin-opt=/usr/libexec/gcc/aar\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib/ld-linux-aarch64.so.1\", \"-X\", \"-EL\", \"-maarch64linux\", \"--fix-cortex-a53-843419\", \"-pie\", \"-z\", \"now\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/baseline\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., ...], 0xffffff4933c8 /* 116 vars */ <unfinished ...>\n12565 <... execve resumed>)             = 0\n",
+        "candidate-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=327264\ninput_sha256=bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042\nb1_size=327264\nb1_sha256=bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042\nb2_size=327264\nb2_sha256=bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042\nb3_size=327264\nb3_sha256=bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042\nb4_size=327264\nb4_sha256=bb152b4ca2450e5dd2d65dc5093f614da04f21695f9f6e9362c755ab91a49042\nfixed_point_qbe_size=1151406\nfixed_point_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\ncompiler_size_limit=328000\n",
+        "candidate-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=1.38 peak_rss_bytes=64679936 cpu_seconds=1.38\nb3-b4 elapsed_seconds=1.39 peak_rss_bytes=64671744 cpu_seconds=1.39\n",
+        "candidate-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=328000\n",
+        "candidate-bootstrap-evidence/measurements.csv": [
+          {
+            "stage": "b2-b3",
+            "iteration": "1",
+            "elapsed_seconds": "1.37",
+            "peak_rss_bytes": "64667648",
+            "status": "0",
+            "cpu_seconds": "1.37"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "1",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64745472",
+            "status": "0",
+            "cpu_seconds": "1.36"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "2",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64679936",
+            "status": "0",
+            "cpu_seconds": "1.40"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "2",
+            "elapsed_seconds": "1.39",
+            "peak_rss_bytes": "64733184",
+            "status": "0",
+            "cpu_seconds": "1.39"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "3",
+            "elapsed_seconds": "1.40",
+            "peak_rss_bytes": "64548864",
+            "status": "0",
+            "cpu_seconds": "1.40"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "3",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64671744",
+            "status": "0",
+            "cpu_seconds": "1.36"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "4",
+            "elapsed_seconds": "1.38",
+            "peak_rss_bytes": "64679936",
+            "status": "0",
+            "cpu_seconds": "1.38"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "4",
+            "elapsed_seconds": "1.42",
+            "peak_rss_bytes": "64671744",
+            "status": "0",
+            "cpu_seconds": "1.41"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "5",
+            "elapsed_seconds": "1.36",
+            "peak_rss_bytes": "64761856",
+            "status": "0",
+            "cpu_seconds": "1.35"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "5",
+            "elapsed_seconds": "1.33",
+            "peak_rss_bytes": "64671744",
+            "status": "0",
+            "cpu_seconds": "1.33"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "6",
+            "elapsed_seconds": "1.38",
+            "peak_rss_bytes": "64548864",
+            "status": "0",
+            "cpu_seconds": "1.38"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "6",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64679936",
+            "status": "0",
+            "cpu_seconds": "1.41"
+          },
+          {
+            "stage": "b2-b3",
+            "iteration": "7",
+            "elapsed_seconds": "1.35",
+            "peak_rss_bytes": "64815104",
+            "status": "0",
+            "cpu_seconds": "1.35"
+          },
+          {
+            "stage": "b3-b4",
+            "iteration": "7",
+            "elapsed_seconds": "1.41",
+            "peak_rss_bytes": "64552960",
+            "status": "0",
+            "cpu_seconds": "1.41"
+          }
+        ],
+        "candidate-bootstrap-evidence/environment.txt": "mode=previous\nprofile=linux-arm64-v0\nrunner_image=ubuntu-24.04-arm\ncompiler_size_limit=328000\nrepository_revision=c9305051ba272f1b52c0eb445855a9612da48604\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nLinux runnervmfx5wp 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:12:01 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux\ncc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\nUbuntu LLD 18.1.3 (compatible with GNU linkers)\n/home/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64 (default), arm64_apple, rv64\n\t-d <flags>  dump debug information\n",
+        "candidate-bootstrap-evidence/executable-dependencies.txt": "\nDynamic section at offset 0x41490 contains 27 entries:\n  Tag        Type                         Name/Value\n 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]\n 0x000000000000001e (FLAGS)              BIND_NOW\n 0x000000006ffffffb (FLAGS_1)            Flags: NOW PIE\n 0x0000000000000015 (DEBUG)              0x0\n 0x0000000000000007 (RELA)               0x8b8\n 0x0000000000000008 (RELASZ)             240 (bytes)\n 0x0000000000000009 (RELAENT)            24 (bytes)\n 0x000000006ffffff9 (RELACOUNT)          6\n 0x0000000000000017 (JMPREL)             0x9a8\n 0x0000000000000002 (PLTRELSZ)           912 (bytes)\n 0x0000000000000003 (PLTGOT)             0x61668\n 0x0000000000000014 (PLTREL)             RELA\n 0x0000000000000006 (SYMTAB)             0x2c8\n 0x000000000000000b (SYMENT)             24 (bytes)\n 0x0000000000000005 (STRTAB)             0x744\n 0x000000000000000a (STRSZ)              366 (bytes)\n 0x000000006ffffef5 (GNU_HASH)           0x728\n 0x0000000000000019 (INIT_ARRAY)         0x61488\n 0x000000000000001b (INIT_ARRAYSZ)       8 (bytes)\n 0x000000000000001a (FINI_ARRAY)         0x61480\n 0x000000000000001c (FINI_ARRAYSZ)       8 (bytes)\n 0x000000000000000c (INIT)               0x511d0\n 0x000000000000000d (FINI)               0x511e8\n 0x000000006ffffff0 (VERSYM)             0x6a0\n 0x000000006ffffffe (VERNEED)            0x6f4\n 0x000000006fffffff (VERNEEDNUM)         1\n 0x0000000000000000 (NULL)               0x0\n",
+        "candidate-bootstrap-evidence/process-inventory.txt": "22385 execve(\"/home/runner/work/_temp/candidate-bootstrap-workspace/b4/compiler\", [\"/home/runner/work/_temp/candidat\"..., \"build\", \"/home/runner/work/type-rb-native\"..., \"--output\", \"/home/runner/work/_temp/candidat\"..., \"--qbe\", \"/home/runner/work/_temp/qbe-1.3/\"..., \"--cc\", \"/usr/bin/cc\", \"--target\", \"linux-arm64-v0\"], 0xffffe3235628 /* 109 vars */) = 0\n22386 execve(\"/home/runner/work/_temp/qbe-1.3/qbe\", [\"/home/runner/work/_temp/qbe-1.3/\"..., \"-t\", \"arm64\", \"-o\", \"/home/runner/work/_temp/candidat\"..., \"/home/runner/work/_temp/candidat\"...], 0xffffec9c1468 /* 109 vars */) = 0\n22387 execve(\"/usr/bin/cc\", [\"/usr/bin/cc\", \"-xassembler\", \"/home/runner/work/_temp/candidat\"..., \"-fuse-ld=lld\", \"-Wl,--gc-sections,--strip-all,--\"..., \"-lm\", \"-o\", \"/home/runner/work/_temp/candidat\"...], 0xffffec9c1468 /* 109 vars */) = 0\n22388 execve(\"/snap/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/home/runner/.local/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/opt/pipx_bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/home/runner/.cargo/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/home/runner/.config/composer/vendor/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/home/runner/.dotnet/tools/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/usr/local/sbin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/usr/local/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/usr/sbin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */) = -1 ENOENT (No such file or directory)\n22388 execve(\"/usr/bin/as\", [\"as\", \"-EL\", \"-mabi=lp64\", \"-o\", \"/tmp/ccfVXIhH.o\", \"/home/runner/work/_temp/candidat\"...], 0x32ccfd70 /* 114 vars */ <unfinished ...>\n22388 <... execve resumed>)             = 0\n22389 execve(\"/usr/libexec/gcc/aarch64-linux-gnu/13/collect2\", [\"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin\", \"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin-opt=/usr/libexec/gcc/aar\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib/ld-linux-aarch64.so.1\", \"-X\", \"-EL\", \"-maarch64linux\", \"--fix-cortex-a53-843419\", \"-pie\", \"-z\", \"now\", \"-fuse-ld=lld\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/candidat\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., ...], 0x32cd0590 /* 116 vars */ <unfinished ...>\n22389 <... execve resumed>)             = 0\n22390 execve(\"/usr/bin/ld.lld\", [\"/usr/bin/ld.lld\", \"-plugin\", \"/usr/libexec/gcc/aarch64-linux-g\"..., \"-plugin-opt=/usr/libexec/gcc/aar\"..., \"-plugin-opt=-fresolution=/tmp/cc\"..., \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"-plugin-opt=-pass-through=-lc\", \"-plugin-opt=-pass-through=-lgcc\", \"-plugin-opt=-pass-through=-lgcc_\"..., \"--build-id\", \"--eh-frame-hdr\", \"--hash-style=gnu\", \"--as-needed\", \"-dynamic-linker\", \"/lib/ld-linux-aarch64.so.1\", \"-X\", \"-EL\", \"-maarch64linux\", \"--fix-cortex-a53-843419\", \"-pie\", \"-z\", \"now\", \"-z\", \"relro\", \"-o\", \"/home/runner/work/_temp/candidat\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"/usr/lib/gcc/aarch64-linux-gnu/1\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., \"-L/usr/lib/gcc/aarch64-linux-gnu\"..., ...], 0xfffff083ec58 /* 116 vars */ <unfinished ...>\n22390 <... execve resumed>)             = 0\n",
+        "application-evidence/sizes.tsv": [
+          {
+            "case": "no-long",
+            "artifact": "qbe",
+            "baseline_bytes": "32182",
+            "candidate_bytes": "32182",
+            "added_bytes": "0",
+            "maximum_added_bytes": "4096",
+            "status": "pass"
+          },
+          {
+            "case": "no-long",
+            "artifact": "executable",
+            "baseline_bytes": "15096",
+            "candidate_bytes": "15096",
+            "added_bytes": "0",
+            "maximum_added_bytes": "1024",
+            "status": "pass"
+          },
+          {
+            "case": "long",
+            "artifact": "qbe",
+            "baseline_bytes": "40362",
+            "candidate_bytes": "40362",
+            "added_bytes": "0",
+            "maximum_added_bytes": "4096",
+            "status": "pass"
+          },
+          {
+            "case": "long",
+            "artifact": "executable",
+            "baseline_bytes": "16808",
+            "candidate_bytes": "16808",
+            "added_bytes": "0",
+            "maximum_added_bytes": "1024",
+            "status": "pass"
+          }
+        ],
+        "application-evidence/executable-segments.txt": "\nElf file type is DYN (Position-Independent Executable file)\nEntry point 0x10b40\nThere are 10 program headers, starting at offset 64\n\nProgram Headers:\n  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align\n  PHDR           0x000040 0x0000000000000040 0x0000000000000040 0x000230 0x000230 R   0x8\n  INTERP         0x000270 0x0000000000000270 0x0000000000000270 0x00001b 0x00001b R   0x1\n      [Requesting program interpreter: /lib/ld-linux-aarch64.so.1]\n  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x000b28 0x000b28 R   0x10000\n  LOAD           0x000b40 0x0000000000010b40 0x0000000000010b40 0x0022c0 0x0022c0 R E 0x10000\n  LOAD           0x002e00 0x0000000000022e00 0x0000000000022e00 0x0002d0 0x001200 RW  0x10000\n  LOAD           0x0030d0 0x00000000000330d0 0x00000000000330d0 0x000884 0x005108 RW  0x10000\n  DYNAMIC        0x002e10 0x0000000000022e10 0x0000000000022e10 0x0001b0 0x0001b0 RW  0x8\n  GNU_RELRO      0x002e00 0x0000000000022e00 0x0000000000022e00 0x0002d0 0x001200 R   0x1\n  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0\n  NOTE           0x00028c 0x000000000000028c 0x000000000000028c 0x000038 0x000038 R   0x4\n\n Section to Segment mapping:\n  Segment Sections...\n   00     \n   01     .interp \n   02     .interp .note.ABI-tag .note.gnu.build-id .dynsym .gnu.version .gnu.version_r .gnu.hash .dynstr .rela.dyn .rela.plt .rodata .eh_frame \n   03     .text .init .fini .plt \n   04     .fini_array .init_array .dynamic .got .got.plt .relro_padding \n   05     .tm_clone_table .data .bss \n   06     .dynamic \n   07     .fini_array .init_array .dynamic .got .got.plt .relro_padding \n   08     \n   09     .note.ABI-tag .note.gnu.build-id \n"
+      }
+    }
+  },
+  "crossTarget": {
+    "artifactId": 10088349788,
+    "evidence": "darwin_arm64_compiler_bytes=349256\nlinux_arm64_compiler_bytes=327264\nbaseline_combined_compiler_bytes=693216\ncombined_compiler_bytes=676520\ncombined_compiler_limit=694000\ndarwin_arm64_text_bytes=260512\nlinux_arm64_text_bytes=263120\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ntarget_neutral_qbe_bytes=1151406\ntarget_neutral_qbe_sha256=11f58bff93f3b9290e19a5c935735793cbd7958b5f17cff3d8b8965f3d30cbb0\ncandidate_spectral_qbe_bytes=not-applicable\ncandidate_spectral_qbe_sha256=not-applicable\n"
+  },
+  "allSelectedAuthorities": [
+    {
+      "name": "plan",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333341845"
+    },
+    {
+      "name": "quick",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333370088"
+    },
+    {
+      "name": "tooling / verify",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333370097"
+    },
+    {
+      "name": "documentation / verify",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333370170"
+    },
+    {
+      "name": "native / verify",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956243"
+    },
+    {
+      "name": "memory / Verify linux-arm64 persistent worker memory",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956336"
+    },
+    {
+      "name": "memory / Verify darwin-arm64 persistent worker memory",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956369"
+    },
+    {
+      "name": "targets / Regress Ubuntu 24.04 arm64",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956376"
+    },
+    {
+      "name": "targets / Verify Ubuntu 24.04 x64",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956415"
+    },
+    {
+      "name": "cli / build (ubuntu-24.04-arm, linux-arm64)",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956817"
+    },
+    {
+      "name": "cli / build (macos-14, darwin-arm64)",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102333956846"
+    },
+    {
+      "name": "memory / Verify shared portable evidence and combined size",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102334238648"
+    },
+    {
+      "name": "targets / Compare target-neutral QBE",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102334648104"
+    },
+    {
+      "name": "performance / Compare linux-arm64",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102336708640"
+    },
+    {
+      "name": "performance / Compare darwin-arm64",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102336708643"
+    },
+    {
+      "name": "performance / Verify cross-target identity and combined size",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102337510626"
+    },
+    {
+      "name": "Native CI acceptance",
+      "status": "success",
+      "url": "https://github.com/type-rb/type-rb-native/actions/runs/34309605826/job/102337543425"
+    }
+  ],
+  "status": "PASS: all 17 selected authorities on first attempt",
+  "acceptedMerge": "a714f9b20b1b2d9ddec29878a1982a18ed110a6e"
+}

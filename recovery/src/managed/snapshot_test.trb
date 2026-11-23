@@ -1,0 +1,212 @@
+import { decode_bootstrap_snapshot, decode_recovery_managed_snapshot } from managed/snapshot
+import { native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_snapshot_fixture(): String
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	if root == nil
+		return ""
+	end
+	case native_read_text(root + "/fixtures/recovery-managed/valid/managed.json")
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+def _recovery_managed_managed_snapshot_fixture(): String
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	if root == nil
+		return ""
+	end
+	case native_read_text(root + "/fixtures/recovery-managed/valid/managed-values.json")
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+def _recovery_function_count_snapshot(count: Integer): String
+	mut functions := ""
+	mut index := 0
+	while index < count
+		if index > 0
+			functions += ","
+		end
+		functions += "{\"id\":\"example#main\",\"name\":\"main\",\"captures\":[],\"parameters\":[],\"result\":\"Void\",\"entry\":\"b0\",\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":1},\"blocks\":[{\"id\":\"b0\",\"parameters\":[],\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":1},\"instructions\":[],\"terminator\":{\"op\":\"return\",\"value\":null,\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":1}}}]}".replace_all("example#main", "example#f" + index.to_s())
+		index += 1
+	end
+	return "{\"format\":\"type-rb-bootstrap-snapshot\",\"version\":4,\"module\":\"example\",\"entryFunction\":\"example#f0\",\"sources\":[{\"id\":\"main\",\"path\":\"main.trb\"}],\"types\":[],\"functions\":[" + functions + "]}"
+end
+
+def _recovery_source_count_snapshot(count: Integer): String
+	mut sources := "{\"id\":\"main\",\"path\":\"main.trb\"}"
+	mut index := 1
+	while index < count
+		source_id := "source" + index.to_s()
+		sources += ",{\"id\":\"" + source_id + "\",\"path\":\"" + source_id + ".trb\"}"
+		index += 1
+	end
+	return _recovery_function_count_snapshot(1).replace_all(
+		"\"sources\":[{\"id\":\"main\",\"path\":\"main.trb\"}]",
+		"\"sources\":[" + sources + "]",
+	)
+end
+
+describe("Managed recovery snapshot v4") do
+	test("bounds compiler recovery sources separately from ordinary snapshots") do
+		[256, 257, 512, 513].each do |count|
+			source := _recovery_source_count_snapshot(count)
+			case decode_recovery_managed_snapshot(source)
+			when Result::Ok(native_module)
+				expect(count).to_equal(256)
+				expect(native_module.sources.size()).to_equal(count)
+			when Result::Err(diagnostic)
+				expect(count > 256).to_be_true()
+				expect(diagnostic.code).to_equal("TRBN0005")
+				expect(diagnostic.path).to_equal("/sources")
+			end
+			case decode_bootstrap_snapshot(source)
+			when Result::Ok(native_module)
+				expect(count <= 512).to_be_true()
+				expect(native_module.sources.size()).to_equal(count)
+			when Result::Err(diagnostic)
+				expect(count).to_equal(513)
+				expect(diagnostic.code).to_equal("TRBN0005")
+				expect(diagnostic.path).to_equal("/sources")
+			end
+		end
+	end
+
+	test("bounds compiler recovery bytes separately from ordinary snapshots") do
+		base := _recovery_function_count_snapshot(1)
+		mut padding := " "
+		while padding.size() < 226492417
+			padding += padding
+		end
+		[4194304, 4194305, 134217729, 167772161, 201326592, 201326593, 218103808, 218103809, 222298112, 222298113, 226492416, 226492417].each do |size|
+			source := base + padding.slice(0...(size - base.size()))
+			case decode_recovery_managed_snapshot(source)
+			when Result::Ok(_module)
+				expect(size).to_equal(4194304)
+			when Result::Err(diagnostic)
+				expect(size > 4194304).to_be_true()
+				expect(diagnostic.message).to_equal("snapshot exceeds the Managed recovery 4 MiB input limit")
+			end
+			case decode_bootstrap_snapshot(source)
+			when Result::Ok(_module)
+				expect(size <= 226492416).to_be_true()
+			when Result::Err(diagnostic)
+				expect(size).to_equal(226492417)
+				expect(diagnostic.message).to_equal("snapshot exceeds the Native bootstrap 216 MiB input limit")
+			end
+		end
+	end
+
+	test("bounds compiler recovery functions separately from ordinary snapshots") do
+		[512, 513, 1024, 1025, 2048, 2049, 2304, 2305, 2560, 2561].each do |count|
+			source := _recovery_function_count_snapshot(count)
+			case decode_recovery_managed_snapshot(source)
+			when Result::Ok(native_module)
+				expect(count).to_equal(512)
+				expect(native_module.functions.size()).to_equal(count)
+			when Result::Err(diagnostic)
+				expect(count > 512).to_be_true()
+				expect(diagnostic.code).to_equal("TRBN0005")
+				expect(diagnostic.path).to_equal("/functions")
+			end
+			case decode_bootstrap_snapshot(source)
+			when Result::Ok(native_module)
+				expect(count <= 2560).to_be_true()
+				expect(native_module.functions.size()).to_equal(count)
+			when Result::Err(diagnostic)
+				expect(count).to_equal(2561)
+				expect(diagnostic.code).to_equal("TRBN0005")
+				expect(diagnostic.path).to_equal("/functions")
+			end
+		end
+	end
+
+	test("strictly decodes aggregate type and instruction definitions") do
+		case decode_recovery_managed_snapshot(_recovery_managed_snapshot_fixture())
+		when Result::Ok(native_module)
+			expect(native_module.id).to_equal("example")
+			expect(native_module.types.size()).to_equal(2)
+			expect(native_module.functions.size()).to_equal(1)
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("strictly decodes managed types, captures, and operations") do
+		case decode_recovery_managed_snapshot(_recovery_managed_managed_snapshot_fixture())
+		when Result::Ok(native_module)
+			expect(native_module.id).to_equal("managed")
+			expect(native_module.types.size()).to_equal(3)
+			expect(native_module.functions.size()).to_equal(2)
+			expect(native_module.functions[0].captures.size()).to_equal(1)
+			expect(native_module.functions[1].blocks[0].instructions.size()).to_equal(14)
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects a closure whose captures do not match its function") do
+		source := _recovery_managed_managed_snapshot_fixture().replace_all("\"captures\": [\"suffix\"]", "\"captures\": []")
+		case decode_recovery_managed_snapshot(source)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.message).to_equal("closure capture count does not match the function")
+		end
+	end
+
+	test("rejects version and unknown root fields deterministically") do
+		source := _recovery_managed_snapshot_fixture()
+		case decode_recovery_managed_snapshot(source.replace_all("\"version\": 4", "\"version\": 5"))
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.path).to_equal("/version")
+		end
+		unknown := source.replace_all("\"functions\": [", "\"unexpected\": true, \"functions\": [")
+		case decode_recovery_managed_snapshot(unknown)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0002")
+			expect(diagnostic.path).to_equal("/unexpected")
+		end
+	end
+
+	test("rejects unsupported operations and Void fields") do
+		source := _recovery_managed_snapshot_fixture()
+		unsupported := source.replace_all("\"op\": \"record_construct\"", "\"op\": \"record_build\"")
+		case decode_recovery_managed_snapshot(unsupported)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.message).to_equal("unsupported Managed recovery instruction")
+		end
+		void_field := source.replace_all(
+			"{ \"name\": \"x\", \"type\": \"Integer\" }",
+			"{ \"name\": \"x\", \"type\": \"Void\" }",
+		)
+		case decode_recovery_managed_snapshot(void_field)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.message).to_equal("unsupported Managed recovery value type")
+		end
+	end
+end

@@ -1,0 +1,180 @@
+import { declaration_start } from frontend/syntax/syntax_forms
+import { skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { captured_body_locals, lambda_captures, lambda_names } from frontend/checking/body/lambdas
+import { check_block_value } from frontend/checking/body/statements
+import { check_expected, type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { builtin_result_type, builtin_result_variant } from frontend/checking/builtins/results
+import { binding_scope_check } from frontend/checking/nominal/results
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { find_record_in_module } from frontend/resolution/declaration_lookup
+import { record_type } from frontend/resolution/type_resolution
+import { resolve_body_names } from frontend/resolution/body_resolution
+import { CallBlockSyntax, CheckedFileBody } from frontend/types/callable_types
+import { contained_scoped_resource, scoped_resource_name } from frontend/types/resource_types
+import { mir_control_return } from mir/build/control
+import { bind_captured_body, declare_captured_body } from mir/lowering/lambdas
+import { mir_enum_construct } from mir/lowering/enums
+import { lower_file_scope } from mir/lowering/file_scopes
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { load_standard_source } from project/standard_library
+import { binding_use_parameter } from state/binding_kinds
+import { checked_body_new } from state/checked_body
+import { CheckedLocals, local_require_use } from state/local_state
+import { mir_state_return_value_slot } from state/local_slots
+import { standard_source_unit } from state/standard_source_kinds
+import { CompilerState, diagnostic, has_diagnostic, local_add } from state/state
+import { load_integer, sparse_integer_at, store_integer } from support/storage
+
+# Statement boundaries are parser-owned; do not mistake a preceding value for
+# the result of a trailing loop or declaration.
+def file_body_has_result(state: CompilerState, syntax: CallBlockSyntax): Boolean
+	mut position := [syntax.body_start]
+	mut last := -1
+	skip_newlines(state, position)
+	while position[0] < syntax.body_finish
+		last = position[0]
+		finish := sparse_integer_at(state.parsed.statement_finishes, last)
+		if finish <= last || finish > syntax.body_finish
+			return false
+		end
+		position[0] = finish
+		skip_newlines(state, position)
+	end
+	if last < 0
+		return false
+	end
+	if token_is(state, last, "while") || declaration_start(state, last)
+		return false
+	end
+	return sparse_integer_at(state.parsed.iteration_origins, last) == 0
+end
+
+# The resource parameter comes from a resolved acquisition owner. This routine
+# never accepts a user-supplied callable signature or produces a closure value.
+def analyze_file_body(mut state: CompilerState, mut parent: CheckedLocals, syntax: CallBlockSyntax, resource_type: String, declared: String): Integer
+	return analyze_scoped_body(state, parent, syntax, resource_type, declared, false)
+end
+
+def analyze_scoped_body(mut state: CompilerState, mut parent: CheckedLocals, syntax: CallBlockSyntax, resource_type: String, declared: String, transaction: Boolean): Integer
+	line := load_integer(state.source_tokens.token_lines, syntax.origin)
+	mut label := "File.open"
+	mut error_name := "FileSystemError"
+	mut parameter_error := "File.open requires one immutable File block parameter"
+	if transaction
+		label = "transaction"
+		error_name = "DbError"
+		parameter_error = "transaction requires one immutable Transaction block parameter"
+	end
+	if (!transaction && scoped_resource_name(state, resource_type) != "File") || syntax.parameters.size() != 1
+		diagnostic(state, "TRBN4004", line, parameter_error)
+		return -1
+	end
+	# This provisional success type is used only to check try's error channel.
+	# The completed body must still yield an explicit value; Unit is not inserted.
+	unit_source := load_standard_source(state, standard_source_unit(), 1)
+	unit := record_type(find_record_in_module(state, unit_source, "Unit"))
+	boundary := builtin_result_type(state, unit, error_name)
+	mut locals := captured_body_locals(state, parent)
+	locals.value_block[0] = parent.value_block[0]
+	locals.file_body[0] = !transaction
+	locals.transaction_body[0] = transaction
+	locals.lambda_result.push(boundary)
+	parameter := syntax.parameters[0]
+	if parameter.mutable != 0 || parameter.type_name != ""
+		diagnostic(state, "TRBN4004", line, parameter_error)
+		return -1
+	end
+	if local_add(state, locals, parameter.name, resource_type, 0, load_integer(state.source_tokens.token_lines, parameter.origin))
+		local_require_use(locals, locals.count[0] - 1, parameter.name, parameter.origin, binding_use_parameter())
+	end
+	previous := state.callables.checked[0]
+	body := state.callables.checked_bodies.size()
+	state.callables.checked_bodies.push(checked_body_new(-1, syntax.body_start, syntax.body_finish + 1))
+	state.callables.checked[0] = state.callables.checked_bodies[body]
+	state.callables.checked[0].generic_binding[0] = previous.generic_binding[0]
+	state.callables.checked[0].collection_contexts[0] = previous.collection_contexts[0]
+	state.callables.checked[0].collection_witnesses[0] = previous.collection_witnesses[0]
+	state.callables.checked[0].collection_context_regions[0] = previous.collection_context_regions[0]
+	state.callables.checked[0].collection_contexts_checked[0] = previous.collection_contexts_checked[0]
+	mut names := lambda_names(locals, state.source_tokens.token_count[0] + 1)
+	mut yielded := "Never"
+	if resolve_body_names(state, syntax.body_start, syntax.body_finish, names)
+		declare_default_functions(state)
+		mut position := [syntax.body_start]
+		value := check_block_value(state, position, locals, boundary, -1, true, "", locals.capture_parents.size())
+		binding_scope_check(state, locals, locals.capture_parents.size())
+		if !has_diagnostic(state)
+			if position[0] != syntax.body_finish
+				diagnostic(state, "TRBN4004", line, "checker did not consume the complete " + label + " block")
+			elsif contained_scoped_resource(state, value.type_name) != ""
+				diagnostic(state, "TRBN4004", line, "scoped resource cannot be yielded from a " + label + " block")
+			elsif value.type_name == "Void" || !file_body_has_result(state, syntax)
+				diagnostic(state, "TRBN4004", line, label + " block must end with a result expression")
+			else
+				yielded = value.type_name
+				if declared != ""
+					check_expected(state, yielded, declared, line)
+					yielded = declared
+				end
+			end
+		end
+	end
+	state.callables.checked[0] = previous
+	if has_diagnostic(state)
+		return -1
+	end
+	captures := lambda_captures(state, parent, locals, syntax.origin, !transaction)
+	result_type := builtin_result_type(state, yielded, error_name)
+	if has_diagnostic(state)
+		return -1
+	end
+	mut name := "$file_body"
+	if transaction
+		name = "$transaction_body"
+	end
+	function := declare_captured_body(state, name, syntax.origin, syntax.body_start, syntax.body_finish, body, captures, syntax.parameters, [resource_type], result_type)
+	checked := CheckedFileBody.new(origin: syntax.origin, resource_type: resource_type, result_type: result_type, yield_type: yielded, body: body, inherited_count: locals.capture_parents.size(), function: [function], captures: captures)
+	state.callables.file_bodies.push(checked)
+	state.callables.checked[0].file_bodies.push(checked)
+	store_integer(state.callables.function_file_bodies, function, state.callables.file_bodies.size())
+	return state.callables.file_bodies.size() - 1
+end
+
+def file_body_bind_captures(mut state: CompilerState, mut locals: CheckedLocals, function: Integer): Integer
+	encoded := sparse_integer_at(state.callables.function_file_bodies, function)
+	if encoded == 0
+		return 0
+	end
+	body := state.callables.file_bodies[encoded - 1]
+	locals.file_body[0] = scoped_resource_name(state, body.resource_type) == "File"
+	locals.transaction_body[0] = !locals.file_body[0]
+	return bind_captured_body(state, locals, function, body.inherited_count, body.captures, body.result_type)
+end
+
+def lower_checked_file_body(mut state: CompilerState, mut locals: CheckedLocals, body_origin: Integer, error: Integer, path: CheckedValue, mode: CheckedValue): CheckedValue
+	state.callables.checked[0].file_bodies.each do |body|
+		if body.origin == body_origin
+			return lower_file_scope(state, locals, body, error, path, mode, body_origin)
+		end
+	end
+	return type_diagnostic(state, load_integer(state.source_tokens.token_lines, body_origin), "File scope has no analyzed body")
+end
+
+# The body's try exits return the same Result type as this implicit success
+# return. The surrounding MIR File operation performs cleanup on either path.
+def check_file_body_function(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, body: CheckedFileBody)
+	origin := position[0]
+	mut value := check_block_value(state, position, locals, body.result_type, -1, true, body.yield_type, 0)
+	if has_diagnostic(state) || value.type_name == "Never"
+		return
+	end
+	check_expected(state, value.type_name, body.yield_type, load_integer(state.source_tokens.token_lines, origin))
+	if has_diagnostic(state)
+		return
+	end
+	value = mir_nullable_coerce(state, locals, value, body.yield_type, origin)
+	result := mir_enum_construct(state, locals, builtin_result_variant(state, body.result_type, true), [checked_mir_value(value)], origin)
+	locals.mir_state[mir_state_return_value_slot()] = checked_mir_value(result)
+	mir_control_return(state, locals, checked_mir_value(result))
+end

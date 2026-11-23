@@ -1,0 +1,273 @@
+import { mir_op_file_scope } from mir/model/instructions
+import { mir_terminator_branch, mir_terminator_jump, mir_terminator_return } from mir/model/control
+import { mir_op_array_position, mir_op_array_store, mir_op_callable_new, mir_op_direct_call, mir_op_enum_new, mir_op_hash_new, mir_op_hash_set, mir_op_indirect_call, mir_op_record_new, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_singleton_literal, mir_op_string_compare, mir_op_string_concat, mir_op_string_index, mir_op_string_literal, mir_op_string_replace } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirBlock, MirFunction, MirInstruction, MirModule, MirStringConcat, mir_function_index } from mir/model/module
+import { mir_string_concat_index } from mir/analysis/string_concats
+
+def mir_live_add(mut live: Array<Integer>, value: Integer)
+	mut index := 0
+	while index < live.size()
+		if live[index] == value
+			return
+		end
+		if live[index] > value
+			break
+		end
+		index += 1
+	end
+	live.push(value)
+	mut cursor := live.size() - 1
+	while cursor > index
+		live[cursor] = live[cursor - 1]
+		cursor -= 1
+	end
+	live[index] = value
+end
+
+def mir_live_equal(left: Array<Integer>, right: Array<Integer>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index] != right[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# Sparse MIR IDs need compact membership storage. Snapshot v4 cannot use an
+# Integer-keyed Hash here; ordered IDs append cheaply and reordered IDs insert.
+def mir_managed_add(mut managed: Array<Integer>, value: Integer)
+	if managed.size() == 0 || managed[managed.size() - 1] < value
+		managed.push(value)
+	else
+		mir_live_add(managed, value)
+	end
+end
+
+def mir_managed_contains(managed: Array<Integer>, value: Integer): Boolean
+	mut start := 0
+	mut finish := managed.size()
+	while start < finish
+		middle := start + (finish - start) / 2
+		if managed[middle] == value
+			return true
+		end
+		if managed[middle] < value
+			start = middle + 1
+		else
+			finish = middle
+		end
+	end
+	return false
+end
+
+def mir_live_operand(managed: Array<Integer>, mut live: Array<Integer>, value: Integer)
+	if mir_managed_contains(managed, value)
+		mir_live_add(live, value)
+	end
+end
+
+def mir_live_before(native_module: MirModule, managed: Array<Integer>, instruction: MirInstruction, after: Array<Integer>): Array<Integer>
+	mut live: Array<Integer> := []
+	after.each do |value|
+		if value != instruction.result
+			live.push(value)
+		end
+	end
+	kind := instruction.kind
+	if kind == mir_op_file_scope()
+		mir_live_operand(managed, live, instruction.first)
+		mir_live_operand(managed, live, instruction.second)
+		scope := native_module.file_scopes[instruction.payload]
+		mut index := scope.argument_start
+		while index < scope.argument_start + scope.argument_count
+			mir_live_operand(managed, live, native_module.arguments[index])
+			index += 1
+		end
+	elsif kind == mir_op_indirect_call()
+		mir_live_operand(managed, live, instruction.first)
+		mut index := instruction.payload
+		while index < instruction.payload + instruction.second
+			mir_live_operand(managed, live, native_module.arguments[index])
+			index += 1
+		end
+	elsif kind == mir_op_direct_call()
+		call := native_module.calls[instruction.payload]
+		mut index := call.argument_start
+		while index < call.argument_start + call.argument_count
+			mir_live_operand(managed, live, native_module.arguments[index])
+			index += 1
+		end
+	elsif kind == mir_op_record_new() || kind == mir_op_enum_new() || kind == mir_op_callable_new()
+		mut index := instruction.first
+		while index < instruction.first + instruction.second
+			mir_live_operand(managed, live, native_module.arguments[index])
+			index += 1
+		end
+	elsif kind != mir_op_scalar_literal() && kind != mir_op_string_literal() && kind != mir_op_singleton_literal() && kind != mir_op_hash_new()
+		mir_live_operand(managed, live, instruction.first)
+		if kind == mir_op_scalar_binary() || kind == mir_op_string_concat() || kind == mir_op_string_compare() || kind == mir_op_string_index() || kind >= mir_op_array_position()
+			mir_live_operand(managed, live, instruction.second)
+		end
+	end
+	if kind == mir_op_array_store() || kind == mir_op_hash_set() || kind == mir_op_string_replace()
+		mir_live_operand(managed, live, instruction.payload)
+	end
+	return live
+end
+
+# Only demanded target parameters make their incoming arguments live. Carrying
+# every lexical binding on an edge must not retain an otherwise dead object.
+def mir_live_edge(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, target: Integer, start: Integer, mut live: Array<Integer>, incoming: Array<Array<Integer>>)
+	index := blocks[integer_string(target)]
+	block := native_module.blocks[function.block_start + index]
+	incoming[index].each do |value|
+		mut source := value
+		mut parameter := 0
+		while parameter < block.parameter_count
+			if native_module.arguments[block.parameter_start + parameter] == value
+				source = native_module.arguments[start + parameter]
+			end
+			parameter += 1
+		end
+		mir_live_add(live, source)
+	end
+end
+
+def mir_concat_live_before(native_module: MirModule, plans: Array<MirStringConcat>, managed: Array<Integer>, index: Integer, after: Array<Integer>): Array<Integer>
+	plan := mir_string_concat_index(plans, index)
+	if plan == -1
+		return mir_live_before(native_module, managed, native_module.instructions[index], after)
+	end
+	if plans[plan].fragments.size() == 0
+		return after
+	end
+	mut live: Array<Integer> := []
+	after.each do |value|
+		if value != native_module.instructions[index].result
+			live.push(value)
+		end
+	end
+	plans[plan].fragments.each do |value|
+		mir_live_operand(managed, live, value)
+	end
+	return live
+end
+
+def mir_live_exit(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, managed: Array<Integer>, block: MirBlock, incoming: Array<Array<Integer>>): Array<Integer>
+	mut live: Array<Integer> := []
+	if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+		mir_live_edge(native_module, function, blocks, block.first_target, block.first_argument_start, live, incoming)
+	end
+	if block.terminator == mir_terminator_branch()
+		mir_live_edge(native_module, function, blocks, block.second_target, block.second_argument_start, live, incoming)
+	end
+	if block.terminator == mir_terminator_return()
+		mir_live_operand(managed, live, block.return_value)
+	end
+	return live
+end
+
+# Each block transfers (live-out - definitions) union uses. Summarize its
+# instructions once; repeated fixed-point steps must not allocate one live set
+# per instruction. Parameters stay live here so edges can substitute them.
+record MirLiveTransfer
+	uses: Array<Integer>
+	definitions: Array<Integer>
+end
+
+def mir_live_transfer(native_module: MirModule, plans: Array<MirStringConcat>, managed: Array<Integer>, block: MirBlock): MirLiveTransfer
+	mut uses: Array<Integer> := []
+	mut definitions: Array<Integer> := []
+	mut cursor := block.instruction_start + block.instruction_count - 1
+	while cursor >= block.instruction_start
+		instruction := native_module.instructions[cursor]
+		uses = mir_concat_live_before(native_module, plans, managed, cursor, uses)
+		mir_live_operand(managed, definitions, instruction.result)
+		cursor -= 1
+	end
+	return MirLiveTransfer.new(uses: uses, definitions: definitions)
+end
+
+def mir_live_apply(transfer: MirLiveTransfer, after: Array<Integer>): Array<Integer>
+	mut live: Array<Integer> := []
+	mut definition := 0
+	after.each do |value|
+		while definition < transfer.definitions.size() && transfer.definitions[definition] < value
+			definition += 1
+		end
+		if definition == transfer.definitions.size() || transfer.definitions[definition] != value
+			live.push(value)
+		end
+	end
+	transfer.uses.each do |value|
+		mir_live_add(live, value)
+	end
+	return live
+end
+
+# All blocks participate, including unreachable regions. A changed live-in set
+# schedules only predecessors, with both branch edges retained by mir_live_exit.
+# Queue storage is bounded by the block count, independent of sparse value IDs.
+def mir_live_incoming(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, managed: Array<Integer>): Array<Array<Integer>>
+	mut plans: Array<MirStringConcat> := []
+	function_index := mir_function_index(native_module, function.id)
+	if function_index >= 0 && function_index < native_module.string_concats.size()
+		plans = native_module.string_concats[function_index]
+	end
+	return mir_live_incoming_with_concats(native_module, function, blocks, managed, plans)
+end
+
+# Other proofs supply their own plans rather than trusting stored optimization
+# state. An empty plan computes raw instruction liveness.
+def mir_live_incoming_with_concats(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, managed: Array<Integer>, plans: Array<MirStringConcat>): Array<Array<Integer>>
+	mut incoming: Array<Array<Integer>> := []
+	mut predecessors: Array<Array<Integer>> := []
+	mut transfers: Array<MirLiveTransfer> := []
+	mut pending: Array<Integer> := []
+	mut queued: Array<Boolean> := []
+	mut index := 0
+	while index < function.block_count
+		incoming.push([])
+		predecessors.push([])
+		pending.push(index)
+		queued.push(true)
+		transfers.push(mir_live_transfer(native_module, plans, managed, native_module.blocks[function.block_start + index]))
+		index += 1
+	end
+	index = 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+			predecessors[blocks[integer_string(block.first_target)]].push(index)
+		end
+		if block.terminator == mir_terminator_branch()
+			predecessors[blocks[integer_string(block.second_target)]].push(index)
+		end
+		index += 1
+	end
+	mut depth := pending.size()
+	while depth > 0
+		depth -= 1
+		index = pending[depth]
+		queued[index] = false
+		block := native_module.blocks[function.block_start + index]
+		live := mir_live_apply(transfers[index], mir_live_exit(native_module, function, blocks, managed, block, incoming))
+		if !mir_live_equal(incoming[index], live)
+			incoming[index] = live
+			predecessors[index].each do |previous|
+				if !queued[previous]
+					queued[previous] = true
+					pending[depth] = previous
+					depth += 1
+				end
+			end
+		end
+	end
+	return incoming
+end

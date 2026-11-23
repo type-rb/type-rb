@@ -1,0 +1,433 @@
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_function_control, mir_terminator_return } from mir/model/control
+import { mir_op_callable_new, mir_op_direct_call, mir_op_enum_field, mir_op_enum_new, mir_op_enum_test } from mir/model/instructions
+import { mir_enum_id } from mir/model/types
+import { MirBlock, MirFunction, MirModule, mir_block_index, mir_function_index } from mir/model/module
+import { mir_managed_type } from mir/model/types
+import { mir_live_before, mir_managed_add, mir_managed_contains } from mir/analysis/liveness
+
+# A caller-owned enum slot has the ordinary header/tag/one-field layout, but
+# has no GC allocation record. Derive this narrow direct-call ABI only from
+# verified SSA and the existing live-before safe-point plans.
+def mir_enum_stack_selected(plans: Array<Integer>, function_id: Integer): Boolean
+	if function_id < 0 || function_id >= plans.size()
+		return false
+	end
+	return plans[function_id] == 1
+end
+
+def mir_enum_stack_result_type(native_module: MirModule, function_id: Integer): Integer
+	if function_id < 0 || function_id >= native_module.signatures.size()
+		return 0
+	end
+	name := native_module.signatures[function_id].result_type
+	mut index := 0
+	while index < native_module.types.size()
+		if native_module.types[index].name == name
+			return index + mir_type_composite_start()
+		end
+		index += 1
+	end
+	return 0
+end
+
+def mir_enum_stack_shape(native_module: MirModule, type_id: Integer): Boolean
+	owner := mir_enum_id(native_module, type_id)
+	if owner < 0
+		return false
+	end
+	mut payloads := 0
+	native_module.enum_variants.each do |variant|
+		if variant.owner == owner
+			if variant.field_count > 1
+				return false
+			end
+			if variant.field_count == 1
+				payloads += 1
+			end
+		end
+	end
+	# An all-payloadless enum already uses static objects without allocation.
+	return payloads > 0
+end
+
+def mir_enum_stack_scalar_payloads(native_module: MirModule, type_id: Integer): Boolean
+	owner := mir_enum_id(native_module, type_id)
+	if owner < 0
+		return false
+	end
+	native_module.enum_variants.each do |variant|
+		if variant.owner == owner
+			if variant.field_count > 1
+				return false
+			end
+			if variant.field_count == 1
+				if mir_managed_type(native_module, native_module.enum_fields[variant.field_start].type_id)
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+def mir_enum_stack_value_type(native_module: MirModule, function_id: Integer, value_id: Integer): Integer
+	native_module.values.each do |value|
+		if value.function_id == function_id && value.id == value_id
+			return value.type_id
+		end
+	end
+	return 0
+end
+
+def mir_enum_stack_definition(native_module: MirModule, function: MirFunction, value_id: Integer): Integer
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			if native_module.instructions[index].result == value_id
+				return index
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return -1
+end
+
+def mir_enum_stack_return_shape(native_module: MirModule, function: MirFunction, type_id: Integer, plans: Array<Integer>): Boolean
+	mut returns := 0
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		if block.terminator == mir_terminator_return()
+			returns += 1
+			if mir_enum_stack_value_type(native_module, function.id, block.return_value) != type_id
+				return false
+			end
+			definition := mir_enum_stack_definition(native_module, function, block.return_value)
+			if definition < 0
+				return false
+			end
+			instruction := native_module.instructions[definition]
+			if instruction.kind == mir_op_enum_new()
+				if native_module.enum_variants[instruction.payload].owner != mir_enum_id(native_module, type_id)
+					return false
+				end
+			elsif instruction.kind == mir_op_direct_call()
+				callee := native_module.calls[instruction.payload].callee
+				if callee >= function.id || !mir_enum_stack_selected(plans, callee)
+					return false
+				end
+			else
+				return false
+			end
+		end
+		block_index += 1
+	end
+	return returns > 0
+end
+
+def mir_enum_stack_argument_escapes(native_module: MirModule, block: MirBlock, value_id: Integer): Boolean
+	mut index := block.first_argument_start
+	while index < block.first_argument_start + block.first_argument_count
+		if native_module.arguments[index] == value_id
+			return true
+		end
+		index += 1
+	end
+	index = block.second_argument_start
+	while index < block.second_argument_start + block.second_argument_count
+		if native_module.arguments[index] == value_id
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+# Only pattern tests/extractions and a selected function's return may consume
+# the borrowed stack pointer. In particular, no allocation may find a managed
+# payload reachable solely through this static-header object.
+def mir_enum_stack_value_safe(native_module: MirModule, function: MirFunction, value_id: Integer, allow_return: Boolean, allow_scalar_roots: Boolean, allow_direct_argument: Boolean): Boolean
+	mut function_index := -1
+	mut index := 0
+	while index < native_module.functions.size()
+		if native_module.functions[index].id == function.id
+			function_index = index
+			break
+		end
+		index += 1
+	end
+	if function_index < 0 || function_index >= native_module.root_plans.size()
+		return false
+	end
+	native_module.root_plans[function_index].roots.each do |roots|
+		roots.each do |root|
+			if root == value_id && !allow_scalar_roots
+				return false
+			end
+		end
+	end
+	mut managed: Array<Integer> := [value_id]
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut instruction_index := block.instruction_start
+		while instruction_index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[instruction_index]
+			uses := mir_live_before(native_module, managed, instruction, [])
+			if uses.size() > 0
+				if instruction.kind != mir_op_enum_test() && instruction.kind != mir_op_enum_field()
+					if instruction.kind != mir_op_direct_call() || !allow_direct_argument
+						return false
+					end
+				end
+			end
+			instruction_index += 1
+		end
+		if mir_enum_stack_argument_escapes(native_module, block, value_id)
+			return false
+		end
+		if block.return_value == value_id && !allow_return
+			return false
+		end
+		block_index += 1
+	end
+	return true
+end
+
+# Collect every SSA block parameter that receives a borrowed enum on an edge.
+# The target's checked type and exact argument position are part of the proof.
+def mir_enum_stack_borrowed_edge(native_module: MirModule, function: MirFunction, target: Integer, start: Integer, count: Integer, type_id: Integer, mut aliases: Array<Integer>): Integer
+	if target < 0
+		if count != 0
+			return -1
+		end
+		return 0
+	end
+	target_index := mir_block_index(native_module, function, target)
+	if target_index < 0
+		return -1
+	end
+	target_block := native_module.blocks[target_index]
+	if count != target_block.parameter_count
+		return -1
+	end
+	mut changed := 0
+	mut index := 0
+	while index < count
+		value := native_module.arguments[start + index]
+		if mir_managed_contains(aliases, value)
+			parameter := native_module.arguments[target_block.parameter_start + index]
+			if mir_enum_stack_value_type(native_module, function.id, parameter) != type_id
+				return -1
+			end
+			if !mir_managed_contains(aliases, parameter)
+				mir_managed_add(aliases, parameter)
+				changed = 1
+			end
+		end
+		index += 1
+	end
+	return changed
+end
+
+# The borrowed argument may flow through control edges, but every resulting
+# SSA name must only be tested or extracted. Scalar payloads need no GC child
+# root; publishing their zero-descriptor caller slot is harmless.
+def mir_enum_stack_borrowed_parameter_safe(native_module: MirModule, function: MirFunction, value_id: Integer, type_id: Integer): Boolean
+	mut aliases: Array<Integer> := [value_id]
+	mut changed := true
+	while changed
+		changed = false
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			first := mir_enum_stack_borrowed_edge(native_module, function, block.first_target, block.first_argument_start, block.first_argument_count, type_id, aliases)
+			if first < 0
+				return false
+			end
+			second := mir_enum_stack_borrowed_edge(native_module, function, block.second_target, block.second_argument_start, block.second_argument_count, type_id, aliases)
+			if second < 0
+				return false
+			end
+			if first > 0 || second > 0
+				changed = true
+			end
+			block_index += 1
+		end
+	end
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			uses := mir_live_before(native_module, aliases, instruction, [])
+			if uses.size() > 0 && instruction.kind != mir_op_enum_test() && instruction.kind != mir_op_enum_field()
+				return false
+			end
+			index += 1
+		end
+		if mir_managed_contains(aliases, block.return_value)
+			return false
+		end
+		if mir_managed_contains(aliases, block.condition)
+			return false
+		end
+		block_index += 1
+	end
+	return true
+end
+
+# A borrowed scalar-payload enum may cross one direct-call argument boundary.
+# The callee must only test/extract that parameter; any forwarding, storage,
+# return, indirect call or managed child keeps the ordinary heap ABI.
+def mir_enum_stack_argument_uses_safe(native_module: MirModule, function: MirFunction, value_id: Integer, type_id: Integer): Boolean
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_direct_call()
+				call := native_module.calls[instruction.payload]
+				mut argument := 0
+				while argument < call.argument_count
+					if native_module.arguments[call.argument_start + argument] == value_id
+						callee_index := mir_function_index(native_module, call.callee)
+						if callee_index < 0
+							return false
+						end
+						callee := native_module.functions[callee_index]
+						if callee.kind != mir_function_control() || argument >= callee.parameter_count
+							return false
+						end
+						parameter := native_module.arguments[callee.parameter_start + argument]
+						if mir_enum_stack_value_type(native_module, callee.id, parameter) != type_id
+							return false
+						end
+						if !mir_enum_stack_borrowed_parameter_safe(native_module, callee, parameter, type_id)
+							return false
+						end
+					end
+					argument += 1
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return true
+end
+
+def mir_enum_stack_function_safe(native_module: MirModule, function: MirFunction, type_id: Integer, plans: Array<Integer>): Boolean
+	if !mir_enum_stack_return_shape(native_module, function, type_id, plans)
+		return false
+	end
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_enum_new() && mir_enum_stack_value_type(native_module, function.id, instruction.result) == type_id
+				if !mir_enum_stack_value_safe(native_module, function, instruction.result, true, false, false)
+					return false
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return true
+end
+
+def mir_enum_stack_callers_safe(native_module: MirModule, callee: Integer, plans: Array<Integer>): Boolean
+	# Structured runtime thunks use the ordinary managed return convention.
+	native_module.file_scopes.each do |scope|
+		if scope.body == callee || scope.error == callee
+			return false
+		end
+	end
+	# Witness tables take implementation addresses using the ordinary return
+	# convention. Those indirect callers cannot supply a caller-owned Enum slot.
+	mut witness_index := 0
+	while witness_index < native_module.object_witnesses.size()
+		witness := native_module.object_witnesses[witness_index]
+		mut slot := 0
+		while slot < witness.methods.size()
+			method := native_module.object_methods[witness.methods[slot]]
+			if method.function == callee
+				return false
+			end
+			slot += 1
+		end
+		witness_index += 1
+	end
+	type_id := mir_enum_stack_result_type(native_module, callee)
+	scalar_payloads := mir_enum_stack_scalar_payloads(native_module, type_id)
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if instruction.kind == mir_op_callable_new() && instruction.payload == callee
+					return false
+				end
+				if instruction.kind == mir_op_direct_call() && native_module.calls[instruction.payload].callee == callee
+					if function.kind != mir_function_control()
+						return false
+					end
+					if !mir_enum_stack_value_safe(native_module, function, instruction.result, mir_enum_stack_selected(plans, function.id), scalar_payloads, scalar_payloads)
+						return false
+					end
+					if scalar_payloads && !mir_enum_stack_argument_uses_safe(native_module, function, instruction.result, type_id)
+						return false
+					end
+				end
+				index += 1
+			end
+			block_index += 1
+		end
+		function_index += 1
+	end
+	return true
+end
+
+def mir_enum_stack_plans(native_module: MirModule): Array<Integer>
+	mut plans: Array<Integer> := []
+	native_module.signatures.each do |_signature|
+		plans.push(0)
+	end
+	# Declaration-order direct-call chains are bounded and acyclic. Unsupported
+	# forward/recursive and callable paths keep the ordinary heap ABI.
+	native_module.functions.each do |function|
+		type_id := mir_enum_stack_result_type(native_module, function.id)
+		if function.kind == mir_function_control() && function.id >= 0 && function.id < plans.size() && mir_enum_stack_shape(native_module, type_id)
+			if mir_enum_stack_return_shape(native_module, function, type_id, plans)
+				plans[function.id] = 1
+			end
+		end
+	end
+	mut changed := true
+	while changed
+		changed = false
+		native_module.functions.each do |function|
+			if mir_enum_stack_selected(plans, function.id)
+				type_id := mir_enum_stack_result_type(native_module, function.id)
+				if !mir_enum_stack_function_safe(native_module, function, type_id, plans) || !mir_enum_stack_callers_safe(native_module, function.id, plans)
+					plans[function.id] = 0
+					changed = true
+				end
+			end
+		end
+	end
+	return plans
+end

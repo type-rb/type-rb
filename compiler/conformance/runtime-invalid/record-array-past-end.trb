@@ -1,0 +1,9 @@
+record Entry
+	id: Integer
+end
+def read(values: Array<Entry>, index: Integer): Integer
+	return values[index].id
+end
+def main()
+	puts(read([Entry.new(id: 1)], 1))
+end

@@ -1,0 +1,4 @@
+def main()
+	puts("mutation-literal")
+	return
+end

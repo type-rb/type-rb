@@ -1,0 +1,131 @@
+import { emit_qbe } from compiler
+import { binary_greater_equal, binary_less_equal } from frontend/types/operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_instruction_with_payload } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { mir_terminator_branch } from mir/model/control
+import { mir_function_array_loops } from mir/analysis/array_loops
+import { mir_build_flow, mir_flow_blocks, mir_flow_position } from mir/analysis/flow
+import { verify_mir } from mir/verify/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def guarded_array_bound_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops.each do |plans|
+		plans.each do |plan|
+			plan.headers.each do |header|
+				count += header.bounded_accesses.size()
+			end
+		end
+	end
+	return count
+end
+
+describe("MIR dominating Array length guards") do
+	test("shares nested storage observations without losing inner bounds or alias behavior") do
+		mut state := array_loop_mir_check("def update(left: Array<Integer>, mut right: Array<Integer>): Integer\nmut index := 0\nwhile index < left.size()\nmut other := index + 1\nwhile other < left.size()\nright[other] += left[index]\nother += 1\nend\nindex += 1\nend\nreturn right[2]\nend\ndef main()\nputs(update([2, 3, 5], [10, 20, 30]))\nmut shared := [2, 3, 5]\nputs(update(shared, shared))\nend\n")
+		expect(guarded_array_bound_count(state) > 0).to_be_true()
+		state.scalar_mir.array_loops.each do |plans|
+			mut seen: Array<Integer> := []
+			plans.each do |plan|
+				plan.headers.each do |header|
+					header.accesses.each do |access|
+						seen.each do |previous|
+							expect(previous == access).to_be_false()
+						end
+						seen.push(access)
+					end
+				end
+			end
+		end
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("35\n12\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("proves scalar bounds on only a stable true branch") do
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\nmut index := 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\nend\nreturn total\nend\ndef main()\nputs(sum([10, 20, 30], 2))\nputs(sum([10, 20, 30], 0))\nputs(sum([10, 20, 30], -1))\nputs(sum([10, 20, 30], 4))\nend\n")
+		expect(guarded_array_bound_count(state) > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("30\n0\n0\n0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects intervening header mutation unknown calls and the false branch") do
+		["values.pop()", "touch(values)"].each do |mutation|
+			state := array_loop_mir_check("def sum(mut values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\n" + mutation + "\nmut index := 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\nend\nreturn total\nend\ndef touch(mut values: Array<Integer>)\nvalues.pop()\nend\ndef main()\nend\n")
+			expect(guarded_array_bound_count(state)).to_equal(0)
+		end
+		state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\nreturn 0\nelse\nmut index := 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\nend\nreturn total\nend\ndef main()\nend\n")
+		expect(guarded_array_bound_count(state)).to_equal(0)
+	end
+
+	test("rejects a stale comparison direction") do
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\nmut index := 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\nend\nreturn total\nend\ndef main()\nend\n")
+		expect(guarded_array_bound_count(state) > 0).to_be_true()
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_less_equal()
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, binary_greater_equal())
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+	end
+
+	test("does not infer a true predicate when both edges enter the true block") do
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nif limit <= values.size()\nmut index := 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\nend\nreturn total\nend\ndef main()\nend\n")
+		expect(guarded_array_bound_count(state) > 0).to_be_true()
+		function := state.scalar_mir.functions[0]
+		flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+		mut index := function.block_start
+		mut changed := false
+		while index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[index]
+			if block.terminator == mir_terminator_branch()
+				position := mir_flow_position(flow, block.condition)
+				instruction := state.scalar_mir.instructions[position]
+				if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_less_equal()
+					state.scalar_mir.blocks[index] = mir_block(block.id, block.source_id, block.line, block.parameter_start, block.parameter_count, block.instruction_start, block.instruction_count, block.terminator, block.condition, block.first_target, block.first_target, block.first_argument_start, block.first_argument_count, block.first_argument_start, block.first_argument_count, block.return_value)
+					changed = true
+				end
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		state.scalar_mir.array_loops[0] = mir_function_array_loops(state.scalar_mir, function, state.scalar_mir.values)
+		expect(guarded_array_bound_count(state)).to_equal(0)
+	end
+end

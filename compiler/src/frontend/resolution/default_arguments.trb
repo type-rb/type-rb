@@ -1,0 +1,91 @@
+import { default_parameter, default_record_field } from state/default_kinds
+import { object_initializer_owner } from frontend/types/object_types
+import { integer_string } from support/literals
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+
+# Initializers have private function identities, normal typed signatures and
+# normal verified MIR bodies. Their only locals are preceding declaration slots.
+# They never enter the authored name index or require a backend default ABI.
+def declare_default_functions(mut state: CompilerState)
+	mut record_parameters := state.parsed.record_default_parameters
+	mut index := 0
+	while index < state.parsed.default_initializers.size()
+		initializer := state.parsed.default_initializers[index]
+		if state.parsed.default_functions[index] >= 0
+			index += 1
+			next
+		end
+		mut module_index := 0
+		mut start := 0
+		mut count := 0
+		mut result_type := ""
+		if initializer.kind == default_record_field()
+			module_index = load_integer(state.declarations.record_modules, initializer.owner)
+			field_start := load_integer(state.declarations.record_field_starts, initializer.owner)
+			count = initializer.slot - field_start
+			result_type = load_string(state.declarations.field_types, initializer.slot)
+			if sparse_integer_at(record_parameters, initializer.owner) == 0
+				store_integer(record_parameters, initializer.owner, state.declarations.parameter_count[0] + 1)
+				mut field := field_start
+				finish := field_start + load_integer(state.declarations.record_field_counts, initializer.owner)
+				while field < finish
+					parameter := state.declarations.parameter_count[0]
+					store_string(state.declarations.parameter_names, parameter, load_string(state.declarations.field_names, field))
+					store_string(state.declarations.parameter_types, parameter, load_string(state.declarations.field_types, field))
+					store_integer(state.declarations.parameter_lines, parameter, load_integer(state.declarations.field_lines, field))
+					store_integer(state.declarations.parameter_mutable, parameter, 0)
+					state.declarations.parameter_count[0] += 1
+					field += 1
+				end
+			end
+			start = sparse_integer_at(record_parameters, initializer.owner) - 1
+		else
+			module_index = load_integer(state.declarations.function_modules, initializer.owner)
+			start = load_integer(state.declarations.function_parameter_starts, initializer.owner)
+			if object_initializer_owner(state, initializer.owner) >= 0
+				start += 1
+			end
+			count = initializer.slot - start
+			result_type = load_string(state.declarations.parameter_types, initializer.slot)
+		end
+		function := state.declarations.function_count[0]
+		store_string(state.declarations.function_names, function, "$default" + integer_string(index))
+		store_integer(state.declarations.function_modules, function, module_index)
+		store_integer(state.declarations.function_parameter_starts, function, start)
+		store_integer(state.declarations.function_parameter_counts, function, count)
+		store_string(state.declarations.function_result_types, function, result_type)
+		store_integer(state.declarations.function_body_starts, function, initializer.start)
+		store_integer(state.declarations.function_body_ends, function, initializer.finish)
+		store_integer(state.declarations.function_lines, function, load_integer(state.source_tokens.token_lines, initializer.start))
+		store_integer(state.parsed.function_expression_bodies, function, 1)
+		if initializer.kind == default_parameter()
+			store_integer(state.type_resolution.function_generic_bindings, function, sparse_integer_at(state.type_resolution.function_generic_bindings, initializer.owner))
+		else
+			store_integer(state.type_resolution.function_generic_bindings, function, sparse_integer_at(state.type_resolution.record_generic_bindings, initializer.owner))
+		end
+		state.parsed.default_functions[index] = function
+		state.declarations.function_count[0] += 1
+		index += 1
+	end
+end
+
+def default_function(state: CompilerState, initializer: Integer): Integer
+	if initializer <= 0 || initializer > state.parsed.default_functions.size()
+		return -1
+	end
+	return state.parsed.default_functions[initializer - 1]
+end
+
+# Used after all explicit expressions have been evaluated and earlier omitted
+# slots filled. Missing is represented by binding presence, never a value sentinel.
+# Constructor parameter defaults precede receiver creation and cannot see self.
+def default_call_arguments(state: CompilerState, callee: Integer, values: Array<Integer>, count: Integer): Array<Integer>
+	mut arguments: Array<Integer> := []
+	mut index := count - load_integer(state.declarations.function_parameter_counts, callee)
+	while index < count
+		arguments.push(values[index])
+		index += 1
+	end
+	return arguments
+end

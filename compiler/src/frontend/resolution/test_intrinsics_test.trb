@@ -1,0 +1,99 @@
+import { standard_test_capture, standard_test_fail } from frontend/resolution/test_intrinsics
+import { test_adapter_capture, test_adapter_fail } from mir/model/test_contract
+import { MirSignature } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { standard_source_test_host } from state/standard_source_kinds
+import { store_integer } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# Isolate the owned boundary before the CLI's selected test modules are loaded.
+# This is internal ABI evidence, not completion of the public test command.
+def test_capture_checked_fixture(): CompilerState
+	source := "record TestOutcome\nfailed: Boolean\nmessage: String\npath: String\nline: Integer\ncolumn: Integer\nend\ndef capture(action: () -> Void, path: String, line: Integer, column: Integer): TestOutcome\nend\ndef fail<T>(message: String, path: String, line: Integer, column: Integer): T\nend\ndef main()\nresult := capture(fn()\nvalue := fail<Integer>(\"assertion\", \"helper.trb\", 23, 5)\nputs(value)\nend, \"case.trb\", 13, 7)\nputs(result.failed)\nputs(result.message)\nputs(result.path)\nputs(result.line)\nputs(result.column)\nnext_result := capture(fn()\nputs(\"continued\")\nend, \"case.trb\", 19, 7)\nputs(next_result.failed)\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, state.module_graph.entry_module[0], standard_source_test_host())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Owned test capture and failure intrinsics") do
+	test("checks managed outcome and callback types then executes after erasing frontend facts") do
+		mut state := test_capture_checked_fixture()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut capture := 0
+		mut failure := 0
+		state.scalar_mir.signatures.each do |signature|
+			if standard_test_capture(state, signature.id)
+				expect(signature.adapter).to_equal(test_adapter_capture())
+				capture += 1
+			end
+			if standard_test_fail(state, signature.id)
+				expect(signature.adapter).to_equal(test_adapter_fail())
+				failure += 1
+			end
+		end
+		expect(capture).to_equal(1)
+		expect(failure).to_equal(1)
+		before := output_source(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("true\nassertion\nhelper.trb\n23\n5\ncontinued\nfalse\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("does not grant intrinsic access to same-named authored declarations") do
+		mut state := test_capture_checked_fixture()
+		store_integer(state.standard_modules, state.module_graph.entry_module[0], 0)
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_test_capture(state, signature.id)).to_be_false()
+			expect(standard_test_fail(state, signature.id)).to_be_false()
+		end
+	end
+
+	test("independently rejects forged callback mutability and result signatures") do
+		["callback", "mutable", "result"].each do |damage|
+			mut state := test_capture_checked_fixture()
+			mut index := 0
+			while index < state.scalar_mir.signatures.size()
+				row := state.scalar_mir.signatures[index]
+				if row.adapter == test_adapter_capture()
+					mut parameters := row.parameter_types
+					mut mutable := row.parameter_mutable
+					mut result := row.result_type
+					if damage == "callback"
+						parameters = ["Integer", "String", "Integer", "Integer"]
+					elsif damage == "mutable"
+						mutable = [1, 0, 0, 0]
+					else
+						result = "String"
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+				end
+				index += 1
+			end
+			expect(verify_mir(state.scalar_mir, true) == "").to_be_false()
+		end
+	end
+end

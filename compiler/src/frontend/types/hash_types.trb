@@ -1,0 +1,224 @@
+import { literal_type_base } from frontend/types/literal_types
+import { has_union_header, union_parts } from frontend/types/union_types
+import { callable_parts } from frontend/types/callable_types
+import { nullable_element } from frontend/types/nullable_types
+import { ascii_code } from support/literals
+import { string_starts_with } from support/path
+
+# Hash equality uses one scalar domain; union keys retain their boxed identity.
+def hash_key_storage_type(name: String): String
+	if name == "Integer" || name == "String"
+		return name
+	end
+	base := literal_type_base(name)
+	if base != ""
+		return base
+	end
+	mut common := ""
+	union_parts(name).each do |part|
+		current := literal_type_base(part)
+		if current == "" || (common != "" && common != current)
+			return ""
+		end
+		common = current
+	end
+	return common
+end
+
+def hash_scalar_key(name: String): Boolean
+	return hash_key_storage_type(name) != ""
+end
+
+# Canonical singleton payloads escape punctuation, including the key separator.
+def hash_key_type(type_name: String): String
+	if !string_starts_with(type_name, "Hash<") || type_name[type_name.size() - 1] != ">"
+		return ""
+	end
+	if string_starts_with(type_name, "Hash<Integer,")
+		return "Integer"
+	end
+	if string_starts_with(type_name, "Hash<String,")
+		return "String"
+	end
+	mut key := ""
+	mut index := 5
+	mut depth := 0
+	while index < type_name.size() - 1
+		character := type_name[index]
+		if character == "," && depth == 0
+			break
+		end
+		if character == "<"
+			depth += 1
+		elsif character == ">"
+			depth -= 1
+		end
+		key += type_name[index]
+		index += 1
+	end
+	if index < type_name.size() - 1 && hash_scalar_key(key)
+		return key
+	end
+	return ""
+end
+
+def hash_value_type(type_name: String): String
+	key := hash_key_type(type_name)
+	if key == ""
+		return ""
+	end
+	mut result := ""
+	mut index := 6 + key.size()
+	while index < type_name.size() - 1
+		result += type_name[index]
+		index += 1
+	end
+	return result
+end
+
+def hash_type(key: String, value: String): String
+	return "Hash<" + key + "," + value + ">"
+end
+
+def native_managed_type(type_name: String): Boolean
+	if literal_type_base(type_name) != ""
+		return literal_type_base(type_name) == "String"
+	end
+	if has_union_header(type_name)
+		return true
+	end
+	if callable_parts(type_name).size() > 0
+		return true
+	end
+	if nullable_element(type_name) != ""
+		return true
+	end
+	if type_name == "String" || type_name == "Bytes" || type_name == "StringBuilder" || type_name == "Range<Integer>" || string_starts_with(type_name, "Array<") || string_starts_with(type_name, "Class#") || string_starts_with(type_name, "Interface#") || string_starts_with(type_name, "Record#") || string_starts_with(type_name, "Enum#") || hash_key_type(type_name) != "" || type_name == "Hash"
+		return true
+	end
+	return false
+end
+
+# Validate the word-sized scalar/managed layouts admitted by Hash MIR.
+def native_value_layout(type_name: String): Boolean
+	if literal_type_base(type_name) != ""
+		return true
+	end
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut valid := true
+		alternatives.each do |alternative|
+			if !native_value_layout(alternative)
+				valid = false
+			end
+		end
+		return valid
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0
+		mut index := 0
+		while index < parts.size()
+			if !(index == 0 && parts[index] == "Void")
+				if !native_value_layout(parts[index])
+					return false
+				end
+			end
+			index += 1
+		end
+		return true
+	end
+	optional := nullable_element(type_name)
+	if optional != ""
+		return native_value_layout(optional)
+	end
+	if type_name == "Any" || type_name == "Nil" || type_name == "Integer" || type_name == "Float" || type_name == "Boolean" || type_name == "String" || type_name == "Bytes" || type_name == "StringBuilder" || type_name == "Range<Integer>"
+		return true
+	end
+	if hash_key_type(type_name) != ""
+		return native_value_layout(hash_value_type(type_name))
+	end
+	if string_starts_with(type_name, "Array<") && type_name[type_name.size() - 1] == ">"
+		mut element := ""
+		mut index := 6
+		while index < type_name.size() - 1
+			element += type_name[index]
+			index += 1
+		end
+		return native_value_layout(element)
+	end
+	mut prefix := 7
+	if string_starts_with(type_name, "Enum#")
+		prefix = 5
+	elsif string_starts_with(type_name, "Class#")
+		prefix = 6
+	elsif string_starts_with(type_name, "Interface#")
+		prefix = 10
+	elsif string_starts_with(type_name, "Newtype#")
+		prefix = 8
+	elsif !string_starts_with(type_name, "Record#")
+		return false
+	end
+	if type_name.size() == prefix
+		return false
+	end
+	if type_name.size() > prefix + 1 && type_name[prefix] == "0"
+		return false
+	end
+	mut index := prefix
+	while index < type_name.size()
+		code := ascii_code(type_name[index])
+		if code < 48 || code > 57
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# Checked generic bodies can carry abstract values without assigning a layout.
+# Only fully concrete types are admitted later by MIR/runtime layout checks.
+def semantic_value_type(type_name: String): Boolean
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut valid := true
+		alternatives.each do |alternative|
+			if !semantic_value_type(alternative)
+				valid = false
+			end
+		end
+		return valid
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0
+		mut index := 0
+		while index < parts.size()
+			if !(index == 0 && parts[index] == "Void")
+				if !semantic_value_type(parts[index])
+					return false
+				end
+			end
+			index += 1
+		end
+		return true
+	end
+	if native_value_layout(type_name) || string_starts_with(type_name, "TypeParameter#")
+		return true
+	end
+	optional := nullable_element(type_name)
+	if optional != ""
+		return semantic_value_type(optional)
+	end
+	if hash_key_type(type_name) != ""
+		return semantic_value_type(hash_value_type(type_name))
+	end
+	if string_starts_with(type_name, "Array<") && type_name[type_name.size() - 1] == ">"
+		mut element := ""
+		mut index := 6
+		while index < type_name.size() - 1
+			element += type_name[index]
+			index += 1
+		end
+		return semantic_value_type(element)
+	end
+	return false
+end

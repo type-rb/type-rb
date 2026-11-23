@@ -1,0 +1,28 @@
+record Pair
+	left: Integer
+	right: Integer
+end
+
+def main()
+	mut first := Pair.new(left: 20, right: 22)
+	mut second := Pair.new(left: 1, right: 2)
+	mut index := 0
+	while index < 1
+		previous_first := first
+		first = second
+		second = previous_first
+		index += 1
+	end
+	if first.left == 1
+		if first.right == 2
+			if second.left == 20
+				if second.right == 22
+					puts("recovery-aggregate-aggregate-swap")
+					return
+				end
+			end
+		end
+	end
+	puts("recovery-aggregate-aggregate-swap-failed")
+	return
+end

@@ -1,0 +1,37 @@
+alias Choice = Integer | String
+
+record Holder
+	value: Choice
+end
+
+def text(value: Choice): String
+	case value
+	when Integer(number)
+		return number.to_s()
+	when String(word)
+		return word
+	end
+end
+
+def main()
+	mut values: Array<Choice> := ["first" + " value", 7]
+	mut table: Hash<String, Choice> := { "word" => "saved" + " word" }
+	holder := Holder.new(value: table["word"])
+	mut captured: Choice := values[0]
+	read := fn(): String
+		return text(captured)
+	end
+	puts(read())
+	values.push(holder.value)
+	captured = 8
+	puts(read())
+	table["word"] = values[1]
+	puts(text(table["word"]))
+	values.each do |value|
+		puts(text(value))
+	end
+	present: Choice? := holder.value
+	if present != nil
+		puts(text(present))
+	end
+end

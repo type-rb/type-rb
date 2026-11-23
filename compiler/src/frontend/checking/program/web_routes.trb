@@ -1,0 +1,220 @@
+import { string_starts_with } from support/path
+import { web_route_has, web_route_slice } from project/web_route_paths
+import { ProjectWebRoute } from state/web_routes
+import { official_source_kind } from project/official_catalog
+import { find_import_binding } from frontend/resolution/declaration_lookup
+import { find_record_type, resolve_type_name } from frontend/resolution/type_resolution
+import { find_object_type } from frontend/types/object_types
+import { token_kind_newline, token_kind_string } from state/token_kinds
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Verify the public nominal edge after resolution. A matching authored type,
+# transparent alias or renamed import does not satisfy the pinned route contract.
+def web_route_public_type(state: CompilerState, source: Integer, type_name: String, name: String): Boolean
+	binding := find_import_binding(state, source, name)
+	if binding < 0 || load_string(state.module_graph.import_declarations, binding) != name
+		return false
+	end
+	module_index := load_integer(state.module_graph.import_targets, binding)
+	if sparse_integer_at(state.standard_modules, module_index) != official_source_kind("trb/web")
+		return false
+	end
+	owner := find_object_type(state, type_name)
+	if owner < 0
+		return false
+	end
+	row := state.nominal.objects[state.nominal.object_instances[owner].definition]
+	if row.source_id == module_index && row.name == name && row.parameters.size() == 0
+		return true
+	end
+	return false
+end
+
+def web_route_signature(state: CompilerState, route: ProjectWebRoute, middleware: Boolean): Boolean
+	function := route.function_id
+	mut count := 1
+	if middleware
+		count = 2
+	end
+	if load_integer(state.declarations.function_parameter_counts, function) != count
+		return false
+	end
+	if !web_route_public_type(state, route.source_id, load_string(state.declarations.function_result_types, function), "Response")
+		return false
+	end
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := 0
+	while index < count
+		parameter := start + index
+		mut expected := "Context"
+		if index == 1
+			expected = "Next"
+		end
+		if load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) != 0 || !web_route_public_type(state, route.source_id, load_string(state.declarations.parameter_types, parameter), expected)
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def web_route_schema(mut state: CompilerState, route: ProjectWebRoute, record_name: String, operation: String, line: Integer): Boolean
+	target := resolve_type_name(state, route.source_id, record_name, false)
+	mut record_index := find_record_type(state, target)
+	if record_index < 0
+		return true
+	end
+	if operation == "bind"
+		envelope_start := load_integer(state.declarations.record_field_starts, record_index)
+		envelope_finish := envelope_start + load_integer(state.declarations.record_field_counts, record_index)
+		mut envelope_field := envelope_start
+		record_index = -1
+		while envelope_field < envelope_finish
+			if load_string(state.declarations.field_names, envelope_field) == "params"
+				record_index = find_record_type(state, load_string(state.declarations.field_types, envelope_field))
+			end
+			envelope_field += 1
+		end
+		if record_index < 0
+			return true
+		end
+	end
+	mut declared: Array<String> := []
+	route.segments.each do |part|
+		if string_starts_with(part, ":") || string_starts_with(part, "*")
+			declared.push(web_route_slice(part, 1, part.size()))
+		end
+	end
+	mut fields: Array<String> := []
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	mut field := start
+	finish := start + load_integer(state.declarations.record_field_counts, record_index)
+	while field < finish
+		name := load_string(state.declarations.field_names, field)
+		if !web_route_has(declared, name)
+			diagnostic(state, "TRBN4003", line, "typed path field is not declared by route " + route.path + ": " + name)
+			return false
+		end
+		fields.push(name)
+		field += 1
+	end
+	declared.each do |parameter_name|
+		if !web_route_has(fields, parameter_name)
+			diagnostic(state, "TRBN4003", line, "typed path record is missing route parameter " + parameter_name)
+			return false
+		end
+	end
+	return true
+end
+
+# Parsed literal identity excludes lexer-fused concatenations. Parentheses,
+# line breaks and a trailing comma do not change a literal argument.
+def web_route_next_token(state: CompilerState, origin: Integer): Integer
+	mut token := origin
+	while token < state.source_tokens.token_count[0] && load_integer(state.source_tokens.token_kinds, token) == token_kind_newline()
+		token += 1
+	end
+	return token
+end
+
+def web_route_literal_argument(state: CompilerState, origin: Integer): Integer
+	mut token := web_route_next_token(state, origin)
+	mut depth := 0
+	while load_string(state.source_tokens.token_texts, token) == "("
+		depth += 1
+		token = web_route_next_token(state, token + 1)
+	end
+	literal := token
+	if load_integer(state.source_tokens.token_kinds, literal) != token_kind_string() || sparse_integer_at(state.source_tokens.token_fused_literals, literal) != 0
+		return -1
+	end
+	token = web_route_next_token(state, token + 1)
+	while depth > 0 && load_string(state.source_tokens.token_texts, token) == ")"
+		depth -= 1
+		token = web_route_next_token(state, token + 1)
+	end
+	if depth > 0
+		return -1
+	end
+	if load_string(state.source_tokens.token_texts, token) == ","
+		token = web_route_next_token(state, token + 1)
+	end
+	if load_string(state.source_tokens.token_texts, token) != ")"
+		return -1
+	end
+	return literal
+end
+
+def web_route_path_calls(mut state: CompilerState, route: ProjectWebRoute): Boolean
+	mut names: Array<String> := []
+	route.segments.each do |part|
+		if string_starts_with(part, ":") || string_starts_with(part, "*")
+			names.push(web_route_slice(part, 1, part.size()))
+		end
+	end
+	mut function := 0
+	while function < state.declarations.function_count[0]
+		if load_integer(state.declarations.function_modules, function) == route.source_id
+			mut contexts: Array<String> := []
+			start := load_integer(state.declarations.function_parameter_starts, function)
+			mut parameter := start
+			while parameter < start + load_integer(state.declarations.function_parameter_counts, function)
+				if web_route_public_type(state, route.source_id, load_string(state.declarations.parameter_types, parameter), "Context")
+					contexts.push(load_string(state.declarations.parameter_names, parameter))
+				end
+				parameter += 1
+			end
+			mut token := load_integer(state.declarations.function_body_starts, function)
+			finish := load_integer(state.declarations.function_body_ends, function)
+			while token + 5 < finish
+				if web_route_has(contexts, load_string(state.source_tokens.token_texts, token)) && load_string(state.source_tokens.token_texts, token + 1) == "."
+					operation := load_string(state.source_tokens.token_texts, token + 2)
+					line := load_integer(state.source_tokens.token_lines, token)
+					if operation == "path_value" && load_string(state.source_tokens.token_texts, token + 3) == "("
+						literal := web_route_literal_argument(state, token + 4)
+						if literal < 0
+							diagnostic(state, "TRBN4003", line, "Context#path_value() name must be a string literal in a route file")
+							return false
+						end
+						name := load_string(state.source_tokens.token_texts, literal)
+						if !web_route_has(names, name)
+							diagnostic(state, "TRBN4003", line, "Context#path_value() references undeclared route parameter " + name)
+							return false
+						end
+					elsif(operation == "params" || operation == "bind") && load_string(state.source_tokens.token_texts, token + 3) == "<" && load_string(state.source_tokens.token_texts, token + 5) == ">"
+						if !web_route_schema(state, route, load_string(state.source_tokens.token_texts, token + 4), operation, line)
+							return false
+						end
+					end
+				end
+				token += 1
+			end
+		end
+		function += 1
+	end
+	return true
+end
+
+def validate_web_routes(mut state: CompilerState): Boolean
+	previous := state.module_graph.active_module[0]
+	state.module_graph.web_routes.each do |route|
+		state.module_graph.active_module[0] = route.source_id
+		if !web_route_signature(state, route, false)
+			diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, route.function_id), "route handler must have signature (Context): Response")
+			return false
+		end
+		if !web_route_path_calls(state, route)
+			return false
+		end
+	end
+	state.module_graph.web_middlewares.each do |route|
+		state.module_graph.active_module[0] = route.source_id
+		if !web_route_signature(state, route, true)
+			diagnostic(state, "TRBN4003", load_integer(state.declarations.function_lines, route.function_id), "middleware must have signature (Context, Next): Response")
+			return false
+		end
+	end
+	state.module_graph.active_module[0] = previous
+	return !has_diagnostic(state)
+end

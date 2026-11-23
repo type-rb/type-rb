@@ -1,0 +1,62 @@
+import { mir_nil_test_not_equal } from mir/model/operation_modes
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_type_kind_nullable } from mir/model/type_kinds
+import { mir_op_nil_test, mir_op_nullable_inject, mir_op_nullable_none } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirInstruction } from mir/model/module
+import { mir_managed_type, mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_address, emit_label, emit_temporary, emit_typed_load, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+# Optional values use a null pointer or a traced one-slot payload box. The MIR
+# identity/operations do not depend on this initial internal ABI representation.
+def emit_nullable_descriptors(state: CompilerState, mut output: QbeOutput)
+	mut index := 0
+	while index < state.scalar_mir.types.size()
+		row := state.scalar_mir.types[index]
+		if row.kind == mir_type_kind_nullable()
+			mut fields := "0, l 8"
+			if mir_managed_type(state.scalar_mir, row.element)
+				fields = "1, l 8, l 8"
+			end
+			qbe_output_line(output, "data $trbn_desc_nullable" + integer_string(index + mir_type_composite_start()) + " = align 8 { l 1, l " + fields + " }")
+		end
+		index += 1
+	end
+	qbe_output_line(output, "data $trbn_nullable_error = { b \"panic: nil payload is unavailable\" }")
+end
+
+def emit_mir_nullable_instruction(state: CompilerState, types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	result_id := mir_operand_type(types, instruction.result)
+	type_name := mir_storage_type_name(state.scalar_mir, result_id)
+	if instruction.kind == mir_op_nullable_none()
+		return emitted_value("0", type_name)
+	end
+	first_type := mir_storage_type_name(state.scalar_mir, mir_operand_type(types, instruction.first))
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_nullable_inject()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_nullable" + integer_string(result_id) + ", l 8, l 0)")
+		address := emit_address(context, output, result, 8)
+		emit_typed_store(output, first_type, operands[instruction.first], address)
+	elsif instruction.kind == mir_op_nil_test()
+		mut operation := "ceql"
+		if instruction.payload == mir_nil_test_not_equal()
+			operation = "cnel"
+		end
+		qbe_output_line(output, "\t" + result + " =l " + operation + " " + operands[instruction.first] + ", 0")
+	else
+		valid := emit_temporary(context)
+		present := emit_label(context)
+		absent := emit_label(context)
+		qbe_output_line(output, "\t" + valid + " =w cnel " + operands[instruction.first] + ", 0")
+		qbe_output_branch(output, valid, present, absent)
+		qbe_output_line(output, absent)
+		qbe_output_line(output, "\tcall $trbn_fail(l $trbn_nullable_error, l 33)")
+		qbe_output_line(output, "\thlt")
+		qbe_output_line(output, present)
+		address := emit_address(context, output, operands[instruction.first], 8)
+		emit_typed_load(output, result, type_name, address)
+	end
+	return emitted_value(result, type_name)
+end

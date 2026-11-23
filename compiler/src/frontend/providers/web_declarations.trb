@@ -1,0 +1,76 @@
+import { GenericFunction, GenericParameter } from frontend/types/generic_model
+import { ObjectMethod } from frontend/types/object_model
+import { object_method_owner } from frontend/types/object_types
+import { official_source_kind } from project/official_catalog
+import { CompilerState } from state/state
+import { load_integer, sparse_integer_at } from support/storage
+
+# The loader grants canonical ownership; the pinned source remains unchanged.
+def declare_web_bindings(mut state: CompilerState, source: Integer)
+	if sparse_integer_at(state.standard_modules, source) != official_source_kind("trb/web")
+		return
+	end
+	mut owner := 0
+	while owner < state.nominal.objects.size()
+		row := state.nominal.objects[owner]
+		if row.source_id == source && !row.interface_type && row.parameters.size() == 0 && (row.name == "Request" || row.name == "Context")
+			mut name := "query"
+			if row.name == "Context"
+				name = "params"
+			end
+			parameter := GenericParameter.new(name: "self", type_name: row.name, line: row.line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+			definition := state.type_resolution.generic_functions.size()
+			state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: row.name, name: row.name + "::" + name, source_id: source, line: row.line, type_parameters: ["T"], parameters: [parameter], result_type: "Result<T,ParameterError>", body_start: row.origin, body_finish: row.origin))
+			state.nominal.objects[owner].methods.push(ObjectMethod.new(name: name, class_member: false, origin: row.origin, function: -1, generic_function: definition))
+			if row.name == "Context"
+				binding := state.type_resolution.generic_functions.size()
+				state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: row.name, name: "Context::bind", source_id: source, line: row.line, type_parameters: ["T"], parameters: [parameter], result_type: "Result<T,EndpointInputError>", body_start: row.origin, body_finish: row.origin))
+				state.nominal.objects[owner].methods.push(ObjectMethod.new(name: "bind", class_member: false, origin: row.origin, function: -1, generic_function: binding))
+			end
+		end
+		owner += 1
+	end
+end
+
+# Require the full declaration and nominal edge, not user-controlled spelling.
+def web_binding_kind(state: CompilerState, definition: Integer): Integer
+	if definition < 0 || definition >= state.type_resolution.generic_functions.size()
+		return 0
+	end
+	row := state.type_resolution.generic_functions[definition]
+	if sparse_integer_at(state.standard_modules, row.source_id) != official_source_kind("trb/web") || row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.parameters.size() != 1 || row.body_start != row.body_finish
+		return 0
+	end
+	owner := object_method_owner(state, definition)
+	if owner < 0
+		return 0
+	end
+	object := state.nominal.objects[owner]
+	parameter := row.parameters[0]
+	if object.source_id != row.source_id || object.interface_type || object.parameters.size() != 0 || row.receiver_type != object.name || parameter.name != "self" || parameter.type_name != object.name || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0
+		return 0
+	end
+	if object.name == "Request" && row.name == "Request::query" && row.result_type == "Result<T,ParameterError>"
+		return 1
+	end
+	if object.name == "Context" && row.name == "Context::params" && row.result_type == "Result<T,ParameterError>"
+		return 2
+	end
+	if object.name == "Context" && row.name == "Context::bind" && row.result_type == "Result<T,EndpointInputError>"
+		return 3
+	end
+	return 0
+end
+
+def web_binding_function(state: CompilerState, function: Integer): Integer
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != official_source_kind("trb/web")
+		return 0
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return web_binding_kind(state, instance.definition)
+		end
+	end
+	return 0
+end

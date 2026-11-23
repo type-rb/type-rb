@@ -1,0 +1,85 @@
+import { orm_provider_pattern } from frontend/resolution/body_resolution
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { binding_use_pattern } from state/binding_kinds
+import { mir_op_union_extract } from mir/model/instructions
+import { UnionPattern, union_parts } from frontend/types/union_types
+import { mir_union_operation } from mir/lowering/unions
+import { expect, expect_identifier, parse_type, skip_newlines } from frontend/syntax/syntax_tokens
+import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { nullable_replace } from frontend/checking/nominal/nullable_flow
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { ControlSyntax } from state/source_state
+import { CheckedLocals, local_bind, local_require_use } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def check_union_patterns(mut state: CompilerState, control: ControlSyntax, selector_type: String): Boolean
+	alternatives := union_parts(selector_type)
+	mut seen: Array<String> := []
+	mut otherwise := false
+	mut index := 0
+	while index < control.branches.size() && !has_diagnostic(state)
+		branch := control.branches[index]
+		index += 1
+		if branch.condition < 0
+			otherwise = true
+			next
+		end
+		mut position := [branch.condition]
+		line := load_integer(state.source_tokens.token_lines, branch.condition)
+		mut type_name := parse_type(state, position)
+		if orm_provider_pattern(state, type_name)
+			type_name = resolve_type_name(state, state.module_graph.active_module[0], type_name, false)
+		elsif type_name != "Integer" && type_name != "Float" && type_name != "Boolean" && type_name != "String"
+			diagnostic(state, "TRBN4004", line, "union type pattern requires a non-nullable scalar type")
+			return false
+		end
+		mut present := false
+		alternatives.each do |alternative|
+			if alternative == type_name
+				present = true
+			end
+		end
+		if !present
+			diagnostic(state, "TRBN4004", line, "type pattern is not a union alternative")
+			return false
+		end
+		seen.each do |previous|
+			if previous == type_name
+				diagnostic(state, "TRBN4004", line, "union alternative is handled more than once")
+			end
+		end
+		seen.push(type_name)
+		if !expect(state, position, "(")
+			return false
+		end
+		skip_newlines(state, position)
+		binding := position[0]
+		expect_identifier(state, position)
+		skip_newlines(state, position)
+		if !expect(state, position, ")") || position[0] != branch.condition_finish
+			diagnostic(state, "TRBN4004", line, "union type pattern binds exactly one value")
+			return false
+		end
+		pattern := UnionPattern.new(origin: branch.condition, type_name: type_name, binding: binding)
+		encoded := sparse_integer_at(state.callables.checked[0].union_pattern_origins, branch.condition)
+		if encoded > 0
+			state.callables.checked[0].union_patterns[encoded - 1] = pattern
+		else
+			state.callables.checked[0].union_patterns.push(pattern)
+			store_integer(state.callables.checked[0].union_pattern_origins, branch.condition, state.callables.checked[0].union_patterns.size())
+		end
+	end
+	if !otherwise && seen.size() != alternatives.size()
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, control.origin), "union case is not exhaustive")
+	end
+	return !has_diagnostic(state)
+end
+
+def check_union_binding(mut state: CompilerState, mut locals: CheckedLocals, selector: CheckedValue, origin: Integer)
+	pattern := state.callables.checked[0].union_patterns[sparse_integer_at(state.callables.checked[0].union_pattern_origins, origin) - 1]
+	value := mir_union_operation(state, locals, mir_op_union_extract(), selector, pattern.type_name, pattern.type_name, pattern.binding)
+	index := local_bind(locals, load_string(state.source_tokens.token_texts, pattern.binding), pattern.type_name, 0)
+	local_require_use(locals, index, load_string(state.source_tokens.token_texts, pattern.binding), pattern.binding, binding_use_pattern())
+	store_integer(locals.mir_values, index, checked_mir_value(value) + 1)
+	nullable_replace(locals, index, pattern.type_name)
+end

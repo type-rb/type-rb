@@ -1,0 +1,129 @@
+import { Reading, Report, Vote } from models
+import { Database, DbError, DbErrorKind, DbResult, Transaction } from trb/orm
+
+def list_rows(): DbResult<Integer>
+	base := Report.where(title: "reader's copy")
+	upper := base.where("id", ">", 1).order(id: :desc)
+	rows := try upper.limit(2).all()
+	rows.each do |row|
+		puts(row.id)
+	end
+	page := try upper.limit(2).offset(2).all()
+	puts(page.size())
+	low := try base.order(id: :asc).first()
+	if low != nil
+		puts(low.id)
+	end
+	absent := try Report.where(title: "absent").first()
+	puts(absent == nil)
+	puts(try base.count())
+	puts(try Report.where(note: nil).count())
+	puts(try Report.where(("title"), ("LIKE"), "reader%").count())
+	ordered := base.order(id: :asc)
+	empty := ordered.limit(0)
+	empty_rows := try empty.all()
+	puts(empty_rows.size())
+	empty_first := try empty.first()
+	puts(empty_first == nil)
+	puts(try empty.count())
+	past := ordered.offset(10)
+	past_first := try past.first()
+	puts(past_first == nil)
+	puts(try past.count())
+	partial := ordered.offset(2).limit(2)
+	puts(try partial.count())
+	partial_first := try partial.first()
+	if partial_first != nil
+		puts(partial_first.id)
+	end
+	offset_only := try ordered.offset(3).all()
+	offset_only.each do |row|
+		puts(row.id)
+	end
+	puts(try ordered.count())
+	sorted_rows := try Report.order(note: (:asc), id: :desc).all()
+	sorted_rows.each do |row|
+		puts(row.id)
+	end
+	puts(try Report.where(note: nil, title: "reader's copy").count())
+	puts(try Report.where("note", "!=", nil).count())
+	return DbResult<Integer>::Ok(rows.size())
+end
+def print_query_error(error: DbError)
+	case error.kind
+	when DbErrorKind::Query
+		puts("Query")
+	else
+		puts("unexpected error kind")
+	end
+	puts(error.message)
+end
+
+def expired_transaction(): DbResult<Transaction>
+	return Database.transaction() do |tx|
+		tx
+	end
+end
+
+def rollback_view(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		reports := Report.using(tx)
+		inserted := try reports.create(title: "transient")
+		puts(try reports.where(title: "transient").count())
+		puts(try Report.where(title: "transient").count())
+		_bad := try reports.create(id: 1, title: "duplicate")
+		inserted.id
+	end
+end
+def exercise_queries()
+	size := list_rows() catch |error|
+		print_query_error(error)
+		return
+	end
+	puts(size)
+	_result := rollback_view() catch |error|
+		puts(error.message)
+		0
+	end
+	after := Report.where(title: "transient").count() catch |error|
+		puts(error.message)
+		return
+	end
+	puts(after)
+	tx := expired_transaction() catch |error|
+		puts(error.message)
+		return
+	end
+	query := Report.using(tx).where(id: 1)
+	case query.all()
+	when DbResult::Err(error)
+		print_query_error(error)
+	when DbResult::Ok(_rows)
+		puts("unexpected rows in expired transaction")
+	end
+	case query.first()
+	when DbResult::Err(error)
+		print_query_error(error)
+	when DbResult::Ok(_row)
+		puts("unexpected first in expired transaction")
+	end
+	case query.count()
+	when DbResult::Err(error)
+		print_query_error(error)
+	when DbResult::Ok(_count)
+		puts("unexpected count in expired transaction")
+	end
+end
+
+def read_without_single_key(): DbResult<Integer>
+	readings := try Reading.where(label: "level").order(score: :desc).all()
+	readings.each { |reading| puts(reading.score) }
+	return Database.transaction() do |tx|
+		votes := Vote.using(tx).where(reader: "sam").order(points: :desc)
+		first := try votes.first()
+		if first != nil
+			puts(first.topic)
+		end
+		try votes.count()
+	end
+end

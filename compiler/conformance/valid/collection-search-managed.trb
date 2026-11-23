@@ -1,0 +1,56 @@
+record Entry
+	name: String
+end
+
+def first<T>(values: Array<T>, predicate: (T) -> Boolean): T?
+	return values.find { |item| predicate(item) }
+end
+
+def main()
+	mut source := [Entry.new(name: "original" + 1.to_s())]
+	selected := source.find do |item|
+		source[0] = Entry.new(name: "replacement")
+		item = Entry.new(name: "parameter")
+		item.name == "parameter"
+	end
+	if selected != nil
+		puts(selected.name)
+	end
+	mut values := [1, 2]
+	mut retained := values
+	mut calls := 0
+	index := values.find_index do |item|
+		calls += 1
+		if item == 1
+			retained[1] = 20
+			retained.push(3)
+			values = [99]
+		end
+		item == 3
+	end
+	if index != nil
+		puts(index)
+	end
+	puts(calls)
+	puts(values[0])
+	mut callbacks: Array<() -> String> := []
+	text := ["first" + 1.to_s(), "second" + 2.to_s()].find do |item|
+		callback := fn(): String
+			return item
+		end
+		callbacks.push(callback)
+		item = item + "!"
+		item == "second2!"
+	end
+	if text != nil
+		puts(text)
+	end
+	puts(callbacks[1]())
+	predicate := fn(value: String): Boolean
+		return value == "generic"
+	end
+	result := first<String>(["generic"], predicate)
+	if result != nil
+		puts(result)
+	end
+end

@@ -1,0 +1,44 @@
+def stopped(limit: Integer): Integer
+	mut index := 0
+	while index < limit
+		index += 1
+		break
+		if true
+			puts("unreachable")
+		end
+	end
+	return index
+end
+
+def skipped(values: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < values.size()
+		index += 1
+		next
+		total += values[index]
+	end
+	return total
+end
+
+def main()
+	puts(stopped(10))
+	puts(skipped([1, 2, 3]))
+	mut outer := 0
+	mut visits := 0
+	while outer < 3
+		outer += 1
+		mut inner := 0
+		while inner < 4
+			inner += 1
+			if inner == 1
+				next
+			elsif inner == 3
+				break
+			end
+			visits += 1
+		end
+	end
+	puts(outer)
+	puts(visits)
+end

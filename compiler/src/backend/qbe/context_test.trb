@@ -1,0 +1,26 @@
+import { emit_address, emit_context_new, emit_label, emit_temporary } from backend/qbe/context
+import { emit_checked_integer_operation } from backend/qbe/emit/numeric
+import { qbe_output_new } from backend/qbe/output
+import { describe, expect, test } from trb/std/test
+
+describe("QBE emission context ownership") do
+	test("shares nested helper numbering and failure publication within one function") do
+		mut context := emit_context_new()
+		mut shared := context
+		mut sibling := emit_context_new()
+		mut output := qbe_output_new(16, [])
+		context.enum_stack_type[0] = 7
+
+		expect(emit_address(shared, output, "%base", 8)).to_equal("%t0")
+		expect(emit_checked_integer_operation(shared, output, "%result", "%left", "%right", "add", false)).to_equal("@l0")
+		expect(emit_temporary(context)).to_equal("%t3")
+		expect(emit_label(context)).to_equal("@l1")
+		expect(context.integer_range_failure_used[0]).to_be_true()
+		expect(shared.enum_stack_type[0]).to_equal(7)
+
+		expect(emit_temporary(sibling)).to_equal("%t0")
+		expect(emit_label(sibling)).to_equal("@l0")
+		expect(sibling.integer_range_failure_used[0]).to_be_false()
+		expect(sibling.enum_stack_type[0]).to_equal(0)
+	end
+end

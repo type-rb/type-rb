@@ -1,0 +1,22 @@
+def observe(mut trace: Array<Integer>, value: Integer): Integer
+	trace[0] = trace[0] * 10 + value
+	return value
+end
+
+def combine(left: Integer, right: Integer): Integer
+	sum := left + right
+	return sum * 2
+end
+
+def main()
+	mut trace := [0]
+	mut result := 0
+	mut index := 0
+	while index < 1
+		result = combine(observe(trace, 1), observe(trace, 2))
+		index += 1
+	end
+	puts(trace[0].to_s())
+	puts(result.to_s())
+	return
+end

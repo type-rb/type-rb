@@ -1,0 +1,56 @@
+import { declaration_global } from frontend/types/declaration_kinds
+import { repl_call } from repl/eval
+import { repl_failed, ReplStore, ReplEnvironment, repl_global_key, repl_value } from repl/model
+import { sparse_string_at } from support/storage
+import { repl_capture_binding, repl_present } from repl/values
+import { find_declaration_in_module } from frontend/resolution/declaration_lookup
+import { CompilerState } from state/state
+import { mir_global_index } from mir/lowering/globals
+
+# A retained REPL program may use different catalog indexes. Persistent values
+# are keyed by source/declaration identity, never by the current array position.
+def repl_initialize_globals(mut state: CompilerState, mut store: ReplStore): Boolean
+	mut added: Array<String> := []
+	store.error[0] = ""
+	store.failed[0] = false
+	state.scalar_mir.global_initialization.each do |identity|
+		row := state.scalar_mir.globals[mir_global_index(state.scalar_mir, identity)]
+		if !row.runtime
+			next
+		end
+		key := repl_global_key(state, identity)
+		if !store.globals.key?(key)
+			mut value := repl_call(state, row.initializer, [], store)
+			if state.submissions.size() > 0
+				origin := state.global_bindings.globals[identity].origin
+				value = repl_present(store, value, sparse_string_at(state.submissions[0].presentations, origin))
+			end
+			if repl_failed(store)
+				added.each do |name|
+					store.globals.delete(name)
+				end
+				return false
+			end
+			store.globals[key] = repl_value(store, "$Binding", 0, 0.0, "", [value])
+			# Cyclic actions commit individually; a later failed action must not
+			# repeat values and side effects that already completed.
+			if !row.cyclic
+				added.push(key)
+			end
+		end
+	end
+	return true
+end
+
+# The checked header witnesses existing values; it must never initialize them.
+# Named functions and anonymous captures reach the same cell as the session.
+def repl_link_globals(state: CompilerState, mut store: ReplStore, mut environment: ReplEnvironment)
+	mut binding := 0
+	while binding < environment.count[0]
+		identity := find_declaration_in_module(state, state.module_graph.entry_module[0], environment.names[binding], declaration_global())
+		if identity >= 0
+			store.globals[repl_global_key(state, identity)] = repl_capture_binding(store, environment, binding)
+		end
+		binding += 1
+	end
+end

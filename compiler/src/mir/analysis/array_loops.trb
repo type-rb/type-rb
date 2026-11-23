@@ -1,0 +1,378 @@
+import { mir_array_header_loop, mir_array_header_matches, mir_array_headers_across_pushes, mir_array_stable_headers } from mir/analysis/array_headers
+import { mir_array_cached_values_equal, mir_array_promoted_loops } from mir/analysis/array_promotions
+import { mir_array_loop_peels } from mir/analysis/array_peeling
+import { mir_array_bound_identity, mir_array_bound_proven, mir_loop_bound, mir_loop_bounded_index, mir_loop_successor_index } from mir/analysis/array_bounds
+import { mir_scalar_inline_add } from mir/model/scalar_operators
+import { binary_add, binary_less } from frontend/types/operators
+import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_array_position, mir_op_array_push, mir_op_array_size, mir_op_array_store, mir_op_direct_call, mir_op_indirect_call, mir_op_integer_to_float, mir_op_scalar_binary, mir_op_scalar_literal } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { mir_planned_instruction_effects } from mir/analysis/callables
+import { mir_array_reserved_pushes } from mir/analysis/array_appends
+import { integer_string } from support/literals
+import { MirArrayHeader, MirArrayLoop, MirBlock, MirFunction, MirModule, MirValue } from mir/model/module
+import { MirNonnegative, mir_exact_integer_literal, mir_nonnegative_value, mir_nonnegative_values } from mir/analysis/ranges
+import { MirFlow, MirFlowAliases, mir_build_flow_with_values, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks, mir_flow_dominates, mir_flow_parameter_slot, mir_flow_position } from mir/analysis/flow
+import { mir_live_add, mir_live_equal, mir_managed_contains } from mir/analysis/liveness
+
+def mir_loop_definition(flow: MirFlow, value: Integer): Integer
+	return mir_flow_position(flow, value)
+end
+
+def mir_loop_literal(native_module: MirModule, flow: MirFlow, value: Integer, text: String): Boolean
+	position := mir_loop_definition(flow, value)
+	if position < 0
+		return false
+	end
+	return mir_exact_integer_literal(native_module, native_module.instructions[position], text)
+end
+
+def mir_no_array_loop(): MirArrayLoop
+	return MirArrayLoop.new(header: -1, preheader: -1, owner: -1, length: -1, accesses: [], headers: [], reserved_pushes: [], cached_values: [], peel_body: -1, peel_nonempty: false)
+end
+
+def mir_array_loop(native_module: MirModule, function: MirFunction, flow: MirFlow, nonnegative: MirNonnegative, header_index: Integer): MirArrayLoop
+	header := native_module.blocks[function.block_start + header_index]
+	if header.terminator != mir_terminator_branch() || flow.ranks[header_index] < 0 || header.first_target == header.id || header.first_target == header.second_target
+		return mir_no_array_loop()
+	end
+	condition_index := mir_loop_definition(flow, header.condition)
+	if condition_index < header.instruction_start || condition_index >= header.instruction_start + header.instruction_count
+		return mir_no_array_loop()
+	end
+	condition := native_module.instructions[condition_index]
+	if condition.kind != mir_op_scalar_binary() || condition.payload != binary_less()
+		return mir_no_array_loop()
+	end
+	mut length_index := mir_loop_definition(flow, condition.second)
+	mut guard_owner := -1
+	if length_index >= header.instruction_start && length_index < header.instruction_start + header.instruction_count
+		length := native_module.instructions[length_index]
+		if length.kind == mir_op_array_size()
+			guard_owner = length.first
+		end
+	end
+	if guard_owner < 0
+		length_index = -1
+	end
+	index_slot := mir_flow_parameter_slot(native_module, header, condition.first)
+	mut owner_slot := -1
+	if guard_owner >= 0
+		owner_slot = mir_flow_parameter_slot(native_module, header, guard_owner)
+	end
+	if index_slot < 0 || (guard_owner >= 0 && owner_slot < 0)
+		return mir_no_array_loop()
+	end
+	aliases := mir_flow_aliases(native_module, function, flow, header)
+	mut preheader := -1
+	mut owner := -1
+	mut members: Array<Integer> := [header_index]
+	mut visited: Hash<String, Integer> := {}
+	visited[integer_string(header_index)] = 1
+	mut pending: Array<Integer> := []
+	mut edge := 0
+	while edge < flow.predecessors[header_index].size()
+		block_index := flow.predecessors[header_index][edge]
+		block := native_module.blocks[function.block_start + block_index]
+		start := flow.incoming_starts[header_index][edge]
+		index_value := mir_flow_alias(aliases, native_module.arguments[start + index_slot])
+		mut owner_value := -1
+		if owner_slot >= 0
+			owner_value = mir_flow_alias(aliases, native_module.arguments[start + owner_slot])
+		end
+		if mir_flow_dominates(flow, header_index, block_index)
+			if guard_owner >= 0 && owner_value != guard_owner
+				return mir_no_array_loop()
+			end
+			if index_value != condition.first
+				definition := mir_loop_definition(flow, index_value)
+				if definition < 0
+					return mir_no_array_loop()
+				end
+				update := native_module.instructions[definition]
+				if update.kind != mir_op_scalar_binary() || (update.payload != binary_add() && update.payload != mir_scalar_inline_add()) || update.failure < 0
+					return mir_no_array_loop()
+				end
+				if mir_flow_alias(aliases, update.first) != condition.first || !mir_loop_literal(native_module, flow, mir_flow_alias(aliases, update.second), "1")
+					return mir_no_array_loop()
+				end
+			end
+			pending.push(block_index)
+		else
+			# A positive starting index has the same guarded upper bound as
+			# zero. Reuse the independently derived range fact, including an
+			# outer induction plus a checked nonnegative offset.
+			if preheader >= 0 || block.terminator != mir_terminator_jump() || !mir_nonnegative_value(nonnegative, index_value)
+				return mir_no_array_loop()
+			end
+			preheader = block.id
+			if owner_slot >= 0
+				owner = native_module.arguments[start + owner_slot]
+			end
+		end
+		edge += 1
+	end
+	if preheader < 0 || pending.size() == 0
+		return mir_no_array_loop()
+	end
+	# Walk natural-loop predecessors, excluding the preheader and exits.
+	mut cursor := 0
+	while cursor < pending.size()
+		current := pending[cursor]
+		cursor += 1
+		if !visited.key?(integer_string(current))
+			if !mir_flow_dominates(flow, header_index, current)
+				return mir_no_array_loop()
+			end
+			visited[integer_string(current)] = 1
+			members.push(current)
+			flow.predecessors[current].each do |previous|
+				pending.push(previous)
+			end
+		end
+	end
+	if visited.key?(integer_string(mir_flow_block_index(flow, header.second_target)))
+		return mir_no_array_loop()
+	end
+	mut accesses: Array<Integer> := []
+	preheader_block := native_module.blocks[function.block_start + mir_flow_block_index(flow, preheader)]
+	candidates := mir_array_stable_headers(native_module, function, flow, header_index, members, aliases, preheader_block)
+	headers := mir_array_headers_across_pushes(native_module, function, flow, aliases, members, preheader_block, guard_owner, candidates)
+	if headers.size() == 0
+		return mir_no_array_loop()
+	end
+	mut bounded: Array<Integer> := []
+	mut successors: Array<Integer> := []
+	mut origins := MirFlowAliases.new(dense: [], sparse: {})
+	if native_module.functions.size() <= 96
+		origins = mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+		bound := mir_loop_bound(native_module, flow, aliases, origins, header, preheader_block)
+		headers.each do |candidate|
+			entry_owner := mir_array_bound_identity(origins, candidate.owner)
+			if mir_array_bound_proven(native_module, function, flow, origins, header_index, bound, entry_owner, false)
+				mir_live_add(bounded, candidate.identity)
+				if mir_array_bound_proven(native_module, function, flow, origins, header_index, bound, entry_owner, true)
+					mir_live_add(successors, candidate.identity)
+				end
+			end
+		end
+	end
+	body := mir_flow_block_index(flow, header.first_target)
+	members.each do |member|
+		block := native_module.blocks[function.block_start + member]
+		mut captured: Hash<String, Integer> := {}
+		mut instruction_index := block.instruction_start
+		while instruction_index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[instruction_index]
+			# Scalar operations, element access, disjoint fresh-output pushes and
+			# calls with no continuing side effect retain the selected headers.
+			mut pure_call := false
+			if (instruction.kind == mir_op_direct_call() && instruction.payload >= 0 && instruction.payload < native_module.calls.size()) || instruction.kind == mir_op_indirect_call()
+				effects := mir_planned_instruction_effects(native_module, instruction, instruction_index)
+				pure_call = effects == mir_effect_none()
+				if effects == mir_effect_failure()
+					pure_call = true
+				end
+			end
+			if (instruction.kind < mir_op_scalar_literal() || instruction.kind > mir_op_integer_to_float()) && (instruction.kind < mir_op_array_size() || instruction.kind > mir_op_array_push()) && !pure_call
+				return mir_no_array_loop()
+			end
+			if guard_owner >= 0 && instruction.kind >= mir_op_array_position() && instruction.kind <= mir_op_array_store() && mir_flow_dominates(flow, body, member)
+				if mir_flow_alias(aliases, instruction.first) == guard_owner
+					mut guarded := mir_flow_alias(aliases, instruction.second) == condition.first
+					if !guarded && captured.key?(integer_string(instruction.second))
+						guarded = captured[integer_string(instruction.second)] == guard_owner
+					end
+					if guarded
+						mir_live_add(accesses, instruction_index)
+						if instruction.kind == mir_op_array_position()
+							captured[integer_string(instruction.result)] = guard_owner
+						end
+					end
+				end
+			end
+			if instruction.kind >= mir_op_array_size() && instruction.kind <= mir_op_array_store()
+				identity := mir_flow_alias(aliases, instruction.first)
+				# The guard owner's header is also stable for other indexes.
+				# Keep their checks; omit only accesses already covered by the
+				# separate induction plan, which has its own retained header.
+				mut covered := instruction_index == length_index
+				if identity == guard_owner
+					accesses.each do |access|
+						if access == instruction_index
+							covered = true
+						end
+					end
+				end
+				headers.each do |candidate|
+					if mir_array_header_matches(candidate, aliases, identity) && !covered
+						mir_live_add(candidate.accesses, instruction_index)
+						if mir_managed_contains(bounded, candidate.identity) && mir_flow_dominates(flow, body, member)
+							mut guarded := mir_loop_bounded_index(native_module, flow, aliases, origins, header, preheader_block, instruction.second)
+							if !guarded && mir_managed_contains(successors, candidate.identity)
+								guarded = mir_loop_successor_index(native_module, flow, aliases, header, instruction.second)
+							end
+							if !guarded && captured.key?(integer_string(instruction.second))
+								guarded = captured[integer_string(instruction.second)] == candidate.identity
+							end
+							if guarded && instruction.kind >= mir_op_array_position()
+								mir_live_add(candidate.bounded_accesses, instruction_index)
+								if instruction.kind == mir_op_array_position()
+									captured[integer_string(instruction.result)] = candidate.identity
+								end
+							end
+						end
+						if instruction.kind >= mir_op_array_position() && mir_flow_dominates(flow, body, member) && mir_nonnegative_value(nonnegative, instruction.second)
+							mir_live_add(candidate.nonnegative_accesses, instruction_index)
+						end
+					end
+				end
+			end
+			instruction_index += 1
+		end
+	end
+	mut reused: Array<MirArrayHeader> := []
+	headers.each do |candidate|
+		if candidate.accesses.size() > 0
+			reused.push(candidate)
+		end
+	end
+	if accesses.size() == 0 && reused.size() == 0
+		return mir_no_array_loop()
+	end
+	pushes := mir_array_reserved_pushes(native_module, function, flow, aliases, header, index_slot, preheader_block, owner, members, candidates)
+	return MirArrayLoop.new(header: header.id, preheader: preheader, owner: owner, length: length_index, accesses: accesses, headers: reused, reserved_pushes: pushes, cached_values: [], peel_body: -1, peel_nonempty: false)
+end
+
+def mir_function_array_loops(native_module: MirModule, function: MirFunction, values: Array<MirValue>): Array<MirArrayLoop>
+	mut plans: Array<MirArrayLoop> := []
+	if function.kind != mir_function_control()
+		return plans
+	end
+	# Sort by block identity so physical block reordering preserves the plan.
+	# Most functions have no candidate. Inspect local guard shapes before
+	# constructing dominance and forwarding information for the whole function.
+	mut headers: Array<Integer> := []
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if mir_array_loop_candidate(native_module, block) || (native_module.functions.size() <= 96 && block.parameter_count > 0)
+			mir_live_add(headers, block.id)
+		end
+		index += 1
+	end
+	if headers.size() == 0
+		return plans
+	end
+	flow := mir_build_flow_with_values(native_module, function, mir_flow_blocks(native_module, function), values)
+	nonnegative := mir_nonnegative_values(native_module, function, flow)
+	headers.each do |id|
+		header_index := mir_flow_block_index(flow, id)
+		mut plan := mir_array_loop(native_module, function, flow, nonnegative, header_index)
+		if plan.header < 0 && native_module.functions.size() <= 96
+			plan = mir_array_header_loop(native_module, function, flow, nonnegative, header_index)
+		end
+		if plan.header >= 0
+			plans.push(mir_array_loop_distinct_headers(plan, plans))
+		end
+	end
+	promoted := mir_array_promoted_loops(native_module, function, flow, nonnegative, plans)
+	return mir_array_loop_peels(native_module, function, flow, nonnegative, promoted)
+end
+
+# Earlier plans already prove stable storage at the same instructions. Prefer
+# those headers instead of loading a second copy at each inner-loop entry.
+# Both plans prove stable storage at the access. Preserve stronger inner range
+# facts on that exact instruction while reusing the outer storage observation.
+def mir_array_loop_distinct_headers(plan: MirArrayLoop, mut previous: Array<MirArrayLoop>): MirArrayLoop
+	mut headers: Array<MirArrayHeader> := []
+	plan.headers.each do |header|
+		mut accesses: Array<Integer> := []
+		mut nonnegative: Array<Integer> := []
+		mut bounded: Array<Integer> := []
+		header.accesses.each do |access|
+			mut covered := false
+			previous.each do |outer|
+				outer.headers.each do |retained|
+					retained.accesses.each do |known|
+						if known == access
+							covered = true
+							if mir_managed_contains(header.bounded_accesses, access)
+								mir_live_add(retained.bounded_accesses, access)
+							end
+							if mir_managed_contains(header.nonnegative_accesses, access)
+								mir_live_add(retained.nonnegative_accesses, access)
+							end
+						end
+					end
+				end
+			end
+			if !covered
+				accesses.push(access)
+				if mir_managed_contains(header.bounded_accesses, access)
+					bounded.push(access)
+				end
+				header.nonnegative_accesses.each do |known|
+					if known == access
+						nonnegative.push(access)
+					end
+				end
+			end
+		end
+		if accesses.size() != 0
+			headers.push(MirArrayHeader.new(identity: header.identity, owner: header.owner, accesses: accesses, nonnegative_accesses: nonnegative, bounded_accesses: bounded))
+		end
+	end
+	return MirArrayLoop.new(header: plan.header, preheader: plan.preheader, owner: plan.owner, length: plan.length, accesses: plan.accesses, headers: headers, reserved_pushes: plan.reserved_pushes, cached_values: plan.cached_values, peel_body: plan.peel_body, peel_nonempty: plan.peel_nonempty)
+end
+
+def mir_array_loop_candidate(native_module: MirModule, block: MirBlock): Boolean
+	if block.terminator != mir_terminator_branch()
+		return false
+	end
+	mut condition := -1
+	mut index := block.instruction_start
+	while index < block.instruction_start + block.instruction_count
+		instruction := native_module.instructions[index]
+		if instruction.result == block.condition && instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_less()
+			condition = instruction.first
+		end
+		index += 1
+	end
+	if condition < 0
+		return false
+	end
+	index = block.parameter_start
+	while index < block.parameter_start + block.parameter_count
+		if native_module.arguments[index] == condition
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def mir_array_loops_equal(left: Array<MirArrayLoop>, right: Array<MirArrayLoop>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		a := left[index]
+		b := right[index]
+		if a.header != b.header || a.preheader != b.preheader || a.owner != b.owner || a.length != b.length || !mir_live_equal(a.accesses, b.accesses) || a.headers.size() != b.headers.size() || !mir_live_equal(a.reserved_pushes, b.reserved_pushes) || !mir_array_cached_values_equal(a.cached_values, b.cached_values) || a.peel_body != b.peel_body || (a.peel_nonempty && !b.peel_nonempty) || (!a.peel_nonempty && b.peel_nonempty)
+			return false
+		end
+		mut header := 0
+		while header < a.headers.size()
+			left_header := a.headers[header]
+			right_header := b.headers[header]
+			if left_header.identity != right_header.identity || left_header.owner != right_header.owner || !mir_live_equal(left_header.accesses, right_header.accesses) || !mir_live_equal(left_header.nonnegative_accesses, right_header.nonnegative_accesses) || !mir_live_equal(left_header.bounded_accesses, right_header.bounded_accesses)
+				return false
+			end
+			header += 1
+		end
+		index += 1
+	end
+	return true
+end

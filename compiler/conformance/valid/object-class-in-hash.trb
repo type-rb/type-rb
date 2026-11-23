@@ -1,0 +1,10 @@
+class Label
+	@text: String
+	def initialize(text: String)
+		@text = text
+	end
+end
+def main()
+	labels := { first: Label.new("held") }
+	puts(labels[:first].text)
+end

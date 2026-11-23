@@ -1,0 +1,9 @@
+{
+  // line comment
+  "name": "comments",
+  /* block
+     comment */
+  "mode": "go",
+  "sourceDir": "src",
+  "go": { "module": "example.com/comments" }
+}

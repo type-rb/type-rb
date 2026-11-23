@@ -1,0 +1,40 @@
+newtype Label = String do
+	private new
+
+	def self.make(text: String): Label
+		return self.new(text)
+	end
+
+	def decorated(*, prefix: String = "["): String
+		return prefix + value() + "]"
+	end
+
+	def reader(): () -> String
+		return fn(): String
+			return value()
+		end
+	end
+end
+
+newtype Nested = Label
+
+record Holder
+	value: Nested
+end
+
+def main()
+	mut labels := [Label.make("he" + "ld")]
+	lookup := { "held" => labels[0] }
+	holder := Holder.new(value: Nested.new(lookup["held"]))
+	read := holder.value.value().reader()
+	labels.push(Label.make("la" + "ter"))
+	puts(labels[1].decorated())
+	puts(read())
+	puts(holder.value.value().decorated(prefix: "<"))
+	present: Label? := lookup["held"]
+	text := present&.decorated()
+	if text != nil
+		puts(text)
+	end
+	puts(Label.make("he" + "ld") == lookup["held"])
+end

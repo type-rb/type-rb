@@ -1,0 +1,59 @@
+import { mir_test_inspection_plan } from mir/analysis/test_inspection
+import { mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { mir_test_value_id, test_adapter_scalar_kind } from mir/model/test_contract
+import { mir_storage_name } from mir/model/types
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { integer_string } from support/literals
+
+# Assertion predicates preserve the reference scalar representation. Newtypes
+# are erased; present nullable Boolean values retain a non-Boolean wrapper.
+def emit_test_predicate_runtime(native_module: MirModule, mut output: QbeOutput)
+	mut roots: Array<Integer> := []
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_scalar_kind()
+			roots.push(mir_test_value_id(native_module, signature.parameter_types[0]))
+		end
+	end
+	if roots.size() == 0
+		return
+	end
+	plan := mir_test_inspection_plan(native_module, roots)
+	plan.nodes.each do |node|
+		value := node.value
+		qbe_output_line(output, "function l $trbn_scalar_kind_type" + integer_string(value.type_id) + "(l %value) {\n@start")
+		if node.kind == "alias"
+			qbe_output_line(output, " %result =l call $trbn_scalar_kind_type" + integer_string(value.children[0]) + "(l %value)\n ret %result")
+		elsif node.kind == "nil"
+			qbe_output_line(output, " ret 0")
+		elsif node.kind == "boolean"
+			qbe_output_line(output, " %true =w cnel %value, 0\n jnz %true, @true, @false\n@true\n ret 1\n@false\n ret 2")
+		elsif node.kind == "nullable"
+			qbe_output_line(output, " %nil =w ceql %value, 0\n jnz %nil, @nil, @present\n@nil\n ret 0\n@present\n ret 3")
+		elsif node.kind == "tagged"
+			qbe_output_line(output, " %tp =l add %value, 8\n %tag =l loadl %tp\n %vp =l add %value, 16\n %child =l loadl %vp")
+			mut index := 0
+			value.children.each do |child|
+				id := integer_string(index)
+				qbe_output_line(output, " %match" + id + " =w ceql %tag, " + integer_string(child) + "\n jnz %match" + id + ", @child" + id + ", @next" + id + "\n@child" + id + "\n %result" + id + " =l call $trbn_scalar_kind_type" + integer_string(child) + "(l %child)\n ret %result" + id + "\n@next" + id)
+				index += 1
+			end
+			qbe_output_line(output, " hlt")
+		else
+			qbe_output_line(output, " ret 3")
+		end
+		qbe_output_line(output, "}\n")
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_scalar_kind()
+			id := mir_test_value_id(native_module, signature.parameter_types[0])
+			mut storage := "l"
+			mut operation := "copy"
+			if mir_storage_name(native_module, signature.parameter_types[0]) == "Float"
+				storage = "d"
+				operation = "cast"
+			end
+			qbe_output_line(output, "function l $trbn_test_scalar_kind_" + integer_string(signature.id) + "(" + storage + " %input) {\n@start\n %bits =l " + operation + " %input\n %result =l call $trbn_scalar_kind_type" + integer_string(id) + "(l %bits)\n ret %result\n}\n")
+		end
+	end
+end

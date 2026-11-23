@@ -1,0 +1,213 @@
+import { concurrent_capture } from frontend/checking/body/concurrency
+import { checked_retained_presentation } from frontend/checking/program/submission
+import { checked_category_value } from frontend/types/value_categories
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_op_direct_call, mir_op_global_read, mir_op_global_write } from mir/model/instructions
+import { module_is_cyclic } from frontend/resolution/module_components
+import { mir_initializer_dependencies } from mir/analysis/initialization
+import { integer_string } from support/literals
+import { CheckedValue, checked_mir_value, checked_presentation, checked_value, mir_checked_value, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirGlobal, MirInstruction, MirModule, mir_function_index, mir_origin_valid } from mir/model/module
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { mir_managed_type, mir_semantic_type_id, mir_semantic_type_name, mir_semantic_value_type } from mir/model/types
+import { nullable_read } from frontend/checking/nominal/nullable_flow
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, sparse_string_at, store_integer } from support/storage
+
+def mir_global_index(native_module: MirModule, identity: Integer): Integer
+	mut index := 0
+	while index < native_module.globals.size()
+		if native_module.globals[index].id == identity
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def mir_declare_globals(mut state: CompilerState)
+	mut runtime: Hash<String, Integer> := {}
+	state.global_bindings.runtime_order.each do |identity|
+		runtime[integer_string(identity)] = 1
+	end
+	mut index := 0
+	while index < state.global_bindings.globals.size()
+		row := state.global_bindings.globals[index]
+		type_id := mir_semantic_type_id(state.scalar_mir, state.global_bindings.global_types[index])
+		state.scalar_mir.globals.push(MirGlobal.new(cyclic: module_is_cyclic(state, row.source_id), mutable: row.mutable, runtime: runtime.key?(integer_string(index)), id: index, name: row.name, source_id: row.source_id, line: row.line, type_id: type_id, initializer: state.global_bindings.global_functions[index], managed: mir_managed_type(state.scalar_mir, type_id)))
+		index += 1
+	end
+	state.global_bindings.global_order.each do |identity|
+		state.scalar_mir.global_initialization.push(identity)
+	end
+end
+
+def checked_global_read(mut state: CompilerState, mut locals: CheckedLocals, identity: Integer, origin: Integer): CheckedValue
+	mut mutable := 0
+	if state.global_bindings.globals[identity].mutable
+		mutable = 1
+	end
+	type_name := state.global_bindings.global_types[identity]
+	concurrent_capture(state, locals, state.global_bindings.globals[identity].name, type_name, origin)
+	if type_name == ""
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "constant initializer cannot read a later constant")
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	store_integer(state.callables.checked[0].global_references, origin, identity + 1)
+	mut value := checked_value(type_name, checked_category_value(), origin, 0)
+	mir_control_prepare(state, locals)
+	if mir_control_active(locals)
+		result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, type_name), origin)
+		scalar_mir_instruction(state, locals, mir_op_global_read(), result, -1, -1, identity, -1, load_integer(state.source_tokens.token_lines, origin))
+		value = mir_checked_value(type_name, result, origin, 0)
+	end
+	value = CheckedValue.new(concurrent_borrowed: false, presentation: "", type_name: type_name, category: value.category, origin: origin, mutable: mutable, binding: true, readonly: false, immutable_reference: false, nullable_binding: -1, nullable_field: -1, truth: -1, falsity: -1, flow_type: type_name)
+	row := state.global_bindings.globals[identity]
+	if state.submissions.size() > 0
+		mut presentation := sparse_string_at(state.submissions[0].presentations, row.origin)
+		retained := checked_retained_presentation(state, row.source_id, row.line, row.name)
+		if retained != ""
+			presentation = retained
+		end
+		value = checked_presentation(value, presentation)
+	end
+	return nullable_read(state, locals, value, -identity - 2, -1, origin)
+end
+
+def mir_global_assign(state: CompilerState, mut locals: CheckedLocals, identity: Integer, value: CheckedValue, origin: Integer)
+	scalar_mir_instruction(state, locals, mir_op_global_write(), -1, checked_mir_value(value), -1, identity, -1, load_integer(state.source_tokens.token_lines, origin))
+end
+
+def mir_global_instruction_error(native_module: MirModule, instruction: MirInstruction, result_type: Integer, first_type: Integer, available: Boolean): String
+	index := mir_global_index(native_module, instruction.payload)
+	if index < 0
+		return "MIR global declaration is missing"
+	end
+	if instruction.kind == mir_op_global_write()
+		if instruction.result != -1 || instruction.second != -1 || instruction.failure != -1
+			return "MIR global write shape differs"
+		end
+		if !native_module.globals[index].mutable
+			return "MIR global write requires a mutable declaration"
+		end
+		if !available || first_type != native_module.globals[index].type_id
+			return "MIR global write requires an available value of the declared type"
+		end
+		return ""
+	end
+	if instruction.first != -1 || instruction.second != -1 || instruction.failure != -1
+		return "MIR global read shape differs"
+	end
+	if result_type != native_module.globals[index].type_id
+		return "MIR global read type differs"
+	end
+	return ""
+end
+
+def mir_globals_error(native_module: MirModule): String
+	if native_module.global_initialization.size() != native_module.globals.size()
+		return "MIR global initialization count differs"
+	end
+	mut seen: Hash<String, Integer> := {}
+	mut initializers: Hash<String, Integer> := {}
+	native_module.globals.each do |row|
+		if row.id < 0 || seen.key?(integer_string(row.id))
+			return "MIR global identity is invalid or duplicated"
+		end
+		seen[integer_string(row.id)] = 1
+		if !mir_origin_valid(row.source_id, row.line, native_module.source_count[0])
+			return "MIR global origin is invalid"
+		end
+		mut root_matches := row.managed
+		if !mir_managed_type(native_module, row.type_id)
+			root_matches = !row.managed
+		end
+		if !mir_semantic_value_type(native_module, row.type_id) || !root_matches
+			return "MIR global type or persistent root differs"
+		end
+		if row.initializer < 0 || row.initializer >= native_module.signatures.size() || initializers.key?(integer_string(row.initializer))
+			return "MIR global initializer identity differs"
+		end
+		initializers[integer_string(row.initializer)] = 1
+		signature := native_module.signatures[row.initializer]
+		if signature.kind != mir_signature_ordinary() || signature.parameter_types.size() != 0 || signature.result_type != mir_semantic_type_name(native_module, row.type_id) || signature.source_id != row.source_id || mir_function_index(native_module, signature.id) < 0
+			return "MIR global initializer signature or body differs"
+		end
+	end
+	mut ordered: Hash<String, Integer> := {}
+	native_module.global_initialization.each do |identity|
+		if !seen.key?(integer_string(identity)) || ordered.key?(integer_string(identity))
+			return "MIR global initialization identity is missing or duplicated"
+		end
+		ordered[integer_string(identity)] = 1
+	end
+	return ""
+end
+
+# This proof runs only after instruction and call verification. Forward reads
+# through ordinary calls are rejected as well as direct reads. Indirect calls
+# retain the ordinary checked-call contract; every global read also checks its
+# initialization state at runtime. Creating a closure does not execute its body.
+def mir_global_initialization_error(native_module: MirModule): String
+	mut initialized: Hash<String, Integer> := {}
+	native_module.global_initialization.each do |identity|
+		row := native_module.globals[mir_global_index(native_module, identity)]
+		if row.cyclic
+			plan := mir_initializer_dependencies(native_module, row.initializer)
+			if plan.opaque
+				return "MIR cyclic initializer reaches an unverified operation"
+			end
+			plan.values.each do |dependency|
+				if !initialized.key?(integer_string(dependency))
+					return "MIR cyclic initializer can read an uninitialized constant"
+				end
+			end
+			native_module.globals.each do |earlier|
+				if earlier.source_id == row.source_id && earlier.id < row.id && !initialized.key?(integer_string(earlier.id))
+					return "MIR cyclic initialization changes source declaration order"
+				end
+			end
+		end
+		mut pending := [row.initializer]
+		mut visited: Hash<String, Integer> := {}
+		mut cursor := 0
+		while cursor < pending.size()
+			callee := pending[cursor]
+			cursor += 1
+			if visited.key?(integer_string(callee))
+				next
+			end
+			visited[integer_string(callee)] = 1
+			body := mir_function_index(native_module, callee)
+			if body < 0
+				next
+			end
+			function := native_module.functions[body]
+			mut block_index := function.block_start
+			while block_index < function.block_start + function.block_count
+				block := native_module.blocks[block_index]
+				mut operation := block.instruction_start
+				while operation < block.instruction_start + block.instruction_count
+					instruction := native_module.instructions[operation]
+					if (instruction.kind == mir_op_global_read() || instruction.kind == mir_op_global_write()) && !initialized.key?(integer_string(instruction.payload))
+						return "MIR constant initializer can read an uninitialized constant"
+					end
+					if row.runtime && (instruction.kind == mir_op_global_read() || instruction.kind == mir_op_global_write())
+						dependency := native_module.globals[mir_global_index(native_module, instruction.payload)]
+						if !dependency.runtime
+							return "MIR runtime initializer can read an inactive constant"
+						end
+					end
+					if instruction.kind == mir_op_direct_call()
+						pending.push(native_module.calls[instruction.payload].callee)
+					end
+					operation += 1
+				end
+				block_index += 1
+			end
+		end
+		initialized[integer_string(identity)] = 1
+	end
+	return ""
+end

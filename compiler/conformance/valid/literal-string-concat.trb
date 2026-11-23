@@ -1,0 +1,12 @@
+def main()
+	puts("a" + "b")
+	puts("a" + "b" + "c")
+	value := "x"
+	puts(value + "y")
+	puts("a" + "b"[0])
+	puts(("a" + "b")[0])
+	puts("a" + "b".size().to_s())
+	puts(("a" + "b").size().to_s())
+	puts("escaped-" + "\"")
+	return
+end

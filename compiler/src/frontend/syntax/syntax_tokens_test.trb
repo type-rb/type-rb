@@ -1,0 +1,44 @@
+import { advance, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { syntax_block_end } from frontend/syntax/syntax_forms
+import { compiler_new } from state/state
+import { store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler syntax primitives") do
+	test("advances a shared source cursor by exactly one") do
+		starts := [-1, 0, 9007199254740990]
+		mut index := 0
+		while index < starts.size()
+			mut position := [starts[index]]
+			advance(position)
+			expect(position[0]).to_equal(starts[index] + 1)
+			index += 1
+		end
+	end
+
+	test("distinguishes syntax tokens from string contents without the lexer") do
+		mut state := compiler_new(4)
+		store_string(state.source_tokens.token_texts, 0, "import")
+		store_integer(state.source_tokens.token_kinds, 0, 1)
+		expect(token_is(state, 0, "import")).to_be_true()
+		store_integer(state.source_tokens.token_kinds, 0, 3)
+		expect(token_is(state, 0, "import")).to_be_false()
+		store_string(state.source_tokens.token_texts, 0, "end")
+		expect(syntax_block_end(state, 0)).to_be_false()
+		store_integer(state.source_tokens.token_kinds, 0, 1)
+		expect(syntax_block_end(state, 0)).to_be_true()
+		store_string(state.source_tokens.token_texts, 0, "}")
+		store_integer(state.source_tokens.token_kinds, 0, 5)
+		expect(syntax_block_end(state, 0)).to_be_true()
+		store_string(state.source_tokens.token_texts, 0, "]")
+		expect(syntax_block_end(state, 0)).to_be_false()
+		store_integer(state.source_tokens.token_kinds, 0, 4)
+		store_integer(state.source_tokens.token_kinds, 1, 4)
+		store_integer(state.source_tokens.token_kinds, 2, 5)
+		store_string(state.source_tokens.token_texts, 2, ")")
+		mut position := [0]
+		skip_newlines(state, position)
+		expect(position[0]).to_equal(2)
+		expect(token_is(state, position[0], ")")).to_be_true()
+	end
+end

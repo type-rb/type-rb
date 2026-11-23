@@ -1,0 +1,3 @@
+def alternative_value(): Integer
+	return 7
+end

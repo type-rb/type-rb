@@ -1,0 +1,125 @@
+import { emit_qbe } from compiler
+import { mir_numeric_plans_equal } from mir/analysis/numeric
+import { MirNumericOperation } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def guarded_increment_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		plan.operations.each do |operation|
+			if operation.mode == 7
+				instruction := state.scalar_mir.instructions[operation.instruction]
+				if instruction.payload == 1 || instruction.payload == 13
+					count += 1
+				end
+			end
+		end
+	end
+	return count
+end
+
+def guarded_increment_source(body: String): String
+	return "def step(value: Integer, bound: Integer): Integer\n" + body + "\nend\ndef main()\nputs(step(-9007199254740991, 0))\nputs(step(-1, 0))\nputs(step(0, 1))\nputs(step(9007199254740990, 9007199254740991))\nputs(step(9007199254740991, 9007199254740991))\nend\n"
+end
+
+describe("MIR comparison-bounded increment") do
+	test("normalizes both comparison polarities and addend orders") do
+		bodies := ["if value < bound\nreturn value + 1\nend\nreturn value", "if bound > value\nreturn 1 + value\nend\nreturn value", "if value >= bound\nreturn value\nend\nreturn value + 1", "if bound <= value\nreturn value\nend\nreturn 1 + value"]
+		bodies.each do |body|
+			state := array_loop_mir_check(guarded_increment_source(body))
+			expect(guarded_increment_count(state)).to_equal(1)
+		end
+	end
+
+	test("executes portable endpoints without removing the unsupported upper case") do
+		state := array_loop_mir_check(guarded_increment_source("if value < bound\nreturn value + 1\nend\nreturn value"))
+		expect(guarded_increment_count(state)).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("-9007199254740990\n0\n1\n9007199254740991\n9007199254740991\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects non-strict transformed bypass and non-unit bounds") do
+		bodies := ["if value <= bound\nreturn value + 1\nend\nreturn value", "if value < bound\nreturn value + 2\nend\nreturn value", "if value < bound\nchanged := value - 1\nreturn changed + 1\nend\nreturn value", "if value < bound\nreturn value\nend\nreturn value + 1", "if value < bound\nreturn bound + 1\nend\nreturn value", "mut result := value\nif value < bound\nresult = bound\nend\nreturn result + 1"]
+		bodies.each do |body|
+			state := array_loop_mir_check(guarded_increment_source(body))
+			expect(guarded_increment_count(state)).to_equal(0)
+		end
+	end
+
+	test("keeps a Float comparison from bounding the portable Integer increment") do
+		source := "def step(value: Integer, bound: Float): Integer\nif value < bound\nreturn value + 1\nend\nreturn value\nend\ndef main()\nputs(step(0, 1.5))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(guarded_increment_count(state)).to_equal(0)
+	end
+
+	test("proves only the guarded iteration value across a loop backedge") do
+		source := "def run(bound: Integer): Integer\nmut index := 0\nwhile index < bound\nindex += 1\nindex += 1\nend\nreturn index\nend\ndef main()\nputs(run(3))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(guarded_increment_count(state)).to_equal(1)
+	end
+
+	test("selects increments in the unchanged Fannkuch workload") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/benchmarks/benchmarksgame/fannkuch-redux/src/main.trb"))
+			expect(guarded_increment_count(state) >= 2).to_be_true()
+		end
+	end
+
+	test("retains proofs after source erasure block reordering and repeated optimization") do
+		mut state := array_loop_mir_check("def run(bound: Integer): Integer\nmut index := 0\nwhile index < bound\nindex += 1\nend\nreturn index\nend\ndef main()\nputs(run(3))\nend\n")
+		expect(guarded_increment_count(state)).to_equal(1)
+		before := state.scalar_mir.numeric_plans[0]
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_numeric_plans_equal(before, state.scalar_mir.numeric_plans[0])).to_be_true()
+	end
+
+	test("rejects a forged proof on a non-strict edge") do
+		mut state := array_loop_mir_check(guarded_increment_source("if value <= bound\nreturn value + 1\nend\nreturn value"))
+		mut changed := false
+		state.scalar_mir.numeric_plans[0].each do |plan|
+			mut index := 0
+			while index < plan.operations.size()
+				operation := plan.operations[index]
+				if !changed
+					plan.operations[index] = MirNumericOperation.new(tested_value: -1, instruction: operation.instruction, mode: 7, divisor: 0, reciprocal: 0, shift: 0)
+					changed = true
+				end
+				index += 1
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+end

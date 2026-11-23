@@ -1,0 +1,662 @@
+import { mir_deadline_checkpoints_error } from mir/verify/deadlines
+import { mir_op_deadline_checkpoint } from mir/model/instructions
+import { mir_resource_calls_error } from mir/verify/resource_calls
+import { mir_resource_values_error } from mir/verify/resource_values
+import { mir_op_direct_call, mir_op_file_scope, mir_op_integer_to_float, mir_op_scalar_literal } from mir/model/instructions
+import { mir_type_boolean, mir_type_integer, mir_type_none, mir_type_string } from mir/model/type_ids
+import { mir_function_control, mir_function_fixture, mir_function_scalar, mir_terminator_branch, mir_terminator_jump, mir_terminator_return, mir_terminator_trap } from mir/model/control
+import { mir_hash_concat_plans, mir_hash_concats_equal } from mir/analysis/hash_concats
+import { mir_call_return_equal, mir_call_return_plans } from mir/analysis/call_returns
+import { mir_hash_membership_equal, mir_hash_membership_plans } from mir/analysis/hash_membership
+import { mir_callable_plans, mir_callable_plans_equal } from mir/analysis/callables
+import { mir_function_loop_calls, mir_loop_calls_error } from mir/analysis/loop_calls
+import { mir_program_error } from mir/verify/program
+import { mir_function_string_splits, mir_string_splits_equal } from mir/analysis/string_splits
+import { mir_literal_data_error } from mir/analysis/literal_data
+import { mir_function_string_concats, mir_string_concats_equal } from mir/analysis/string_concats
+import { mir_array_joins_equal, mir_function_array_joins } from mir/analysis/array_joins
+import { mir_call_effect_summaries } from mir/analysis/call_effects
+import { mir_object_dispatch_error } from mir/lowering/object_dispatch
+import { mir_object_initialization_error, mir_object_initializers_error } from mir/verify/object_initialization
+import { mir_global_initialization_error, mir_globals_error } from mir/lowering/globals
+import { mir_hash_lookup_equal, mir_hash_lookup_plans } from mir/analysis/hash_lookup
+import { mir_numeric_plans, mir_numeric_plans_equal } from mir/analysis/numeric
+import { mir_array_loops_equal, mir_function_array_loops } from mir/analysis/array_loops
+import { mir_array_read_guards_equal, mir_function_array_checks } from mir/analysis/array_read_guards
+import { integer_string } from support/literals
+import { mir_definition_index } from mir/analysis/identities
+import { mir_semantic_type_name, mir_semantic_value_type, mir_types_error } from mir/model/types
+import { mir_function_root_plan, mir_root_plan_equal } from mir/analysis/roots
+import { mir_live_equal } from mir/analysis/liveness
+import { mir_enum_stack_plans } from mir/analysis/enum_stack
+import { MirFlow, mir_build_flow_with_values, mir_flow_blocks, mir_flow_graph_error, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { MirBlock, MirFunction, MirModule, MirValue, mir_block_index, mir_origin_valid, mir_table_span_valid } from mir/model/module
+import { mir_scalar_guard } from mir/analysis/ranges
+import { mir_function_signature_error, mir_signatures_error } from mir/lowering/calls
+import { mir_instruction_error } from mir/verify/instructions
+
+def mir_target_arguments_error(
+		flow: MirFlow,
+		native_module: MirModule,
+		function: MirFunction,
+		block: MirBlock,
+		target: Integer,
+		start: Integer,
+		count: Integer,
+	): String
+	target_index := mir_block_index(native_module, function, target)
+	if target_index < 0
+		return "MIR terminator target does not exist"
+	end
+	target_block := native_module.blocks[target_index]
+	if count != target_block.parameter_count
+		return "MIR block argument arity differs"
+	end
+	mut index := 0
+	while index < count
+		value_id := native_module.arguments[start + index]
+		if !mir_value_available(
+				flow,
+				block,
+				block.instruction_start + block.instruction_count,
+				value_id,
+			)
+			return "MIR block argument is undefined"
+		end
+		target_value := native_module.arguments[target_block.parameter_start + index]
+		actual_type := mir_flow_type(flow, value_id)
+		target_type := mir_flow_type(flow, target_value)
+		if actual_type != target_type
+			return "MIR block argument type differs"
+		end
+		index += 1
+	end
+	return ""
+end
+
+def mir_terminator_error(
+		flow: MirFlow,
+		native_module: MirModule,
+		function: MirFunction,
+		block: MirBlock,
+	): String
+	kind := block.terminator
+	if kind == mir_terminator_jump()
+		if block.condition == -1
+			if block.second_target == -1
+				if block.second_argument_count == 0
+					if block.return_value == -1
+						return mir_target_arguments_error(
+							flow,
+							native_module,
+							function,
+							block,
+							block.first_target,
+							block.first_argument_start,
+							block.first_argument_count,
+						)
+					end
+				end
+			end
+		end
+		return "MIR jump shape differs"
+	end
+	if kind == mir_terminator_branch()
+		condition_type := mir_flow_type(flow, block.condition)
+		condition_available := mir_value_available(
+			flow,
+			block,
+			block.instruction_start + block.instruction_count,
+			block.condition,
+		)
+		if condition_available
+			if condition_type == mir_type_boolean()
+				if block.return_value == -1
+					first := mir_target_arguments_error(
+						flow,
+						native_module,
+						function,
+						block,
+						block.first_target,
+						block.first_argument_start,
+						block.first_argument_count,
+					)
+					if first != ""
+						return first
+					end
+					return mir_target_arguments_error(
+						flow,
+						native_module,
+						function,
+						block,
+						block.second_target,
+						block.second_argument_start,
+						block.second_argument_count,
+					)
+				end
+			end
+		end
+		return "MIR branch shape differs"
+	end
+	if kind == mir_terminator_return()
+		if block.return_value < -1
+			return "MIR return shape differs"
+		end
+		if block.condition == -1
+			if block.first_target == -1
+				if block.second_target == -1
+					if block.first_argument_count == 0
+						if block.second_argument_count == 0
+							if block.return_value >= 0
+								if !mir_value_available(
+										flow,
+										block,
+										block.instruction_start + block.instruction_count,
+										block.return_value,
+									)
+									return "MIR return value is undefined"
+								end
+							end
+							mut type_name := "Void"
+							if block.return_value >= 0
+								type_name = mir_semantic_type_name(native_module, mir_flow_type(flow, block.return_value))
+							end
+							if type_name != function.result_type
+								return "MIR return type differs from declaration"
+							end
+							return ""
+						end
+					end
+				end
+			end
+		end
+		return "MIR return shape differs"
+	end
+	if kind == mir_terminator_trap()
+		if block.condition == -1
+			if block.first_target == -1
+				if block.second_target == -1
+					if block.first_argument_start == 0
+						if block.first_argument_count == 0
+							if block.second_argument_start == 0
+								if block.second_argument_count == 0
+									if block.return_value == -1
+										return ""
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		return "MIR trap shape differs"
+	end
+	return "MIR terminator kind is unsupported"
+end
+
+# Validate storage before definition counting or cross-block semantic checks.
+# Range checks use subtraction so malformed large counts cannot overflow.
+def mir_function_structure_error(native_module: MirModule, function: MirFunction): String
+	if !mir_table_span_valid(function.parameter_start, function.parameter_count, native_module.arguments.size())
+		return "MIR function parameter range is invalid"
+	end
+	if !mir_table_span_valid(function.block_start, function.block_count, native_module.blocks.size())
+		return "MIR function block range is invalid"
+	end
+	mut block_index := function.block_start
+	block_finish := block_index + function.block_count
+	while block_index < block_finish
+		block := native_module.blocks[block_index]
+		if !mir_table_span_valid(block.parameter_start, block.parameter_count, native_module.arguments.size())
+			return "MIR block parameter range is invalid"
+		end
+		if !mir_table_span_valid(block.instruction_start, block.instruction_count, native_module.instructions.size())
+			return "MIR block instruction range is invalid"
+		end
+		if !mir_table_span_valid(block.first_argument_start, block.first_argument_count, native_module.arguments.size())
+			return "MIR terminator argument range is invalid"
+		end
+		if !mir_table_span_valid(block.second_argument_start, block.second_argument_count, native_module.arguments.size())
+			return "MIR alternate argument range is invalid"
+		end
+		block_index += 1
+	end
+	return ""
+end
+
+def mir_adapter_error(flow: MirFlow, native_module: MirModule, function: MirFunction): String
+	if function.kind == mir_function_fixture()
+		return ""
+	end
+	if function.kind == mir_function_scalar()
+		if function.block_count != 2
+			return "MIR scalar adapter shape differs"
+		end
+		entry_index := mir_block_index(native_module, function, function.entry_block)
+		if entry_index < 0
+			return "MIR scalar adapter shape differs"
+		end
+		entry := native_module.blocks[entry_index]
+		if entry.terminator != mir_terminator_return() || entry.parameter_count != 0
+			return "MIR scalar adapter shape differs"
+		end
+	end
+	mut returned_type := mir_type_none()
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			kind := native_module.instructions[index].kind
+			if kind != mir_op_deadline_checkpoint() && ((kind < mir_op_scalar_literal() || kind > mir_op_integer_to_float()) && (function.kind != mir_function_control() || kind < mir_op_direct_call() || kind > mir_op_file_scope()))
+				return "MIR scalar control operation is unsupported"
+			end
+			index += 1
+		end
+		if block.terminator == mir_terminator_return()
+			type_id := mir_flow_type(flow, block.return_value)
+			if function.kind == mir_function_control() && type_id != mir_type_none() && !mir_semantic_value_type(native_module, type_id)
+				return "MIR scalar return type differs"
+			end
+			if returned_type != mir_type_none() && returned_type != type_id
+				return "MIR scalar return type differs"
+			end
+			returned_type = type_id
+		elsif function.kind == mir_function_scalar() && block.terminator != mir_terminator_trap()
+			return "MIR scalar adapter shape differs"
+		end
+		block_index += 1
+	end
+	return ""
+end
+
+def mir_function_error(native_module: MirModule, function: MirFunction, values: Array<MirValue>, call_effects: Array<Integer>): String
+	if function.kind < mir_function_fixture() || function.kind > mir_function_control() || function.kind == 2
+		return "MIR function adapter kind is invalid"
+	end
+	if function.kind == mir_function_control()
+		values.each do |value|
+			if value.function_id == function.id
+				if !mir_semantic_value_type(native_module, value.type_id)
+					return "MIR scalar control value type differs"
+				end
+			end
+		end
+	end
+	if mir_block_index(native_module, function, function.entry_block) < 0
+		return "MIR function entry block does not exist"
+	end
+	signature_error := mir_function_signature_error(native_module, function)
+	if signature_error != ""
+		return signature_error
+	end
+	blocks := mir_flow_blocks(native_module, function)
+	graph_error := mir_flow_graph_error(native_module, function, blocks)
+	if graph_error != ""
+		return graph_error
+	end
+	flow := mir_build_flow_with_values(native_module, function, blocks, values)
+	mut index := function.parameter_start
+	mut finish := index + function.parameter_count
+	while index < finish
+		if mir_flow_type(flow, native_module.arguments[index]) == mir_type_none()
+			return "MIR function parameter is undefined"
+		end
+		index += 1
+	end
+	mut block_index := function.block_start
+	block_finish := block_index + function.block_count
+	while block_index < block_finish
+		block := native_module.blocks[block_index]
+		if !mir_origin_valid(block.source_id, block.line, native_module.source_count[0])
+			return "MIR block origin is invalid"
+		end
+		index = block.parameter_start
+		finish = index + block.parameter_count
+		while index < finish
+			if mir_flow_type(flow, native_module.arguments[index]) == mir_type_none()
+				return "MIR block parameter is undefined"
+			end
+			index += 1
+		end
+		index = block.instruction_start
+		finish = index + block.instruction_count
+		while index < finish
+			error := mir_instruction_error(flow, native_module, function, block, index, call_effects)
+			if error != ""
+				return error
+			end
+			index += 1
+		end
+		error := mir_terminator_error(flow, native_module, function, block)
+		if error != ""
+			return error
+		end
+		block_index += 1
+	end
+	resource_error := mir_resource_values_error(native_module, function, values)
+	if resource_error != ""
+		return resource_error
+	end
+	initialization_error := mir_object_initialization_error(native_module, function, flow)
+	if initialization_error != ""
+		return initialization_error
+	end
+	return mir_adapter_error(flow, native_module, function)
+end
+
+def verify_mir_structure(native_module: MirModule, optimized: Boolean): String
+	if native_module.call_return_guards.size() != 1
+		return "MIR call return guard container differs"
+	end
+	if !optimized && native_module.call_return_guards[0].size() != 0
+		return "MIR input cannot supply call return guards"
+	end
+	if native_module.hash_concat_probes.size() != 1
+		return "MIR Hash concat plan container differs"
+	end
+	if !optimized && native_module.hash_concat_probes[0].size() != 0
+		return "MIR input cannot supply Hash concat plans"
+	end
+	if native_module.hash_membership_reuse.size() != 1
+		return "MIR Hash membership plan container differs"
+	end
+	if !optimized && native_module.hash_membership_reuse[0].size() != 0
+		return "MIR input cannot supply Hash membership plans"
+	end
+	if native_module.hash_lookup_reuse.size() != 1
+		return "MIR Hash lookup plan container differs"
+	end
+	if !optimized && native_module.hash_lookup_reuse[0].size() != 0
+		return "MIR input cannot supply Hash lookup plans"
+	end
+	if native_module.numeric_plans.size() != 1
+		return "MIR numeric plan container differs"
+	end
+	if !optimized && native_module.enum_stack_functions.size() != 0
+		return "MIR input cannot supply enum stack plans"
+	end
+	if !optimized && native_module.numeric_plans[0].size() != 0
+		return "MIR input cannot supply numeric plans"
+	end
+	if !optimized && native_module.string_splits.size() != 0
+		return "MIR input cannot supply String split plans"
+	end
+	if !optimized && native_module.array_joins.size() != 0
+		return "MIR input cannot supply Array join plans"
+	end
+	if !optimized && native_module.string_concats.size() != 0
+		return "MIR input cannot supply String concat plans"
+	end
+	if native_module.callable_plans.size() != 1
+		return "MIR callable plan owner differs"
+	end
+	if !optimized && native_module.callable_plans[0].size() != 0
+		return "MIR input cannot supply callable plans"
+	end
+	if native_module.source_count[0] <= 0
+		return "MIR module has no sources"
+	end
+	type_error := mir_types_error(native_module)
+	if type_error != ""
+		return type_error
+	end
+	signature_error := mir_signatures_error(native_module)
+	if signature_error != ""
+		return signature_error
+	end
+	dispatch_error := mir_object_dispatch_error(native_module)
+	if dispatch_error != ""
+		return dispatch_error
+	end
+	initializers_error := mir_object_initializers_error(native_module)
+	if initializers_error != ""
+		return initializers_error
+	end
+	global_error := mir_globals_error(native_module)
+	if global_error != ""
+		return global_error
+	end
+	program_error := mir_program_error(native_module)
+	if program_error != ""
+		return program_error
+	end
+	mut entry_found := false
+	mut index := 0
+	if native_module.functions.size() == 0
+		if native_module.call_return_guards[0].size() != 0
+			return "MIR call return guard differs"
+		end
+		if native_module.hash_concat_probes[0].size() != 0
+			return "MIR Hash concat plan differs"
+		end
+		if native_module.hash_membership_reuse[0].size() != 0
+			return "MIR Hash membership plan differs"
+		end
+		if native_module.hash_lookup_reuse[0].size() != 0
+			return "MIR Hash lookup plan differs"
+		end
+		if native_module.string_splits.size() != 0
+			return "MIR String split plan count differs"
+		end
+		if native_module.array_joins.size() != 0
+			return "MIR Array join plan count differs"
+		end
+		if native_module.string_concats.size() != 0
+			return "MIR String concat plan count differs"
+		end
+		if native_module.callable_plans[0].size() != 0
+			return "MIR callable plan differs"
+		end
+		if native_module.loop_calls.size() != 0
+			return "MIR loop-call plan count differs"
+		end
+		if native_module.numeric_plans[0].size() != 0
+			return "MIR numeric plan differs"
+		end
+		if native_module.array_loops.size() != 0
+			return "MIR Array-loop plan count differs"
+		end
+		if native_module.array_check_reuse.size() != 0
+			return "MIR Array check-reuse plan count differs"
+		end
+		if native_module.array_read_guards.size() != 0
+			return "MIR Array read-guard plan count differs"
+		end
+		return mir_literal_data_error(native_module, optimized)
+	end
+	mut functions: Hash<String, Integer> := {}
+	mut function_values: Array<Array<MirValue>> := []
+	index = 0
+	while index < native_module.functions.size()
+		function := native_module.functions[index]
+		if function.id < 0
+			return "MIR function identifier is invalid"
+		end
+		if !mir_origin_valid(function.source_id, function.line, native_module.source_count[0])
+			return "MIR function origin is invalid"
+		end
+		function_key := integer_string(function.id)
+		if functions.key?(function_key)
+			return "MIR function identifier is duplicated"
+		end
+		functions[function_key] = index
+		function_values.push([])
+		if function.id == native_module.entry_function[0]
+			entry_found = true
+		end
+		error := mir_function_structure_error(native_module, function)
+		if error != ""
+			return error
+		end
+		index += 1
+	end
+	if !entry_found
+		return "MIR entry function does not exist"
+	end
+	mut definitions := mir_definition_index(native_module)
+	index = 0
+	while index < native_module.values.size()
+		value := native_module.values[index]
+		function_key := integer_string(value.function_id)
+		if !functions.key?(function_key)
+			return "MIR value identity is invalid"
+		end
+		if value.id < 0
+			return "MIR value identity is invalid"
+		end
+		if value.type_id < mir_type_integer()
+			return "MIR value type is invalid"
+		end
+		if value.type_id > mir_type_string() && !mir_semantic_value_type(native_module, value.type_id)
+			return "MIR value type is invalid"
+		end
+		if !mir_origin_valid(value.source_id, value.line, native_module.source_count[0])
+			return "MIR value origin is invalid"
+		end
+		function_index := functions[function_key]
+		mut counts := definitions[function_index].counts
+		key := integer_string(value.id)
+		# Positive counts are fresh definitions; zero marks a validated value row.
+		if counts.key?(key) && counts[key] == 0
+			return "MIR value is defined more than once"
+		end
+		mut owned := function_values[function_index]
+		owned.push(value)
+		if !counts.key?(key) || counts[key] != 1
+			return "MIR value definition count differs"
+		end
+		counts[key] = 0
+		index += 1
+	end
+	call_effects := mir_call_effect_summaries(native_module)
+	index = 0
+	while index < native_module.functions.size()
+		error := mir_function_error(native_module, native_module.functions[index], function_values[index], call_effects)
+		if error != ""
+			return error
+		end
+		function := native_module.functions[index]
+		mut expected_guard := 0
+		if optimized
+			expected_guard = mir_scalar_guard(native_module, function)
+		end
+		if function.integer_guard != expected_guard
+			return "MIR scalar Integer guard differs"
+		end
+		index += 1
+	end
+	# Verify target identity and effects before roots or loop plans consume them.
+	if optimized && !mir_callable_plans_equal(native_module.callable_plans[0], mir_callable_plans(native_module))
+		return "MIR callable plan differs"
+	end
+	if optimized && native_module.string_concats.size() != native_module.functions.size()
+		return "MIR String concat plan count differs"
+	end
+	if !optimized && native_module.loop_calls.size() != 0
+		return "MIR input cannot supply loop-call plans"
+	end
+	if optimized && native_module.loop_calls.size() != native_module.functions.size()
+		return "MIR loop-call plan count differs"
+	end
+	if !optimized && native_module.array_loops.size() != 0
+		return "MIR input cannot supply Array-loop plans"
+	end
+	if optimized && native_module.array_loops.size() != native_module.functions.size()
+		return "MIR Array-loop plan count differs"
+	end
+	if optimized && native_module.string_splits.size() != native_module.functions.size()
+		return "MIR String split plan count differs"
+	end
+	if optimized && native_module.array_joins.size() != native_module.functions.size()
+		return "MIR Array join plan count differs"
+	end
+	if !optimized && native_module.array_check_reuse.size() != 0
+		return "MIR input cannot supply Array check-reuse plans"
+	end
+	if optimized && native_module.array_check_reuse.size() != native_module.functions.size()
+		return "MIR Array check-reuse plan count differs"
+	end
+	if !optimized && native_module.array_read_guards.size() != 0
+		return "MIR input cannot supply Array read-guard plans"
+	end
+	if optimized && native_module.array_read_guards.size() != native_module.functions.size()
+		return "MIR Array read-guard plan count differs"
+	end
+	if optimized
+		if native_module.root_plans.size() != native_module.functions.size()
+			return "MIR root plan count differs"
+		end
+	elsif native_module.root_plans.size() != 0
+		return "MIR input cannot supply root plans"
+	end
+	if optimized
+		index = 0
+		while index < native_module.functions.size()
+			if !mir_string_concats_equal(native_module.string_concats[index], mir_function_string_concats(native_module, native_module.functions[index]))
+				return "MIR String concat plan differs"
+			end
+			loop_error := mir_loop_calls_error(native_module.loop_calls[index], mir_function_loop_calls(native_module, native_module.functions[index], function_values[index]))
+			if loop_error != ""
+				return loop_error
+			end
+			if !mir_array_loops_equal(native_module.array_loops[index], mir_function_array_loops(native_module, native_module.functions[index], function_values[index]))
+				return "MIR Array-loop plan differs"
+			end
+			checks := mir_function_array_checks(native_module, native_module.functions[index], function_values[index])
+			if !mir_live_equal(native_module.array_check_reuse[index], checks.reuse)
+				return "MIR Array check-reuse plan differs"
+			end
+			if !mir_array_read_guards_equal(native_module.array_read_guards[index], checks.guards)
+				return "MIR Array read-guard plan differs"
+			end
+			if !mir_string_splits_equal(native_module.string_splits[index], mir_function_string_splits(native_module, native_module.functions[index], function_values[index]))
+				return "MIR String split plan differs"
+			end
+			joins := mir_function_array_joins(native_module, native_module.functions[index], function_values[index])
+			if !mir_array_joins_equal(native_module.array_joins[index], joins)
+				return "MIR Array join plan differs"
+			end
+			if !mir_root_plan_equal(native_module.root_plans[index], mir_function_root_plan(native_module, native_module.functions[index], function_values[index], joins))
+				return "MIR live root plan differs"
+			end
+			index += 1
+		end
+	end
+	if optimized && !mir_numeric_plans_equal(native_module.numeric_plans[0], mir_numeric_plans(native_module))
+		return "MIR numeric plan differs"
+	end
+	if optimized && !mir_call_return_equal(native_module.call_return_guards[0], mir_call_return_plans(native_module))
+		return "MIR call return guard differs"
+	end
+	if optimized && !mir_hash_concats_equal(native_module.hash_concat_probes[0], mir_hash_concat_plans(native_module))
+		return "MIR Hash concat plan differs"
+	end
+	if optimized && !mir_hash_membership_equal(native_module.hash_membership_reuse[0], mir_hash_membership_plans(native_module))
+		return "MIR Hash membership plan differs"
+	end
+	if optimized && !mir_hash_lookup_equal(native_module.hash_lookup_reuse[0], mir_hash_lookup_plans(native_module))
+		return "MIR Hash lookup plan differs"
+	end
+	if optimized && !mir_live_equal(native_module.enum_stack_functions, mir_enum_stack_plans(native_module))
+		return "MIR enum stack plan differs"
+	end
+	return mir_literal_data_error(native_module, optimized)
+end
+
+def verify_mir(native_module: MirModule, optimized: Boolean): String
+	error := verify_mir_structure(native_module, optimized)
+	if error != ""
+		return error
+	end
+	deadline_error := mir_deadline_checkpoints_error(native_module)
+	if deadline_error != ""
+		return deadline_error
+	end
+	resource_error := mir_resource_calls_error(native_module)
+	if resource_error != ""
+		return resource_error
+	end
+	return mir_global_initialization_error(native_module)
+end

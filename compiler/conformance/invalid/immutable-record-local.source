@@ -1,0 +1,10 @@
+record Sample
+	value: Integer
+end
+
+def main()
+	input := Sample.new(value: 1)
+	mut copy := input
+	puts(copy.value)
+	return
+end

@@ -1,0 +1,61 @@
+alias Key = -2 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+alias Label = "alpha" | "beta" | ""
+
+def held(value: String): String
+	return value + "!"
+end
+
+def build_values(): Hash<Key, String>
+	keys: Array<Key> := [-2, 0, 1, 2, 3, 4, 5, 6, 7, 8]
+	mut values: Hash<Key, String> := {}
+	keys.each do |key|
+		values[key] = held(key.to_s())
+	end
+	return values
+end
+
+def main()
+	mut values := build_values()
+	puts(held("noise"))
+	puts(values.size())
+	keys := values.keys()
+	snapshot := values.keys()
+	copy := values.dup()
+	keys.each do |key|
+		if key > 0
+			values.delete(key)
+		end
+	end
+	mut retained := 0
+	snapshot.each do |key|
+		if values.key?(key)
+			retained += 1
+		end
+	end
+	puts(retained)
+	values.update(copy)
+	puts(values.size())
+	zero: Key := 0
+	negative: Key := -2
+	puts(values[zero])
+	puts(values[negative])
+	first: Label := "alpha"
+	same: Label := "alpha"
+	second: Label := "beta"
+	empty: Label := ""
+	mut labels := { first => held("first"), second => held("second"), empty => held("empty") }
+	labels[same] = held("replacement")
+	puts(labels.size())
+	puts(labels[first])
+	puts(labels.delete(second))
+	puts(labels.key?(second))
+	labels[second] = held("restored")
+	mut count := 0
+	labels.each do |key, value|
+		if labels[key] == value
+			count += 1
+		end
+	end
+	puts(count)
+	puts(labels.fetch(""))
+end

@@ -1,0 +1,44 @@
+import { qbe_root_common_prefix } from backend/qbe/emit/roots
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR root publication reuse") do
+	test("keeps unchanged leading roots across calls while restoring the exact count") do
+		expect(qbe_root_common_prefix([1, 2, 3], [1, 2, 4])).to_equal(2)
+		expect(qbe_root_common_prefix([1, 2, 3], [1])).to_equal(1)
+		expect(qbe_root_common_prefix([1], [2])).to_equal(0)
+		source := "def keep(a: String): String\n  b := a + \"b\"\n  c := a + \"c\"\n  d := a + \"d\"\n  return a + b + c + d\nend\n\ndef main()\n  puts(keep(\"a\"))\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		qbe := control_test_output(emit_qbe(state))
+		parts := qbe.split("function l $trbnf0(l %p0) {")
+		expect(parts.size()).to_equal(2)
+		body := parts[1].split("\n}\n")[0]
+		# The input remains live at several allocations in this block. Rewriting
+		# its root at every call would make this count grow with the call count.
+		# One store publishes the shared leading root, and one writes the
+		# original parameter into the fused fragment table. The final chain
+		# has one safe point instead of three, so count publication falls by two.
+		expect(body.split("\tstorel %p0, ").size()).to_equal(3)
+		expect(body.split("$trbn_gc_temp_count").size()).to_equal(7)
+		qbe_path := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_path != nil
+			marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+			allocation := qbe.split(marker)
+			expect(allocation.size()).to_equal(2)
+			forced := allocation[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + allocation[1]
+			case logical_run_qbe(qbe_path, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("aabacad\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

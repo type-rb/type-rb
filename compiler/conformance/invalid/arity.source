@@ -1,0 +1,8 @@
+def identity(value: Integer): Integer
+	return value
+end
+
+def main()
+	identity()
+	return
+end

@@ -1,0 +1,36 @@
+alias Text = String
+record Entry
+	label: Text
+end
+def probe()
+	mut text := "ori" + "ginal"
+	receiver := fn(): Text
+		puts("receiver")
+		return text
+	end
+	first := fn(): Integer
+		puts("first")
+		text = "sho" + "rt"
+		return 1
+	end
+	last := fn(): Integer
+		puts("last")
+		return 4
+	end
+	entry := Entry.new(label: receiver().slice(first()...last()))
+	present: String? := "AB" + "CD"
+	absent: String? := nil
+	part := present&.slice(1..2)
+	puts(absent&.slice(first()...last()) == nil)
+	mut garbage := ""
+	(0...10).each { |i| garbage += i.to_s() }
+	puts(entry.label)
+	puts(text)
+	if part != nil
+		puts(part)
+	end
+	puts(garbage.size())
+end
+def main()
+	probe()
+end

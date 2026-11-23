@@ -1,0 +1,58 @@
+def choose(flag: Boolean): String?
+	if flag
+		return "retained"
+	end
+	return nil
+end
+
+def main()
+	mut table: Hash<Integer, Integer> := {}
+	puts(table.key?(0))
+	mut index := -96
+	while index < 96
+		table[index] = index * 2
+		index += 1
+	end
+	view := table
+	index = -96
+	while index < 96
+		table.delete(index)
+		index += 2
+	end
+	puts(view.key?(-96))
+	puts(view.key?(-95))
+	puts(view[-95])
+	mut copied := table.merge({ -95 => 999 })
+	copied[-96] = 3
+	puts(copied[-95])
+	puts(copied.size())
+	puts(view[-95])
+	index = -95
+	while index < 96
+		table.delete(index)
+		index += 2
+	end
+	table[0] = 11
+	puts(view[0])
+	puts(view.size())
+	mut floats: Hash<Integer, Float> := {}
+	floats[-1] = 1.5
+	puts(floats[-1])
+	mut nullable: Hash<Integer, String?> := {}
+	nullable[1] = choose(true)
+	nullable[2] = choose(false)
+	held := nullable[1]
+	if held != nil
+		puts(held)
+	end
+	puts(nullable[2] == nil)
+	mut erased: Hash<Integer, Any> := {}
+	erased[-1] = "retained"
+	mut sink: Array<Any> := [erased[-1]]
+	puts(sink.size())
+	key := "é\x00key"
+	mut words: Hash<String, Integer> := {}
+	words[key] = 7
+	puts(words.key?(key))
+	puts(words[key])
+end

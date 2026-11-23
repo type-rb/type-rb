@@ -1,0 +1,23 @@
+def main()
+	label := "other"
+	values := { label: "first", ((
+				label)): "second", (label + ""): "third", "quoted": "value" }
+	puts(values["label"])
+	puts(values["other"])
+	puts(values["quoted"])
+	mut events: Array<String> := []
+	key := fn(): String
+		events.push("key")
+		return "item"
+	end
+	value := fn(): Array<String>
+		events.push("value")
+		return ["kept" + " value"]
+	end
+	managed := { key(): value() }
+	puts(managed["item"][0])
+	puts(events.join("/"))
+	integers := { 1: 2, (3 + 4): 5 }
+	puts(integers[1])
+	puts(integers[7])
+end

@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/type-rb/type-rb",
+  "revision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "sourceRoot": "internal/official/packages",
+  "files": [
+    {
+      "path": "LICENSE",
+      "source": "LICENSE",
+      "bytes": 1076,
+      "sha256": "98d1008390986a9a5ecef4ed0fecf72f540fc70848c8104d2dee2d1a3fcd5fa2"
+    },
+    {
+      "path": "packages/trb/auth/oidc/src/index.trb",
+      "source": "internal/official/packages/trb/auth/oidc/src/index.trb",
+      "bytes": 620,
+      "sha256": "453b0394d46a077eb4035eac1234b77d13cdd4d74cc98fd4722391c5a8421c4c"
+    },
+    {
+      "path": "packages/trb/auth/oidc/trbpackage.json",
+      "source": "internal/official/packages/trb/auth/oidc/trbpackage.json",
+      "bytes": 160,
+      "sha256": "ac6d70c3c480290f5bfd38d7895193ad017eb2c181faef830599cc29e70caaaa"
+    },
+    {
+      "path": "packages/trb/cli/src/index.trb",
+      "source": "internal/official/packages/trb/cli/src/index.trb",
+      "bytes": 72,
+      "sha256": "e040ecc9737c14879c95a8ed981e4762c325264f4eecdf0649d351a67b88849f"
+    },
+    {
+      "path": "packages/trb/cli/trbpackage.json",
+      "source": "internal/official/packages/trb/cli/trbpackage.json",
+      "bytes": 285,
+      "sha256": "8a962bde3eb26b075df36a5a2880059db4bfc49592c6ba0a2565fa40495a99a4"
+    },
+    {
+      "path": "packages/trb/http/src/index.trb",
+      "source": "internal/official/packages/trb/http/src/index.trb",
+      "bytes": 3196,
+      "sha256": "561b3f8cd7d3f82f2364b72895b62d4b8b5e368dfd03fa91ccf3042511c05512"
+    },
+    {
+      "path": "packages/trb/http/trbpackage.json",
+      "source": "internal/official/packages/trb/http/trbpackage.json",
+      "bytes": 156,
+      "sha256": "a2c86ea0cfd9f068228d29732ec567f7f6a4784c965b594e6875a7c054c30ed9"
+    },
+    {
+      "path": "packages/trb/jobs/sql/src/index.trb",
+      "source": "internal/official/packages/trb/jobs/sql/src/index.trb",
+      "bytes": 1425,
+      "sha256": "32833ecf8834f4896864f3d4c16429ff59196feeb802e9f63c0f01dbd452a39b"
+    },
+    {
+      "path": "packages/trb/jobs/sql/trbpackage.json",
+      "source": "internal/official/packages/trb/jobs/sql/trbpackage.json",
+      "bytes": 943,
+      "sha256": "c6eca8e37a3f14d763c17da229cb4a380665d3e3d3f869093086f8c7f4a4eb5d"
+    },
+    {
+      "path": "packages/trb/jobs/src/index.trb",
+      "source": "internal/official/packages/trb/jobs/src/index.trb",
+      "bytes": 850,
+      "sha256": "7b114db7926eab31622922bedeea00ad4414b4a3addd42c84a784e67f5002d3a"
+    },
+    {
+      "path": "packages/trb/jobs/trbpackage.json",
+      "source": "internal/official/packages/trb/jobs/trbpackage.json",
+      "bytes": 178,
+      "sha256": "c21a076abc9a5c935b6851fb81882489f2a21327201f424b370172a4bbc91605"
+    },
+    {
+      "path": "packages/trb/orm/src/index.trb",
+      "source": "internal/official/packages/trb/orm/src/index.trb",
+      "bytes": 919,
+      "sha256": "e723a86b5457217243264b0314304b8d42d1362525f73b4512291771a0a1b3a3"
+    },
+    {
+      "path": "packages/trb/orm/trbpackage.json",
+      "source": "internal/official/packages/trb/orm/trbpackage.json",
+      "bytes": 897,
+      "sha256": "d3bd47d35c3a50de0f095d61b1d50f813e0f446e7b0aae505256e0cc091de6b2"
+    },
+    {
+      "path": "packages/trb/platform/typescript/browser/src/index.trb",
+      "source": "internal/official/packages/trb/platform/typescript/browser/src/index.trb",
+      "bytes": 1452,
+      "sha256": "7565122ecefbdb07389d933ec336b26a14ca08df934fe68ff8d47f8547fc537a"
+    },
+    {
+      "path": "packages/trb/platform/typescript/browser/trbpackage.json",
+      "source": "internal/official/packages/trb/platform/typescript/browser/trbpackage.json",
+      "bytes": 279,
+      "sha256": "580536fe6afbb936c00922654083e1e6eafe6874ed8b89239b86f5ec0da4976a"
+    },
+    {
+      "path": "packages/trb/platform/typescript/react/src/index.trb",
+      "source": "internal/official/packages/trb/platform/typescript/react/src/index.trb",
+      "bytes": 337,
+      "sha256": "10d3d764ce476a456d7ebc9d2f31a7fda9e6bac7b78a46af9915cb44272ddd1f"
+    },
+    {
+      "path": "packages/trb/platform/typescript/react/trbpackage.json",
+      "source": "internal/official/packages/trb/platform/typescript/react/trbpackage.json",
+      "bytes": 465,
+      "sha256": "6e1887f35873cc5b28a6a5ec3f176065b831de64d767c35eeb865217a02810d8"
+    },
+    {
+      "path": "packages/trb/web/auth/bearer/src/index.trb",
+      "source": "internal/official/packages/trb/web/auth/bearer/src/index.trb",
+      "bytes": 1680,
+      "sha256": "16d172d0178c945efae061720b94ad244a675e92e3f5439e8c2e83aba9ff42ea"
+    },
+    {
+      "path": "packages/trb/web/auth/bearer/trbpackage.json",
+      "source": "internal/official/packages/trb/web/auth/bearer/trbpackage.json",
+      "bytes": 349,
+      "sha256": "041dbc7960dc454e3e6af6dbfb0eca8a431c776cd524f4b8947c71bbb15b772d"
+    },
+    {
+      "path": "packages/trb/web/middleware/compression/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/compression/src/index.trb",
+      "bytes": 4208,
+      "sha256": "d3dc99346ccbf84287348a73d260d94d8ac82b9ab0feb09bb75ce46fe6dc1a62"
+    },
+    {
+      "path": "packages/trb/web/middleware/compression/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/compression/trbpackage.json",
+      "bytes": 178,
+      "sha256": "c1aff06dc09ceb103d947b9093c61d08cb1b781a839f959d7a6d538e46db8ac1"
+    },
+    {
+      "path": "packages/trb/web/middleware/cors/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/cors/src/index.trb",
+      "bytes": 4329,
+      "sha256": "e27fff071cdc0fc1f58cd8c7f3668185582e8f0493308648a86e5a8c50d14be2"
+    },
+    {
+      "path": "packages/trb/web/middleware/cors/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/cors/trbpackage.json",
+      "bytes": 164,
+      "sha256": "967002c9611aec6deb059c135fd68e1dae69ff8942e2af2657e9f0a4c1229468"
+    },
+    {
+      "path": "packages/trb/web/middleware/logger/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/logger/src/index.trb",
+      "bytes": 1034,
+      "sha256": "137dcc6f94cfef982ad997c525e224462cee15f75dcdb063b2bb159ae8c009c1"
+    },
+    {
+      "path": "packages/trb/web/middleware/logger/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/logger/trbpackage.json",
+      "bytes": 168,
+      "sha256": "fe8f351e39183956f34f4b355d54551760affab08de6a51081cd886f882a296c"
+    },
+    {
+      "path": "packages/trb/web/middleware/request_id/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/request_id/src/index.trb",
+      "bytes": 2022,
+      "sha256": "36ffe8b0a993048a21468ecb952dc1371d1031ba928ac1a69d052f2351d7e5d2"
+    },
+    {
+      "path": "packages/trb/web/middleware/request_id/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/request_id/trbpackage.json",
+      "bytes": 176,
+      "sha256": "ef82dfffce304832d9cb5ecb48ab17adda46c2d51ec0ebed36cbe8bc8fabe345"
+    },
+    {
+      "path": "packages/trb/web/middleware/secure_headers/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/secure_headers/src/index.trb",
+      "bytes": 1298,
+      "sha256": "bd8d4b5dd040e56071247a6d88f6d87bebb9670f20b170b0341eb334915209b0"
+    },
+    {
+      "path": "packages/trb/web/middleware/secure_headers/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/secure_headers/trbpackage.json",
+      "bytes": 184,
+      "sha256": "5d780ee61d2ac20d98293c5c41449f4713e81f094b35599880346be8ff3785dd"
+    },
+    {
+      "path": "packages/trb/web/middleware/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/src/index.trb",
+      "bytes": 1031,
+      "sha256": "e201a12aaed0d19bfd6c97b8baae73b60f70dcbbf0d36335327836ac14c6c4a7"
+    },
+    {
+      "path": "packages/trb/web/middleware/timeout/src/index.trb",
+      "source": "internal/official/packages/trb/web/middleware/timeout/src/index.trb",
+      "bytes": 1327,
+      "sha256": "92487fa99dd938d7fbce0c56da95e80d8876a3382bd59b77961729dc49687a11"
+    },
+    {
+      "path": "packages/trb/web/middleware/timeout/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/timeout/trbpackage.json",
+      "bytes": 170,
+      "sha256": "ba1770fbec8fe022fa7390edda207515f5bb75e105f7acdab73f2cf7a3c576dd"
+    },
+    {
+      "path": "packages/trb/web/middleware/trbpackage.json",
+      "source": "internal/official/packages/trb/web/middleware/trbpackage.json",
+      "bytes": 154,
+      "sha256": "982845d14e063f2d780fdfd63f7e59646d1c822effabd943ecc67b37a077e72f"
+    },
+    {
+      "path": "packages/trb/web/src/index.trb",
+      "source": "internal/official/packages/trb/web/src/index.trb",
+      "bytes": 13234,
+      "sha256": "708d1182af61ff72ecfd8898a76af79bd767c9c12406d96f1ff8dc3746e739b1"
+    },
+    {
+      "path": "packages/trb/web/testing/src/index.trb",
+      "source": "internal/official/packages/trb/web/testing/src/index.trb",
+      "bytes": 110,
+      "sha256": "3ab634ae098d22a8345fd2116f8c4e13b9cba1265623ab6734da2b28b55c0999"
+    },
+    {
+      "path": "packages/trb/web/testing/trbpackage.json",
+      "source": "internal/official/packages/trb/web/testing/trbpackage.json",
+      "bytes": 189,
+      "sha256": "0f6a61e323a74d0039cb446f3d6fa04a2600eb4ad7e3754febef2e09483384c5"
+    },
+    {
+      "path": "packages/trb/web/trbpackage.json",
+      "source": "internal/official/packages/trb/web/trbpackage.json",
+      "bytes": 233,
+      "sha256": "dd067223fd04c10d18a7ec95327f1c2ec58f02f2d69bdf1ac6a76403846487bd"
+    },
+    {
+      "path": "stdlib/base64.go",
+      "source": "internal/stdlib/base64.go",
+      "bytes": 725,
+      "sha256": "83023d934494a6da56fb523fae82b1973469ceeeb90c2247b000264f2139bfac"
+    },
+    {
+      "path": "stdlib/dir.go",
+      "source": "internal/stdlib/dir.go",
+      "bytes": 1717,
+      "sha256": "b776fae4aa9c72ab3f71c103481add62469830595233d72cdf2dd8d0bca66baa"
+    },
+    {
+      "path": "stdlib/errors.go",
+      "source": "internal/stdlib/errors.go",
+      "bytes": 1389,
+      "sha256": "3a488847cab1a2a5cfbc7a83aa647aa7d2c3e17170e7a6054da7657e69914ab0"
+    },
+    {
+      "path": "stdlib/file.go",
+      "source": "internal/stdlib/file.go",
+      "bytes": 114,
+      "sha256": "6c85e397de0db31d2d93ec615facc7346b8d670c77bb2181b9d0e2af697f767d"
+    },
+    {
+      "path": "stdlib/hash.go",
+      "source": "internal/stdlib/hash.go",
+      "bytes": 370,
+      "sha256": "22df6850cb7bbd0bda408da011375b7cf5a0a4e3beaa504728b4cce9fbe50922"
+    },
+    {
+      "path": "stdlib/hex.go",
+      "source": "internal/stdlib/hex.go",
+      "bytes": 472,
+      "sha256": "b26cbc19d2ce994ebf47e683e9e24fc2304c947faf83d347ab14dc70384e5e5f"
+    },
+    {
+      "path": "stdlib/hmac.go",
+      "source": "internal/stdlib/hmac.go",
+      "bytes": 370,
+      "sha256": "19b4bee360698c431264d33bf9c825b04e564d778810e6ee09433c5ef1f39019"
+    },
+    {
+      "path": "stdlib/json.go",
+      "source": "internal/stdlib/json.go",
+      "bytes": 3000,
+      "sha256": "6d8c3da945b10871548097cfdcb10dea113ca53d16de26c777be4ceb2767e3c4"
+    },
+    {
+      "path": "stdlib/jsonc.go",
+      "source": "internal/stdlib/jsonc.go",
+      "bytes": 244,
+      "sha256": "96a02de4f3d545f9f2a68e62fc5a808cba22b0d2374b918d48147f9374f4606a"
+    },
+    {
+      "path": "stdlib/path.go",
+      "source": "internal/stdlib/path.go",
+      "bytes": 3687,
+      "sha256": "38c3fe22a47a9f52b017e8e9a36d0167ad0abd557f7d85f105c86e4da2a17b1e"
+    },
+    {
+      "path": "stdlib/process.go",
+      "source": "internal/stdlib/process.go",
+      "bytes": 698,
+      "sha256": "16eaae0385e004a88bfcc0996533940a7215184c8534172634b6977ef4a07d4d"
+    },
+    {
+      "path": "stdlib/test.go",
+      "source": "internal/stdlib/registry.go",
+      "bytes": 75410,
+      "sha256": "8038ee19c03bb6ea62a70d1a2718dbb7d0b0755165eb9bd5f4cf12da298218d5"
+    },
+    {
+      "path": "stdlib/time.go",
+      "source": "internal/stdlib/time.go",
+      "bytes": 14589,
+      "sha256": "dd52b86e3a83202cf5566655a122217791ce3dae4ad0276bec65628db3e8fdfb"
+    },
+    {
+      "path": "stdlib/url.go",
+      "source": "internal/stdlib/url.go",
+      "bytes": 3002,
+      "sha256": "ebe1d18167d1d67429a5bcfb6c73b69d61a1d32f0e03658b8437d0fea00f7b68"
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+import { compiler_collect_test_paths } from compiler
+import { test_import } from frontend/syntax/test_syntax
+import { lex_source_offsets } from frontend/syntax/lexer
+import { parse_module_with_tests } from frontend/syntax/parser
+import { LspWorkspace, lsp_document_uri, lsp_owns, lsp_source } from lsp/workspace
+import { package_json_quote } from project/package_json
+import { test_source_path } from project/test_selection
+import { add_module, compiler_new } from state/state
+import { token_kind_end_of_module } from state/token_kinds
+import { compiler_string_bytes } from support/compiler_bytes
+import { integer_string } from support/literals
+import { load_string } from support/storage
+
+# Lexer offsets count scalars, the reference test IDs count UTF-8 bytes and
+# editor positions count UTF-16 units. Visit the requested boundaries in order.
+def lsp_test_positions(source: String, points: Array<Integer>, mut bytes_at: Hash<Integer, Integer>, mut positions: Hash<Integer, String>)
+	data := compiler_string_bytes(source)
+	mut byte := 0
+	mut scalar := 0
+	mut line := 0
+	mut column := 0
+	points.sort().each do |point|
+		while scalar < point
+			first := data[byte]
+			if first == 10
+				line += 1
+				column = 0
+			else
+				column += first < 240 ? 1 : 2
+			end
+			if first < 128
+				byte += 1
+			elsif first < 224
+				byte += 2
+			elsif first < 240
+				byte += 3
+			else
+				byte += 4
+			end
+			scalar += 1
+		end
+		bytes_at[point] = byte
+		positions[point] = "{\"line\":" + integer_string(line) + ",\"character\":" + integer_string(column) + "}"
+	end
+	return
+end
+
+def lsp_file_tests(path: String, uri: String, source: String, mut items: Array<String>)
+	mut state := compiler_new(source.size() + 8)
+	add_module(state, "test", path)
+	mut offsets: Array<Integer> := []
+	if !lex_source_offsets(state, source, token_kind_end_of_module(), offsets, true)
+		return
+	end
+	parse_module_with_tests(state, 0, 0, true)
+	if test_import(state, "describe") < 0
+		return
+	end
+	cases_imported := test_import(state, "test") >= 0
+	mut points: Array<Integer> := []
+	state.parsed.tests.each do |item|
+		if item.closing_token >= 0
+			points.push(offsets[item.origin])
+			points.push(offsets[item.closing_token] + load_string(state.source_tokens.token_texts, item.closing_token).size())
+		end
+	end
+	if points.empty?()
+		return
+	end
+	mut bytes_at: Hash<Integer, Integer> := {}
+	mut positions: Hash<Integer, String> := {}
+	lsp_test_positions(source, points, bytes_at, positions)
+	mut ids: Array<String> := []
+	state.parsed.tests.each do |item|
+		if item.closing_token < 0 || item.function_id >= 0 && !cases_imported || item.parent >= 0 && ids[item.parent] == ""
+			ids.push("")
+		else
+			start := offsets[item.origin]
+			finish := offsets[item.closing_token] + load_string(state.source_tokens.token_texts, item.closing_token).size()
+			id := package_json_quote(path + ":" + integer_string(bytes_at[start]))
+			parent := item.parent < 0 ? "" : ",\"parentId\":" + ids[item.parent]
+			kind := item.function_id < 0 ? "suite" : "test"
+			ids.push(id)
+			items.push("{\"id\":" + id + parent + ",\"kind\":" + package_json_quote(kind) + ",\"name\":" + package_json_quote(item.name) + ",\"fullName\":" + package_json_quote(item.full_name) + ",\"uri\":" + package_json_quote(uri) + ",\"range\":{\"start\":" + positions[start] + ",\"end\":" + positions[finish] + "}}")
+		end
+	end
+	return
+end
+
+def lsp_discover_tests(workspace: LspWorkspace): String
+	if workspace.config == ""
+		return "[]"
+	end
+	inventory := compiler_collect_test_paths(workspace.root, workspace.output)
+	mut paths: Hash<String, Boolean> := {}
+	inventory.paths.each do |path|
+		if test_source_path(path)
+			paths[path] = true
+		end
+	end
+	workspace.text.keys().each do |path|
+		if lsp_owns(workspace, path) && test_source_path(path)
+			paths[path] = true
+		end
+	end
+	mut items: Array<String> := []
+	paths.keys().sort().each do |path|
+		lsp_file_tests(path, lsp_document_uri(workspace, path), lsp_source(workspace, path), items)
+	end
+	return "[" + items.join(",") + "]"
+end

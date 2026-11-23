@@ -1,0 +1,86 @@
+import { integer_string } from support/literals
+import { MirInstruction, MirModule } from mir/model/module
+import { mir_global_index } from mir/lowering/globals
+import { mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_label, emit_temporary, emit_typed_load, emit_typed_store, emitted_value, qbe_type } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+def emit_mir_global_read(native_module: MirModule, instruction: MirInstruction, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	row := native_module.globals[mir_global_index(native_module, instruction.payload)]
+	suffix := integer_string(row.id)
+	emit_mir_global_ready(suffix, context, output)
+	result := emit_temporary(context)
+	type_name := mir_storage_type_name(native_module, row.type_id)
+	emit_typed_load(output, result, type_name, "$trbn_global" + suffix)
+	return emitted_value(result, type_name)
+end
+
+def emit_mir_global_write(native_module: MirModule, instruction: MirInstruction, operand: String, mut context: QbeEmitContext, mut output: QbeOutput)
+	row := native_module.globals[mir_global_index(native_module, instruction.payload)]
+	suffix := integer_string(row.id)
+	emit_mir_global_ready(suffix, context, output)
+	emit_typed_store(output, mir_storage_type_name(native_module, row.type_id), operand, "$trbn_global" + suffix)
+end
+
+def emit_mir_global_ready(suffix: String, mut context: QbeEmitContext, mut output: QbeOutput)
+	status := emit_temporary(context)
+	ready := emit_temporary(context)
+	valid := emit_label(context)
+	failed := emit_label(context)
+	qbe_output_line(output, "\t" + status + " =w loadw $trbn_global_ready" + suffix)
+	qbe_output_line(output, "\t" + ready + " =w ceqw " + status + ", 1")
+	qbe_output_line(output, "\tjnz " + ready + ", " + valid + ", " + failed)
+	qbe_output_line(output, failed)
+	qbe_output_line(output, "\tcall $trbn_fatal(l $trbn_global_error, l 35)")
+	qbe_output_line(output, "\thlt")
+	qbe_output_line(output, valid)
+end
+
+# Consume the verified catalog and order. No authored token, declaration
+# spelling, source traversal or initializer expression is interpreted here.
+def emit_mir_globals(native_module: MirModule, mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_global_error = { b \"panic: constant is not initialized\", b 10 }")
+	mut roots := ""
+	mut count := 0
+	native_module.globals.each do |row|
+		suffix := integer_string(row.id)
+		qbe_output_line(output, "data $trbn_global" + suffix + " = align 8 { z 8 }")
+		qbe_output_line(output, "data $trbn_global_ready" + suffix + " = align 4 { w 0 }")
+		if row.managed
+			if count > 0
+				roots += ", "
+			end
+			roots += "l $trbn_global" + suffix
+			count += 1
+		end
+	end
+	if count > 0
+		qbe_output_line(output, "data $trbn_global_roots = align 8 { " + roots + " }")
+	end
+	qbe_output_line(output, "function $trbn_initialize_globals() {\n@start")
+	if count > 0
+		qbe_output_line(output, "\tstorel $trbn_global_roots, $trbn_gc_global_storage_roots")
+		qbe_output_line(output, "\tstorel " + integer_string(count) + ", $trbn_gc_global_storage_root_count")
+	end
+	if native_module.global_initialization.size() > 0
+		qbe_output_line(output, "\t%roots =l loadl $trbn_gc_temp_count")
+	end
+	native_module.global_initialization.each do |identity|
+		row := native_module.globals[mir_global_index(native_module, identity)]
+		if !row.runtime
+			next
+		end
+		suffix := integer_string(row.id)
+		type_name := mir_storage_type_name(native_module, row.type_id)
+		qbe_output_line(output, "\t%constant" + suffix + " =" + qbe_type(type_name) + " call $trbnf" + integer_string(row.initializer) + "()")
+		emit_typed_store(output, type_name, "%constant" + suffix, "$trbn_global" + suffix)
+		qbe_output_line(output, "\tstorew 1, $trbn_global_ready" + suffix)
+		qbe_output_line(output, "\tstorel %roots, $trbn_gc_temp_count")
+	end
+	qbe_output_line(output, "\tret\n}\n")
+end
+
+def emit_global_roots_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_gc_global_storage_roots = align 8 { l 0 }\ndata $trbn_gc_global_storage_root_count = align 8 { l 0 }")
+	qbe_output_line(output, "function $trbn_gc_mark_constants() {\n@start\n\t%data =l loadl $trbn_gc_global_storage_roots\n\t%count =l loadl $trbn_gc_global_storage_root_count\n\tjmp @loop\n@loop\n\t%index =l phi @start 0, @visit %next\n\t%done =w cslel %count, %index\n\tjnz %done, @finish, @visit\n@visit\n\t%offset =l mul %index, 8\n\t%slot =l add %data, %offset\n\t%address =l loadl %slot\n\t%value =l loadl %address\n\tcall $trbn_gc_mark(l %value)\n\t%next =l add %index, 1\n\tjmp @loop\n@finish\n\tret\n}\n")
+end

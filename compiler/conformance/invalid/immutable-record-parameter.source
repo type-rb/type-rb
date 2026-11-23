@@ -1,0 +1,12 @@
+record Sample
+	value: Integer
+end
+
+def read(input: Sample): Integer
+	mut copy := (input)
+	return copy.value
+end
+
+def main()
+	return
+end
