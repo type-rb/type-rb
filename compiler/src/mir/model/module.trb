@@ -383,6 +383,7 @@ record MirHashConcatProbe
 	function_id: Integer
 	concat: Integer
 	membership: Integer
+	omit_key_on_miss: Boolean
 end
 
 # A split keeps its canonical operation and fresh mutable result. Only the
