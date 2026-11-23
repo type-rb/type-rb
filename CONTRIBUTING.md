@@ -8,6 +8,12 @@ Report implemented coverage and validation separately from the eventual goals.
 
 ## Proposing work
 
+Use this repository for new Native compiler work. The
+[Go implementation](https://github.com/type-rb/type-rb-go) accepts changes to
+the companion compiler. Existing issues, pull requests, and bootstrap releases
+in [type-rb-native](https://github.com/type-rb/type-rb-native) retain their
+original links during the handoff.
+
 Plan work on the project board described in the
 [project workflow](docs/project-workflow.md): an Initiative states a measurable
 outcome and its Tasks are the reviewable changes, with milestone issues as their
