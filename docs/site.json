@@ -55,6 +55,8 @@
   "exclude": [
     "decisions",
     "development.md",
+    "native-alpha-release-notes.md",
+    "native-language-feature-inventory.md",
     "releasing.md"
   ]
 }

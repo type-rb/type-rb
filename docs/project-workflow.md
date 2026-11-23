@@ -77,7 +77,7 @@ Claims are serialized through a create-only branch with a unique commit for
 each acquisition attempt. Run this from the repository, replacing the task
 number and owner with public identifiers:
 
-```bash
+```sh
 set -eu
 task=123
 claim_owner='codex:REPLACE_WITH_RUN_ID'
@@ -114,7 +114,7 @@ clear Claim and Claim updated while still holding the branch. Unfinished work
 returns to Todo; record any blocker in Attention. Then release only the saved
 token:
 
-```bash
+```sh
 git push --force-with-lease="$claim_ref:$claim_sha" origin ":$claim_ref"
 ```
 
