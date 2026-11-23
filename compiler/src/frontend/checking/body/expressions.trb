@@ -31,7 +31,7 @@ import { advance, expect, expect_identifier, skip_newlines, token_is } from fron
 import { mir_enum_construct, mir_enum_operation } from mir/lowering/enums
 import { enum_argument_bindings, enum_type, find_enum_type, find_enum_variant } from frontend/types/enum_types
 import { checked_enum_presentation, checked_submission_result } from frontend/checking/program/submission
-import { nullable_apply, nullable_finish, nullable_logical_condition, nullable_nil_condition, nullable_read, nullable_lookup } from frontend/checking/nominal/nullable_flow
+import { nullable_apply, nullable_finish, nullable_logical_condition, nullable_lookup, nullable_nil_condition, nullable_read } from frontend/checking/nominal/nullable_flow
 import { nullable_element } from frontend/types/nullable_types
 import { argument_binding_slot } from frontend/resolution/argument_binding
 import { mir_checked_range_new } from mir/lowering/ranges

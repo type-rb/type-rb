@@ -154,9 +154,9 @@ def lsp_call_help(mut state: CompilerState, owner: Integer, cursor: LspCursor, o
 	while i >= 0
 		if cursor.offsets[i] < offset && load_integer(cursor.tokens.source_tokens.token_kinds, i) == token_kind_symbol()
 			symbol := lsp_spelling(cursor, i)
-			if [")", "]", "}"].include?(symbol)
+			if symbol == ")" || symbol == "]" || symbol == "}"
 				depth += 1
-			elsif ["(", "[", "{"].include?(symbol)
+			elsif symbol == "(" || symbol == "[" || symbol == "{"
 				if depth == 0
 					if symbol == "("
 						break

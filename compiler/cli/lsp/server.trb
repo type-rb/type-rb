@@ -155,6 +155,7 @@ def lsp_notification(mut workspace: LspWorkspace, method: String, params: JSON::
 end
 
 def lsp_serve(mut workspace: LspWorkspace): Integer
+	position_methods := ["textDocument/definition", "textDocument/completion", "textDocument/hover", "textDocument/signatureHelp"]
 	mut initialized := false
 	mut shutdown := false
 	mut failure := [""]
@@ -202,7 +203,7 @@ def lsp_serve(mut workspace: LspWorkspace): Integer
 			else
 				ok = lsp_result(id, lsp_format(workspace, path))
 			end
-		elsif ["textDocument/definition", "textDocument/completion", "textDocument/hover", "textDocument/signatureHelp"].include?(method)
+		elsif position_methods.include?(method)
 			doc := lsp_field(params, "textDocument")
 			path := lsp_uri_path(lsp_text(lsp_field(doc, "uri")))
 			position := lsp_field(params, "position")
