@@ -983,7 +983,7 @@ end
 
 # Index the canonical JSON spelling of each ASCII byte directly.
 JSON_ASCII_FRAGMENTS := [
-	# 0x00–0x0f
+	# 0x00-0x0f
 	"\\u0000",
 	"\\u0001",
 	"\\u0002",
@@ -1000,7 +1000,7 @@ JSON_ASCII_FRAGMENTS := [
 	"\\r",
 	"\\u000e",
 	"\\u000f",
-	# 0x10–0x1f
+	# 0x10-0x1f
 	"\\u0010",
 	"\\u0011",
 	"\\u0012",
@@ -1017,7 +1017,7 @@ JSON_ASCII_FRAGMENTS := [
 	"\\u001d",
 	"\\u001e",
 	"\\u001f",
-	# 0x20–0x2f
+	# 0x20-0x2f
 	" ",
 	"!",
 	"\\\"",
@@ -1034,7 +1034,7 @@ JSON_ASCII_FRAGMENTS := [
 	"-",
 	".",
 	"/",
-	# 0x30–0x3f
+	# 0x30-0x3f
 	"0",
 	"1",
 	"2",
@@ -1051,7 +1051,7 @@ JSON_ASCII_FRAGMENTS := [
 	"=",
 	"\\u003e",
 	"?",
-	# 0x40–0x4f
+	# 0x40-0x4f
 	"@",
 	"A",
 	"B",
@@ -1068,7 +1068,7 @@ JSON_ASCII_FRAGMENTS := [
 	"M",
 	"N",
 	"O",
-	# 0x50–0x5f
+	# 0x50-0x5f
 	"P",
 	"Q",
 	"R",
@@ -1085,7 +1085,7 @@ JSON_ASCII_FRAGMENTS := [
 	"]",
 	"^",
 	"_",
-	# 0x60–0x6f
+	# 0x60-0x6f
 	"`",
 	"a",
 	"b",
@@ -1102,7 +1102,7 @@ JSON_ASCII_FRAGMENTS := [
 	"m",
 	"n",
 	"o",
-	# 0x70–0x7f
+	# 0x70-0x7f
 	"p",
 	"q",
 	"r",
