@@ -152,6 +152,12 @@ class ProjectManager {
 				}],
 				synchronize: { fileEvents: project.watcher },
 				middleware: {
+					workspace: {
+						async didChangeWatchedFile(event, next) {
+							await next(event);
+							if (/_test\.trb$/i.test(event.uri)) await typeRBTests?.refreshProject(project);
+						}
+					},
 					provideCodeLenses() {
 						return [];
 					}
@@ -648,12 +654,15 @@ class TypeRBTestController {
 		if (project?.client === undefined || project.standalone) {
 			return;
 		}
+		const revision = (project.testDiscoveryRevision ?? 0) + 1;
+		project.testDiscoveryRevision = revision;
 		let discovered;
 		try {
 			discovered = await project.client.sendRequest("typerb/discoverTests", {});
 		} catch {
 			return;
 		}
+		if (revision !== project.testDiscoveryRevision) return;
 		const rootID = `project:${project.configPath}`;
 		let root = this.controller.items.get(rootID);
 		if (root === undefined) {
@@ -669,15 +678,24 @@ class TypeRBTestController {
 		root.children.replace([]);
 		this.metadata.set(root.id, { project, kind: "project", fullName: "" });
 		const byID = new Map();
+		const byFile = new Map();
 		for (const raw of discovered) {
+			const uri = vscode.Uri.parse(raw.uri);
+			let file = byFile.get(raw.uri);
+			if (file === undefined) {
+				file = this.controller.createTestItem(`file:${project.configPath}:${raw.uri}`, path.relative(project.sourceRoot, uri.fsPath), uri);
+				file.tags = root.tags;
+				byFile.set(raw.uri, file);
+				this.metadata.set(file.id, { project, kind: "file", fullName: "" });
+				root.children.add(file);
+			}
 			const id = `${project.configPath}:${raw.id}`;
-			const item = this.controller.createTestItem(id, raw.name, vscode.Uri.parse(raw.uri));
+			const item = this.controller.createTestItem(id, raw.name, uri);
 			item.tags = project.mode === "go" ? [this.debugTag] : [];
 			item.range = new vscode.Range(raw.range.start.line, raw.range.start.character, raw.range.end.line, raw.range.end.character);
 			byID.set(raw.id, item);
 			this.metadata.set(item.id, { project, kind: raw.kind, fullName: raw.fullName });
-			const parent = raw.parentId === "" ? root : byID.get(raw.parentId);
-			(parent ?? root).children.add(item);
+			(byID.get(raw.parentId) ?? file).children.add(item);
 		}
 	}
 
@@ -796,16 +814,18 @@ class TypeRBTestController {
 			if (metadata === undefined) {
 				continue;
 			}
-			const leaves = this.leafTests(item).filter((leaf) => !excluded.has(leaf.id) && !covered.has(leaf.id));
+			const children = this.leafTests(item);
+			const leaves = children.filter((leaf) => !excluded.has(leaf.id) && !covered.has(leaf.id));
 			if (leaves.length === 0) {
 				continue;
 			}
 			for (const leaf of leaves) {
 				covered.add(leaf.id);
 			}
-			if (excluded.size === 0) {
+			if (leaves.length === children.length) {
 				const files = new Set(leaves.map((leaf) => leaf.uri.fsPath));
-				result.push({ project: metadata.project, filter: metadata.fullName, file: files.size === 1 ? leaves[0].uri.fsPath : "", tests: leaves });
+				const file = metadata.kind === "project" || files.size !== 1 ? "" : leaves[0].uri.fsPath;
+				result.push({ project: metadata.project, filter: metadata.fullName, file, tests: leaves });
 			} else {
 				for (const leaf of leaves) {
 					const leafMetadata = this.metadata.get(leaf.id);
@@ -858,6 +878,7 @@ class TypeRBTestController {
 		]));
 		const byName = new Map(invocation.tests.map((item) => [this.metadata.get(item.id).fullName, item]));
 		let buffer = "";
+		let diagnostic = "";
 		let failures = 0;
 		const consume = (text) => {
 			buffer += text;
@@ -887,8 +908,12 @@ class TypeRBTestController {
 		};
 		const status = await new Promise((resolve) => {
 			runner.on("output", (category, text) => {
-				if (category === "stdout") consume(text);
-				else testRun.appendOutput(text.replace(/\r?\n/g, "\r\n"));
+				if (category === "stdout") {
+					consume(text);
+				} else {
+					if (diagnostic === "") diagnostic = text.trim().split(/\r?\n/, 1)[0].slice(0, 500);
+					testRun.appendOutput(text.replace(/\r?\n/g, "\r\n"));
+				}
 			});
 			runner.once("error", (error) => resolve({ code: -1, error }));
 			runner.once("exit", (code) => resolve({ code: code ?? -1 }));
@@ -897,7 +922,7 @@ class TypeRBTestController {
 		cancellation.dispose();
 		if (buffer !== "") consume("\n");
 		if (status.code !== 0 && failures === 0 && !token.isCancellationRequested) {
-			const message = new vscode.TestMessage(status.error?.message || `trb test exited with status ${status.code}`);
+			const message = new vscode.TestMessage(status.error?.message || diagnostic || `trb test exited with status ${status.code}`);
 			for (const item of invocation.tests) testRun.errored(item, message);
 		}
 	}
