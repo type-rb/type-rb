@@ -448,6 +448,11 @@
     "source": ".github/workflows/process-conformance.yml"
   },
   {
+    "id": "delivery:.github/workflows/release-go-companion.yml",
+    "kind": "delivery",
+    "source": ".github/workflows/release-go-companion.yml"
+  },
+  {
     "id": "delivery:.github/workflows/release.yml",
     "kind": "delivery",
     "source": ".github/workflows/release.yml"
@@ -1468,6 +1473,14 @@
     ]
   },
   {
+    "id": "document:docs/native-transition.md#alpha-cutover",
+    "kind": "documented contract",
+    "source": "docs/native-transition.md",
+    "members": [
+      "Alpha cutover"
+    ]
+  },
+  {
     "id": "document:docs/native-transition.md#complete-feature-contract",
     "kind": "documented contract",
     "source": "docs/native-transition.md",
@@ -1481,6 +1494,14 @@
     "source": "docs/native-transition.md",
     "members": [
       "Development and release gates"
+    ]
+  },
+  {
+    "id": "document:docs/native-transition.md#final-v050-qualification",
+    "kind": "documented contract",
+    "source": "docs/native-transition.md",
+    "members": [
+      "Final v0.5.0 qualification"
     ]
   },
   {
