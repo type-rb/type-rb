@@ -9,6 +9,7 @@ import { IntegerStorage, StringStorage, integer_storage, integer_storage_copy, s
 record TestDeclaration
 	source_id: Integer
 	origin: Integer
+	closing_token: Integer
 	parent: Integer
 	name: String
 	full_name: String

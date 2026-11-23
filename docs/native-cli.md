@@ -400,8 +400,13 @@ diagnostic. Fixing an error or closing the document clears its diagnostic.
 Go to Definition resolves visible record names and direct function calls
 to their declarations in project source, including imported files. Editor
 positions and incremental edits use UTF-16 units. Syntax highlighting and
-snippets come from the extension. Completion, hover, rename, Test Explorer,
-and debugger integration have separate acceptance work.
+snippets come from the extension. Completion, hover, rename and debugger
+integration have separate acceptance work.
+
+For a configured project, `typerb/discoverTests` lists suites and cases
+with their parent identities, file URIs and declaration ranges. Project
+and file runs use the ordinary `test --reporter json` command. Native
+supports file and directory selection. Test-name selection is deferred in #643.
 
 Format Document applies the same formatter as `trbn fmt` to the editor
 buffer. An incomplete expression or an already formatted document produces
